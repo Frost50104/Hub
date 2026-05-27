@@ -1,0 +1,126 @@
+/* Signaris brand tokens — ports from IT_startup/index.html:18-47.
+   Dark theme is the default.
+   Light theme placeholders below are filled after Hub-MVP.1 contrаст-точки
+   (палитра согласовывается отдельно с пользователем). */
+
+:root,
+[data-theme='dark'] {
+  /* Primary palette */
+  --amber: #ffb200;
+  --green: #34d399;
+  --red: #ef4444;
+
+  /* Surfaces */
+  --bg: #08080e;
+  --bg-alt: #0f1220;
+  --surface: rgba(255, 255, 255, 0.04);
+
+  /* Text */
+  --text: #f0f0f5;
+  --text2: #9090a8;
+  --text3: #55556a;
+
+  /* Glass effect */
+  --glass: rgba(255, 255, 255, 0.06);
+  --glass-border: rgba(255, 255, 255, 0.08);
+
+  /* Product accents (зеркало IT_startup --p-*) */
+  --p-desk: #ff8c00;
+  --p-field: #fcb813;
+  --p-brain: #66b345;
+  --p-listen: #5b9bd5;
+  --p-net: #e84393;
+  --p-sonar: #00b4a8;
+  --p-hub: #ffb200; /* Hub использует общий бренд-амбер */
+
+  --font-display: 'Unbounded', system-ui, sans-serif;
+  --font-body: 'Onest', system-ui, sans-serif;
+
+  /* Dot-grid background (light dots on dark surface) */
+  --dotgrid-dot: rgba(255, 255, 255, 0.08);
+}
+
+/* Light theme — palette TBD on Hub-MVP.1 контрольная точка.
+   Placeholders below are agent's recommendation; replace after user approval. */
+[data-theme='light'] {
+  --amber: #ffb200; /* Брендовый акцент не меняется */
+  --green: #16a34a;
+  --red: #dc2626;
+
+  --bg: #fafafa;
+  --bg-alt: #ffffff;
+  --surface: rgba(0, 0, 0, 0.04);
+
+  --text: #1a1a24;
+  --text2: #55556a;
+  --text3: #9090a8;
+
+  --glass: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(0, 0, 0, 0.08);
+
+  --dotgrid-dot: rgba(0, 0, 0, 0.06);
+}
+
+/* System preference fallback — applies only when [data-theme] attribute is absent
+   (i.e. user has not selected explicitly via ThemeToggle yet). */
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) {
+    --amber: #ffb200;
+    --green: #16a34a;
+    --red: #dc2626;
+    --bg: #fafafa;
+    --bg-alt: #ffffff;
+    --surface: rgba(0, 0, 0, 0.04);
+    --text: #1a1a24;
+    --text2: #55556a;
+    --text3: #9090a8;
+    --glass: rgba(255, 255, 255, 0.7);
+    --glass-border: rgba(0, 0, 0, 0.08);
+    --dotgrid-dot: rgba(0, 0, 0, 0.06);
+  }
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+/* Dot-grid layer behind everything (ported from IT_startup/index.html:37-39) */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: radial-gradient(var(--dotgrid-dot) 1px, transparent 1.2px);
+  background-size: 32px 32px;
+}
+
+/* Glass-card primitive (porten from IT_startup/index.html:46-47) */
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  margin: 0;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}

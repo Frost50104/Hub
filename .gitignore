@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+build/
+
+# Node
+node_modules/
+web/dist/
+web/.vite/
+
+# Local secrets / data
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+uploads/
+attachments/
+
+# Build-time artifacts (written by deploy.sh)
+backend/VERSION
+web/public/version.json
+
+# OS
+.DS_Store
+*.swp
+
+# IDE
+.idea/

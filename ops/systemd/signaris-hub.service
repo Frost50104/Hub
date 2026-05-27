@@ -1,0 +1,18 @@
+[Unit]
+Description=Signaris Hub backend (prod)
+After=network.target postgresql.service redis-server.service
+
+[Service]
+Type=exec
+User=signaris
+Group=signaris
+WorkingDirectory=/opt/signaris-hub
+EnvironmentFile=/opt/signaris-hub/.env
+ExecStart=/opt/signaris-hub/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 5059 --workers 1
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

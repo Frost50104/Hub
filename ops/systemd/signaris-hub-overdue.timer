@@ -1,0 +1,11 @@
+[Unit]
+Description=Run signaris-hub-overdue daily 09:00 Moscow time
+
+[Timer]
+# 06:00 UTC = 09:00 MSK (UTC+3, no DST in RU)
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+Unit=signaris-hub-overdue.service
+
+[Install]
+WantedBy=timers.target
