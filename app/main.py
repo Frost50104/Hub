@@ -67,15 +67,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             reason="SIGNARIS_HUB_SIGNARIS_SERVICE_KEY missing or disabled",
         )
 
+    # Sid-sync worker (Phase 2 SLO) — опрашивает фид ревокаций SSO-сессий,
+    # держит локальный blacklist, чтобы require_auth отказывал в access-токенах
+    # с ревокнутым sid мгновенно (≤ poll-интервал), не дожидаясь access-TTL.
+    sid_sync_task: asyncio.Task | None = None
+    if settings.signaris_service_key and settings.sid_sync_enabled:
+        from app.services.sid_sync import start_worker as start_sid_worker
+
+        sid_sync_task = asyncio.create_task(start_sid_worker())
+        log.info("sid_sync.task_created")
+    else:
+        log.info(
+            "sid_sync.disabled",
+            reason="SIGNARIS_HUB_SIGNARIS_SERVICE_KEY missing or sid_sync disabled",
+        )
+
     try:
         yield
     finally:
-        if deletion_task is not None:
-            deletion_task.cancel()
-            try:
-                await deletion_task
-            except asyncio.CancelledError:
-                pass
+        for task in (deletion_task, sid_sync_task):
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
         log.info("hub.stopping")
 
 
@@ -103,11 +119,33 @@ def create_app() -> FastAPI:
         ],
     )
 
+    from app.api import activity as activity_api
+    from app.api import comments as comments_api
     from app.api import env as env_api
     from app.api import me as me_api
+    from app.api import me_tasks as me_tasks_api
+    from app.api import notifications as notifications_api
+    from app.api import projects as projects_api
+    from app.api import push as push_api
+    from app.api import search as search_api
+    from app.api import sections as sections_api
+    from app.api import tasks as tasks_api
+    from app.api import tenant as tenant_api
+    from app.api import watchers as watchers_api
 
     app.include_router(env_api.router, prefix="/api")
     app.include_router(me_api.router, prefix="/api")
+    app.include_router(me_tasks_api.router, prefix="/api")
+    app.include_router(projects_api.router, prefix="/api")
+    app.include_router(sections_api.router, prefix="/api")
+    app.include_router(tasks_api.router, prefix="/api")
+    app.include_router(comments_api.router, prefix="/api")
+    app.include_router(watchers_api.router, prefix="/api")
+    app.include_router(activity_api.router, prefix="/api")
+    app.include_router(search_api.router, prefix="/api")
+    app.include_router(tenant_api.router, prefix="/api")
+    app.include_router(push_api.router, prefix="/api")
+    app.include_router(notifications_api.router, prefix="/api")
 
     return app
 

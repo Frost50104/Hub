@@ -1,12 +1,12 @@
 import { Outlet } from 'react-router-dom'
 
-import { Topbar } from './Topbar'
+import { Sidebar } from './Sidebar'
 
 export function Shell() {
   return (
-    <div className="flex min-h-screen flex-col">
-      <Topbar />
-      <main className="flex-1">
+    <div className="flex min-h-screen gap-3 p-3">
+      <Sidebar />
+      <main className="min-w-0 flex-1 overflow-y-auto">
         <Outlet />
       </main>
     </div>

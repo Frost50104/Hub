@@ -4,7 +4,13 @@ import { authClient } from '@/lib/auth'
 
 export function LoginRedirect() {
   useEffect(() => {
-    authClient.startLogin(window.location.pathname)
+    // На `/login` нет смысла передавать pathname — handleCallback вернётся на
+    // `/login` и снова отрендерит этот компонент → бесконечный цикл
+    // login→callback→login. Lib 0.6.1+ имеет sanitizeReturnPath-страховку,
+    // но дублируем тут для ясности.
+    const p = window.location.pathname
+    const returnPath = p === '/login' || p.startsWith('/auth/') ? '/' : p
+    authClient.startLogin(returnPath)
   }, [])
 
   return (

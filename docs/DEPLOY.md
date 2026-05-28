@@ -61,16 +61,12 @@ A-записи:
 
 ## CORS / SSO redirect whitelist (в env auth)
 
+`signaris-auth` развёрнут в **единственном экземпляре** на VPS `194.87.215.15` (`auth.signaris.ru`) — отдельного staging-instance нет. Staging-домены продуктов добавляются в env того же сервиса. Env-файл на хосте auth: `/etc/signaris-auth/signaris-auth.env`. После правки — `systemctl restart signaris-auth` (не `reload` — в unit нет `ExecReload`, и `EnvironmentFile` читается только при старте процесса).
+
 Добавляется в две фазы:
 
-- **Hub-MVP.1 (staging):** в env `signaris-auth-staging`:
-  - `SIGNARIS_AUTH_CORS_ORIGINS += https://hub-staging.signaris.ru`
-  - `SIGNARIS_AUTH_SSO_REDIRECT_ORIGINS += https://hub-staging.signaris.ru`
-  - `systemctl reload signaris-auth-staging`
-- **Hub-MVP.6 (prod):** в env `signaris-auth.service`:
-  - `SIGNARIS_AUTH_CORS_ORIGINS += https://hub.signaris.ru`
-  - `SIGNARIS_AUTH_SSO_REDIRECT_ORIGINS += https://hub.signaris.ru`
-  - `systemctl reload signaris-auth.service`
+- **Hub-MVP.1 (staging):** `SIGNARIS_AUTH_CORS_ORIGINS += https://hub-staging.signaris.ru` + `SIGNARIS_AUTH_SSO_REDIRECT_ORIGINS += https://hub-staging.signaris.ru` → `systemctl restart signaris-auth`.
+- **Hub-MVP.6 (prod):** то же для `https://hub.signaris.ru` → `systemctl restart signaris-auth`.
 
 ## Активация hub в auth (после Hub-MVP.6)
 

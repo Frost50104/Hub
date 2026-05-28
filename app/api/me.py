@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from signaris_auth import Principal
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: F401 — declares dep order
 
-from app.deps import get_db, require_auth
+from app.deps import get_db, require_auth_any
 
 router = APIRouter(tags=["me"])
 
@@ -29,10 +29,14 @@ class MeResponse(BaseModel):
 
 @router.get("/me", response_model=MeResponse)
 async def get_me(
-    principal: Principal = Depends(require_auth(roles=["admin", "member", "viewer"])),
+    principal: Principal = Depends(require_auth_any()),
     db: AsyncSession = Depends(get_db),
 ) -> MeResponse:
-    # The Depends(get_db) above runs shadow upsert; we don't need its session here.
+    # /me — identity endpoint: anyone with a valid Signaris JWT can read it
+    # (no `roles=[...]` filter). UI uses `hub_role=None` to render the
+    # "no access to Hub" state instead of looping through SSO.
+    # `Depends(get_db)` triggers shadow_users/shadow_tenants upsert in the
+    # same transaction; session itself isn't needed here.
     return MeResponse(
         employee_id=principal.employee_id,
         email=principal.email,

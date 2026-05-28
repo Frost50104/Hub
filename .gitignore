@@ -16,6 +16,8 @@ build/
 node_modules/
 web/dist/
 web/.vite/
+web/dist-tsbuild/
+web/tsconfig.tsbuildinfo
 
 # Local secrets / data
 .env
@@ -36,3 +38,6 @@ web/public/version.json
 
 # IDE
 .idea/
+
+# Local scratch (asana reference screenshots etc.)
+.tmp-asana/

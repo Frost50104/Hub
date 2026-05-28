@@ -18,7 +18,7 @@
     "@hookform/resolvers": "^3.9.0",
     "@radix-ui/react-dialog": "^1.1.2",
     "@radix-ui/react-dropdown-menu": "^2.1.2",
-    "@signaris/auth-client": "https://auth.signaris.ru/npm/@signaris/auth-client/signaris-auth-client-0.5.1.tgz",
+    "@signaris/auth-client": "https://auth.signaris.ru/npm/@signaris/auth-client/signaris-auth-client-0.6.1.tgz",
     "@tanstack/react-query": "^5.51.0",
     "axios": "^1.7.0",
     "class-variance-authority": "^0.7.0",

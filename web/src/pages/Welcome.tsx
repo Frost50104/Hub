@@ -28,9 +28,10 @@ export function Welcome() {
 
   if (error) {
     return (
-      <div className="p-8 text-red">
-        Не удалось получить /api/me — {(error as Error).message}.{' '}
-        <a className="text-amber underline" href="/login">
+      <div className="mx-auto max-w-xl space-y-4 p-8 text-center">
+        <h2 className="font-display text-xl text-red">Не удалось загрузить профиль</h2>
+        <p className="text-text2">{(error as Error).message}</p>
+        <a className="inline-block rounded-lg border border-glass-border px-4 py-2 text-sm text-amber hover:bg-glass" href="/login">
           Войти заново
         </a>
       </div>
@@ -44,8 +45,9 @@ export function Welcome() {
       <header className="space-y-2">
         <h1 className="font-display text-3xl">Привет, {data.full_name}!</h1>
         <p className="text-text2">
-          Signaris Hub, Hub-MVP.1. Это страница приветствия — реальные функции
-          (проекты, задачи, канбан) появятся в следующих фазах.
+          {data.hub_role
+            ? 'Signaris Hub, Hub-MVP.1. Это страница приветствия — реальные функции (проекты, задачи, канбан) появятся в следующих фазах.'
+            : 'У вашей организации пока нет доступа к Signaris Hub. Обратитесь к администратору в auth.signaris.ru, чтобы Hub появился в списке продуктов.'}
         </p>
       </header>
 

@@ -60,9 +60,27 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='signaris_hub
   sudo -u postgres createdb -O signaris_hub_migrate signaris_hub_db
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='signaris_hub_staging_db'" | grep -q 1 || \
   sudo -u postgres createdb -O signaris_hub_staging_migrate signaris_hub_staging_db
-# App roles need basic grants
-sudo -u postgres psql -d signaris_hub_db -c "GRANT USAGE ON SCHEMA public TO signaris_hub; GRANT ALL ON ALL TABLES IN SCHEMA public TO signaris_hub; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO signaris_hub; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO signaris_hub;" >/dev/null
-sudo -u postgres psql -d signaris_hub_staging_db -c "GRANT USAGE ON SCHEMA public TO signaris_hub_staging; GRANT ALL ON ALL TABLES IN SCHEMA public TO signaris_hub_staging; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO signaris_hub_staging; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO signaris_hub_staging;" >/dev/null
+# App-role grants. ALTER DEFAULT PRIVILEGES requires FOR ROLE <creator> —
+# without it the default applies only to objects created by the *current*
+# postgres user, NOT the migrate role that actually runs alembic upgrades.
+sudo -u postgres psql -d signaris_hub_db -c "
+    GRANT USAGE ON SCHEMA public TO signaris_hub;
+    GRANT ALL ON ALL TABLES IN SCHEMA public TO signaris_hub;
+    GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO signaris_hub;
+    ALTER DEFAULT PRIVILEGES FOR ROLE signaris_hub_migrate IN SCHEMA public
+        GRANT ALL ON TABLES TO signaris_hub;
+    ALTER DEFAULT PRIVILEGES FOR ROLE signaris_hub_migrate IN SCHEMA public
+        GRANT USAGE, SELECT ON SEQUENCES TO signaris_hub;
+" >/dev/null
+sudo -u postgres psql -d signaris_hub_staging_db -c "
+    GRANT USAGE ON SCHEMA public TO signaris_hub_staging;
+    GRANT ALL ON ALL TABLES IN SCHEMA public TO signaris_hub_staging;
+    GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO signaris_hub_staging;
+    ALTER DEFAULT PRIVILEGES FOR ROLE signaris_hub_staging_migrate IN SCHEMA public
+        GRANT ALL ON TABLES TO signaris_hub_staging;
+    ALTER DEFAULT PRIVILEGES FOR ROLE signaris_hub_staging_migrate IN SCHEMA public
+        GRANT USAGE, SELECT ON SEQUENCES TO signaris_hub_staging;
+" >/dev/null
 
 cat <<'EOF'
 

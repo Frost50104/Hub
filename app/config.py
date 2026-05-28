@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     deletion_sync_enabled: bool = Field(default=True)
     deletion_sync_poll_sec: float = Field(default=60.0)
 
+    # Sid-sync (Phase 2 SLO) — фоновый воркер опрашивает фид ревокации SSO-сессий
+    # (GET /api/products/revoked-sids, X-Service-Key) и держит локальный
+    # blacklist `sso_session_id`'ов. `require_auth` отказывает в access-токенах
+    # с ревокнутым sid мгновенно (≤ poll-интервал), не дожидаясь access-TTL.
+    # См. `app/services/sid_sync.py`.
+    sid_sync_enabled: bool = Field(default=True)
+    sid_sync_poll_sec: float = Field(default=30.0)
+
     # CORS — staging + prod fronts
     cors_origins: list[str] = Field(
         default_factory=lambda: [
