@@ -1,0 +1,10 @@
+[Unit]
+Description=Signaris Hub — daily backup retention sweep at 03:30 MSK (00:30 UTC)
+
+[Timer]
+OnCalendar=*-*-* 00:30:00
+Persistent=true
+Unit=signaris-hub-backup-cleanup.service
+
+[Install]
+WantedBy=timers.target

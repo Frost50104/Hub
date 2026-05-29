@@ -37,6 +37,19 @@ for env_dir in /opt/signaris-hub /opt/signaris-hub-staging; do
   chmod 750 "$env_dir"
 done
 
+echo "==> backup + healthcheck infra (3.6.8)"
+mkdir -p /opt/signaris-hub/backups/daily /opt/signaris-hub/backups/weekly
+chown -R postgres:postgres /opt/signaris-hub/backups
+chmod 750 /opt/signaris-hub/backups
+mkdir -p /opt/signaris-hub/scripts
+# scripts/ must be world-readable + executable so the postgres + root timers
+# can run them out of the same place no matter who owns them.
+install -m 755 -o root -g root "$REPO_ROOT/scripts/backup-pg.sh"      /opt/signaris-hub/scripts/backup-pg.sh
+install -m 755 -o root -g root "$REPO_ROOT/scripts/backup-cleanup.sh" /opt/signaris-hub/scripts/backup-cleanup.sh
+install -m 755 -o root -g root "$REPO_ROOT/scripts/healthcheck.sh"    /opt/signaris-hub/scripts/healthcheck.sh
+mkdir -p /var/lib/signaris-hub
+chmod 755 /var/lib/signaris-hub
+
 echo "==> Python venvs (prod + staging)"
 for env_dir in /opt/signaris-hub /opt/signaris-hub-staging; do
   if [[ ! -d "$env_dir/.venv" ]]; then
@@ -122,6 +135,9 @@ if [[ -d "$REPO_ROOT/ops/systemd" ]]; then
   systemctl daemon-reload
   systemctl enable signaris-hub signaris-hub-staging
   systemctl enable signaris-hub-due-soon.timer signaris-hub-overdue.timer
+  # 3.6.8: backup + healthcheck timers.
+  systemctl enable --now signaris-hub-backup.timer signaris-hub-backup-cleanup.timer
+  systemctl enable --now signaris-hub-healthcheck.timer
 fi
 
 echo "==> nginx site configs"
@@ -155,7 +171,16 @@ cat <<'EOF'
        SIGNARIS_HUB_ENVIRONMENT=prod   # 'staging' for staging .env
        SIGNARIS_HUB_PORT=5059          # 5060 for staging
        # SIGNARIS_HUB_SIGNARIS_SERVICE_KEY=<filled in Hub-MVP.6>
-  3. From your laptop:
+  3. (Optional, 3.6.8) Offsite backup — create /etc/default/signaris-hub-backup:
+       BACKUP_S3_BUCKET=signaris-hub-backups
+       AWS_ACCESS_KEY_ID=...
+       AWS_SECRET_ACCESS_KEY=...
+       AWS_DEFAULT_REGION=eu-central-1
+     (Requires `apt install awscli`. Skip the file → backups stay local-only.)
+  4. (Optional) Alert email recipient — /etc/default/signaris-hub-healthcheck:
+       HEALTHCHECK_ALERT_EMAIL=ops@signaris.ru
+     `mail` command must be installed (`apt install mailutils`) for emails.
+  5. From your laptop:
        ./deploy/deploy.sh staging
        ./deploy/deploy.sh prod
 EOF

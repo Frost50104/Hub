@@ -16,7 +16,7 @@ from signaris_auth import Principal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_db, require_auth_any
+from app.deps import enforce_rate_limit, get_db, require_auth_any
 from app.models.project import Project, ProjectMember
 from app.models.task import Task
 from app.services.project_access import is_hub_admin
@@ -48,6 +48,12 @@ async def search(
     principal: Principal = Depends(require_auth_any()),
     db: AsyncSession = Depends(get_db),
 ) -> SearchResponse:
+    await enforce_rate_limit(
+        bucket="search",
+        employee_id=str(principal.employee_id),
+        limit=60,
+        window_sec=60,
+    )
     pattern = _ilike(q)
 
     # Projects — hub:admin sees the whole tenant; others — only their memberships.

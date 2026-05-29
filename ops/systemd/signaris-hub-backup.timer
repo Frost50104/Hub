@@ -1,0 +1,13 @@
+[Unit]
+Description=Signaris Hub — daily backup at 03:00 MSK (00:00 UTC)
+
+[Timer]
+# 03:00 Europe/Moscow = 00:00 UTC. systemd timers use server time;
+# our VPS runs UTC, so we schedule at 00:00 UTC.
+OnCalendar=*-*-* 00:00:00
+Persistent=true
+RandomizedDelaySec=300
+Unit=signaris-hub-backup.service
+
+[Install]
+WantedBy=timers.target

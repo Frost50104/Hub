@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.deps import get_db, require_auth
+from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.attachment import TaskAttachment
 from app.models.shadow import ShadowUser
 from app.models.task import Task
@@ -96,6 +96,12 @@ async def upload_attachment(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> AttachmentResponse:
+    await enforce_rate_limit(
+        bucket="attach:upload",
+        employee_id=str(principal.employee_id),
+        limit=30,
+        window_sec=60,
+    )
     task = await _fetch_task_visible(db, task_id, principal)
     # Edit-permission required — uploading mutates a task.
     await require_project_role(

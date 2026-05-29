@@ -1,0 +1,10 @@
+[Unit]
+Description=Signaris Hub — uptime healthcheck (prod + staging)
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/etc/default/signaris-hub-healthcheck
+ExecStart=/opt/signaris-hub/scripts/healthcheck.sh
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,17 @@
+[Unit]
+Description=Signaris Hub — daily pg_dump (prod + staging databases)
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+# Both databases in one run — `pg_dump` per call, ~seconds each.
+ExecStart=/opt/signaris-hub/scripts/backup-pg.sh signaris_hub_db
+ExecStart=/opt/signaris-hub/scripts/backup-pg.sh signaris_hub_staging_db
+# Read BACKUP_S3_BUCKET from /etc/default/signaris-hub-backup if present
+# (so prod-only offsite copy without touching the repo).
+EnvironmentFile=-/etc/default/signaris-hub-backup
+StandardOutput=journal
+StandardError=journal

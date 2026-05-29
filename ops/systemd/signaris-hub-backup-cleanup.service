@@ -1,0 +1,10 @@
+[Unit]
+Description=Signaris Hub — retention sweep (daily 14d, weekly 42d)
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+ExecStart=/opt/signaris-hub/scripts/backup-cleanup.sh
+StandardOutput=journal
+StandardError=journal

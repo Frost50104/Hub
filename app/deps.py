@@ -1,4 +1,4 @@
-"""Global FastAPI dependencies — auth verifier + tenant-scoped DB.
+"""Global FastAPI dependencies — auth verifier + tenant-scoped DB + rate-limit.
 
 Route signature:
 
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 
-from fastapi import Request
+from fastapi import HTTPException, Request, status
 from signaris_auth import JWKSCache, Principal, RevokedSidStore, TokenVerifier
 from signaris_auth.fastapi import build_require_auth
 from signaris_auth.shadow import upsert_shadow_tenant, upsert_shadow_user
@@ -30,6 +30,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import tenant_scoped_session
+from app.redis_client import get_redis
+from app.security.rate_limit import RateLimitExceeded, check_and_increment
 
 _settings = get_settings()
 _jwks = JWKSCache(_settings.signaris_auth_jwks_url)
@@ -86,3 +88,30 @@ async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
         await upsert_shadow_user(session, principal, table="shadow_users")
         await session.commit()
         yield session
+
+
+async def enforce_rate_limit(
+    *,
+    bucket: str,
+    employee_id: str,
+    limit: int,
+    window_sec: int,
+) -> None:
+    """Wrap `check_and_increment` and translate `RateLimitExceeded` → HTTP 429.
+
+    `bucket` is a short label (`task:write`, `search`, `comment`, `attach`)
+    that namespaces the Redis key alongside the employee id.
+    """
+    try:
+        await check_and_increment(
+            get_redis(),
+            key=f"{bucket}:{employee_id}",
+            limit=limit,
+            window_sec=window_sec,
+        )
+    except RateLimitExceeded as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Слишком часто. Лимит {e.limit} за {e.window_sec}с — подождите минуту.",
+            headers={"Retry-After": str(e.window_sec)},
+        ) from None

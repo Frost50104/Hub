@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_db, require_auth
+from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.section import Section
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskWatcher
@@ -194,6 +194,12 @@ async def create_task(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> TaskResponse:
+    await enforce_rate_limit(
+        bucket="task:write",
+        employee_id=str(principal.employee_id),
+        limit=120,
+        window_sec=60,
+    )
     await require_project_role(db, project_id, principal, allow=("owner", "editor"))
     await _assert_section_in_project(db, project_id, body.section_id)
     await _assert_assignee_in_tenant(db, body.assignee_id)
@@ -287,6 +293,12 @@ async def update_task(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> TaskResponse:
+    await enforce_rate_limit(
+        bucket="task:write",
+        employee_id=str(principal.employee_id),
+        limit=120,
+        window_sec=60,
+    )
     task = await db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")

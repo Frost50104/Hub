@@ -92,6 +92,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     await task
                 except asyncio.CancelledError:
                     pass
+        # Close the shared Redis connection pool — used by rate-limit + push fan-out.
+        from app.redis_client import close_redis
+
+        await close_redis()
         log.info("hub.stopping")
 
 

@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_db, require_auth
+from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskComment, TaskWatcher  # noqa: F401 — used below
 from app.schemas.comment import CommentCreate, CommentResponse, CommentUpdate
@@ -118,6 +118,12 @@ async def create_comment(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> CommentResponse:
+    await enforce_rate_limit(
+        bucket="comment:write",
+        employee_id=str(principal.employee_id),
+        limit=60,
+        window_sec=60,
+    )
     task = await _fetch_task_visible(db, task_id, principal)
 
     mentioned_ids = await resolve_mentions(
