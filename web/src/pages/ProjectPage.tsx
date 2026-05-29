@@ -1,10 +1,11 @@
-import { Filter, MoreHorizontal, Plus, Star, Trash2 } from 'lucide-react'
+import { Filter, MoreHorizontal, Plus, Settings2, Star, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { CalendarView } from '@/components/calendar/CalendarView'
 import { BoardView } from '@/components/kanban/BoardView'
+import { CustomFieldsManager } from '@/components/project/CustomFieldsManager'
 import { TaskDetailDrawer } from '@/components/task/TaskDetailDrawer'
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { TaskRow } from '@/components/task/TaskRow'
@@ -65,9 +66,11 @@ function projectIconClasses(p: Project): string {
 function ProjectHeader({
   project,
   onArchive,
+  onOpenFields,
 }: {
   project: Project
   onArchive: () => void
+  onOpenFields: () => void
 }) {
   const isArchived = !!project.archived_at
   const myRole = project.my_role
@@ -105,18 +108,29 @@ function ProjectHeader({
         </div>
       </div>
       {canManage(myRole) && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="secondary" size="icon" aria-label="Действия">
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={onArchive}>
-              {isArchived ? 'Разархивировать' : 'Архивировать'}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onOpenFields}
+            aria-label="Поля проекта"
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+            Поля
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="secondary" size="icon" aria-label="Действия">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={onArchive}>
+                {isArchived ? 'Разархивировать' : 'Архивировать'}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       )}
     </div>
   )
@@ -403,6 +417,7 @@ export function ProjectPage() {
   const project = useProject(id)
   const archive = useArchiveProject(id ?? '')
   const [tab, setTab] = useState<TabKey>('list')
+  const [fieldsOpen, setFieldsOpen] = useState(false)
 
   const selectedTaskId = searchParams.get('task')
   const openTask = (taskId: string) => {
@@ -446,6 +461,7 @@ export function ProjectPage() {
             toast.error('Не получилось', { description: (err as Error).message })
           }
         }}
+        onOpenFields={() => setFieldsOpen(true)}
       />
 
       <TabsRow active={tab} onChange={setTab} />
@@ -472,6 +488,12 @@ export function ProjectPage() {
         taskId={selectedTaskId}
         projectId={id}
         onClose={closeTask}
+      />
+
+      <CustomFieldsManager
+        projectId={id}
+        open={fieldsOpen}
+        onOpenChange={setFieldsOpen}
       />
     </div>
   )

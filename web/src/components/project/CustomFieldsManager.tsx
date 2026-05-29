@@ -1,0 +1,280 @@
+import { Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+import { toast } from 'sonner'
+
+import { Button } from '@/components/ui/Button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/Dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu'
+import { Input } from '@/components/ui/Input'
+import { Label } from '@/components/ui/Label'
+import {
+  useCreateCustomField,
+  useCustomFieldDefinitions,
+  useDeleteCustomField,
+} from '@/hooks/useCustomFields'
+import { cn } from '@/lib/cn'
+import {
+  CUSTOM_FIELD_TYPE_LABEL,
+  type CustomFieldOption,
+  type CustomFieldType,
+} from '@/lib/customFields'
+
+interface CustomFieldsManagerProps {
+  projectId: string
+  open: boolean
+  onOpenChange: (v: boolean) => void
+}
+
+const NON_OPTION_TYPES: CustomFieldType[] = [
+  'text',
+  'number',
+  'date',
+  'person',
+  'checkbox',
+]
+const OPTION_TYPES: CustomFieldType[] = ['select', 'multi_select']
+const ALL_TYPES: CustomFieldType[] = [...NON_OPTION_TYPES, ...OPTION_TYPES]
+
+let optionTmpCounter = 0
+
+export function CustomFieldsManager({
+  projectId,
+  open,
+  onOpenChange,
+}: CustomFieldsManagerProps) {
+  const defs = useCustomFieldDefinitions(projectId)
+  const create = useCreateCustomField(projectId)
+  const remove = useDeleteCustomField(projectId)
+
+  const [name, setName] = useState('')
+  const [type, setType] = useState<CustomFieldType>('text')
+  const [options, setOptions] = useState<CustomFieldOption[]>([])
+
+  const isOptionType = OPTION_TYPES.includes(type)
+  const valid =
+    name.trim().length > 0 &&
+    (!isOptionType ||
+      (options.length > 0 && options.every((o) => o.label.trim().length > 0)))
+
+  const reset = () => {
+    setName('')
+    setType('text')
+    setOptions([])
+  }
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!valid) return
+    try {
+      await create.mutateAsync({
+        name: name.trim(),
+        type,
+        options: isOptionType
+          ? options.map((o) => ({
+              id: o.id,
+              label: o.label.trim(),
+              color: o.color,
+            }))
+          : undefined,
+      })
+      toast.success(`Поле «${name.trim()}» создано`)
+      reset()
+    } catch (err) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } }).response?.data
+          ?.detail ?? (err as Error).message
+      toast.error('Не удалось создать поле', { description: detail })
+    }
+  }
+
+  const addOption = () => {
+    optionTmpCounter += 1
+    setOptions((prev) => [
+      ...prev,
+      { id: `opt_${Date.now()}_${optionTmpCounter}`, label: '' },
+    ])
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) reset()
+        onOpenChange(v)
+      }}
+    >
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Поля проекта</DialogTitle>
+          <DialogDescription>
+            Дополнительные поля для задач: текст, число, дата, выбор, человек,
+            чекбокс. Видны на всех задачах проекта.
+          </DialogDescription>
+        </DialogHeader>
+
+        <section className="space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-text3">
+            Существующие
+          </h3>
+          {defs.isLoading && <p className="text-sm text-text2">Загружаем…</p>}
+          {defs.data?.length === 0 && (
+            <p className="text-sm text-text3">Пока нет полей.</p>
+          )}
+          <ul className="space-y-1">
+            {defs.data?.map((d) => (
+              <li
+                key={d.id}
+                className="flex items-center justify-between rounded-md border border-glass-border bg-surface px-3 py-2 text-sm"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-text">{d.name}</span>
+                  <span className="rounded bg-glass px-1.5 py-0.5 text-[10px] text-text3">
+                    {CUSTOM_FIELD_TYPE_LABEL[d.type]}
+                  </span>
+                  {(d.type === 'select' || d.type === 'multi_select') && (
+                    <span className="text-[10px] text-text3">
+                      {d.options.length} опц.
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!confirm(`Удалить поле «${d.name}»?`)) return
+                    try {
+                      await remove.mutateAsync(d.id)
+                      toast.success(`Поле «${d.name}» удалено`)
+                    } catch (err) {
+                      toast.error('Не получилось', {
+                        description: (err as Error).message,
+                      })
+                    }
+                  }}
+                  className="rounded p-1 text-text3 hover:bg-glass hover:text-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                  aria-label={`Удалить ${d.name}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <form onSubmit={submit} className="space-y-3 border-t border-glass-border pt-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-text3">
+            Новое поле
+          </h3>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_180px]">
+            <div className="space-y-1.5">
+              <Label htmlFor="cf-name">Название</Label>
+              <Input
+                id="cf-name"
+                placeholder="Бюджет"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                disabled={create.isPending}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cf-type">Тип</Label>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full justify-between"
+                    id="cf-type"
+                  >
+                    {CUSTOM_FIELD_TYPE_LABEL[type]}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-[180px]">
+                  {ALL_TYPES.map((t) => (
+                    <DropdownMenuItem
+                      key={t}
+                      onSelect={() => {
+                        setType(t)
+                        if (!OPTION_TYPES.includes(t)) setOptions([])
+                      }}
+                    >
+                      {CUSTOM_FIELD_TYPE_LABEL[t]}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+
+          {isOptionType && (
+            <div className="space-y-2">
+              <Label>Опции</Label>
+              <div className="space-y-1.5">
+                {options.map((opt, i) => (
+                  <div key={opt.id} className="flex items-center gap-2">
+                    <Input
+                      placeholder="Название опции"
+                      value={opt.label}
+                      onChange={(e) =>
+                        setOptions((prev) =>
+                          prev.map((o, j) =>
+                            j === i ? { ...o, label: e.target.value } : o,
+                          ),
+                        )
+                      }
+                      disabled={create.isPending}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOptions((prev) => prev.filter((_, j) => j !== i))
+                      }
+                      className="rounded p-1.5 text-text3 hover:bg-glass hover:text-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                      aria-label="Удалить опцию"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addOption}
+                  className={cn(
+                    'flex items-center gap-1 rounded px-1 text-sm text-text2 hover:text-amber focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+                  )}
+                >
+                  <Plus className="h-3.5 w-3.5" /> Добавить опцию
+                </button>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={create.isPending}
+            >
+              Закрыть
+            </Button>
+            <Button type="submit" disabled={!valid || create.isPending}>
+              {create.isPending ? 'Создаём…' : 'Создать поле'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}

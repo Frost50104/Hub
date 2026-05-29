@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 import { TaskAttachments } from '@/components/task/TaskAttachments'
+import { TaskCustomFields } from '@/components/task/TaskCustomFields'
 import { TaskThread } from '@/components/task/TaskThread'
 import { WatchControl } from '@/components/task/WatchControl'
 import { Avatar } from '@/components/ui/Avatar'
@@ -237,6 +238,8 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                   placeholder="Что нужно сделать?"
                 />
               </div>
+
+              <TaskCustomFields taskId={task.id} projectId={projectId} />
 
               <TaskAttachments taskId={task.id} />
 
