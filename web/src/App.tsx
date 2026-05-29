@@ -10,6 +10,7 @@ import { LoginRedirect } from '@/pages/LoginRedirect'
 import { MyTasksPage } from '@/pages/MyTasksPage'
 import { ProjectListPage } from '@/pages/ProjectListPage'
 import { ProjectPage } from '@/pages/ProjectPage'
+import { SearchPage } from '@/pages/SearchPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { NotificationsSettingsTab } from '@/pages/settings/NotificationsTab'
 
@@ -25,6 +26,7 @@ export function App() {
           <Route path="/inbox" element={<InboxPage />} />
           <Route path="/projects" element={<ProjectListPage />} />
           <Route path="/projects/:id" element={<ProjectPage />} />
+          <Route path="/search" element={<SearchPage />} />
           <Route path="/settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="notifications" replace />} />
             <Route path="notifications" element={<NotificationsSettingsTab />} />

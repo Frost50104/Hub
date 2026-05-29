@@ -19,6 +19,13 @@ export function SidebarSearch() {
     nav(path)
   }
 
+  const openAdvanced = () => {
+    const trimmed = q.trim()
+    setQ('')
+    setFocused(false)
+    nav(trimmed ? `/search?q=${encodeURIComponent(trimmed)}` : '/search')
+  }
+
   return (
     <div className="relative">
       <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text3" />
@@ -89,6 +96,16 @@ export function SidebarSearch() {
               ))}
             </div>
           )}
+          <div className="mt-1 border-t border-glass-border pt-1">
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={openAdvanced}
+              className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs text-text2 hover:bg-surface hover:text-text"
+            >
+              <Search className="h-3 w-3" />
+              Расширенный поиск с фильтрами
+            </button>
+          </div>
         </div>
       )}
     </div>

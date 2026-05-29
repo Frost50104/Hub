@@ -108,6 +108,15 @@ Save passwords into local Hub/CLAUDE.md → СЕКРЕТЫ AND into:
   /opt/signaris-hub-staging/.env     → same for _staging
 EOF
 
+echo "==> Postgres extensions (3.6.11 FTS) — superuser-only, install once on cluster"
+# CREATE EXTENSION требует superuser. Делаем здесь один раз через postgres
+# user, чтобы alembic-миграция 0008 могла бесплатно CREATE EXTENSION IF NOT
+# EXISTS. Имеют смысл tenant-wide: одно расширение на cluster.
+for db in signaris_hub_db signaris_hub_staging_db; do
+  sudo -u postgres psql -d "$db" -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;" >/dev/null
+  sudo -u postgres psql -d "$db" -c "CREATE EXTENSION IF NOT EXISTS unaccent;" >/dev/null
+done
+
 echo "==> Redis: databases >= 6 (auth=3, hub-prod=4, hub-staging=5)"
 sed -i 's/^# databases .*/databases 16/' /etc/redis/redis.conf || true
 sed -i 's/^databases .*/databases 16/' /etc/redis/redis.conf || true
