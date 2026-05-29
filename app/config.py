@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     attachments_root: Path = Field(default=Path("/opt/signaris-hub/attachments"))
     attachment_max_bytes: int = Field(default=20 * 1024 * 1024)
 
+    # Public links (3.6.12) — view-only no-auth deep-links to a task/project.
+    # Feature-flag so we can kill-switch the entire surface without a redeploy.
+    public_links_enabled: bool = Field(default=True)
+    # Used to build the absolute URL returned by `POST /api/.../share`.
+    public_base_url: str = Field(default="https://hub.signaris.ru")
+
 
 @lru_cache
 def get_settings() -> Settings:

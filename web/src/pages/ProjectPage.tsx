@@ -1,4 +1,4 @@
-import { Filter, MoreHorizontal, Plus, Settings2, Star, Trash2 } from 'lucide-react'
+import { Filter, Link as LinkIcon, MoreHorizontal, Plus, Settings2, Star, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { CalendarView } from '@/components/calendar/CalendarView'
 import { BoardView } from '@/components/kanban/BoardView'
 import { CustomFieldsManager } from '@/components/project/CustomFieldsManager'
+import { ShareDialog } from '@/components/share/ShareDialog'
 import { TaskDetailDrawer } from '@/components/task/TaskDetailDrawer'
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { TaskRow } from '@/components/task/TaskRow'
@@ -67,10 +68,12 @@ function ProjectHeader({
   project,
   onArchive,
   onOpenFields,
+  onOpenShare,
 }: {
   project: Project
   onArchive: () => void
   onOpenFields: () => void
+  onOpenShare: () => void
 }) {
   const isArchived = !!project.archived_at
   const myRole = project.my_role
@@ -107,29 +110,44 @@ function ProjectHeader({
           )}
         </div>
       </div>
-      {canManage(myRole) && (
+      {(canManage(myRole) || canEdit(myRole)) && (
         <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onOpenFields}
-            aria-label="Поля проекта"
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-            Поля
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="secondary" size="icon" aria-label="Действия">
-                <MoreHorizontal className="h-4 w-4" />
+          {canEdit(myRole) && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onOpenShare}
+              aria-label="Поделиться проектом"
+            >
+              <LinkIcon className="h-3.5 w-3.5" />
+              Поделиться
+            </Button>
+          )}
+          {canManage(myRole) && (
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={onOpenFields}
+                aria-label="Поля проекта"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                Поля
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={onArchive}>
-                {isArchived ? 'Разархивировать' : 'Архивировать'}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="secondary" size="icon" aria-label="Действия">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={onArchive}>
+                    {isArchived ? 'Разархивировать' : 'Архивировать'}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -418,6 +436,7 @@ export function ProjectPage() {
   const archive = useArchiveProject(id ?? '')
   const [tab, setTab] = useState<TabKey>('list')
   const [fieldsOpen, setFieldsOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
 
   const selectedTaskId = searchParams.get('task')
   const openTask = (taskId: string) => {
@@ -462,6 +481,7 @@ export function ProjectPage() {
           }
         }}
         onOpenFields={() => setFieldsOpen(true)}
+        onOpenShare={() => setShareOpen(true)}
       />
 
       <TabsRow active={tab} onChange={setTab} />
@@ -494,6 +514,14 @@ export function ProjectPage() {
         projectId={id}
         open={fieldsOpen}
         onOpenChange={setFieldsOpen}
+      />
+
+      <ShareDialog
+        scope="project"
+        entityId={id}
+        entityLabel={p.name}
+        open={shareOpen}
+        onOpenChange={setShareOpen}
       />
     </div>
   )

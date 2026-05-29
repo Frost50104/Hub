@@ -10,6 +10,7 @@ import { LoginRedirect } from '@/pages/LoginRedirect'
 import { MyTasksPage } from '@/pages/MyTasksPage'
 import { ProjectListPage } from '@/pages/ProjectListPage'
 import { ProjectPage } from '@/pages/ProjectPage'
+import { PublicViewPage } from '@/pages/PublicViewPage'
 import { SearchPage } from '@/pages/SearchPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { NotificationsSettingsTab } from '@/pages/settings/NotificationsTab'
@@ -20,6 +21,8 @@ export function App() {
       <Routes>
         <Route path="/login" element={<LoginRedirect />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
+        {/* /p/:token is rendered OUTSIDE Shell — no auth, anonymous. */}
+        <Route path="/p/:token" element={<PublicViewPage />} />
         <Route element={<Shell />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/my" element={<MyTasksPage />} />

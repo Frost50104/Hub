@@ -133,9 +133,11 @@ def create_app() -> FastAPI:
     from app.api import me_tasks as me_tasks_api
     from app.api import notifications as notifications_api
     from app.api import projects as projects_api
+    from app.api import public as public_api
     from app.api import push as push_api
     from app.api import search as search_api
     from app.api import sections as sections_api
+    from app.api import share as share_api
     from app.api import tasks as tasks_api
     from app.api import tenant as tenant_api
     from app.api import watchers as watchers_api
@@ -148,6 +150,8 @@ def create_app() -> FastAPI:
     app.include_router(tasks_api.router, prefix="/api")
     app.include_router(calendar_api.router, prefix="/api")
     app.include_router(custom_fields_api.router, prefix="/api")
+    app.include_router(share_api.router, prefix="/api")
+    app.include_router(public_api.router, prefix="/api")
     app.include_router(comments_api.router, prefix="/api")
     app.include_router(watchers_api.router, prefix="/api")
     app.include_router(activity_api.router, prefix="/api")

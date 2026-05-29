@@ -1,8 +1,9 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { Archive, Calendar, Flag, Tag, User, X } from 'lucide-react'
+import { Archive, Calendar, Flag, Link as LinkIcon, Tag, User, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
+import { ShareDialog } from '@/components/share/ShareDialog'
 import { TaskAttachments } from '@/components/task/TaskAttachments'
 import { TaskCustomFields } from '@/components/task/TaskCustomFields'
 import { TaskThread } from '@/components/task/TaskThread'
@@ -37,6 +38,7 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
   const [description, setDescription] = useState('')
   const [dueAt, setDueAt] = useState('')
   const [startAt, setStartAt] = useState('')
+  const [shareOpen, setShareOpen] = useState(false)
 
   useEffect(() => {
     if (task) {
@@ -269,11 +271,28 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                   <Archive className="h-4 w-4" />
                   {task.archived_at ? 'Восстановить' : 'В архив'}
                 </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShareOpen(true)}
+                >
+                  <LinkIcon className="h-4 w-4" />
+                  Поделиться
+                </Button>
               </footer>
             </div>
           )}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
+      {task && (
+        <ShareDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          scope="task"
+          entityId={task.id}
+          entityLabel={task.title}
+        />
+      )}
     </DialogPrimitive.Root>
   )
 }
