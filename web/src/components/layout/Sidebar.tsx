@@ -61,7 +61,7 @@ function projectColorFor(p: Project): string {
   return palette[hash % palette.length] ?? palette[0]!
 }
 
-function ProjectsList() {
+function ProjectsList({ onItemClick }: { onItemClick?: () => void }) {
   const { data, isLoading } = useProjects()
   if (isLoading) return <p className="px-3 py-1 text-xs text-text3">Загружаем…</p>
   if (!data || data.length === 0) {
@@ -73,6 +73,7 @@ function ProjectsList() {
         <li key={p.id}>
           <NavLink
             to={`/projects/${p.id}`}
+            onClick={onItemClick}
             className={({ isActive }) =>
               cn(
                 'group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
@@ -180,15 +181,20 @@ function CreateProjectFromSidebar({
   )
 }
 
-export function Sidebar() {
+export interface SidebarProps {
+  /** Called when a navigation entry is clicked (used to close the mobile drawer). */
+  onItemClick?: () => void
+}
+
+export function Sidebar({ onItemClick }: SidebarProps = {}) {
   const me = useMe()
   const unread = useUnreadCount()
   const unreadCount = unread.data?.count ?? 0
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
   const [createTaskOpen, setCreateTaskOpen] = useState(false)
   return (
-    <aside className="glass flex h-[calc(100vh-1.5rem)] w-[260px] shrink-0 flex-col gap-4 p-4">
-      <Link to="/" className="flex items-center gap-2 px-1">
+    <aside className="glass flex h-screen w-[280px] shrink-0 flex-col gap-4 p-4 md:h-[calc(100vh-1.5rem)] md:w-[260px]">
+      <Link to="/" onClick={onItemClick} className="flex items-center gap-2 px-1">
         <img src="/brand/signaris-horizontal-on-dark.svg" alt="Signaris" className="h-6" />
         <span className="font-display text-lg font-black leading-none tracking-tight">
           Hub
@@ -223,6 +229,7 @@ export function Sidebar() {
             key={to}
             to={to}
             end={end}
+            onClick={onItemClick}
             className={({ isActive }) =>
               cn(
                 'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium transition-colors',
@@ -250,13 +257,13 @@ export function Sidebar() {
           </span>
           <button
             onClick={() => setCreateProjectOpen(true)}
-            className="rounded p-1 text-text3 hover:bg-glass hover:text-text"
+            className="rounded p-1 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
             aria-label="Новый проект"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
         </div>
-        <ProjectsList />
+        <ProjectsList onItemClick={onItemClick} />
       </div>
 
       <div className="flex items-center justify-between gap-2 border-t border-glass-border pt-3">
@@ -274,18 +281,20 @@ export function Sidebar() {
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button
-            className="rounded p-1.5 text-text3 hover:bg-glass hover:text-text"
+          <Link
+            to="/settings/notifications"
+            onClick={onItemClick}
+            className="rounded p-1.5 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
             aria-label="Настройки"
-            title="Настройки (скоро)"
+            title="Настройки"
           >
             <Settings className="h-4 w-4" />
-          </button>
+          </Link>
           <button
             onClick={() => {
               void authClient.logout()
             }}
-            className="rounded p-1.5 text-text3 hover:bg-glass hover:text-text"
+            className="rounded p-1.5 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
             aria-label="Выйти"
             title="Выйти"
           >

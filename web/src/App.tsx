@@ -1,5 +1,7 @@
+import * as Sentry from '@sentry/react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
+import { ErrorFallback } from '@/components/ErrorFallback'
 import { Shell } from '@/components/layout/Shell'
 import { AuthCallback } from '@/pages/AuthCallback'
 import { HomePage } from '@/pages/HomePage'
@@ -8,20 +10,28 @@ import { LoginRedirect } from '@/pages/LoginRedirect'
 import { MyTasksPage } from '@/pages/MyTasksPage'
 import { ProjectListPage } from '@/pages/ProjectListPage'
 import { ProjectPage } from '@/pages/ProjectPage'
+import { SettingsPage } from '@/pages/SettingsPage'
+import { NotificationsSettingsTab } from '@/pages/settings/NotificationsTab'
 
 export function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<LoginRedirect />} />
-      <Route path="/auth/callback" element={<AuthCallback />} />
-      <Route element={<Shell />}>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/my" element={<MyTasksPage />} />
-        <Route path="/inbox" element={<InboxPage />} />
-        <Route path="/projects" element={<ProjectListPage />} />
-        <Route path="/projects/:id" element={<ProjectPage />} />
-      </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <Sentry.ErrorBoundary fallback={<ErrorFallback />}>
+      <Routes>
+        <Route path="/login" element={<LoginRedirect />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route element={<Shell />}>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/my" element={<MyTasksPage />} />
+          <Route path="/inbox" element={<InboxPage />} />
+          <Route path="/projects" element={<ProjectListPage />} />
+          <Route path="/projects/:id" element={<ProjectPage />} />
+          <Route path="/settings" element={<SettingsPage />}>
+            <Route index element={<Navigate to="notifications" replace />} />
+            <Route path="notifications" element={<NotificationsSettingsTab />} />
+          </Route>
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Sentry.ErrorBoundary>
   )
 }

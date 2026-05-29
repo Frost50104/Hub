@@ -78,22 +78,29 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
         <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
         <DialogPrimitive.Content
           className={cn(
-            'glass fixed right-3 top-3 bottom-3 z-50 w-full max-w-[480px] overflow-y-auto p-6 shadow-glass focus:outline-none',
+            'glass fixed z-50 overflow-y-auto bg-bg-alt p-4 shadow-glass focus:outline-none',
+            // Mobile: full-screen sheet, no glass rounding, slide from bottom.
+            'inset-0 !rounded-none',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
-            'data-[state=closed]:slide-out-to-right-2 data-[state=open]:slide-in-from-right-2',
+            'data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',
+            // Desktop ≥md: anchored right-side drawer with rounding.
+            'md:inset-auto md:right-3 md:top-3 md:bottom-3 md:w-full md:max-w-[480px] md:p-6 md:!rounded-[20px]',
+            'md:data-[state=closed]:slide-out-to-right-2 md:data-[state=open]:slide-in-from-right-2',
           )}
         >
           <DialogPrimitive.Title className="sr-only">
             Карточка задачи
           </DialogPrimitive.Title>
 
-          <header className="mb-4 flex items-center justify-between">
+          <header className="sticky top-0 z-10 -mx-4 mb-4 flex items-center justify-between border-b border-glass-border bg-bg-alt/95 px-4 py-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none">
             <Badge variant="secondary">Задача</Badge>
             <div className="flex items-center gap-1">
               {task && <WatchControl taskId={task.id} />}
-              <DialogPrimitive.Close className="rounded p-1 text-text3 hover:bg-glass hover:text-text">
+              <DialogPrimitive.Close
+                className="inline-flex h-11 w-11 items-center justify-center rounded text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 md:h-8 md:w-8"
+                aria-label="Закрыть"
+              >
                 <X className="h-4 w-4" />
-                <span className="sr-only">Закрыть</span>
               </DialogPrimitive.Close>
             </div>
           </header>

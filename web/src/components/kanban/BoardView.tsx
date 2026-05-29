@@ -156,7 +156,7 @@ export function BoardView({ projectId, myRole, onTaskClick }: BoardViewProps) {
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
-      <div className="flex gap-3 overflow-x-auto pb-4">
+      <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain pb-4 md:snap-none">
         {columns.map((col) => (
           <KanbanColumn
             key={col.dndId}

@@ -13,11 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps import get_db, require_auth_any
 from app.models.notification import Notification, NotificationPreferences
 from app.schemas.notification import (
+    KindPreference,
     NotificationResponse,
     PreferencesResponse,
     PreferencesUpdate,
     UnreadCount,
 )
+from app.services.notification_prefs import normalize_prefs
 
 router = APIRouter(tags=["notifications"])
 
@@ -106,8 +108,10 @@ async def get_preferences(
             NotificationPreferences.employee_id == principal.employee_id
         )
     )
-    prefs = row.scalar_one_or_none()
-    return PreferencesResponse(prefs=prefs or {})
+    raw = row.scalar_one_or_none()
+    return PreferencesResponse(
+        prefs={k: KindPreference(**v) for k, v in normalize_prefs(raw).items()}
+    )
 
 
 @router.put("/notifications/preferences", response_model=PreferencesResponse)
@@ -116,17 +120,21 @@ async def put_preferences(
     principal: Principal = Depends(require_auth_any()),
     db: AsyncSession = Depends(get_db),
 ) -> PreferencesResponse:
+    # Normalise on write so the JSONB row never contains legacy bool-shape.
+    normalised = normalize_prefs(body.prefs)
     await db.execute(
         pg_insert(NotificationPreferences)
         .values(
             employee_id=principal.employee_id,
             tenant_id=principal.tenant_id,
-            prefs=body.prefs,
+            prefs=normalised,
         )
         .on_conflict_do_update(
             index_elements=["employee_id"],
-            set_={"prefs": body.prefs, "updated_at": datetime.now(UTC)},
+            set_={"prefs": normalised, "updated_at": datetime.now(UTC)},
         )
     )
     await db.commit()
-    return PreferencesResponse(prefs=body.prefs)
+    return PreferencesResponse(
+        prefs={k: KindPreference(**v) for k, v in normalised.items()}
+    )

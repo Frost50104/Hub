@@ -47,11 +47,24 @@ class UnreadCount(BaseModel):
 # ─── Preferences ────────────────────────────────────────────────────────────
 
 
+class KindPreference(BaseModel):
+    push: bool = True
+    in_app: bool = True
+
+
 class PreferencesResponse(BaseModel):
+    """Always returns the full set of known kinds with both channels populated."""
+
     model_config = ConfigDict(from_attributes=True)
 
-    prefs: dict[str, Any]
+    prefs: dict[str, KindPreference]
 
 
 class PreferencesUpdate(BaseModel):
+    """Accepts the full or partial set; missing kinds use default (both True).
+
+    Legacy `{kind: bool}` shape is also accepted by the API — normalisation
+    happens server-side via `app.services.notification_prefs.normalize_prefs`.
+    """
+
     prefs: dict[str, Any]

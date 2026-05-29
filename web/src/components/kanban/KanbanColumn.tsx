@@ -37,7 +37,7 @@ export function KanbanColumn({
   const { setNodeRef, isOver } = useDroppable({ id: column.dndId })
 
   return (
-    <div className="flex w-72 shrink-0 flex-col gap-2">
+    <div className="flex w-[85vw] max-w-[320px] shrink-0 snap-start flex-col gap-2 sm:w-72">
       <header className="flex items-center justify-between px-1">
         <h3 className="font-display text-sm font-semibold text-text">{column.name}</h3>
         <span className="text-xs text-text3">{column.tasks.length}</span>

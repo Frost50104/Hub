@@ -56,13 +56,23 @@ export function KanbanCard({ task, onClick, onToggleDone }: KanbanCardProps) {
       {...attributes}
       {...listeners}
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      aria-roledescription="draggable task"
+      aria-grabbed={isDragging || undefined}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick?.()
+        }
+      }}
       className={cn(
-        'glass cursor-grab space-y-2 p-3 active:cursor-grabbing',
+        'glass cursor-grab space-y-2 p-3 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
         task.status === 'done' && 'opacity-70',
         isDragging && 'shadow-glass ring-1 ring-amber',
       )}
     >
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-1">
         <button
           type="button"
           onClick={(e) => {
@@ -70,7 +80,10 @@ export function KanbanCard({ task, onClick, onToggleDone }: KanbanCardProps) {
             onToggleDone?.()
           }}
           onPointerDown={(e) => e.stopPropagation()}
-          className={cn('mt-0.5 shrink-0', STATUS_TONE[task.status])}
+          className={cn(
+            '-m-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 md:-m-1 md:h-8 md:w-8',
+            STATUS_TONE[task.status],
+          )}
           title={STATUS_LABEL[task.status]}
           aria-label={STATUS_LABEL[task.status]}
         >
