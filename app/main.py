@@ -120,6 +120,7 @@ def create_app() -> FastAPI:
     )
 
     from app.api import activity as activity_api
+    from app.api import attachments as attachments_api
     from app.api import comments as comments_api
     from app.api import env as env_api
     from app.api import me as me_api
@@ -142,6 +143,7 @@ def create_app() -> FastAPI:
     app.include_router(comments_api.router, prefix="/api")
     app.include_router(watchers_api.router, prefix="/api")
     app.include_router(activity_api.router, prefix="/api")
+    app.include_router(attachments_api.router, prefix="/api")
     app.include_router(search_api.router, prefix="/api")
     app.include_router(tenant_api.router, prefix="/api")
     app.include_router(push_api.router, prefix="/api")

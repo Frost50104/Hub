@@ -108,3 +108,48 @@ async def notify_commented(
         url=_task_url(task),
         payload={"task_id": str(task.id)},
     )
+
+
+async def notify_due_soon(
+    session: AsyncSession,
+    *,
+    task: Task,
+    recipient_id: UUID,
+) -> None:
+    when = (
+        task.due_at.strftime("%d.%m в %H:%M") if task.due_at else "скоро"
+    )
+    await dispatch(
+        session,
+        tenant_id=task.tenant_id,
+        employee_id=recipient_id,
+        kind="task.due_soon",
+        title="Скоро дедлайн",
+        body=f"«{task.title}» — срок {when}",
+        url=_task_url(task),
+        payload={
+            "task_id": str(task.id),
+            "due_at": task.due_at.isoformat() if task.due_at else None,
+        },
+    )
+
+
+async def notify_overdue(
+    session: AsyncSession,
+    *,
+    task: Task,
+    recipient_id: UUID,
+) -> None:
+    await dispatch(
+        session,
+        tenant_id=task.tenant_id,
+        employee_id=recipient_id,
+        kind="task.overdue",
+        title="Задача просрочена",
+        body=f"«{task.title}» — дедлайн прошёл, статус ещё не «Готово»",
+        url=_task_url(task),
+        payload={
+            "task_id": str(task.id),
+            "due_at": task.due_at.isoformat() if task.due_at else None,
+        },
+    )

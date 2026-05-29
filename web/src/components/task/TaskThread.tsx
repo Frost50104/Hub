@@ -1,5 +1,5 @@
-import { Trash2 } from 'lucide-react'
-import { Fragment, useMemo, useState } from 'react'
+import { ChevronDown, ChevronRight, History, Trash2 } from 'lucide-react'
+import { Fragment, useState } from 'react'
 import { toast } from 'sonner'
 
 import { MentionTextarea } from '@/components/task/MentionTextarea'
@@ -16,8 +16,6 @@ import { cn } from '@/lib/cn'
 import { STATUS_LABEL, type TaskStatus } from '@/lib/tasks'
 import { type Activity, type Comment } from '@/lib/threads'
 
-// Mirror of `app/services/mention_parser.py::_MENTION_RE` (without the
-// boundary group — we split on the bare `@handle` token here for rendering).
 const MENTION_TOKEN_RE = /(@[A-Za-z0-9._-]+)/g
 
 function renderCommentBody(body: string): React.ReactNode {
@@ -34,10 +32,6 @@ function renderCommentBody(body: string): React.ReactNode {
     return <Fragment key={idx}>{part}</Fragment>
   })
 }
-
-type FeedItem =
-  | { kind: 'comment'; at: string; comment: Comment }
-  | { kind: 'activity'; at: string; activity: Activity }
 
 function renderActivity(a: Activity): string | null {
   const actor = a.actor_full_name || a.actor_email || 'Кто-то'
@@ -66,6 +60,10 @@ function renderActivity(a: Activity): string | null {
       return `${actor} подписался на задачу`
     case 'watcher_removed':
       return `${actor} отписался от задачи`
+    case 'attached':
+      return `${actor} прикрепил файл «${String(p['filename'] ?? '—')}»`
+    case 'unattached':
+      return `${actor} удалил файл «${String(p['filename'] ?? '—')}»`
     case 'commented':
       // Rendered as the comment itself — skip the activity row.
       return null
@@ -84,7 +82,7 @@ function CommentBubble({
   onDelete: () => void
 }) {
   return (
-    <div className="flex gap-3">
+    <div className="group flex gap-3">
       <Avatar
         name={comment.author_full_name}
         email={comment.author_email}
@@ -127,11 +125,13 @@ function CommentBubble({
 
 function ActivityRow({ text, at }: { text: string; at: string }) {
   return (
-    <div className="flex items-center gap-3 py-1 pl-11 text-xs text-text3">
-      <span>·</span>
-      <span>{text}</span>
-      <span className="ml-auto">
-        {new Date(at).toLocaleTimeString('ru-RU', {
+    <div className="flex items-center gap-3 py-1 text-xs text-text3">
+      <span className="ml-1 h-1 w-1 shrink-0 rounded-full bg-text3" />
+      <span className="flex-1">{text}</span>
+      <span>
+        {new Date(at).toLocaleString('ru-RU', {
+          day: 'numeric',
+          month: 'short',
           hour: '2-digit',
           minute: '2-digit',
         })}
@@ -151,18 +151,9 @@ export function TaskThread({ taskId }: TaskThreadProps) {
   const create = useCreateComment(taskId)
   const del = useDeleteComment(taskId)
   const [draft, setDraft] = useState('')
+  const [historyOpen, setHistoryOpen] = useState(false)
 
-  const feed: FeedItem[] = useMemo(() => {
-    const cs: FeedItem[] = (comments.data ?? []).map((c) => ({
-      kind: 'comment',
-      at: c.created_at,
-      comment: c,
-    }))
-    const acts: FeedItem[] = (activity.data ?? [])
-      .filter((a) => a.kind !== 'commented')
-      .map((a) => ({ kind: 'activity', at: a.created_at, activity: a }))
-    return [...cs, ...acts].sort((a, b) => a.at.localeCompare(b.at))
-  }, [comments.data, activity.data])
+  const visibleActivity = (activity.data ?? []).filter((a) => a.kind !== 'commented')
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -179,63 +170,85 @@ export function TaskThread({ taskId }: TaskThreadProps) {
   }
 
   return (
-    <div className="space-y-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text3">
-        Комментарии и активность
-      </h3>
+    <div className="space-y-5">
+      <section className="space-y-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-text3">
+          Комментарии {comments.data ? `(${comments.data.length})` : ''}
+        </h3>
 
-      <div className={cn('space-y-3', feed.length === 0 && 'hidden')}>
-        {feed.map((item) =>
-          item.kind === 'comment' ? (
-            <div key={`c-${item.comment.id}`} className="group">
-              <CommentBubble
-                comment={item.comment}
-                isMine={item.comment.author_id === me.data?.employee_id}
-                onDelete={() => {
-                  if (confirm('Удалить комментарий?')) {
-                    void del.mutateAsync(item.comment.id)
-                  }
-                }}
-              />
-            </div>
-          ) : (
-            (() => {
-              const text = renderActivity(item.activity)
-              if (!text) return null
-              return (
-                <ActivityRow
-                  key={`a-${item.activity.id}`}
-                  text={text}
-                  at={item.at}
-                />
-              )
-            })()
-          ),
-        )}
-      </div>
-
-      <form onSubmit={submit} className="flex flex-col gap-2 pt-2">
-        <MentionTextarea
-          rows={3}
-          value={draft}
-          onValueChange={setDraft}
-          placeholder="Комментарий… Наберите @ для упоминания"
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-              e.preventDefault()
-              void submit(e as unknown as React.FormEvent)
-            }
-          }}
-        />
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] text-text3">
-            ⌘/Ctrl + Enter — отправить · @имя — упоминание
-          </span>
-          <Button type="submit" size="sm" disabled={create.isPending || !draft.trim()}>
-            Отправить
-          </Button>
+        <div className="space-y-3">
+          {comments.data?.map((c) => (
+            <CommentBubble
+              key={c.id}
+              comment={c}
+              isMine={c.author_id === me.data?.employee_id}
+              onDelete={() => {
+                if (confirm('Удалить комментарий?')) {
+                  void del.mutateAsync(c.id)
+                }
+              }}
+            />
+          ))}
+          {comments.data && comments.data.length === 0 && (
+            <p className="text-xs text-text3">Комментариев пока нет.</p>
+          )}
         </div>
-      </form>
+
+        <form onSubmit={submit} className="flex flex-col gap-2 pt-1">
+          <MentionTextarea
+            rows={3}
+            value={draft}
+            onValueChange={setDraft}
+            placeholder="Комментарий… Наберите @ для упоминания"
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault()
+                void submit(e as unknown as React.FormEvent)
+              }
+            }}
+          />
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-text3">
+              ⌘/Ctrl + Enter — отправить · @имя — упоминание
+            </span>
+            <Button type="submit" size="sm" disabled={create.isPending || !draft.trim()}>
+              Отправить
+            </Button>
+          </div>
+        </form>
+      </section>
+
+      <section className="rounded-md border border-glass-border">
+        <button
+          type="button"
+          onClick={() => setHistoryOpen((v) => !v)}
+          className={cn(
+            'flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium',
+            'text-text2 hover:bg-glass hover:text-text',
+          )}
+        >
+          {historyOpen ? (
+            <ChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5" />
+          )}
+          <History className="h-3.5 w-3.5" />
+          История {visibleActivity.length > 0 ? `(${visibleActivity.length})` : ''}
+        </button>
+        {historyOpen && (
+          <div className="space-y-0.5 px-3 pb-3">
+            {visibleActivity.length === 0 ? (
+              <p className="text-xs text-text3">Событий пока нет.</p>
+            ) : (
+              visibleActivity.map((a) => {
+                const text = renderActivity(a)
+                if (!text) return null
+                return <ActivityRow key={a.id} text={text} at={a.created_at} />
+              })
+            )}
+          </div>
+        )}
+      </section>
     </div>
   )
 }

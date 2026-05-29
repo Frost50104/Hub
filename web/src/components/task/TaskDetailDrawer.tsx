@@ -3,6 +3,7 @@ import { Archive, Calendar, Flag, Tag, User, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
+import { TaskAttachments } from '@/components/task/TaskAttachments'
 import { TaskThread } from '@/components/task/TaskThread'
 import { WatchControl } from '@/components/task/WatchControl'
 import { Avatar } from '@/components/ui/Avatar'
@@ -202,6 +203,8 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                   placeholder="Что нужно сделать?"
                 />
               </div>
+
+              <TaskAttachments taskId={task.id} />
 
               <TaskThread taskId={task.id} />
 

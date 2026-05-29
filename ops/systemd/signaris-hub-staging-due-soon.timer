@@ -1,0 +1,10 @@
+[Unit]
+Description=Run signaris-hub-staging-due-soon hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+Unit=signaris-hub-staging-due-soon.service
+
+[Install]
+WantedBy=timers.target

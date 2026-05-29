@@ -12,30 +12,52 @@ const UPDATE_CHECK_INTERVAL_MS = 60_000
  * `skipWaiting`. This banner polls for new versions every 60s and on
  * `visibilitychange` (iOS PWA freezes background timers, so the focus event
  * is the reliable wake-up), then surfaces a button to activate the new SW.
+ *
+ * Polling lives in a `useEffect` on `navigator.serviceWorker.ready`, NOT
+ * inside `onRegisteredSW` — that callback only fires on first registration,
+ * so users with an already-active SW would never get polled.
  */
 export function UpdateBanner() {
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
-  } = useRegisterSW({
-    onRegisteredSW(_swUrl, registration) {
-      if (!registration) return
-      const check = () => {
-        if (registration.installing || !navigator) return
-        if (!('connection' in navigator) || navigator.onLine) {
-          void registration.update()
+  } = useRegisterSW()
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return undefined
+    let cancelled = false
+    let intervalId: number | undefined
+    let visListener: (() => void) | undefined
+
+    navigator.serviceWorker.ready
+      .then((registration) => {
+        if (cancelled || !registration) return
+        const check = () => {
+          if (navigator.onLine) void registration.update()
         }
-      }
-      window.setInterval(check, UPDATE_CHECK_INTERVAL_MS)
-      window.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') check()
+        intervalId = window.setInterval(check, UPDATE_CHECK_INTERVAL_MS)
+        visListener = () => {
+          if (document.visibilityState === 'visible') check()
+        }
+        document.addEventListener('visibilitychange', visListener)
+        // Kick off one check immediately — don't wait the full minute.
+        check()
       })
-    },
-  })
+      .catch(() => {
+        /* SW not registered — nothing to poll. */
+      })
+
+    return () => {
+      cancelled = true
+      if (intervalId !== undefined) window.clearInterval(intervalId)
+      if (visListener) document.removeEventListener('visibilitychange', visListener)
+    }
+  }, [])
 
   useEffect(() => {
     if (!needRefresh) return undefined
-    // Fallback in case `updateServiceWorker` doesn't reload in some edge case.
+    // Safety net — `updateServiceWorker(true)` reloads itself, but iOS
+    // sometimes ignores the reload. Force after a minute.
     const id = window.setTimeout(() => window.location.reload(), 60_000)
     return () => window.clearTimeout(id)
   }, [needRefresh])
@@ -60,8 +82,6 @@ export function UpdateBanner() {
           size="sm"
           onClick={() => {
             void updateServiceWorker(true)
-            // updateServiceWorker(true) reloads automatically after activation,
-            // but iOS sometimes ignores it — explicit reload as a safety net.
             window.setTimeout(() => window.location.reload(), 1500)
           }}
         >
