@@ -90,6 +90,9 @@ class Task(Base):
         ForeignKey("shadow_users.employee_id", ondelete="RESTRICT"),
         nullable=False,
     )
+    start_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     position: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
 

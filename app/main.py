@@ -125,6 +125,7 @@ def create_app() -> FastAPI:
 
     from app.api import activity as activity_api
     from app.api import attachments as attachments_api
+    from app.api import calendar as calendar_api
     from app.api import comments as comments_api
     from app.api import env as env_api
     from app.api import me as me_api
@@ -144,6 +145,7 @@ def create_app() -> FastAPI:
     app.include_router(projects_api.router, prefix="/api")
     app.include_router(sections_api.router, prefix="/api")
     app.include_router(tasks_api.router, prefix="/api")
+    app.include_router(calendar_api.router, prefix="/api")
     app.include_router(comments_api.router, prefix="/api")
     app.include_router(watchers_api.router, prefix="/api")
     app.include_router(activity_api.router, prefix="/api")

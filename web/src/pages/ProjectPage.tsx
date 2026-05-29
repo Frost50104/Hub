@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
+import { CalendarView } from '@/components/calendar/CalendarView'
 import { BoardView } from '@/components/kanban/BoardView'
 import { TaskDetailDrawer } from '@/components/task/TaskDetailDrawer'
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
@@ -31,11 +32,12 @@ import { cn } from '@/lib/cn'
 import { type Project, type ProjectRole, type Section } from '@/lib/projects'
 import { type Task } from '@/lib/tasks'
 
-type TabKey = 'list' | 'board' | 'members'
+type TabKey = 'list' | 'board' | 'calendar' | 'members'
 
 const TABS: { key: TabKey; label: string; disabled?: boolean }[] = [
   { key: 'list', label: 'Список' },
   { key: 'board', label: 'Доска' },
+  { key: 'calendar', label: 'Календарь' },
   { key: 'members', label: 'Участники' },
 ]
 
@@ -460,6 +462,9 @@ export function ProjectPage() {
       )}
       {tab === 'board' && (
         <BoardView projectId={id} myRole={p.my_role} onTaskClick={openTask} />
+      )}
+      {tab === 'calendar' && (
+        <CalendarView projectId={id} onTaskClick={openTask} />
       )}
       {tab === 'members' && <MembersTab projectId={id} />}
 

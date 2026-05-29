@@ -21,6 +21,7 @@ export interface Task {
   assignee_id: string | null
   assignee: TaskAssigneeBrief | null
   created_by: string
+  start_at: string | null
   due_at: string | null
   position: string | number
   created_at: string
@@ -44,6 +45,7 @@ export interface TaskCreateBody {
   status?: TaskStatus
   priority?: TaskPriority
   assignee_id?: string | null
+  start_at?: string | null
   due_at?: string | null
 }
 
@@ -54,8 +56,16 @@ export interface TaskUpdateBody {
   status?: TaskStatus
   priority?: TaskPriority
   assignee_id?: string | null
+  start_at?: string | null
   due_at?: string | null
   position?: string | number
+}
+
+export interface CalendarRange {
+  /** Inclusive YYYY-MM-DD. */
+  from: string
+  /** Inclusive YYYY-MM-DD. */
+  to: string
 }
 
 export const tasksApi = {
@@ -72,6 +82,10 @@ export const tasksApi = {
     api.post<Task>(`/tasks/${id}/unarchive`).then((r) => r.data),
   remove: (id: string): Promise<void> =>
     api.delete(`/tasks/${id}`).then(() => undefined),
+  calendar: (projectId: string, range: CalendarRange): Promise<Task[]> =>
+    api
+      .get<Task[]>(`/projects/${projectId}/tasks/calendar`, { params: range })
+      .then((r) => r.data),
 }
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {

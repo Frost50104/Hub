@@ -31,6 +31,7 @@ class TaskCreate(BaseModel):
     status: TaskStatus = "todo"
     priority: TaskPriority = "medium"
     assignee_id: UUID | None = None
+    start_at: datetime | None = None
     due_at: datetime | None = None
 
 
@@ -41,6 +42,7 @@ class TaskUpdate(BaseModel):
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
     assignee_id: UUID | None = None
+    start_at: datetime | None = None
     due_at: datetime | None = None
     position: Decimal | None = None
     # Pydantic v2 has trouble distinguishing "explicit null" from "absent" by
@@ -64,6 +66,7 @@ class TaskResponse(BaseModel):
     assignee_id: UUID | None
     assignee: AssigneeBrief | None = None
     created_by: UUID
+    start_at: datetime | None = None
     due_at: datetime | None
     position: Decimal
     created_at: datetime

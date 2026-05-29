@@ -217,6 +217,7 @@ async def create_task(
         priority=body.priority,
         assignee_id=body.assignee_id,
         created_by=principal.employee_id,
+        start_at=body.start_at,
         due_at=body.due_at,
         position=await _next_position(db, project_id, body.status),
     )
@@ -334,6 +335,13 @@ async def update_task(
             "new": body.due_at.isoformat(),
         }
         task.due_at = body.due_at
+
+    if body.start_at is not None and body.start_at != task.start_at:
+        changes["start_at"] = {
+            "old": task.start_at.isoformat() if task.start_at else None,
+            "new": body.start_at.isoformat(),
+        }
+        task.start_at = body.start_at
 
     actor_name_row = await db.execute(
         select(ShadowUser.full_name, ShadowUser.email).where(

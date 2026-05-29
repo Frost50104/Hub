@@ -35,12 +35,14 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [dueAt, setDueAt] = useState('')
+  const [startAt, setStartAt] = useState('')
 
   useEffect(() => {
     if (task) {
       setTitle(task.title)
       setDescription(task.description ?? '')
       setDueAt(task.due_at ? task.due_at.slice(0, 10) : '')
+      setStartAt(task.start_at ? task.start_at.slice(0, 10) : '')
     }
   }, [task])
 
@@ -67,6 +69,16 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
     const iso = val ? new Date(val + 'T12:00:00').toISOString() : null
     try {
       await update.mutateAsync({ id: task.id, due_at: iso })
+    } catch (err) {
+      toast.error('Не удалось обновить', { description: (err as Error).message })
+    }
+  }
+
+  const saveStartAt = async (val: string) => {
+    if (!task) return
+    const iso = val ? new Date(val + 'T12:00:00').toISOString() : null
+    try {
+      await update.mutateAsync({ id: task.id, start_at: iso })
     } catch (err) {
       toast.error('Не удалось обновить', { description: (err as Error).message })
     }
@@ -182,6 +194,21 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                   ) : (
                     <span className="text-sm text-text3">Не назначен</span>
                   )}
+                </Row>
+
+                <Row
+                  icon={<Calendar className="h-4 w-4 text-text3" />}
+                  label="Старт"
+                >
+                  <input
+                    type="date"
+                    value={startAt}
+                    onChange={(e) => {
+                      setStartAt(e.target.value)
+                      void saveStartAt(e.target.value)
+                    }}
+                    className="rounded-lg border border-glass-border bg-glass px-2 py-1 text-sm text-text"
+                  />
                 </Row>
 
                 <Row
