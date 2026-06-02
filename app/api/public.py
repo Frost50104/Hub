@@ -35,6 +35,7 @@ from app.models.task import Task, TaskComment
 from app.schemas.share import (
     PublicAttachmentMeta,
     PublicComment,
+    PublicProjectComment,
     PublicProjectView,
     PublicSection,
     PublicTaskHit,
@@ -227,8 +228,44 @@ async def _build_project_view(
             )
         )
 
+    # Top-10 most recent comments across every visible task — gives a public
+    # viewer a quick "what's the team talking about?" without revealing names.
+    recent_comment_rows = await session.execute(
+        select(
+            TaskComment.body,
+            TaskComment.created_at,
+            Task.title,
+            ShadowUser.full_name,
+            ShadowUser.email,
+        )
+        .join(Task, Task.id == TaskComment.task_id)
+        .join(
+            ShadowUser,
+            (ShadowUser.employee_id == TaskComment.author_id)
+            & (ShadowUser.deleted_at.is_(None)),
+            isouter=True,
+        )
+        .where(
+            Task.project_id == project_id,
+            Task.archived_at.is_(None),
+            TaskComment.deleted_at.is_(None),
+        )
+        .order_by(TaskComment.created_at.desc())
+        .limit(10)
+    )
+    recent_comments = [
+        PublicProjectComment(
+            task_title=r.title,
+            author_initials=initials(r.full_name, r.email),
+            body=r.body,
+            created_at=r.created_at,
+        )
+        for r in recent_comment_rows.all()
+    ]
+
     return PublicProjectView(
         name=project.name,
         description=project.description,
         sections=sections,
+        recent_comments=recent_comments,
     )

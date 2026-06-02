@@ -58,11 +58,19 @@ export interface PublicSection {
   tasks: PublicTaskHit[]
 }
 
+export interface PublicProjectComment {
+  task_title: string
+  author_initials: string | null
+  body: string
+  created_at: string
+}
+
 export interface PublicProjectView {
   kind: 'project'
   name: string
   description: string | null
   sections: PublicSection[]
+  recent_comments: PublicProjectComment[]
 }
 
 export type PublicView = PublicTaskView | PublicProjectView

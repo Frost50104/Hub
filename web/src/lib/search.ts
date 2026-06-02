@@ -20,6 +20,17 @@ export interface SearchTaskHit {
   priority: 'low' | 'medium' | 'high' | 'urgent'
   due_at: string | null
   assignee_id: string | null
+  /** ts_headline with ‹‹match›› markers — null if no description snippet. */
+  headline: string | null
+}
+
+export interface SearchCommentHit {
+  task_id: string
+  task_title: string
+  /** ts_headline with ‹‹match›› markers. */
+  snippet: string
+  author_initials: string | null
+  created_at: string
 }
 
 export interface SearchGroup {
@@ -27,6 +38,7 @@ export interface SearchGroup {
   project_name: string
   project_key: string
   tasks: SearchTaskHit[]
+  comments: SearchCommentHit[]
 }
 
 export interface ParsedDsl {

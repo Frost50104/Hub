@@ -32,8 +32,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import enforce_rate_limit, get_db, require_auth_any
 from app.models.project import Project, ProjectMember
-from app.models.task import Task
+from app.models.shadow import ShadowUser
+from app.models.task import Task, TaskComment
 from app.services.project_access import is_hub_admin
+from app.services.public_token import initials
 from app.services.search_dsl import ParsedQuery
 from app.services.search_dsl import parse as parse_dsl
 
@@ -59,6 +61,17 @@ class SearchTaskHit(BaseModel):
     priority: str
     due_at: datetime | None
     assignee_id: UUID | None
+    # `headline` is a snippet with the user's query highlighted via custom
+    # marker pair ‹‹…››. Client splits on it — safer than serving HTML.
+    headline: str | None = None
+
+
+class SearchCommentHit(BaseModel):
+    task_id: UUID
+    task_title: str
+    snippet: str  # ts_headline with ‹‹…›› markers
+    author_initials: str | None
+    created_at: datetime
 
 
 class SearchGroup(BaseModel):
@@ -66,6 +79,7 @@ class SearchGroup(BaseModel):
     project_name: str
     project_key: str
     tasks: list[SearchTaskHit]
+    comments: list[SearchCommentHit] = []
 
 
 class SearchResponseLegacy(BaseModel):
@@ -133,6 +147,31 @@ def _apply_text(stmt, text_query: str):
     return stmt.where(Task.title.ilike(_ilike_pattern(text_query)))
 
 
+# Use distinctive markers so the client can split the snippet without
+# rendering raw HTML (which would be a source of XSS for user-supplied
+# titles/descriptions). The chars `‹›` don't appear in normal RU/EN text.
+_HEADLINE_OPTIONS = (
+    "StartSel=‹‹, StopSel=››, "
+    "MinWords=10, MaxWords=24, ShortWord=2, HighlightAll=false"
+)
+
+
+def _headline_expr(source_col, text_query: str):
+    """Build a `ts_headline(...)` expression for a column.
+
+    Returns the source column unchanged if the query is below FTS minimum
+    length — ts_headline on empty tsquery just returns the whole text.
+    """
+    if len(text_query) < _MIN_FTS_LEN:
+        return source_col
+    return func.ts_headline(
+        "russian",
+        source_col,
+        func.websearch_to_tsquery("russian", text_query),
+        _HEADLINE_OPTIONS,
+    )
+
+
 def _serialize_legacy_task(t: Task, project_name: str) -> SearchHit:
     return SearchHit(
         kind="task",
@@ -175,8 +214,11 @@ async def search(
     is_admin = is_hub_admin(principal)
 
     # ─── Task query ─────────────────────────────────────────────────────────
+    # ts_headline runs on description so the user sees WHY a task matched.
+    headline_col = _headline_expr(Task.description, parsed.text)
+
     task_stmt = (
-        select(Task, Project.name, Project.key)
+        select(Task, Project.name, Project.key, headline_col.label("headline"))
         .join(Project, Project.id == Task.project_id)
         .where(Task.archived_at.is_(None), Project.archived_at.is_(None))
     )
@@ -212,13 +254,16 @@ async def search(
                 SearchHit(kind="project", id=p.id, title=p.name, subtitle=p.key)
                 for p in project_rows
             ],
-            tasks=[_serialize_legacy_task(t, project_name) for t, project_name, _ in task_rows],
+            tasks=[
+                _serialize_legacy_task(t, project_name)
+                for t, project_name, _, _ in task_rows
+            ],
         )
 
     # ─── Grouped response (advanced /search page) ───────────────────────────
-    rows = (await db.execute(task_stmt.limit(_GROUPED_LIMIT))).all()
+    task_rows = (await db.execute(task_stmt.limit(_GROUPED_LIMIT))).all()
     by_project: dict[UUID, SearchGroup] = {}
-    for t, project_name, project_key in rows:
+    for t, project_name, project_key, headline in task_rows:
         bucket = by_project.get(t.project_id)
         if bucket is None:
             bucket = SearchGroup(
@@ -226,6 +271,7 @@ async def search(
                 project_name=project_name,
                 project_key=project_key,
                 tasks=[],
+                comments=[],
             )
             by_project[t.project_id] = bucket
         bucket.tasks.append(
@@ -236,12 +282,82 @@ async def search(
                 priority=t.priority,
                 due_at=t.due_at,
                 assignee_id=t.assignee_id,
+                headline=headline if (headline and headline != t.description) else None,
             )
         )
+
+    # ─── Comment query (only when there's a text part to match against). ───
+    if parsed.text and len(parsed.text) >= _MIN_FTS_LEN:
+        comment_snippet = _headline_expr(TaskComment.body, parsed.text)
+        comment_stmt = (
+            select(
+                TaskComment.task_id,
+                Task.title.label("task_title"),
+                Task.project_id,
+                comment_snippet.label("snippet"),
+                ShadowUser.full_name,
+                ShadowUser.email,
+                TaskComment.created_at,
+            )
+            .join(Task, Task.id == TaskComment.task_id)
+            .join(Project, Project.id == Task.project_id)
+            .join(
+                ShadowUser,
+                (ShadowUser.employee_id == TaskComment.author_id)
+                & (ShadowUser.deleted_at.is_(None)),
+                isouter=True,
+            )
+            .where(
+                TaskComment.deleted_at.is_(None),
+                Task.archived_at.is_(None),
+                Project.archived_at.is_(None),
+                text(
+                    "to_tsvector('russian', task_comments.body) @@ "
+                    "websearch_to_tsquery('russian', :tsq)"
+                ).bindparams(tsq=parsed.text),
+            )
+            .order_by(TaskComment.created_at.desc())
+        )
+        if not is_admin:
+            comment_stmt = comment_stmt.join(
+                ProjectMember, ProjectMember.project_id == Task.project_id
+            ).where(ProjectMember.employee_id == principal.employee_id)
+        comment_rows = (
+            await db.execute(comment_stmt.limit(_GROUPED_LIMIT))
+        ).all()
+
+        for r in comment_rows:
+            bucket = by_project.get(r.project_id)
+            if bucket is None:
+                # Show project groups that ONLY have comment matches too.
+                # Need project_name/key — fetch them lazily.
+                proj = await db.execute(
+                    select(Project.name, Project.key).where(Project.id == r.project_id)
+                )
+                proj_row = proj.first()
+                if proj_row is None:
+                    continue
+                bucket = SearchGroup(
+                    project_id=r.project_id,
+                    project_name=proj_row.name,
+                    project_key=proj_row.key,
+                    tasks=[],
+                    comments=[],
+                )
+                by_project[r.project_id] = bucket
+            bucket.comments.append(
+                SearchCommentHit(
+                    task_id=r.task_id,
+                    task_title=r.task_title,
+                    snippet=r.snippet,
+                    author_initials=initials(r.full_name, r.email),
+                    created_at=r.created_at,
+                )
+            )
 
     groups = sorted(by_project.values(), key=lambda g: g.project_name.lower())
     return SearchResponseGrouped(
         groups=groups,
-        total=sum(len(g.tasks) for g in groups),
+        total=sum(len(g.tasks) + len(g.comments) for g in groups),
         parsed=_parsed_summary(parsed),
     )

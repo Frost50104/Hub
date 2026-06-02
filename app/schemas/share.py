@@ -45,11 +45,21 @@ class PublicSection(BaseModel):
     tasks: list[PublicTaskHit]
 
 
+class PublicProjectComment(BaseModel):
+    """Latest comments across all tasks in a public project — short context."""
+
+    task_title: str
+    author_initials: str | None
+    body: str
+    created_at: datetime
+
+
 class PublicProjectView(BaseModel):
     kind: Literal["project"] = "project"
     name: str
     description: str | None
     sections: list[PublicSection]
+    recent_comments: list[PublicProjectComment] = []
 
 
 class PublicComment(BaseModel):

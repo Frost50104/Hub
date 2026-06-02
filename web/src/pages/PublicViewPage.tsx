@@ -300,6 +300,31 @@ function ProjectViewBlock({ data }: { data: PublicProjectView }) {
           </ul>
         </section>
       ))}
+
+      {data.recent_comments.length > 0 && (
+        <section className="space-y-2 pt-2">
+          <h2 className="font-display text-sm font-semibold text-text">
+            Последние комментарии
+          </h2>
+          <ul className="space-y-2">
+            {data.recent_comments.map((c, i) => (
+              <li
+                key={`${c.created_at}-${i}`}
+                className="rounded-md border border-glass-border bg-surface px-3 py-2 text-sm"
+              >
+                <header className="flex items-center gap-2 text-[11px] text-text3">
+                  <Initials value={c.author_initials} />
+                  <span className="truncate font-medium text-text2">
+                    {c.task_title}
+                  </span>
+                  <span className="ml-auto">{formatDateTime(c.created_at)}</span>
+                </header>
+                <p className="mt-1 whitespace-pre-wrap text-text">{c.body}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </article>
   )
 }

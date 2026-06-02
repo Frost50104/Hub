@@ -1,5 +1,5 @@
 import { Search } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { useSearch } from '@/hooks/useSearch'
@@ -10,6 +10,20 @@ export function SidebarSearch() {
   const [focused, setFocused] = useState(false)
   const { data, isLoading } = useSearch(q)
   const nav = useNavigate()
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Global Cmd+K / Ctrl+K → focus search input.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        inputRef.current?.focus()
+        inputRef.current?.select()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const show = focused && q.trim().length >= 2
 
@@ -30,12 +44,19 @@ export function SidebarSearch() {
     <div className="relative">
       <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text3" />
       <input
+        ref={inputRef}
         type="search"
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={() => window.setTimeout(() => setFocused(false), 150)}
-        placeholder="Поиск…"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            ;(e.target as HTMLInputElement).blur()
+            setQ('')
+          }
+        }}
+        placeholder="Поиск…  ⌘K"
         className="w-full rounded-md border border-glass-border bg-glass px-7 py-1.5 text-sm text-text placeholder:text-text3 focus:border-amber focus:outline-none"
       />
       {show && (
