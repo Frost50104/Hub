@@ -1,10 +1,15 @@
-import { ChevronDown, Filter, Link as LinkIcon, MoreHorizontal, Plus, Settings2, Star, Trash2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { ChevronDown, Filter, Link as LinkIcon, Loader2, MoreHorizontal, Plus, Settings2, Star, Trash2 } from 'lucide-react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
+// `recharts` is ~370KB minified. Lazy-load the entire dashboard chunk so
+// the main bundle stays light for users who never open this tab.
+const ProjectDashboard = lazy(
+  () => import('@/components/dashboard/ProjectDashboard'),
+)
+
 import { CalendarView } from '@/components/calendar/CalendarView'
-import { ProjectDashboard } from '@/components/dashboard/ProjectDashboard'
 import { BoardView } from '@/components/kanban/BoardView'
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { ColumnsMenu } from '@/components/project/ColumnsMenu'
@@ -619,7 +624,17 @@ export function ProjectPage() {
       {tab === 'timeline' && (
         <TimelineView projectId={id} onTaskClick={openTask} />
       )}
-      {tab === 'dashboard' && <ProjectDashboard projectId={id} />}
+      {tab === 'dashboard' && (
+        <Suspense
+          fallback={
+            <div className="flex items-center gap-2 p-2 text-sm text-text2">
+              <Loader2 className="h-4 w-4 animate-spin" /> Загружаем дашборд…
+            </div>
+          }
+        >
+          <ProjectDashboard projectId={id} />
+        </Suspense>
+      )}
       {tab === 'members' && <MembersTab projectId={id} />}
 
       {/* Mobile: floating view picker + FAB above the bottom tab bar. */}

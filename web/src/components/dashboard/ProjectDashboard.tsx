@@ -59,7 +59,7 @@ const SELECT_PALETTE = [
   '#f0f0f5',
 ]
 
-export function ProjectDashboard({ projectId }: ProjectDashboardProps) {
+function ProjectDashboard({ projectId }: ProjectDashboardProps) {
   const stats = useProjectStats(projectId)
 
   if (stats.isLoading) {
@@ -399,3 +399,7 @@ function NumStat({
 function sumTrend(trend: ProjectStats['completed_trend']): number {
   return trend.reduce((s, p) => s + p.count, 0)
 }
+
+// Default export — required so `React.lazy(() => import(...))` works.
+export default ProjectDashboard
+
