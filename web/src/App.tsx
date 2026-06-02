@@ -8,6 +8,7 @@ import { HomePage } from '@/pages/HomePage'
 import { InboxPage } from '@/pages/InboxPage'
 import { LoginRedirect } from '@/pages/LoginRedirect'
 import { MyTasksPage } from '@/pages/MyTasksPage'
+import { ProfilePage } from '@/pages/ProfilePage'
 import { ProjectListPage } from '@/pages/ProjectListPage'
 import { ProjectPage } from '@/pages/ProjectPage'
 import { PublicViewPage } from '@/pages/PublicViewPage'
@@ -30,6 +31,7 @@ export function App() {
           <Route path="/projects" element={<ProjectListPage />} />
           <Route path="/projects/:id" element={<ProjectPage />} />
           <Route path="/search" element={<SearchPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="notifications" replace />} />
             <Route path="notifications" element={<NotificationsSettingsTab />} />

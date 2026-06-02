@@ -25,7 +25,13 @@ export function useMediaQuery(query: string): boolean {
   return matches
 }
 
-/** Tailwind `md:` breakpoint — desktop layout >=768px. */
+/**
+ * Mobile vs desktop layout breakpoint.
+ *
+ * Bumped to `lg` (1024px) post-4.8 redesign — iPad portrait (768×1024) was
+ * showing the desktop sidebar squashed against a too-narrow main panel.
+ * Below 1024px we serve the Asana-style mobile layout with a bottom tab bar.
+ */
 export function useIsDesktop(): boolean {
-  return useMediaQuery('(min-width: 768px)')
+  return useMediaQuery('(min-width: 1024px)')
 }

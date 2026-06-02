@@ -1,8 +1,13 @@
+import { ChevronDown, LayoutGrid } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
+import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { PushPermissionPrompt } from '@/components/PushPermissionPrompt'
+import { MobileTaskRow } from '@/components/task/MobileTaskRow'
 import { TaskRow } from '@/components/task/TaskRow'
+import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMe } from '@/hooks/useMe'
 import { useMyTasks, type DueWindow } from '@/hooks/useMyTasks'
 import { useProjects } from '@/hooks/useProjects'
@@ -18,34 +23,182 @@ function greeting(): string {
   return 'Добрый вечер'
 }
 
+function todayLabel(): string {
+  return new Date()
+    .toLocaleDateString('ru-RU', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'long',
+    })
+    .replace('.', '')
+}
+
+const PROJECT_PALETTE: { bg: string; text: string }[] = [
+  { bg: 'bg-amber/20', text: 'text-amber' },
+  { bg: 'bg-green/20', text: 'text-green' },
+  { bg: 'bg-blue-500/20', text: 'text-blue-500' },
+  { bg: 'bg-pink-500/20', text: 'text-pink-500' },
+  { bg: 'bg-purple-500/20', text: 'text-purple-500' },
+  { bg: 'bg-cyan-500/20', text: 'text-cyan-500' },
+]
+
+function projectColor(p: Project): { bg: string; text: string } {
+  let hash = 0
+  for (const ch of p.id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+  return PROJECT_PALETTE[hash % PROJECT_PALETTE.length] ?? PROJECT_PALETTE[0]!
+}
+
 const TASK_TABS: { key: DueWindow; label: string }[] = [
   { key: 'upcoming', label: 'Предстоит' },
   { key: 'overdue', label: 'Просрочено' },
   { key: 'today', label: 'Сегодня' },
 ]
 
-function projectColor(p: Project): string {
-  let hash = 0
-  for (const ch of p.id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
-  const palette = [
-    'bg-amber/30 text-amber',
-    'bg-green/20 text-green',
-    'bg-blue-500/20 text-blue-300',
-    'bg-pink-500/20 text-pink-300',
-    'bg-purple-500/20 text-purple-300',
-    'bg-cyan-500/20 text-cyan-300',
-  ]
-  return palette[hash % palette.length] ?? palette[0]!
+export function HomePage() {
+  const isDesktop = useIsDesktop()
+  return isDesktop ? <DesktopHome /> : <MobileHome />
 }
 
-export function HomePage() {
+// ─── Mobile (Asana-style) ───────────────────────────────────────────────────
+
+function MobileHome() {
+  const me = useMe()
+  const projects = useProjects()
+  const recentTasks = useMyTasks({ due_window: 'upcoming' })
+  const update = useUpdateTask('')
+
+  const firstName = me.data?.full_name?.split(/\s+/)[0] ?? ''
+  const recentProjects = (projects.data ?? []).slice(0, 6)
+  const tasks = (recentTasks.data ?? []).slice(0, 5)
+  const projectsById = new Map((projects.data ?? []).map((p) => [p.id, p]))
+
+  return (
+    <>
+      <MobilePageHeader
+        eyebrow={todayLabel()}
+        title={`${greeting()}, ${firstName || 'друг'}`}
+        trailing={
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-text3 hover:bg-glass hover:text-text"
+            aria-label="Виджеты"
+          >
+            <LayoutGrid className="h-5 w-5" />
+          </button>
+        }
+      />
+
+      <div className="space-y-4 px-3">
+        <PushPermissionPrompt />
+
+        <Section title="Недавние">
+          {recentTasks.isLoading ? (
+            <p className="px-4 py-3 text-sm text-text3">Загружаем…</p>
+          ) : tasks.length === 0 ? (
+            <p className="px-4 py-6 text-center text-sm text-text3">
+              Все задачи разобраны.
+            </p>
+          ) : (
+            <div>
+              {tasks.map((t) => (
+                <MobileTaskRow
+                  key={t.id}
+                  task={t}
+                  subtitle={
+                    t.project_id
+                      ? projectsById.get(t.project_id)?.name
+                      : undefined
+                  }
+                  onToggleDone={() =>
+                    update.mutate({
+                      id: t.id,
+                      status: t.status === 'done' ? 'todo' : 'done',
+                    })
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </Section>
+
+        <Section
+          title="Проекты"
+          trailing={
+            <Link
+              to="/projects"
+              className="flex items-center gap-0.5 text-xs text-text3 hover:text-text"
+            >
+              Все <ChevronDown className="-rotate-90 h-3 w-3" />
+            </Link>
+          }
+        >
+          {recentProjects.length === 0 ? (
+            <p className="px-4 py-6 text-center text-sm text-text3">
+              Проектов ещё нет. Нажмите «+» внизу, чтобы создать первый.
+            </p>
+          ) : (
+            <ul>
+              {recentProjects.map((p) => {
+                const c = projectColor(p)
+                return (
+                  <li key={p.id}>
+                    <Link
+                      to={`/projects/${p.id}`}
+                      className="flex items-center gap-3 px-4 py-3 active:bg-glass"
+                    >
+                      <span
+                        className={cn(
+                          'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-display text-sm font-black uppercase',
+                          c.bg,
+                          c.text,
+                        )}
+                      >
+                        {p.key.slice(0, 2)}
+                      </span>
+                      <span className="truncate text-[15px] text-text">
+                        {p.name}
+                      </span>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </Section>
+      </div>
+
+      <FloatingActionButton />
+    </>
+  )
+}
+
+function Section({
+  title,
+  trailing,
+  children,
+}: {
+  title: string
+  trailing?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <section className="rounded-2xl border border-glass-border bg-bg-alt/60 shadow-sm">
+      <header className="flex items-center justify-between px-4 pb-1 pt-3">
+        <h2 className="text-[15px] font-semibold text-text">{title}</h2>
+        {trailing}
+      </header>
+      {children}
+    </section>
+  )
+}
+
+// ─── Desktop (preserved) ────────────────────────────────────────────────────
+
+function DesktopHome() {
   const me = useMe()
   const projects = useProjects()
   const [taskTab, setTaskTab] = useState<DueWindow>('upcoming')
   const myTasks = useMyTasks({ due_window: taskTab })
-  // updateTask isn't tied to a single project for me-tasks invalidation;
-  // pass empty string — invalidate global ['tasks'] still works thanks to
-  // queryKey prefix.
   const update = useUpdateTask('')
 
   const firstName = me.data?.full_name?.split(/\s+/)[0] ?? ''
@@ -69,12 +222,12 @@ export function HomePage() {
           {greeting()}, {firstName || 'друг'}
         </h1>
         <p className="text-xs text-text3">
-          {totalCount} {totalCount === 1 ? 'задача' : 'задач'} • выполнено {completedCount}
+          {totalCount} {totalCount === 1 ? 'задача' : 'задач'} • выполнено{' '}
+          {completedCount}
         </p>
       </header>
 
       <div className="mx-auto grid max-w-5xl grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* My Tasks widget */}
         <section className="glass space-y-3 p-5">
           <div className="flex items-center justify-between">
             <h2 className="font-display text-base font-semibold">Мои задачи</h2>
@@ -126,7 +279,6 @@ export function HomePage() {
           </div>
         </section>
 
-        {/* Recent projects */}
         <section className="glass space-y-3 p-5">
           <div className="flex items-center justify-between">
             <h2 className="font-display text-base font-semibold">Недавние проекты</h2>
@@ -140,26 +292,30 @@ export function HomePage() {
             </p>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {recent.map((p) => (
-                <Link
-                  key={p.id}
-                  to={`/projects/${p.id}`}
-                  className="flex items-center gap-3 rounded-lg border border-glass-border p-3 transition-colors hover:bg-surface"
-                >
-                  <span
-                    className={cn(
-                      'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-display text-sm font-black uppercase',
-                      projectColor(p),
-                    )}
+              {recent.map((p) => {
+                const c = projectColor(p)
+                return (
+                  <Link
+                    key={p.id}
+                    to={`/projects/${p.id}`}
+                    className="flex items-center gap-3 rounded-lg border border-glass-border p-3 transition-colors hover:bg-surface"
                   >
-                    {p.key.slice(0, 2)}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-text">{p.name}</p>
-                    <p className="truncate text-xs text-text3">{p.key}</p>
-                  </div>
-                </Link>
-              ))}
+                    <span
+                      className={cn(
+                        'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-display text-sm font-black uppercase',
+                        c.bg,
+                        c.text,
+                      )}
+                    >
+                      {p.key.slice(0, 2)}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-text">{p.name}</p>
+                      <p className="truncate text-xs text-text3">{p.key}</p>
+                    </div>
+                  </Link>
+                )
+              })}
             </div>
           )}
         </section>

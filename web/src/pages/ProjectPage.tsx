@@ -1,4 +1,4 @@
-import { Filter, Link as LinkIcon, MoreHorizontal, Plus, Settings2, Star, Trash2 } from 'lucide-react'
+import { ChevronDown, Filter, Link as LinkIcon, MoreHorizontal, Plus, Settings2, Star, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { CalendarView } from '@/components/calendar/CalendarView'
 import { ProjectDashboard } from '@/components/dashboard/ProjectDashboard'
 import { BoardView } from '@/components/kanban/BoardView'
+import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { ColumnsMenu } from '@/components/project/ColumnsMenu'
 import { CustomFieldsManager } from '@/components/project/CustomFieldsManager'
 import { ShareDialog } from '@/components/share/ShareDialog'
@@ -14,6 +15,10 @@ import { TaskListHeader } from '@/components/task/TaskListHeader'
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { TaskRow } from '@/components/task/TaskRow'
 import { TimelineView } from '@/components/timeline/TimelineView'
+import {
+  BottomSheet,
+  BottomSheetItem,
+} from '@/components/ui/BottomSheet'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -179,8 +184,9 @@ function TabsRow({
   active: TabKey
   onChange: (t: TabKey) => void
 }) {
+  // Hidden on mobile — replaced by MobileViewControlBar at the bottom.
   return (
-    <div className="flex gap-1 border-b border-glass-border px-1">
+    <div className="hidden gap-1 border-b border-glass-border px-1 lg:flex">
       {TABS.map(({ key, label, disabled }) => (
         <button
           key={key}
@@ -199,6 +205,58 @@ function TabsRow({
         </button>
       ))}
     </div>
+  )
+}
+
+function MobileViewControlBar({
+  active,
+  onChange,
+}: {
+  active: TabKey
+  onChange: (t: TabKey) => void
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const current = TABS.find((t) => t.key === active)!
+  return (
+    <>
+      <div
+        className="fixed inset-x-0 z-20 flex items-center justify-center gap-2 px-4 lg:hidden"
+        style={{
+          bottom: 'calc(env(safe-area-inset-bottom, 0) + 4.5rem)',
+        }}
+      >
+        <div className="flex items-center gap-1 rounded-full border border-glass-border bg-bg-alt/95 px-1 py-1 shadow-lg backdrop-blur">
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium text-text active:bg-surface"
+          >
+            {current.label}
+            <ChevronDown className="h-3.5 w-3.5 text-text3" />
+          </button>
+        </div>
+      </div>
+
+      <BottomSheet
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        title="Выберите вид"
+      >
+        {TABS.map(({ key, label, disabled }) => (
+          <BottomSheetItem
+            key={key}
+            disabled={disabled}
+            onClick={() => {
+              onChange(key)
+              setPickerOpen(false)
+            }}
+            trailing={active === key ? '✓' : null}
+          >
+            {label}
+          </BottomSheetItem>
+        ))}
+      </BottomSheet>
+    </>
   )
 }
 
@@ -563,6 +621,10 @@ export function ProjectPage() {
       )}
       {tab === 'dashboard' && <ProjectDashboard projectId={id} />}
       {tab === 'members' && <MembersTab projectId={id} />}
+
+      {/* Mobile: floating view picker + FAB above the bottom tab bar. */}
+      <MobileViewControlBar active={tab} onChange={setTab} />
+      <FloatingActionButton bottomOffset={7.5} />
 
       <TaskDetailDrawer
         taskId={selectedTaskId}
