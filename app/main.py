@@ -139,6 +139,7 @@ def create_app() -> FastAPI:
     from app.api import search as search_api
     from app.api import sections as sections_api
     from app.api import share as share_api
+    from app.api import stats as stats_api
     from app.api import tasks as tasks_api
     from app.api import tenant as tenant_api
     from app.api import timeline as timeline_api
@@ -164,6 +165,7 @@ def create_app() -> FastAPI:
     app.include_router(tenant_api.router, prefix="/api")
     app.include_router(push_api.router, prefix="/api")
     app.include_router(notifications_api.router, prefix="/api")
+    app.include_router(stats_api.router, prefix="/api")
 
     return app
 

@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { CalendarView } from '@/components/calendar/CalendarView'
+import { ProjectDashboard } from '@/components/dashboard/ProjectDashboard'
 import { BoardView } from '@/components/kanban/BoardView'
 import { ColumnsMenu } from '@/components/project/ColumnsMenu'
 import { CustomFieldsManager } from '@/components/project/CustomFieldsManager'
@@ -43,13 +44,20 @@ import { type Project, type ProjectRole, type Section } from '@/lib/projects'
 import { type Task } from '@/lib/tasks'
 import { useViewConfig } from '@/stores/viewConfig'
 
-type TabKey = 'list' | 'board' | 'calendar' | 'timeline' | 'members'
+type TabKey =
+  | 'list'
+  | 'board'
+  | 'calendar'
+  | 'timeline'
+  | 'dashboard'
+  | 'members'
 
 const TABS: { key: TabKey; label: string; disabled?: boolean }[] = [
   { key: 'list', label: 'Список' },
   { key: 'board', label: 'Доска' },
   { key: 'calendar', label: 'Календарь' },
   { key: 'timeline', label: 'Timeline' },
+  { key: 'dashboard', label: 'Дашборд' },
   { key: 'members', label: 'Участники' },
 ]
 
@@ -553,6 +561,7 @@ export function ProjectPage() {
       {tab === 'timeline' && (
         <TimelineView projectId={id} onTaskClick={openTask} />
       )}
+      {tab === 'dashboard' && <ProjectDashboard projectId={id} />}
       {tab === 'members' && <MembersTab projectId={id} />}
 
       <TaskDetailDrawer
