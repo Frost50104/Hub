@@ -12,6 +12,7 @@ import { TaskDetailDrawer } from '@/components/task/TaskDetailDrawer'
 import { TaskListHeader } from '@/components/task/TaskListHeader'
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { TaskRow } from '@/components/task/TaskRow'
+import { TimelineView } from '@/components/timeline/TimelineView'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -42,12 +43,13 @@ import { type Project, type ProjectRole, type Section } from '@/lib/projects'
 import { type Task } from '@/lib/tasks'
 import { useViewConfig } from '@/stores/viewConfig'
 
-type TabKey = 'list' | 'board' | 'calendar' | 'members'
+type TabKey = 'list' | 'board' | 'calendar' | 'timeline' | 'members'
 
 const TABS: { key: TabKey; label: string; disabled?: boolean }[] = [
   { key: 'list', label: 'Список' },
   { key: 'board', label: 'Доска' },
   { key: 'calendar', label: 'Календарь' },
+  { key: 'timeline', label: 'Timeline' },
   { key: 'members', label: 'Участники' },
 ]
 
@@ -547,6 +549,9 @@ export function ProjectPage() {
       )}
       {tab === 'calendar' && (
         <CalendarView projectId={id} onTaskClick={openTask} />
+      )}
+      {tab === 'timeline' && (
+        <TimelineView projectId={id} onTaskClick={openTask} />
       )}
       {tab === 'members' && <MembersTab projectId={id} />}
 

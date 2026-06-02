@@ -128,6 +128,7 @@ def create_app() -> FastAPI:
     from app.api import calendar as calendar_api
     from app.api import comments as comments_api
     from app.api import custom_fields as custom_fields_api
+    from app.api import dependencies as dependencies_api
     from app.api import env as env_api
     from app.api import me as me_api
     from app.api import me_tasks as me_tasks_api
@@ -140,6 +141,7 @@ def create_app() -> FastAPI:
     from app.api import share as share_api
     from app.api import tasks as tasks_api
     from app.api import tenant as tenant_api
+    from app.api import timeline as timeline_api
     from app.api import watchers as watchers_api
 
     app.include_router(env_api.router, prefix="/api")
@@ -150,6 +152,8 @@ def create_app() -> FastAPI:
     app.include_router(tasks_api.router, prefix="/api")
     app.include_router(calendar_api.router, prefix="/api")
     app.include_router(custom_fields_api.router, prefix="/api")
+    app.include_router(dependencies_api.router, prefix="/api")
+    app.include_router(timeline_api.router, prefix="/api")
     app.include_router(share_api.router, prefix="/api")
     app.include_router(public_api.router, prefix="/api")
     app.include_router(comments_api.router, prefix="/api")
