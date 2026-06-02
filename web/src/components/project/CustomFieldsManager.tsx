@@ -1,5 +1,20 @@
-import { Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { GripVertical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/Button'
@@ -23,10 +38,12 @@ import {
   useCreateCustomField,
   useCustomFieldDefinitions,
   useDeleteCustomField,
+  useUpdateCustomField,
 } from '@/hooks/useCustomFields'
 import { cn } from '@/lib/cn'
 import {
   CUSTOM_FIELD_TYPE_LABEL,
+  type CustomFieldDefinition,
   type CustomFieldOption,
   type CustomFieldType,
 } from '@/lib/customFields'
@@ -56,11 +73,19 @@ export function CustomFieldsManager({
 }: CustomFieldsManagerProps) {
   const defs = useCustomFieldDefinitions(projectId)
   const create = useCreateCustomField(projectId)
+  const update = useUpdateCustomField(projectId)
   const remove = useDeleteCustomField(projectId)
 
   const [name, setName] = useState('')
   const [type, setType] = useState<CustomFieldType>('text')
   const [options, setOptions] = useState<CustomFieldOption[]>([])
+
+  // Local order copy so we can do optimistic drag reorder before the server
+  // confirms the new positions.
+  const [localOrder, setLocalOrder] = useState<CustomFieldDefinition[]>([])
+  useEffect(() => {
+    if (defs.data) setLocalOrder(defs.data)
+  }, [defs.data])
 
   const isOptionType = OPTION_TYPES.includes(type)
   const valid =
@@ -107,6 +132,45 @@ export function CustomFieldsManager({
     ])
   }
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  )
+
+  const onDragEnd = (e: DragEndEvent) => {
+    if (!e.over || e.active.id === e.over.id) return
+    const oldIdx = localOrder.findIndex((d) => d.id === e.active.id)
+    const newIdx = localOrder.findIndex((d) => d.id === e.over!.id)
+    if (oldIdx === -1 || newIdx === -1) return
+
+    const reordered = arrayMove(localOrder, oldIdx, newIdx)
+    setLocalOrder(reordered)
+
+    // Compute new position for the moved item: midpoint between neighbours,
+    // or +1 / -1 at the edges. Same pattern as kanban DnD.
+    const moved = reordered[newIdx]!
+    const before = newIdx > 0 ? Number(reordered[newIdx - 1]!.position) : null
+    const after =
+      newIdx < reordered.length - 1
+        ? Number(reordered[newIdx + 1]!.position)
+        : null
+    let newPosition: number
+    if (before === null && after !== null) newPosition = after - 1
+    else if (after === null && before !== null) newPosition = before + 1
+    else if (before !== null && after !== null) newPosition = (before + after) / 2
+    else newPosition = Number(moved.position)
+
+    update.mutate(
+      { fieldId: moved.id, body: { position: newPosition } },
+      {
+        onError: (err) => {
+          toast.error('Не удалось переместить', {
+            description: (err as Error).message,
+          })
+        },
+      },
+    )
+  }
+
   return (
     <Dialog
       open={open}
@@ -120,7 +184,7 @@ export function CustomFieldsManager({
           <DialogTitle>Поля проекта</DialogTitle>
           <DialogDescription>
             Дополнительные поля для задач: текст, число, дата, выбор, человек,
-            чекбокс. Видны на всех задачах проекта.
+            чекбокс. Видны на всех задачах проекта. Drag-handle меняет порядок.
           </DialogDescription>
         </DialogHeader>
 
@@ -132,44 +196,51 @@ export function CustomFieldsManager({
           {defs.data?.length === 0 && (
             <p className="text-sm text-text3">Пока нет полей.</p>
           )}
-          <ul className="space-y-1">
-            {defs.data?.map((d) => (
-              <li
-                key={d.id}
-                className="flex items-center justify-between rounded-md border border-glass-border bg-surface px-3 py-2 text-sm"
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="truncate text-text">{d.name}</span>
-                  <span className="rounded bg-glass px-1.5 py-0.5 text-[10px] text-text3">
-                    {CUSTOM_FIELD_TYPE_LABEL[d.type]}
-                  </span>
-                  {(d.type === 'select' || d.type === 'multi_select') && (
-                    <span className="text-[10px] text-text3">
-                      {d.options.length} опц.
-                    </span>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!confirm(`Удалить поле «${d.name}»?`)) return
-                    try {
-                      await remove.mutateAsync(d.id)
-                      toast.success(`Поле «${d.name}» удалено`)
-                    } catch (err) {
-                      toast.error('Не получилось', {
-                        description: (err as Error).message,
-                      })
-                    }
-                  }}
-                  className="rounded p-1 text-text3 hover:bg-glass hover:text-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
-                  aria-label={`Удалить ${d.name}`}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </li>
-            ))}
-          </ul>
+
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={onDragEnd}
+          >
+            <SortableContext
+              items={localOrder.map((d) => d.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <ul className="space-y-1">
+                {localOrder.map((d) => (
+                  <SortableFieldRow
+                    key={d.id}
+                    definition={d}
+                    onRename={async (newName) => {
+                      try {
+                        await update.mutateAsync({
+                          fieldId: d.id,
+                          body: { name: newName.trim() },
+                        })
+                        toast.success(`Переименовано в «${newName.trim()}»`)
+                      } catch (err) {
+                        const detail =
+                          (err as { response?: { data?: { detail?: string } } })
+                            .response?.data?.detail ?? (err as Error).message
+                        toast.error('Не удалось переименовать', { description: detail })
+                      }
+                    }}
+                    onDelete={async () => {
+                      if (!confirm(`Удалить поле «${d.name}»?`)) return
+                      try {
+                        await remove.mutateAsync(d.id)
+                        toast.success(`Поле «${d.name}» удалено`)
+                      } catch (err) {
+                        toast.error('Не получилось', {
+                          description: (err as Error).message,
+                        })
+                      }
+                    }}
+                  />
+                ))}
+              </ul>
+            </SortableContext>
+          </DndContext>
         </section>
 
         <form onSubmit={submit} className="space-y-3 border-t border-glass-border pt-4">
@@ -276,5 +347,118 @@ export function CustomFieldsManager({
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ─── Sortable row ───────────────────────────────────────────────────────────
+
+interface SortableFieldRowProps {
+  definition: CustomFieldDefinition
+  onRename: (newName: string) => Promise<void>
+  onDelete: () => Promise<void>
+}
+
+function SortableFieldRow({ definition, onRename, onDelete }: SortableFieldRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: definition.id })
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(definition.name)
+
+  // If the upstream `definition.name` changes (server confirmed rename),
+  // sync local draft so the input isn't stale on next edit.
+  useEffect(() => {
+    if (!editing) setDraft(definition.name)
+  }, [definition.name, editing])
+
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  }
+
+  const commit = async () => {
+    const trimmed = draft.trim()
+    if (!trimmed) {
+      setDraft(definition.name)
+      setEditing(false)
+      return
+    }
+    if (trimmed === definition.name) {
+      setEditing(false)
+      return
+    }
+    await onRename(trimmed)
+    setEditing(false)
+  }
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-2 rounded-md border border-glass-border bg-surface px-2 py-2 text-sm"
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        className="cursor-grab text-text3 hover:text-text2 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+        aria-label="Перетащить"
+        title="Перетащить, чтобы изменить порядок"
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {editing ? (
+          <Input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                ;(e.target as HTMLInputElement).blur()
+              } else if (e.key === 'Escape') {
+                setDraft(definition.name)
+                setEditing(false)
+              }
+            }}
+            className="h-7"
+          />
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              onDoubleClick={() => setEditing(true)}
+              className="flex flex-1 items-center gap-1 truncate text-left text-text hover:text-amber focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+              title="Переименовать"
+            >
+              <span className="truncate">{definition.name}</span>
+              <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-100" />
+            </button>
+            <span className="shrink-0 rounded bg-glass px-1.5 py-0.5 text-[10px] text-text3">
+              {CUSTOM_FIELD_TYPE_LABEL[definition.type]}
+            </span>
+            {(definition.type === 'select' ||
+              definition.type === 'multi_select') && (
+              <span className="shrink-0 text-[10px] text-text3">
+                {definition.options.length} опц.
+              </span>
+            )}
+          </>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={onDelete}
+        className="rounded p-1 text-text3 hover:bg-glass hover:text-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+        aria-label={`Удалить ${definition.name}`}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </li>
   )
 }

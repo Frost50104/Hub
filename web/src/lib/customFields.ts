@@ -87,6 +87,10 @@ export const customFieldsApi = {
     api
       .get<CustomFieldValue[]>(`/tasks/${taskId}/custom-fields`)
       .then((r) => r.data),
+  projectValues: (projectId: string): Promise<CustomFieldValue[]> =>
+    api
+      .get<CustomFieldValue[]>(`/projects/${projectId}/custom-field-values`)
+      .then((r) => r.data),
   setValue: (
     taskId: string,
     fieldId: string,

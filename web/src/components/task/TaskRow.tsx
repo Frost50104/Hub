@@ -3,6 +3,8 @@ import { CheckCircle2, Circle, ClipboardCheck, Clock, MessageSquare } from 'luci
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { cn } from '@/lib/cn'
+import { type CustomFieldDefinition, type CustomFieldValue } from '@/lib/customFields'
+import { formatCustomFieldValue } from '@/lib/formatCustomField'
 import {
   PRIORITY_LABEL,
   STATUS_LABEL,
@@ -28,14 +30,27 @@ interface TaskRowProps {
   task: Task
   onClick?: () => void
   onToggleDone?: () => void
+  /** Custom field definitions to render as trailing columns, in display order. */
+  visibleFields?: CustomFieldDefinition[]
+  /** Map field_id → stored value for THIS task (parent fetches once). */
+  customValues?: Map<string, CustomFieldValue>
 }
 
 /**
  * List-view task row (Asana-style table line).
- * Columns: status-checkbox | title (+ badges) | assignee | due date.
- * Used inside SectionBlock — full-width borderless row.
+ *
+ * Columns: status | title (+ badges) | assignee | <custom fields...> | due.
+ * Custom-field cells are read-only — click propagates to onClick which
+ * opens the task drawer (full editor lives there). Inline editing in the
+ * table is a future enhancement.
  */
-export function TaskRow({ task, onClick, onToggleDone }: TaskRowProps) {
+export function TaskRow({
+  task,
+  onClick,
+  onToggleDone,
+  visibleFields = [],
+  customValues,
+}: TaskRowProps) {
   const StatusIcon = STATUS_ICON[task.status]
   const overdue =
     task.due_at &&
@@ -106,17 +121,31 @@ export function TaskRow({ task, onClick, onToggleDone }: TaskRowProps) {
         )}
       </div>
 
-      <div className="w-24 text-right text-xs">
-        {task.due_at ? (
-          <span className={cn(overdue ? 'text-red' : 'text-text2')}>
-            {new Date(task.due_at).toLocaleDateString('ru-RU', {
-              day: 'numeric',
-              month: 'short',
-            })}
-          </span>
-        ) : (
-          <span className="text-text3">—</span>
-        )}
+      <div className="flex items-center gap-3 text-right text-xs">
+        {visibleFields.map((f) => {
+          const v = customValues?.get(f.id)?.value
+          return (
+            <span
+              key={f.id}
+              className="inline-block w-24 truncate text-text2"
+              title={`${f.name}: ${formatCustomFieldValue(f, v)}`}
+            >
+              {formatCustomFieldValue(f, v)}
+            </span>
+          )
+        })}
+        <span className="inline-block w-24">
+          {task.due_at ? (
+            <span className={cn(overdue ? 'text-red' : 'text-text2')}>
+              {new Date(task.due_at).toLocaleDateString('ru-RU', {
+                day: 'numeric',
+                month: 'short',
+              })}
+            </span>
+          ) : (
+            <span className="text-text3">—</span>
+          )}
+        </span>
       </div>
     </div>
   )

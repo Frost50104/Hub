@@ -16,6 +16,8 @@ import {
 export const customFieldKeys = {
   defs: (projectId: string) => ['custom-fields', 'defs', projectId] as const,
   values: (taskId: string) => ['custom-fields', 'values', taskId] as const,
+  projectValues: (projectId: string) =>
+    ['custom-fields', 'project-values', projectId] as const,
 }
 
 export function useCustomFieldDefinitions(
@@ -40,6 +42,24 @@ export function useTaskCustomValues(
       : ['custom-fields', 'values', 'none'],
     queryFn: () => customFieldsApi.taskValues(taskId!),
     enabled: !!taskId,
+  })
+}
+
+/**
+ * Batch fetch — all custom values for all tasks in a project. Used by the
+ * List view to render columns without an N+1.
+ */
+export function useProjectCustomValues(
+  projectId: string | undefined,
+  enabled = true,
+): UseQueryResult<CustomFieldValue[]> {
+  return useQuery({
+    queryKey: projectId
+      ? customFieldKeys.projectValues(projectId)
+      : ['custom-fields', 'project-values', 'none'],
+    queryFn: () => customFieldsApi.projectValues(projectId!),
+    enabled: !!projectId && enabled,
+    staleTime: 30_000,
   })
 }
 
@@ -87,6 +107,9 @@ export function useSetTaskCustomValue(taskId: string) {
       customFieldsApi.setValue(taskId, fieldId, value),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: customFieldKeys.values(taskId) })
+      // Also blow away batch project-values cache — without this, the List
+      // view shows stale column data right after editing in the drawer.
+      qc.invalidateQueries({ queryKey: ['custom-fields', 'project-values'] })
     },
   })
 }
@@ -97,6 +120,7 @@ export function useClearTaskCustomValue(taskId: string) {
     mutationFn: (fieldId: string) => customFieldsApi.clearValue(taskId, fieldId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: customFieldKeys.values(taskId) })
+      qc.invalidateQueries({ queryKey: ['custom-fields', 'project-values'] })
     },
   })
 }

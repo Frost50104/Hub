@@ -5,9 +5,11 @@ import { toast } from 'sonner'
 
 import { CalendarView } from '@/components/calendar/CalendarView'
 import { BoardView } from '@/components/kanban/BoardView'
+import { ColumnsMenu } from '@/components/project/ColumnsMenu'
 import { CustomFieldsManager } from '@/components/project/CustomFieldsManager'
 import { ShareDialog } from '@/components/share/ShareDialog'
 import { TaskDetailDrawer } from '@/components/task/TaskDetailDrawer'
+import { TaskListHeader } from '@/components/task/TaskListHeader'
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { TaskRow } from '@/components/task/TaskRow'
 import { Avatar } from '@/components/ui/Avatar'
@@ -22,6 +24,10 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { Input } from '@/components/ui/Input'
 import {
+  useCustomFieldDefinitions,
+  useProjectCustomValues,
+} from '@/hooks/useCustomFields'
+import {
   useArchiveProject,
   useCreateSection,
   useDeleteSection,
@@ -31,8 +37,10 @@ import {
 } from '@/hooks/useProjects'
 import { useTasks, useUpdateTask } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
+import { type CustomFieldDefinition, type CustomFieldValue } from '@/lib/customFields'
 import { type Project, type ProjectRole, type Section } from '@/lib/projects'
 import { type Task } from '@/lib/tasks'
+import { useViewConfig } from '@/stores/viewConfig'
 
 type TabKey = 'list' | 'board' | 'calendar' | 'members'
 
@@ -191,6 +199,8 @@ function SectionBlock({
   canEditFlag,
   canManageFlag,
   onTaskClick,
+  visibleFields,
+  valuesByTask,
 }: {
   section: Section | null
   projectId: string
@@ -198,6 +208,8 @@ function SectionBlock({
   canEditFlag: boolean
   canManageFlag: boolean
   onTaskClick: (id: string) => void
+  visibleFields: CustomFieldDefinition[]
+  valuesByTask: Map<string, Map<string, CustomFieldValue>>
 }) {
   const [collapsed, setCollapsed] = useState(false)
   const del = useDeleteSection(projectId)
@@ -263,6 +275,8 @@ function SectionBlock({
                     status: t.status === 'done' ? 'todo' : 'done',
                   })
                 }
+                visibleFields={visibleFields}
+                customValues={valuesByTask.get(t.id)}
               />
             ))}
           </div>
@@ -291,6 +305,11 @@ function ListTab({
 }) {
   const sections = useProjectSections(projectId)
   const tasks = useTasks(projectId)
+  const defs = useCustomFieldDefinitions(projectId)
+  const values = useProjectCustomValues(projectId)
+  const visibleIds = useViewConfig(
+    (s) => s.byProject[projectId]?.visibleCustomFields ?? [],
+  )
   const create = useCreateSection(projectId)
   const [newSectionName, setNewSectionName] = useState('')
   const [addingSection, setAddingSection] = useState(false)
@@ -304,6 +323,26 @@ function ListTab({
     }
     return map
   }, [tasks.data])
+
+  // Definitions filtered + ordered by user's visibility config.
+  const visibleFields = useMemo(() => {
+    if (!defs.data) return []
+    const byId = new Map(defs.data.map((d) => [d.id, d]))
+    return visibleIds
+      .map((id) => byId.get(id))
+      .filter((d): d is CustomFieldDefinition => d !== undefined)
+  }, [defs.data, visibleIds])
+
+  // Map<task_id, Map<field_id, value>> — flat → nested lookup.
+  const valuesByTask = useMemo(() => {
+    const m = new Map<string, Map<string, CustomFieldValue>>()
+    for (const v of values.data ?? []) {
+      const bucket = m.get(v.task_id) ?? new Map()
+      bucket.set(v.field_id, v)
+      m.set(v.task_id, bucket)
+    }
+    return m
+  }, [values.data])
 
   const onAddSection = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -332,6 +371,8 @@ function ListTab({
         <p className="text-red">Ошибка: {(sections.error as Error).message}</p>
       )}
 
+      <TaskListHeader visibleFields={visibleFields} />
+
       {(orphanTasks.length > 0 || canEditFlag) && (
         <SectionBlock
           section={null}
@@ -340,6 +381,8 @@ function ListTab({
           canEditFlag={canEditFlag}
           canManageFlag={canManageFlag}
           onTaskClick={onTaskClick}
+          visibleFields={visibleFields}
+          valuesByTask={valuesByTask}
         />
       )}
 
@@ -352,6 +395,8 @@ function ListTab({
           canEditFlag={canEditFlag}
           canManageFlag={canManageFlag}
           onTaskClick={onTaskClick}
+          visibleFields={visibleFields}
+          valuesByTask={valuesByTask}
         />
       ))}
 
@@ -488,10 +533,11 @@ export function ProjectPage() {
 
       {tab === 'list' && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between px-1">
+          <div className="flex items-center justify-between gap-2 px-1">
             <Button variant="secondary" size="sm" disabled title="Фильтры (скоро)">
               <Filter className="h-3.5 w-3.5" /> Фильтр
             </Button>
+            <ColumnsMenu projectId={id} />
           </div>
           <ListTab projectId={id} myRole={p.my_role} onTaskClick={openTask} />
         </div>

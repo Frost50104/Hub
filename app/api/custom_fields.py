@@ -225,6 +225,30 @@ async def list_task_custom_values(
     return [CustomFieldValueResponse.model_validate(v) for v in rows.scalars().all()]
 
 
+@router.get(
+    "/projects/{project_id}/custom-field-values",
+    response_model=list[CustomFieldValueResponse],
+)
+async def list_project_custom_values(
+    project_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> list[CustomFieldValueResponse]:
+    """Batch endpoint — every value for every task in this project.
+
+    Avoids N+1 when the List view renders custom-field columns. The total
+    payload is bounded by `defs.count × tasks.count`, both manageable for
+    Hub-scale projects (≤ thousands of tasks, ≤ tens of fields).
+    """
+    await require_project_role(db, project_id, principal)
+    rows = await db.execute(
+        select(TaskCustomFieldValue)
+        .join(Task, Task.id == TaskCustomFieldValue.task_id)
+        .where(Task.project_id == project_id)
+    )
+    return [CustomFieldValueResponse.model_validate(v) for v in rows.scalars().all()]
+
+
 @router.put(
     "/tasks/{task_id}/custom-fields/{field_id}",
     response_model=CustomFieldValueResponse,
