@@ -19,12 +19,27 @@ export interface TimelineResponse {
   sections: TimelineSection[]
 }
 
+export interface DependencyPeer {
+  id: string
+  title: string
+  status: 'todo' | 'in_progress' | 'in_review' | 'done'
+}
+
+export interface TaskDependencies {
+  predecessors: DependencyPeer[]
+  successors: DependencyPeer[]
+}
+
 export const timelineApi = {
   get: (projectId: string, range: { from: string; to: string }): Promise<TimelineResponse> =>
     api
       .get<TimelineResponse>(`/projects/${projectId}/timeline`, { params: range })
       .then((r) => r.data),
 
+  taskDependencies: (taskId: string): Promise<TaskDependencies> =>
+    api
+      .get<TaskDependencies>(`/tasks/${taskId}/dependencies`)
+      .then((r) => r.data),
   addDependency: (
     successorId: string,
     predecessorId: string,

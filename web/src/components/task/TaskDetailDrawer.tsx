@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { ShareDialog } from '@/components/share/ShareDialog'
 import { TaskAttachments } from '@/components/task/TaskAttachments'
 import { TaskCustomFields } from '@/components/task/TaskCustomFields'
+import { TaskDependencies } from '@/components/task/TaskDependencies'
 import { TaskThread } from '@/components/task/TaskThread'
 import { WatchControl } from '@/components/task/WatchControl'
 import { Avatar } from '@/components/ui/Avatar'
@@ -242,6 +243,8 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
               </div>
 
               <TaskCustomFields taskId={task.id} projectId={projectId} />
+
+              <TaskDependencies taskId={task.id} projectId={projectId} />
 
               <TaskAttachments taskId={task.id} />
 

@@ -13,7 +13,9 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict
 from signaris_auth import Principal
+from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +27,72 @@ from app.services.dependency_cycle import would_create_cycle
 from app.services.project_access import require_project_role
 
 router = APIRouter(tags=["dependencies"])
+
+
+class DependencyPeer(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str
+    status: str
+
+
+class TaskDependenciesResponse(BaseModel):
+    predecessors: list[DependencyPeer]
+    successors: list[DependencyPeer]
+
+
+@router.get(
+    "/tasks/{task_id}/dependencies", response_model=TaskDependenciesResponse
+)
+async def list_dependencies(
+    task_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> TaskDependenciesResponse:
+    task = await db.get(Task, task_id)
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена"
+        )
+    await require_project_role(db, task.project_id, principal)
+
+    edge_rows = await db.execute(
+        select(TaskDependency).where(
+            or_(
+                TaskDependency.predecessor_id == task_id,
+                TaskDependency.successor_id == task_id,
+            )
+        )
+    )
+    edges = list(edge_rows.scalars().all())
+    peer_ids = {
+        edge.predecessor_id if edge.successor_id == task_id else edge.successor_id
+        for edge in edges
+    }
+    if not peer_ids:
+        return TaskDependenciesResponse(predecessors=[], successors=[])
+
+    peer_rows = await db.execute(
+        select(Task.id, Task.title, Task.status).where(Task.id.in_(peer_ids))
+    )
+    peers = {
+        row.id: DependencyPeer(id=row.id, title=row.title, status=row.status)
+        for row in peer_rows.all()
+    }
+    predecessors = [
+        peers[edge.predecessor_id]
+        for edge in edges
+        if edge.successor_id == task_id and edge.predecessor_id in peers
+    ]
+    successors = [
+        peers[edge.successor_id]
+        for edge in edges
+        if edge.predecessor_id == task_id and edge.successor_id in peers
+    ]
+    return TaskDependenciesResponse(
+        predecessors=predecessors, successors=successors
+    )
 
 
 @router.post(
