@@ -1,4 +1,4 @@
-import { Bell, ChevronRight, Globe, LogOut, Pencil } from 'lucide-react'
+import { Bell, ChevronRight, Globe, LogOut, Palette, Pencil } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
@@ -81,6 +81,16 @@ export function ProfilePage() {
               >
                 <Bell className="h-5 w-5 text-text3" />
                 <span className="flex-1 text-sm text-text">Уведомления</span>
+                <ChevronRight className="h-4 w-4 text-text3" />
+              </Link>
+            </li>
+            <li className="border-t border-glass-border/60">
+              <Link
+                to="/settings/appearance"
+                className="flex items-center gap-3 px-4 py-3 active:bg-glass"
+              >
+                <Palette className="h-5 w-5 text-text3" />
+                <span className="flex-1 text-sm text-text">Оформление</span>
                 <ChevronRight className="h-4 w-4 text-text3" />
               </Link>
             </li>

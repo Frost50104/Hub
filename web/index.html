@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru" data-theme="dark">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/brand/signaris-favicon-on-dark.svg" />
@@ -19,6 +19,21 @@
       rel="stylesheet"
     />
     <title>Signaris Hub</title>
+    <script>
+      // Apply the saved theme before first paint (no FOUC). Keep in sync with
+      // src/lib/theme.ts (key + resolution logic).
+      (function () {
+        try {
+          var t = localStorage.getItem('hub-theme')
+          var resolved = t === 'light' ? 'light' : 'dark'
+          document.documentElement.setAttribute('data-theme', resolved)
+          var m = document.querySelector('meta[name="theme-color"]')
+          if (m) m.setAttribute('content', resolved === 'light' ? '#ffffff' : '#08080e')
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark')
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

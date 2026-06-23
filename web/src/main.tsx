@@ -8,6 +8,7 @@ import { Toaster } from './components/ui/Toaster'
 import { UpdateBanner } from './components/UpdateBanner'
 import { queryClient } from './lib/queryClient'
 import { initSentry } from './lib/sentry'
+import { initTheme } from './lib/theme'
 import './styles/globals.css'
 
 const root = document.getElementById('root')
@@ -20,6 +21,9 @@ interface BootstrapEnv {
 }
 
 async function bootstrap(): Promise<void> {
+  // Re-assert the persisted theme as soon as the bundle runs — keeps the
+  // rendered theme in sync with the toggle even if a cached document loaded.
+  initTheme()
   // Fetch /api/env BEFORE first render so Sentry captures import-time errors.
   // /api/env is public (no auth) — bare fetch keeps Sentry init independent
   // of the axios+attachAxiosAuth pipeline.

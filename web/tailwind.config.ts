@@ -9,6 +9,7 @@ export default {
         amber: 'rgb(var(--amber) / <alpha-value>)',
         red: 'rgb(var(--red) / <alpha-value>)',
         green: 'rgb(var(--green) / <alpha-value>)',
+        'on-amber': 'rgb(var(--on-amber) / <alpha-value>)',
         bg: 'rgb(var(--bg) / <alpha-value>)',
         'bg-alt': 'rgb(var(--bg-alt) / <alpha-value>)',
         surface: 'var(--surface)',

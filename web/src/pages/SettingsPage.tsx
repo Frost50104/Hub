@@ -1,10 +1,11 @@
-import { Bell } from 'lucide-react'
+import { Bell, Palette } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
 
 import { cn } from '@/lib/cn'
 
 const TABS = [
   { to: 'notifications', label: 'Уведомления', icon: Bell },
+  { to: 'appearance', label: 'Оформление', icon: Palette },
 ] as const
 
 export function SettingsPage() {

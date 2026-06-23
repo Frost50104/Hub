@@ -21,6 +21,10 @@
   --text2: 144 144 168;
   --text3: 85 85 106;
 
+  /* Fixed dark ink for content sitting on the amber accent — does NOT flip
+     per theme (amber is yellow in both, so text on it must always be dark). */
+  --on-amber: 8 8 14;
+
   /* Glass effect */
   --glass: rgba(255, 255, 255, 0.06);
   --glass-border: rgba(255, 255, 255, 0.08);
@@ -62,24 +66,8 @@
   --dotgrid-dot: rgba(0, 0, 0, 0.06);
 }
 
-/* System preference fallback — applies only when [data-theme] attribute is absent
-   (i.e. user has not selected explicitly via ThemeToggle yet). */
-@media (prefers-color-scheme: light) {
-  html:not([data-theme]) {
-    --amber: 255 178 0;
-    --green: 22 163 74;
-    --red: 220 38 38;
-    --bg: 250 250 250;
-    --bg-alt: 255 255 255;
-    --surface: rgba(0, 0, 0, 0.04);
-    --text: 26 26 36;
-    --text2: 85 85 106;
-    --text3: 144 144 168;
-    --glass: rgba(255, 255, 255, 0.7);
-    --glass-border: rgba(0, 0, 0, 0.08);
-    --dotgrid-dot: rgba(0, 0, 0, 0.06);
-  }
-}
+/* No system/auto mode: the app always sets an explicit data-theme on <html>
+   (default dark via :root) through the inline boot script + initTheme(). */
 
 body {
   background: rgb(var(--bg));

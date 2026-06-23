@@ -242,7 +242,7 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
             <Icon className="h-4 w-4" />
             <span className="flex-1">{label}</span>
             {badge && unreadCount > 0 && (
-              <span className="rounded-full bg-amber px-1.5 py-0.5 text-[10px] font-semibold text-bg">
+              <span className="rounded-full bg-amber px-1.5 py-0.5 text-[10px] font-semibold text-on-amber">
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}

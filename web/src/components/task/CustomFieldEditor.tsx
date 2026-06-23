@@ -365,7 +365,7 @@ function CheckboxEditor({
       aria-checked={checked}
       className={cn(
         'inline-flex h-6 w-6 items-center justify-center rounded border border-glass-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
-        checked ? 'bg-amber text-bg' : 'bg-glass text-transparent',
+        checked ? 'bg-amber text-on-amber' : 'bg-glass text-transparent',
       )}
     >
       <Check className="h-3.5 w-3.5" />

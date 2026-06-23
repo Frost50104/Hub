@@ -148,7 +148,7 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                         className={cn(
                           'rounded-md px-2 py-1 text-xs transition-colors',
                           task.status === s
-                            ? 'bg-amber text-bg'
+                            ? 'bg-amber text-on-amber'
                             : 'bg-surface text-text2 hover:text-text',
                         )}
                       >

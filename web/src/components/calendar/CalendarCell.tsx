@@ -46,7 +46,7 @@ export function CalendarCell({
         <span
           className={cn(
             'inline-flex h-5 w-5 items-center justify-center text-xs',
-            isToday && 'rounded-full bg-amber font-semibold text-bg',
+            isToday && 'rounded-full bg-amber font-semibold text-on-amber',
             !isToday && isCurrentMonth && 'text-text2',
             !isCurrentMonth && 'text-text3',
           )}

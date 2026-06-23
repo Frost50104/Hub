@@ -14,6 +14,7 @@ import { ProjectPage } from '@/pages/ProjectPage'
 import { PublicViewPage } from '@/pages/PublicViewPage'
 import { SearchPage } from '@/pages/SearchPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { AppearanceTab } from '@/pages/settings/AppearanceTab'
 import { NotificationsSettingsTab } from '@/pages/settings/NotificationsTab'
 
 export function App() {
@@ -35,6 +36,7 @@ export function App() {
           <Route path="/settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="notifications" replace />} />
             <Route path="notifications" element={<NotificationsSettingsTab />} />
+            <Route path="appearance" element={<AppearanceTab />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
