@@ -155,8 +155,8 @@ export function TaskThread({ taskId }: TaskThreadProps) {
 
   const visibleActivity = (activity.data ?? []).filter((a) => a.kind !== 'commented')
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const submit = async (e?: React.FormEvent) => {
+    e?.preventDefault()
     const trimmed = draft.trim()
     if (!trimmed) return
     try {
@@ -177,6 +177,9 @@ export function TaskThread({ taskId }: TaskThreadProps) {
         </h3>
 
         <div className="space-y-3">
+          {comments.isError && (
+            <p className="text-xs text-red">Не удалось загрузить комментарии.</p>
+          )}
           {comments.data?.map((c) => (
             <CommentBubble
               key={c.id}
@@ -184,7 +187,11 @@ export function TaskThread({ taskId }: TaskThreadProps) {
               isMine={c.author_id === me.data?.employee_id}
               onDelete={() => {
                 if (confirm('Удалить комментарий?')) {
-                  void del.mutateAsync(c.id)
+                  del.mutateAsync(c.id).catch((err) => {
+                    toast.error('Не удалось удалить', {
+                      description: (err as Error).message,
+                    })
+                  })
                 }
               }}
             />
@@ -203,7 +210,7 @@ export function TaskThread({ taskId }: TaskThreadProps) {
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                 e.preventDefault()
-                void submit(e as unknown as React.FormEvent)
+                void submit()
               }
             }}
           />
@@ -237,7 +244,9 @@ export function TaskThread({ taskId }: TaskThreadProps) {
         </button>
         {historyOpen && (
           <div className="space-y-0.5 px-3 pb-3">
-            {visibleActivity.length === 0 ? (
+            {activity.isError ? (
+              <p className="text-xs text-red">Не удалось загрузить историю.</p>
+            ) : visibleActivity.length === 0 ? (
               <p className="text-xs text-text3">Событий пока нет.</p>
             ) : (
               visibleActivity.map((a) => {

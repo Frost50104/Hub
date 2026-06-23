@@ -43,6 +43,9 @@ export function ColumnsMenu({ projectId }: ColumnsMenuProps) {
           Кастом-поля
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {defs.isError && (
+          <p className="px-2 py-1.5 text-xs text-red">Не удалось загрузить поля</p>
+        )}
         {defs.data?.map((d) => {
           const checked = visible.includes(d.id)
           return (

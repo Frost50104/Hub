@@ -79,6 +79,10 @@ export function TaskDependencies({ taskId, projectId }: TaskDependenciesProps) {
         Зависимости
       </h3>
 
+      {deps.isError && (
+        <p className="text-xs text-red">Не удалось загрузить зависимости.</p>
+      )}
+
       <div className="space-y-1">
         <p className="text-[10px] uppercase tracking-wider text-text3">
           Зависит от
