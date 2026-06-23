@@ -186,8 +186,11 @@ async def _build_project_view(
         .order_by(Task.position)
     )
     tasks_by_section: dict[UUID | None, list[tuple]] = {}
+    assignee_ids: set[UUID] = set()
     for row in task_rows.all():
         tasks_by_section.setdefault(row.section_id, []).append(row)
+        if row.assignee_id is not None:
+            assignee_ids.add(row.assignee_id)
 
     # Pre-fetch attachment counts in one query — avoids N+1 on large boards.
     has_att_rows = await session.execute(
@@ -195,15 +198,31 @@ async def _build_project_view(
     )
     has_attachments_set = {row[0] for row in has_att_rows.all()}
 
-    async def _row_to_hit(row) -> PublicTaskHit:  # noqa: ANN001 — local helper
-        assignee_init = await _initials_for(session, row.assignee_id)
+    # Pre-fetch assignee initials in one query — avoids N+1 per task.
+    initials_by_id: dict[UUID, str | None] = {}
+    if assignee_ids:
+        au_rows = await session.execute(
+            select(
+                ShadowUser.employee_id,
+                ShadowUser.full_name,
+                ShadowUser.email,
+            ).where(ShadowUser.employee_id.in_(assignee_ids))
+        )
+        for au in au_rows.all():
+            initials_by_id[au.employee_id] = initials(au.full_name, au.email)
+
+    def _row_to_hit(row) -> PublicTaskHit:  # noqa: ANN001 — local helper
         return PublicTaskHit(
             id=row.id,
             title=row.title,
             status=row.status,
             priority=row.priority,
             due_at=row.due_at,
-            assignee_initials=assignee_init,
+            assignee_initials=(
+                initials_by_id.get(row.assignee_id)
+                if row.assignee_id is not None
+                else None
+            ),
             has_attachments=row.id in has_attachments_set,
         )
 
@@ -215,7 +234,7 @@ async def _build_project_view(
             PublicSection(
                 id=project.id,  # synthetic — UI uses project.id as anchor
                 name="Без секции",
-                tasks=[await _row_to_hit(r) for r in orphan],
+                tasks=[_row_to_hit(r) for r in orphan],
             )
         )
     for section in section_rows:
@@ -224,7 +243,7 @@ async def _build_project_view(
             PublicSection(
                 id=section.id,
                 name=section.name,
-                tasks=[await _row_to_hit(r) for r in rows],
+                tasks=[_row_to_hit(r) for r in rows],
             )
         )
 

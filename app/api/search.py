@@ -294,6 +294,8 @@ async def search(
                 TaskComment.task_id,
                 Task.title.label("task_title"),
                 Task.project_id,
+                Project.name.label("project_name"),
+                Project.key.label("project_key"),
                 comment_snippet.label("snippet"),
                 ShadowUser.full_name,
                 ShadowUser.email,
@@ -330,17 +332,11 @@ async def search(
             bucket = by_project.get(r.project_id)
             if bucket is None:
                 # Show project groups that ONLY have comment matches too.
-                # Need project_name/key — fetch them lazily.
-                proj = await db.execute(
-                    select(Project.name, Project.key).where(Project.id == r.project_id)
-                )
-                proj_row = proj.first()
-                if proj_row is None:
-                    continue
+                # project_name/key come from the joined Project — no extra query.
                 bucket = SearchGroup(
                     project_id=r.project_id,
-                    project_name=proj_row.name,
-                    project_key=proj_row.key,
+                    project_name=r.project_name,
+                    project_key=r.project_key,
                     tasks=[],
                     comments=[],
                 )

@@ -28,7 +28,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from signaris_auth import Principal
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import and_, bindparam, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
@@ -209,29 +209,95 @@ async def _custom_field_stats(
     if not defs:
         return []
 
+    number_ids = [d.id for d in defs if d.type == "number"]
+    select_ids = [d.id for d in defs if d.type == "select"]
+    multi_ids = [d.id for d in defs if d.type == "multi_select"]
+
+    # ─── Bulk number aggregates, grouped by field_id (1 query for all). ───
+    # `jsonb_typeof = 'number'` skips any value that somehow isn't numeric
+    # despite the field type — defensive. `count` is labelled `cnt` to avoid
+    # clashing with the tuple `.count` method on Row.
+    num_by_field: dict[UUID, Any] = {}
+    if number_ids:
+        cast_f = func.cast(TaskCustomFieldValue.value, type_=text("float8").type)
+        num_rows = await session.execute(
+            select(
+                TaskCustomFieldValue.field_id,
+                func.sum(cast_f).label("sum"),
+                func.avg(cast_f).label("avg"),
+                func.min(cast_f).label("min"),
+                func.max(cast_f).label("max"),
+                func.count(TaskCustomFieldValue.task_id).label("cnt"),
+            )
+            .join(Task, Task.id == TaskCustomFieldValue.task_id)
+            .where(
+                Task.project_id == project_id,
+                Task.archived_at.is_(None),
+                TaskCustomFieldValue.field_id.in_(number_ids),
+                text("jsonb_typeof(task_custom_field_values.value) = 'number'"),
+            )
+            .group_by(TaskCustomFieldValue.field_id)
+        )
+        num_by_field = {row.field_id: row for row in num_rows.all()}
+
+    # ─── Bulk option counts for select + multi_select, grouped by field_id. ───
+    # A field is either select OR multi_select, never both, so one dict keyed
+    # by field_id has no collisions.
+    options_by_field: dict[UUID, list[tuple[str, int]]] = {}
+    if select_ids:
+        opt_id_col = func.cast(
+            TaskCustomFieldValue.value, type_=text("text").type
+        ).label("opt_id")
+        sel_rows = await session.execute(
+            select(
+                TaskCustomFieldValue.field_id,
+                opt_id_col,
+                func.count(TaskCustomFieldValue.task_id).label("cnt"),
+            )
+            .join(Task, Task.id == TaskCustomFieldValue.task_id)
+            .where(
+                Task.project_id == project_id,
+                Task.archived_at.is_(None),
+                TaskCustomFieldValue.field_id.in_(select_ids),
+                text("jsonb_typeof(task_custom_field_values.value) = 'string'"),
+            )
+            .group_by(TaskCustomFieldValue.field_id, text("opt_id"))
+        )
+        for row in sel_rows.all():
+            options_by_field.setdefault(row.field_id, []).append(
+                (str(row.opt_id).strip('"'), int(row.cnt))
+            )
+    if multi_ids:
+        # multi_select — expand each JSONB array, group by (field_id, element).
+        multi_stmt = text(
+            "SELECT tcfv.field_id AS field_id, v.elem AS opt_id, COUNT(*) AS cnt "
+            "FROM task_custom_field_values tcfv "
+            "JOIN tasks t ON t.id = tcfv.task_id "
+            ", jsonb_array_elements_text(tcfv.value) v(elem) "
+            "WHERE tcfv.field_id IN :fids "
+            "AND t.project_id = :pid "
+            "AND t.archived_at IS NULL "
+            "AND jsonb_typeof(tcfv.value) = 'array' "
+            "GROUP BY tcfv.field_id, v.elem"
+        ).bindparams(bindparam("fids", expanding=True))
+        multi_rows = await session.execute(
+            multi_stmt,
+            {"fids": [str(i) for i in multi_ids], "pid": str(project_id)},
+        )
+        for row in multi_rows.all():
+            options_by_field.setdefault(UUID(str(row.field_id)), []).append(
+                (str(row.opt_id).strip('"'), int(row.cnt))
+            )
+
     out: list[CustomFieldStat] = []
     for d in defs:
         if d.type == "number":
-            # JSONB → float cast through Postgres cast operator (`::float8`).
-            # Using `func.jsonb_typeof` to skip rows where the value somehow
-            # isn't a number despite the field type — defensive.
-            row = await session.execute(
-                select(
-                    func.sum(func.cast(TaskCustomFieldValue.value, type_=text("float8").type)),
-                    func.avg(func.cast(TaskCustomFieldValue.value, type_=text("float8").type)),
-                    func.min(func.cast(TaskCustomFieldValue.value, type_=text("float8").type)),
-                    func.max(func.cast(TaskCustomFieldValue.value, type_=text("float8").type)),
-                    func.count(TaskCustomFieldValue.task_id),
-                )
-                .join(Task, Task.id == TaskCustomFieldValue.task_id)
-                .where(
-                    Task.project_id == project_id,
-                    Task.archived_at.is_(None),
-                    TaskCustomFieldValue.field_id == d.id,
-                    text("jsonb_typeof(task_custom_field_values.value) = 'number'"),
-                )
-            )
-            s, a, mn, mx, cnt = row.first() or (None, None, None, None, 0)
+            row = num_by_field.get(d.id)
+            s = row.sum if row else None
+            a = row.avg if row else None
+            mn = row.min if row else None
+            mx = row.max if row else None
+            cnt = row.cnt if row else 0
             out.append(
                 CustomFieldStat(
                     field_id=d.id,
@@ -247,49 +313,10 @@ async def _custom_field_stats(
                 )
             )
         elif d.type in ("select", "multi_select"):
-            # For `select` the JSONB value is a string option_id; for
-            # `multi_select` it's an array. We expand both to a flat option_id
-            # list using `jsonb_array_elements_text` for arrays and a fallback
-            # for plain strings.
             option_lookup = {str(opt.get("id")): str(opt.get("label", opt.get("id")))
                              for opt in (d.options or [])}
-
-            if d.type == "select":
-                opt_id_col = func.cast(
-                    TaskCustomFieldValue.value, type_=text("text").type
-                ).label("opt_id")
-                rows = await session.execute(
-                    select(opt_id_col, func.count(TaskCustomFieldValue.task_id))
-                    .join(Task, Task.id == TaskCustomFieldValue.task_id)
-                    .where(
-                        Task.project_id == project_id,
-                        Task.archived_at.is_(None),
-                        TaskCustomFieldValue.field_id == d.id,
-                        text("jsonb_typeof(task_custom_field_values.value) = 'string'"),
-                    )
-                    .group_by(text("opt_id"))
-                )
-            else:
-                # multi_select — expand JSONB array, group by element.
-                rows = await session.execute(
-                    text(
-                        "SELECT v.elem AS opt_id, COUNT(*) AS cnt "
-                        "FROM task_custom_field_values tcfv "
-                        "JOIN tasks t ON t.id = tcfv.task_id "
-                        ", jsonb_array_elements_text(tcfv.value) v(elem) "
-                        "WHERE tcfv.field_id = :fid "
-                        "AND t.project_id = :pid "
-                        "AND t.archived_at IS NULL "
-                        "AND jsonb_typeof(tcfv.value) = 'array' "
-                        "GROUP BY v.elem"
-                    ),
-                    {"fid": str(d.id), "pid": str(project_id)},
-                )
-
             options_by_id: dict[str, OptionCount] = {}
-            for raw in rows.all():
-                opt_id = str(raw[0]).strip('"')
-                count = int(raw[1])
+            for opt_id, count in options_by_field.get(d.id, []):
                 label = option_lookup.get(opt_id, opt_id)
                 options_by_id[opt_id] = OptionCount(
                     id=opt_id, label=label, count=count
