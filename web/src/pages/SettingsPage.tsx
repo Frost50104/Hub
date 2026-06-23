@@ -42,6 +42,11 @@ export function SettingsPage() {
           <Outlet />
         </section>
       </div>
+
+      <footer className="border-t border-glass-border pt-4 text-xs text-text3">
+        Версия <span className="font-mono text-text2">{__APP_VERSION__}</span>
+        {__APP_MODE__ !== 'production' && ` · ${__APP_MODE__}`}
+      </footer>
     </div>
   )
 }
