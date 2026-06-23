@@ -57,7 +57,7 @@ export function MobileTaskRow({
           onToggleDone?.()
         }}
         className={cn(
-          'flex h-7 w-7 shrink-0 items-center justify-center',
+          'flex h-10 w-10 shrink-0 items-center justify-center -ml-1.5',
           STATUS_TONE[task.status],
         )}
         aria-label="Сменить статус"

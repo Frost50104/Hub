@@ -46,7 +46,7 @@ function MobileMyTasks() {
           <button
             type="button"
             onClick={() => setPickerOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-full border border-glass-border bg-glass px-3 py-1 text-sm text-text active:bg-surface"
+            className="inline-flex items-center gap-1.5 rounded-full border border-glass-border bg-glass px-3 py-2 text-sm text-text active:bg-surface"
           >
             <Filter className="h-3.5 w-3.5" /> {current.label}
           </button>
