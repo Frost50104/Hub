@@ -5,7 +5,7 @@
 - **Прод:** [hub.signaris.ru](https://hub.signaris.ru)
 - **Staging:** [hub-staging.signaris.ru](https://hub-staging.signaris.ru)
 - **Авторизация:** через центральный identity provider [auth.signaris.ru](https://auth.signaris.ru) — никакого собственного логина/пароля/MFA.
-- **Phase:** 3.6 в роадмапе Signaris (см. `CentralAuthService/docs/PHASES_ROADMAP.md`).
+- **Phase:** 4.9 в роадмапе Signaris (см. `CentralAuthService/docs/PHASES_ROADMAP.md`).
 
 ## Стек
 

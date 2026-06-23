@@ -20,27 +20,23 @@
 - ~~Кастом-статусы / кастом-поля задач — отсутствуют.~~ Custom-поля закрыты в 3.6.10 (7 типов). Кастом-статусы — open (Asana workflow rules).
 - ~~Гости (внешние пользователи) и публичные ссылки — отсутствуют.~~ Public links закрыты в 3.6.12 (view-only по UUID-токену). Guests с email-приглашением — open (требует scope `hub:guest` в auth.signaris.ru).
 - Time tracking — отсутствует.
-- ~~Calendar / Timeline / Gantt — отсутствуют.~~ Calendar закрыт в 3.6.9 (месячная сетка с DnD). Timeline/Gantt — open (XL, отложено в Phase 4).
+- ~~Calendar / Timeline / Gantt — отсутствуют.~~ Calendar закрыт в 3.6.9 (месячная сетка с DnD), Timeline/Gantt — в 4.3 (миграция 0010 `task_dependencies`, scale day/week/month, dependency-arrows, BFS cycle-check).
 
-## Открытое — Phase 4 backlog (после 3.6.x)
+## Открытое — backlog (после 4.x)
 
-- **Timeline / Gantt view** — XL по сложности (`task_dependencies` миграция, scale day/week/month/quarter, drag-боков, либа vs custom SVG). Calendar + Custom fields покрывают 90% планирования; делаем только по явному запросу.
+**Закрыто в Phase 4.1..4.9** (вынесено из backlog): Timeline/Gantt + task dependencies (4.3); Reports/Dashboard на recharts (4.6); FTS по комментам + `ts_headline` highlight + Cmd+K + comment-section в project public view (4.1.2); viewConfig + custom-fields-колонки в List view + UI rename + drag-to-reorder definitions (4.1.1); server-side `Referrer-Policy: no-referrer` для `/p/` (3.6.12, nginx per-route — см. `ops/nginx/hub.signaris.ru.conf`).
+
+Осталось открытым:
+
 - **Guests** — email-приглашения внешних пользователей с view/comment-доступом к конкретному проекту. Блокер: нужна фича в `auth.signaris.ru` (новый scope `hub:guest`, JWT-claim `is_guest`, tenant_id хоста для гостя).
 - **Saved searches** — сохранить DSL-запрос как «фильтр» / smart-list. Лёгкая надстройка над 3.6.11.
-- **FTS по комментариям в SearchPage** — GIN-индекс `ix_task_comments_body_fts` готов с 3.6.11, но UI не использует. Добавить вторую секцию `comments` рядом с `tasks` в `SearchResponseGrouped`.
-- **Highlight matches в результатах поиска** — через `ts_headline('russian', text, tsquery)`.
-- **Cmd+K hotkey** — global keyboard listener в Sidebar для фокуса в search-input.
-- **viewConfig store + custom-fields-колонки в TaskRow (List view)** — zustand persist per-project конфиг видимости колонок. Сейчас custom fields видны только в drawer, не в List view.
 - **CF-фильтры в `GET /tasks?cf_<field_id>=<value>`** — server-side JSONB filters через GIN-индекс. Backend готов, добавить query-param parser.
-- **UI rename полей в `CustomFieldsManager`** — API PATCH name готов, UI только Delete+Create.
-- **Drag-to-reorder definitions** — @dnd-kit + PATCH position.
-- **Comment-section в project public view** — на `/p/{token}` для project-скоупа сейчас видны только заголовки задач, без комментов.
-- **Security headers full fix для `/p/`** — named location или rewrite-rule чтобы `Referrer-Policy: no-referrer` применялся server-side, не через `<meta>`.
+- **Time tracking** — оценка/факт по задаче.
 - **Email-уведомления fallback** — когда push не работает (не PWA, не Chrome, не разрешил). Через SMTP в `app/services/push_sender.py`.
 - **i18n** — сейчас русский hard-coded. UPPETIT — RU-only, но multi-tenant в будущем потребует.
 - **Audit log на admin-действия** — кто добавил/удалил project_member, кто архивировал проект, кто отозвал public link. Расширить `task_activity` или новую `admin_audit_log`.
-- **Workflow/automation rules** — Asana-эквивалент (при изменении статуса → action). Большой scope.
-- **Reports/Dashboard** — workload, completed tasks, burndown. Asana Dashboards.
+- **Кастом-статусы задач / Workflow-automation rules** — Asana-эквивалент (при изменении статуса → action). Большой scope.
+- **Offsite backup (S3/restic)** — локальный backup покрывает 95%; offsite-флаг `BACKUP_S3_BUCKET` есть, полноценно — когда БД large либо compliance.
 
 ## Решённое в MVP
 
