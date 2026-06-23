@@ -5,20 +5,21 @@
 
 :root,
 [data-theme='dark'] {
-  /* Primary palette */
-  --amber: #ffb200;
-  --green: #34d399;
-  --red: #ef4444;
+  /* Primary palette — RGB channels (space-separated) so Tailwind's `/<alpha>`
+     opacity modifiers work via `rgb(var(--x) / <alpha-value>)` in the config. */
+  --amber: 255 178 0;
+  --green: 52 211 153;
+  --red: 239 68 68;
 
   /* Surfaces */
-  --bg: #08080e;
-  --bg-alt: #0f1220;
+  --bg: 8 8 14;
+  --bg-alt: 15 18 32;
   --surface: rgba(255, 255, 255, 0.04);
 
   /* Text */
-  --text: #f0f0f5;
-  --text2: #9090a8;
-  --text3: #55556a;
+  --text: 240 240 245;
+  --text2: 144 144 168;
+  --text3: 85 85 106;
 
   /* Glass effect */
   --glass: rgba(255, 255, 255, 0.06);
@@ -43,17 +44,17 @@
 /* Light theme — palette TBD on Hub-MVP.1 контрольная точка.
    Placeholders below are agent's recommendation; replace after user approval. */
 [data-theme='light'] {
-  --amber: #ffb200; /* Брендовый акцент не меняется */
-  --green: #16a34a;
-  --red: #dc2626;
+  --amber: 255 178 0; /* Брендовый акцент не меняется */
+  --green: 22 163 74;
+  --red: 220 38 38;
 
-  --bg: #fafafa;
-  --bg-alt: #ffffff;
+  --bg: 250 250 250;
+  --bg-alt: 255 255 255;
   --surface: rgba(0, 0, 0, 0.04);
 
-  --text: #1a1a24;
-  --text2: #55556a;
-  --text3: #9090a8;
+  --text: 26 26 36;
+  --text2: 85 85 106;
+  --text3: 144 144 168;
 
   --glass: rgba(255, 255, 255, 0.7);
   --glass-border: rgba(0, 0, 0, 0.08);
@@ -65,15 +66,15 @@
    (i.e. user has not selected explicitly via ThemeToggle yet). */
 @media (prefers-color-scheme: light) {
   html:not([data-theme]) {
-    --amber: #ffb200;
-    --green: #16a34a;
-    --red: #dc2626;
-    --bg: #fafafa;
-    --bg-alt: #ffffff;
+    --amber: 255 178 0;
+    --green: 22 163 74;
+    --red: 220 38 38;
+    --bg: 250 250 250;
+    --bg-alt: 255 255 255;
     --surface: rgba(0, 0, 0, 0.04);
-    --text: #1a1a24;
-    --text2: #55556a;
-    --text3: #9090a8;
+    --text: 26 26 36;
+    --text2: 85 85 106;
+    --text3: 144 144 168;
     --glass: rgba(255, 255, 255, 0.7);
     --glass-border: rgba(0, 0, 0, 0.08);
     --dotgrid-dot: rgba(0, 0, 0, 0.06);
@@ -81,8 +82,8 @@
 }
 
 body {
-  background: var(--bg);
-  color: var(--text);
+  background: rgb(var(--bg));
+  color: rgb(var(--text));
   font-family: var(--font-body);
   margin: 0;
   -webkit-font-smoothing: antialiased;

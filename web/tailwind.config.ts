@@ -6,13 +6,15 @@ export default {
   theme: {
     extend: {
       colors: {
-        amber: 'var(--amber)',
-        bg: 'var(--bg)',
-        'bg-alt': 'var(--bg-alt)',
+        amber: 'rgb(var(--amber) / <alpha-value>)',
+        red: 'rgb(var(--red) / <alpha-value>)',
+        green: 'rgb(var(--green) / <alpha-value>)',
+        bg: 'rgb(var(--bg) / <alpha-value>)',
+        'bg-alt': 'rgb(var(--bg-alt) / <alpha-value>)',
         surface: 'var(--surface)',
-        text: 'var(--text)',
-        text2: 'var(--text2)',
-        text3: 'var(--text3)',
+        text: 'rgb(var(--text) / <alpha-value>)',
+        text2: 'rgb(var(--text2) / <alpha-value>)',
+        text3: 'rgb(var(--text3) / <alpha-value>)',
         glass: 'var(--glass)',
         'glass-border': 'var(--glass-border)',
       },
