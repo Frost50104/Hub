@@ -3,6 +3,7 @@ import { Archive, Calendar, Flag, Link as LinkIcon, Tag, User, X } from 'lucide-
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
+import { PeoplePicker } from '@/components/PeoplePicker'
 import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
 import { TaskAttachments } from '@/components/task/TaskAttachments'
@@ -10,10 +11,10 @@ import { TaskCustomFields } from '@/components/task/TaskCustomFields'
 import { TaskDependencies } from '@/components/task/TaskDependencies'
 import { TaskThread } from '@/components/task/TaskThread'
 import { WatchControl } from '@/components/task/WatchControl'
-import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Input'
+import { useProject } from '@/hooks/useProjects'
 import { useArchiveTask, useTask, useUpdateTask } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import {
@@ -35,6 +36,10 @@ const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
 export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawerProps) {
   const taskQuery = useTask(taskId ?? undefined)
   const { data: task, isLoading } = taskQuery
+  const project = useProject(projectId)
+  // viewer — read-only; null (hub:admin вне членства) оставляем редактируемым,
+  // права всё равно enforced на backend.
+  const readOnly = project.data?.my_role === 'viewer'
   const update = useUpdateTask(projectId)
   const archive = useArchiveTask(projectId)
   const [title, setTitle] = useState('')
@@ -138,6 +143,7 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 onBlur={saveTitle}
+                readOnly={readOnly}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault()
@@ -153,6 +159,7 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                     {STATUSES.map((s) => (
                       <button
                         key={s}
+                        disabled={readOnly}
                         onClick={() => update.mutate({ id: task.id, status: s })}
                         className={cn(
                           'rounded-md px-2 py-1 text-xs transition-colors',
@@ -175,6 +182,7 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                     {PRIORITIES.map((p) => (
                       <button
                         key={p}
+                        disabled={readOnly}
                         onClick={() => update.mutate({ id: task.id, priority: p })}
                         className={cn(
                           'rounded-md px-2 py-1 text-xs transition-colors',
@@ -193,20 +201,20 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                   icon={<User className="h-4 w-4 text-text3" />}
                   label="Исполнитель"
                 >
-                  {task.assignee ? (
-                    <div className="flex items-center gap-2">
-                      <Avatar
-                        name={task.assignee.full_name}
-                        email={task.assignee.email}
-                        className="h-6 w-6 text-[10px]"
-                      />
-                      <span className="text-sm text-text">
-                        {task.assignee.full_name || task.assignee.email}
-                      </span>
-                    </div>
-                  ) : (
-                    <span className="text-sm text-text3">Не назначен</span>
-                  )}
+                  <PeoplePicker
+                    value={task.assignee_id}
+                    onChange={(id) =>
+                      update.mutate({ id: task.id, assignee_id: id })
+                    }
+                    disabled={readOnly || update.isPending}
+                    currentLabel={
+                      task.assignee
+                        ? task.assignee.full_name || task.assignee.email
+                        : null
+                    }
+                    currentEmail={task.assignee?.email ?? null}
+                    placeholder="Не назначен"
+                  />
                 </Row>
 
                 <Row
@@ -216,6 +224,7 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                   <input
                     type="date"
                     value={startAt}
+                    disabled={readOnly}
                     onChange={(e) => {
                       setStartAt(e.target.value)
                       void saveStartAt(e.target.value)
@@ -231,6 +240,7 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                   <input
                     type="date"
                     value={dueAt}
+                    disabled={readOnly}
                     onChange={(e) => {
                       setDueAt(e.target.value)
                       void saveDueAt(e.target.value)
@@ -247,6 +257,7 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   onBlur={saveDescription}
+                  readOnly={readOnly}
                   placeholder="Что нужно сделать?"
                 />
               </div>
@@ -263,6 +274,7 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                 <Button
                   variant="ghost"
                   size="sm"
+                  disabled={readOnly}
                   onClick={async () => {
                     try {
                       await archive.mutateAsync({
