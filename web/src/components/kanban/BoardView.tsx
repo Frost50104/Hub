@@ -11,6 +11,7 @@ import {
 } from '@dnd-kit/core'
 import { useMemo, useState } from 'react'
 
+import { Skeleton } from '@/components/ui/Skeleton'
 import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
 import { useProjectSections } from '@/hooks/useProjects'
 import { useTasks, useUpdateTask } from '@/hooks/useTasks'
@@ -175,7 +176,17 @@ export function BoardView({ projectId, myRole, onTaskClick, filters }: BoardView
   }
 
   if (tasks.isLoading || sections.isLoading) {
-    return <p className="px-1 text-sm text-text2">Загружаем доску…</p>
+    return (
+      <div className="flex gap-3 pb-4" aria-hidden>
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i} className="w-72 shrink-0 space-y-2">
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        ))}
+      </div>
+    )
   }
 
   return (

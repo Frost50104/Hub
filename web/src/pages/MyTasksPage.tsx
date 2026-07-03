@@ -5,6 +5,7 @@ import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { MobileTaskRow } from '@/components/task/MobileTaskRow'
+import { SkeletonRows } from '@/components/ui/Skeleton'
 import { TaskRow } from '@/components/task/TaskRow'
 import {
   BottomSheet,
@@ -55,9 +56,7 @@ function MobileMyTasks() {
       </div>
 
       <div>
-        {tasks.isLoading && (
-          <p className="px-4 py-4 text-sm text-text2">Загружаем…</p>
-        )}
+        {tasks.isLoading && <SkeletonRows rows={6} className="p-4" />}
         {tasks.isError && (
           <QueryError
             error={tasks.error}
@@ -144,7 +143,7 @@ function DesktopMyTasks() {
       </div>
 
       <div>
-        {tasks.isLoading && <p className="text-sm text-text2">Загружаем…</p>}
+        {tasks.isLoading && <SkeletonRows rows={6} />}
         {tasks.isError && (
           <QueryError
             error={tasks.error}

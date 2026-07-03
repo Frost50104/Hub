@@ -16,6 +16,7 @@ import { WatchControl } from '@/components/task/WatchControl'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Input'
+import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { useProject } from '@/hooks/useProjects'
 import { useArchiveTask, useTask, useUpdateTask } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
@@ -159,7 +160,13 @@ export function TaskDetailDrawer({
             </div>
           </header>
 
-          {isLoading && <p className="text-text2">Загружаем…</p>}
+          {isLoading && (
+            <div className="space-y-4">
+              <Skeleton className="h-8 w-2/3" />
+              <SkeletonRows rows={4} rowClassName="h-7" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          )}
           {taskQuery.isError && (
             <QueryError
               error={taskQuery.error}

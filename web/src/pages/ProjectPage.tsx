@@ -17,6 +17,7 @@ import { CustomFieldsManager } from '@/components/project/CustomFieldsManager'
 import { LabelsManager } from '@/components/project/LabelsManager'
 import { MembersTab } from '@/components/project/MembersTab'
 import { TaskFilterBar } from '@/components/project/TaskFilterBar'
+import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
 import { TaskDetailDrawer } from '@/components/task/TaskDetailDrawer'
@@ -557,7 +558,7 @@ function ListTab({
 
   return (
     <div className="space-y-6">
-      {sections.isLoading && <p className="text-text2">Загружаем секции…</p>}
+      {sections.isLoading && <SkeletonRows rows={5} />}
       {sections.isError && (
         <QueryError
           error={sections.error}
@@ -689,7 +690,15 @@ export function ProjectPage() {
   }
 
   if (!id) return null
-  if (project.isLoading) return <div className="p-6 text-text2">Загружаем проект…</div>
+  if (project.isLoading) {
+    return (
+      <div className="space-y-4 p-6">
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-8 w-96" />
+        <SkeletonRows rows={6} />
+      </div>
+    )
+  }
   if (project.error) {
     return (
       <div className="mx-auto max-w-xl space-y-4 p-8 text-center">

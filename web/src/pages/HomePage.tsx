@@ -6,6 +6,7 @@ import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { PushPermissionPrompt } from '@/components/PushPermissionPrompt'
 import { QueryError } from '@/components/QueryError'
+import { SkeletonRows } from '@/components/ui/Skeleton'
 import { MobileTaskRow } from '@/components/task/MobileTaskRow'
 import { TaskRow } from '@/components/task/TaskRow'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
@@ -94,7 +95,7 @@ function MobileHome() {
 
         <Section title="Недавние">
           {recentTasks.isLoading ? (
-            <p className="px-4 py-3 text-sm text-text3">Загружаем…</p>
+            <SkeletonRows rows={3} className="p-4" />
           ) : recentTasks.isError ? (
             <QueryError
               error={recentTasks.error}
@@ -267,9 +268,7 @@ function DesktopHome() {
             ))}
           </div>
           <div>
-            {myTasks.isLoading && (
-              <p className="px-2 py-2 text-xs text-text2">Загружаем…</p>
-            )}
+            {myTasks.isLoading && <SkeletonRows rows={4} className="py-2" />}
             {myTasks.isError && (
               <QueryError
                 error={myTasks.error}

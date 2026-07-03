@@ -4,7 +4,6 @@ import {
   CalendarClock,
   CheckCircle2,
   CheckSquare,
-  Loader2,
   MessageSquare,
 } from 'lucide-react'
 import { useMemo } from 'react'
@@ -14,6 +13,7 @@ import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Button } from '@/components/ui/Button'
+import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import {
   useMarkAllRead,
@@ -75,11 +75,7 @@ function MobileInbox() {
         }
       />
 
-      {notifications.isLoading && (
-        <p className="flex items-center gap-2 px-4 py-4 text-sm text-text2">
-          <Loader2 className="h-4 w-4 animate-spin" /> Загружаем…
-        </p>
-      )}
+      {notifications.isLoading && <SkeletonRows rows={5} className="p-4" />}
       {notifications.isError && (
         <QueryError
           error={notifications.error}
@@ -248,9 +244,7 @@ function DesktopInbox() {
         )}
       </header>
 
-      {notifications.isLoading && (
-        <p className="text-sm text-text2">Загружаем…</p>
-      )}
+      {notifications.isLoading && <SkeletonRows rows={5} />}
       {notifications.isError && (
         <QueryError
           error={notifications.error}

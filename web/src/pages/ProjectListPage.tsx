@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/Dialog'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
+import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useCreateProject, useProjects } from '@/hooks/useProjects'
 import { type Project } from '@/lib/projects'
 
@@ -159,7 +160,7 @@ export function ProjectListPage() {
         </Button>
       </div>
 
-      {isLoading && <p className="text-text2">Загружаем проекты…</p>}
+      {isLoading && <SkeletonRows rows={5} rowClassName="h-14" />}
       {error && (
         <p className="text-red">
           Не удалось загрузить проекты — {(error as Error).message}

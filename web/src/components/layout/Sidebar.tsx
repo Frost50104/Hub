@@ -18,6 +18,7 @@ import { toast } from 'sonner'
 import { SidebarSearch } from './SidebarSearch'
 import { CreateTaskDialog } from '@/components/task/CreateTaskDialog'
 import { Avatar } from '@/components/ui/Avatar'
+import { SkeletonRows } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import {
   Dialog,
@@ -64,7 +65,7 @@ function projectColorFor(p: Project): string {
 
 function ProjectsList({ onItemClick }: { onItemClick?: () => void }) {
   const { data, isLoading, isError, refetch } = useProjects()
-  if (isLoading) return <p className="px-3 py-1 text-xs text-text3">Загружаем…</p>
+  if (isLoading) return <SkeletonRows rows={4} rowClassName="h-7" className="px-2" />
   if (isError) {
     return (
       <button
