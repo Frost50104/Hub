@@ -1,4 +1,5 @@
 import { AlertCircle, Loader2 } from 'lucide-react'
+import { useMemo } from 'react'
 import {
   Bar,
   BarChart,
@@ -15,6 +16,7 @@ import {
 import { Avatar } from '@/components/ui/Avatar'
 import { useProjectStats } from '@/hooks/useProjectStats'
 import { type CustomFieldStat, type ProjectStats } from '@/lib/stats'
+import { useTheme } from '@/lib/theme'
 
 interface ProjectDashboardProps {
   projectId: string
@@ -34,33 +36,64 @@ const PRIORITY_LABEL: Record<string, string> = {
   urgent: 'срочно',
 }
 
-// Theme-derived chart palette. Hex literals because recharts can't read CSS
-// vars at SVG-paint time.
-const STATUS_COLOR: Record<string, string> = {
-  todo: '#55556a',
-  in_progress: '#ffb200',
-  in_review: '#9090a8',
-  done: '#34d399',
+/** `rgb(...)` из канального CSS-токена (`--amber: 255 178 0`), опц. с альфой. */
+function cssColor(name: string, alpha?: number): string {
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim()
+  if (!raw) return alpha !== undefined ? `rgba(128,128,128,${alpha})` : '#888888'
+  return alpha !== undefined ? `rgb(${raw} / ${alpha})` : `rgb(${raw})`
 }
 
-const PRIORITY_COLOR: Record<string, string> = {
-  low: '#55556a',
-  medium: '#9090a8',
-  high: '#ffb200',
-  urgent: '#ef4444',
+interface ChartPalette {
+  status: Record<string, string>
+  priority: Record<string, string>
+  select: string[]
+  fallback: string
+  axis: string
+  grid: string
+  bar: string
+  cursor: string
+  tooltip: React.CSSProperties
 }
 
-const SELECT_PALETTE = [
-  '#ffb200',
-  '#34d399',
-  '#9090a8',
-  '#ef4444',
-  '#55556a',
-  '#f0f0f5',
-]
+/**
+ * recharts не умеет CSS-переменные в SVG-заливках — читаем токены темы в
+ * конкретные rgb() и пересчитываем при переключении Light/Dark.
+ */
+function useChartPalette(): ChartPalette {
+  const theme = useTheme((s) => s.theme)
+  return useMemo(() => {
+    void theme // зависимость: getComputedStyle читает уже применённую тему
+    const amber = cssColor('--amber')
+    const green = cssColor('--green')
+    const red = cssColor('--red')
+    const text = cssColor('--text')
+    const text2 = cssColor('--text2')
+    const text3 = cssColor('--text3')
+    return {
+      status: { todo: text3, in_progress: amber, in_review: text2, done: green },
+      priority: { low: text3, medium: text2, high: amber, urgent: red },
+      select: [amber, green, text2, red, text3, text],
+      fallback: text2,
+      axis: text2,
+      grid: cssColor('--text', 0.07),
+      bar: amber,
+      cursor: cssColor('--amber', 0.08),
+      tooltip: {
+        background: cssColor('--bg-alt', 0.97),
+        border: `1px solid ${cssColor('--text', 0.12)}`,
+        borderRadius: 8,
+        fontSize: 12,
+        color: text,
+      },
+    }
+  }, [theme])
+}
 
 function ProjectDashboard({ projectId }: ProjectDashboardProps) {
   const stats = useProjectStats(projectId)
+  const palette = useChartPalette()
 
   if (stats.isLoading) {
     return (
@@ -86,21 +119,23 @@ function ProjectDashboard({ projectId }: ProjectDashboardProps) {
         <Card title="По статусу">
           <PieFromCounts
             counts={d.status_breakdown}
-            colorBy={(k) => STATUS_COLOR[k] ?? '#9090a8'}
+            colorBy={(k) => palette.status[k] ?? palette.fallback}
             labelBy={(k) => STATUS_LABEL[k] ?? k}
+            tooltipStyle={palette.tooltip}
           />
         </Card>
         <Card title="По приоритету">
           <PieFromCounts
             counts={d.priority_breakdown}
-            colorBy={(k) => PRIORITY_COLOR[k] ?? '#9090a8'}
+            colorBy={(k) => palette.priority[k] ?? palette.fallback}
             labelBy={(k) => PRIORITY_LABEL[k] ?? k}
+            tooltipStyle={palette.tooltip}
           />
         </Card>
       </div>
 
       <Card title="Готово за 30 дней">
-        <TrendBars trend={d.completed_trend} />
+        <TrendBars trend={d.completed_trend} palette={palette} />
       </Card>
 
       <Card title="Загрузка по людям">
@@ -111,7 +146,7 @@ function ProjectDashboard({ projectId }: ProjectDashboardProps) {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {d.custom_field_stats.map((s) => (
             <Card key={s.field_id} title={s.name}>
-              <CustomFieldStatBlock stat={s} />
+              <CustomFieldStatBlock stat={s} selectPalette={palette.select} />
             </Card>
           ))}
         </div>
@@ -183,10 +218,12 @@ function PieFromCounts({
   counts,
   colorBy,
   labelBy,
+  tooltipStyle,
 }: {
   counts: Record<string, number>
   colorBy: (key: string) => string
   labelBy: (key: string) => string
+  tooltipStyle: React.CSSProperties
 }) {
   const data = Object.entries(counts)
     .filter(([, count]) => count > 0)
@@ -198,14 +235,7 @@ function PieFromCounts({
     <div className="h-56">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
-          <Tooltip
-            contentStyle={{
-              background: 'rgba(15, 18, 32, 0.95)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 8,
-              fontSize: 12,
-            }}
-          />
+          <Tooltip contentStyle={tooltipStyle} />
           <Pie
             data={data}
             dataKey="count"
@@ -235,7 +265,13 @@ function PieFromCounts({
   )
 }
 
-function TrendBars({ trend }: { trend: ProjectStats['completed_trend'] }) {
+function TrendBars({
+  trend,
+  palette,
+}: {
+  trend: ProjectStats['completed_trend']
+  palette: ChartPalette
+}) {
   const data = trend.map((t) => ({
     day: t.day.slice(5), // MM-DD
     count: t.count,
@@ -244,30 +280,25 @@ function TrendBars({ trend }: { trend: ProjectStats['completed_trend'] }) {
     <div className="h-48">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 5, right: 10, left: -16, bottom: 0 }}>
-          <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+          <CartesianGrid stroke={palette.grid} vertical={false} />
           <XAxis
             dataKey="day"
-            stroke="#9090a8"
+            stroke={palette.axis}
             fontSize={10}
             tickLine={false}
             interval={4}
           />
           <YAxis
-            stroke="#9090a8"
+            stroke={palette.axis}
             fontSize={10}
             tickLine={false}
             allowDecimals={false}
           />
           <Tooltip
-            cursor={{ fill: 'rgba(255,178,0,0.08)' }}
-            contentStyle={{
-              background: 'rgba(15, 18, 32, 0.95)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 8,
-              fontSize: 12,
-            }}
+            cursor={{ fill: palette.cursor }}
+            contentStyle={palette.tooltip}
           />
-          <Bar dataKey="count" fill="#ffb200" radius={[3, 3, 0, 0]} />
+          <Bar dataKey="count" fill={palette.bar} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -319,7 +350,13 @@ function WorkloadTable({
   )
 }
 
-function CustomFieldStatBlock({ stat }: { stat: CustomFieldStat }) {
+function CustomFieldStatBlock({
+  stat,
+  selectPalette,
+}: {
+  stat: CustomFieldStat
+  selectPalette: string[]
+}) {
   if (stat.type === 'number' && stat.number) {
     const n = stat.number
     if (n.count === 0) {
@@ -346,7 +383,7 @@ function CustomFieldStatBlock({ stat }: { stat: CustomFieldStat }) {
     return (
       <ul className="space-y-1.5">
         {opts.map((o, i) => {
-          const color = SELECT_PALETTE[i % SELECT_PALETTE.length]!
+          const color = selectPalette[i % selectPalette.length]!
           const pct = (o.count / total) * 100
           return (
             <li key={o.id} className="text-xs">
