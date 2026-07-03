@@ -1,5 +1,5 @@
 import { Filter } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
@@ -16,6 +16,7 @@ import { useMyTasks, type DueWindow } from '@/hooks/useMyTasks'
 import { useProjects } from '@/hooks/useProjects'
 import { useUpdateTask } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
+import { type Task } from '@/lib/tasks'
 
 const TABS: { key: DueWindow; label: string }[] = [
   { key: 'upcoming', label: 'Предстоит' },
@@ -23,6 +24,77 @@ const TABS: { key: DueWindow; label: string }[] = [
   { key: 'today', label: 'Сегодня' },
   { key: 'all', label: 'Все' },
 ]
+
+// ─── Группировка «Все» по срокам (как секции My Tasks в Asana) ──────────────
+
+type GroupKey = 'overdue' | 'today' | 'week' | 'later' | 'nodate'
+
+const GROUP_LABEL: Record<GroupKey, string> = {
+  overdue: 'Просрочено',
+  today: 'Сегодня',
+  week: 'Ближайшая неделя',
+  later: 'Позже',
+  nodate: 'Без срока',
+}
+
+const GROUP_ORDER: GroupKey[] = ['overdue', 'today', 'week', 'later', 'nodate']
+
+function groupTasksByDue(tasks: Task[]): { key: GroupKey; items: Task[] }[] {
+  const now = new Date()
+  const startToday = new Date(now)
+  startToday.setHours(0, 0, 0, 0)
+  const endToday = new Date(now)
+  endToday.setHours(23, 59, 59, 999)
+  const endWeek = new Date(endToday)
+  endWeek.setDate(endWeek.getDate() + 7)
+
+  const buckets = new Map<GroupKey, Task[]>(GROUP_ORDER.map((k) => [k, []]))
+  for (const t of tasks) {
+    let key: GroupKey
+    if (!t.due_at) key = 'nodate'
+    else {
+      const due = new Date(t.due_at)
+      // Готовые задачи не считаем просроченными — оставляем в своей дате.
+      if (due < startToday && t.status !== 'done') key = 'overdue'
+      else if (due <= endToday) key = 'today'
+      else if (due <= endWeek) key = 'week'
+      else key = 'later'
+    }
+    buckets.get(key)!.push(t)
+  }
+  return GROUP_ORDER.map((key) => ({ key, items: buckets.get(key)! }))
+}
+
+function GroupedTaskList({
+  tasks,
+  renderTask,
+}: {
+  tasks: Task[]
+  renderTask: (t: Task) => React.ReactNode
+}) {
+  const groups = useMemo(() => groupTasksByDue(tasks), [tasks])
+  return (
+    <div className="space-y-4">
+      {groups.map(
+        (g) =>
+          g.items.length > 0 && (
+            <section key={g.key}>
+              <h2
+                className={cn(
+                  'flex items-baseline gap-2 px-1 pb-1 text-[11px] font-semibold uppercase tracking-wider',
+                  g.key === 'overdue' ? 'text-red' : 'text-text3',
+                )}
+              >
+                {GROUP_LABEL[g.key]}
+                <span className="font-normal">{g.items.length}</span>
+              </h2>
+              <div>{g.items.map(renderTask)}</div>
+            </section>
+          ),
+      )}
+    </div>
+  )
+}
 
 export function MyTasksPage() {
   const isDesktop = useIsDesktop()
@@ -70,21 +142,43 @@ function MobileMyTasks() {
             {tab === 'overdue' ? 'Нет просроченных — отлично!' : 'Здесь пока пусто.'}
           </p>
         )}
-        {tasks.data?.map((t) => (
-          <MobileTaskRow
-            key={t.id}
-            task={t}
-            subtitle={
-              t.project_id ? projectsById.get(t.project_id)?.name : undefined
-            }
-            onToggleDone={() =>
-              update.mutate({
-                id: t.id,
-                status: t.status === 'done' ? 'todo' : 'done',
-              })
-            }
-          />
-        ))}
+        {tasks.data &&
+          (tab === 'all' ? (
+            <GroupedTaskList
+              tasks={tasks.data}
+              renderTask={(t) => (
+                <MobileTaskRow
+                  key={t.id}
+                  task={t}
+                  subtitle={
+                    t.project_id ? projectsById.get(t.project_id)?.name : undefined
+                  }
+                  onToggleDone={() =>
+                    update.mutate({
+                      id: t.id,
+                      status: t.status === 'done' ? 'todo' : 'done',
+                    })
+                  }
+                />
+              )}
+            />
+          ) : (
+            tasks.data.map((t) => (
+              <MobileTaskRow
+                key={t.id}
+                task={t}
+                subtitle={
+                  t.project_id ? projectsById.get(t.project_id)?.name : undefined
+                }
+                onToggleDone={() =>
+                  update.mutate({
+                    id: t.id,
+                    status: t.status === 'done' ? 'todo' : 'done',
+                  })
+                }
+              />
+            ))
+          ))}
       </div>
 
       <BottomSheet
@@ -158,18 +252,37 @@ function DesktopMyTasks() {
               : 'Здесь пока пусто.'}
           </p>
         )}
-        {tasks.data?.map((t) => (
-          <TaskRow
-            key={t.id}
-            task={t}
-            onToggleDone={() =>
-              update.mutate({
-                id: t.id,
-                status: t.status === 'done' ? 'todo' : 'done',
-              })
-            }
-          />
-        ))}
+        {tasks.data &&
+          (tab === 'all' ? (
+            <GroupedTaskList
+              tasks={tasks.data}
+              renderTask={(t) => (
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  onToggleDone={() =>
+                    update.mutate({
+                      id: t.id,
+                      status: t.status === 'done' ? 'todo' : 'done',
+                    })
+                  }
+                />
+              )}
+            />
+          ) : (
+            tasks.data.map((t) => (
+              <TaskRow
+                key={t.id}
+                task={t}
+                onToggleDone={() =>
+                  update.mutate({
+                    id: t.id,
+                    status: t.status === 'done' ? 'todo' : 'done',
+                  })
+                }
+              />
+            ))
+          ))}
       </div>
     </div>
   )
