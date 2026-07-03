@@ -17,13 +17,12 @@ import {
   useRemoveMember,
   useUpdateMember,
 } from '@/hooks/useProjects'
-import { type ProjectMember, type ProjectRole } from '@/lib/projects'
+import {
+  PROJECT_ROLE_LABEL as ROLE_LABEL,
+  type ProjectMember,
+  type ProjectRole,
+} from '@/lib/projects'
 
-const ROLE_LABEL: Record<ProjectRole, string> = {
-  owner: 'Владелец',
-  editor: 'Редактор',
-  viewer: 'Наблюдатель',
-}
 const ROLES: ProjectRole[] = ['owner', 'editor', 'viewer']
 
 const SELECT_CLASS =

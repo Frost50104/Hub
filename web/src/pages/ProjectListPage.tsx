@@ -20,7 +20,7 @@ import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useCreateProject, useProjects } from '@/hooks/useProjects'
-import { type Project } from '@/lib/projects'
+import { PROJECT_ROLE_LABEL, type Project } from '@/lib/projects'
 
 const createSchema = z.object({
   name: z.string().min(1).max(255),
@@ -47,7 +47,7 @@ function ProjectCard({ project }: { project: Project }) {
         </div>
         {project.archived_at && <Badge variant="secondary">архив</Badge>}
         {project.my_role && project.my_role !== 'viewer' && (
-          <Badge variant="default">{project.my_role}</Badge>
+          <Badge variant="default">{PROJECT_ROLE_LABEL[project.my_role]}</Badge>
         )}
       </div>
       {project.description && (

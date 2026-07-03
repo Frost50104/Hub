@@ -2,6 +2,12 @@ import { api } from './api'
 
 export type ProjectRole = 'owner' | 'editor' | 'viewer'
 
+export const PROJECT_ROLE_LABEL: Record<ProjectRole, string> = {
+  owner: 'Владелец',
+  editor: 'Редактор',
+  viewer: 'Наблюдатель',
+}
+
 export interface Project {
   id: string
   key: string

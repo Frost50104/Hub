@@ -291,7 +291,7 @@ function ProjectViewBlock({ data }: { data: PublicProjectView }) {
                       PRIORITY_TONE[t.priority],
                     )}
                   >
-                    {t.priority}
+                    {PRIORITY_LABEL[t.priority] ?? t.priority}
                   </span>
                   <Initials value={t.assignee_initials} />
                 </span>

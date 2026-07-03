@@ -57,7 +57,12 @@ import { useTasks, useUpdateTask } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
 import { type CustomFieldDefinition, type CustomFieldValue } from '@/lib/customFields'
-import { type Project, type ProjectRole, type Section } from '@/lib/projects'
+import {
+  PROJECT_ROLE_LABEL,
+  type Project,
+  type ProjectRole,
+  type Section,
+} from '@/lib/projects'
 import {
   applyFiltersToSearchParams,
   filtersFromSearchParams,
@@ -79,7 +84,7 @@ const TABS: { key: TabKey; label: string; disabled?: boolean }[] = [
   { key: 'list', label: 'Список' },
   { key: 'board', label: 'Доска' },
   { key: 'calendar', label: 'Календарь' },
-  { key: 'timeline', label: 'Timeline' },
+  { key: 'timeline', label: 'Хронология' },
   { key: 'dashboard', label: 'Дашборд' },
   { key: 'members', label: 'Участники' },
 ]
@@ -156,7 +161,7 @@ function ProjectHeader({
             )}
             <Badge variant="outline">{project.key}</Badge>
             {isArchived && <Badge variant="secondary">архив</Badge>}
-            {myRole && <Badge variant="default">{myRole}</Badge>}
+            {myRole && <Badge variant="default">{PROJECT_ROLE_LABEL[myRole]}</Badge>}
           </div>
           {project.description && (
             <p className="mt-0.5 max-w-2xl truncate text-sm text-text2">

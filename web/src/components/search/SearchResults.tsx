@@ -22,6 +22,13 @@ const PRIORITY_TONE: Record<SearchTaskHit['priority'], string> = {
   urgent: 'text-red',
 }
 
+const PRIORITY_LABEL: Record<SearchTaskHit['priority'], string> = {
+  low: 'низкий',
+  medium: 'средний',
+  high: 'высокий',
+  urgent: 'срочно',
+}
+
 interface SearchResultsProps {
   groups: SearchGroup[]
   total: number
@@ -111,7 +118,7 @@ export function SearchResults({
                             PRIORITY_TONE[t.priority],
                           )}
                         >
-                          {t.priority}
+                          {PRIORITY_LABEL[t.priority]}
                         </span>
                         <span className="rounded bg-glass px-1.5 py-0.5 text-[10px] text-text2">
                           {STATUS_LABEL[t.status]}

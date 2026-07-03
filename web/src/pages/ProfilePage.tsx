@@ -7,6 +7,12 @@ import { useMe } from '@/hooks/useMe'
 import { authClient } from '@/lib/auth'
 import { cn } from '@/lib/cn'
 
+const HUB_ROLE_LABEL: Record<'admin' | 'member' | 'viewer', string> = {
+  admin: 'Администратор',
+  member: 'Сотрудник',
+  viewer: 'Наблюдатель',
+}
+
 /**
  * Mobile-only "Профиль" page (the desktop sidebar already has logout and
  * settings shortcuts). Layout mirrors Asana mobile: edit pencil left, title
@@ -63,7 +69,7 @@ export function ProfilePage() {
               </span>
               {me.data?.hub_role && (
                 <span className="rounded bg-glass px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text3">
-                  {me.data.hub_role}
+                  {HUB_ROLE_LABEL[me.data.hub_role]}
                 </span>
               )}
             </li>
