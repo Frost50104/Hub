@@ -1,6 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { CheckCircle2, Circle, ClipboardCheck, Clock } from 'lucide-react'
+import { CheckCircle2, Circle, ClipboardCheck, Clock, ListTree } from 'lucide-react'
 import type { CSSProperties } from 'react'
 
 import { Avatar } from '@/components/ui/Avatar'
@@ -9,6 +9,7 @@ import { cn } from '@/lib/cn'
 import {
   PRIORITY_LABEL,
   STATUS_LABEL,
+  type SubtaskStats,
   type Task,
   type TaskStatus,
 } from '@/lib/tasks'
@@ -29,6 +30,7 @@ const STATUS_TONE: Record<TaskStatus, string> = {
 
 interface KanbanCardProps {
   task: Task
+  subtasks?: SubtaskStats
   onClick?: () => void
   onToggleDone?: () => void
 }
@@ -39,7 +41,7 @@ interface KanbanCardProps {
  * `activationConstraint: { distance: 5 }` on the PointerSensor).
  * Status-icon stops propagation to handle done-toggle independently.
  */
-export function KanbanCard({ task, onClick, onToggleDone }: KanbanCardProps) {
+export function KanbanCard({ task, subtasks, onClick, onToggleDone }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: task.id })
   const style: CSSProperties = {
@@ -99,7 +101,7 @@ export function KanbanCard({ task, onClick, onToggleDone }: KanbanCardProps) {
         </p>
       </div>
 
-      {(task.priority !== 'medium' || task.due_at || task.assignee) && (
+      {(task.priority !== 'medium' || task.due_at || task.assignee || subtasks) && (
         <div className="flex items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1">
             {task.priority !== 'medium' && (
@@ -112,6 +114,14 @@ export function KanbanCard({ task, onClick, onToggleDone }: KanbanCardProps) {
               >
                 {PRIORITY_LABEL[task.priority]}
               </Badge>
+            )}
+            {subtasks && subtasks.total > 0 && (
+              <span
+                className="inline-flex items-center gap-0.5 text-[10px] text-text3"
+                title={`Подзадачи: ${subtasks.done} из ${subtasks.total} готово`}
+              >
+                <ListTree className="h-3 w-3" /> {subtasks.done}/{subtasks.total}
+              </span>
             )}
             {task.due_at && (
               <span className="text-[10px] text-text3">

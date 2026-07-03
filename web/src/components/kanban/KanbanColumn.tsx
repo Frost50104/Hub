@@ -6,7 +6,7 @@ import {
 
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { cn } from '@/lib/cn'
-import { type Task } from '@/lib/tasks'
+import { type SubtaskStats, type Task } from '@/lib/tasks'
 
 import { KanbanCard } from './KanbanCard'
 
@@ -23,6 +23,7 @@ interface KanbanColumnProps {
   column: ColumnDef
   projectId: string
   canEdit: boolean
+  childrenByParent?: Map<string, SubtaskStats>
   onTaskClick: (id: string) => void
   onToggleDone: (task: Task) => void
 }
@@ -31,6 +32,7 @@ export function KanbanColumn({
   column,
   projectId,
   canEdit,
+  childrenByParent,
   onTaskClick,
   onToggleDone,
 }: KanbanColumnProps) {
@@ -58,6 +60,7 @@ export function KanbanColumn({
             <KanbanCard
               key={t.id}
               task={t}
+              subtasks={childrenByParent?.get(t.id)}
               onClick={() => onTaskClick(t.id)}
               onToggleDone={() => onToggleDone(t)}
             />

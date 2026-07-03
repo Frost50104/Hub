@@ -32,6 +32,12 @@ export interface Task {
 
 export type TaskSortField = 'position' | 'due_at' | 'priority' | 'created_at' | 'title'
 
+/** Счётчик подзадач для чипа «k/N» на строке/карточке родителя. */
+export interface SubtaskStats {
+  total: number
+  done: number
+}
+
 export interface TaskListFilters {
   include_archived?: boolean
   status?: TaskStatus

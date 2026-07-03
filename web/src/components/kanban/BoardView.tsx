@@ -46,10 +46,26 @@ export function BoardView({ projectId, myRole, onTaskClick, filters }: BoardView
     }),
   )
 
+  // Счётчик k/N по родителям. При активных фильтрах дети могут быть
+  // отфильтрованы — тогда чип занижен/скрыт; полный счёт виден в карточке.
+  const childrenByParent = useMemo(() => {
+    const m = new Map<string, { total: number; done: number }>()
+    for (const t of tasks.data ?? []) {
+      if (!t.parent_task_id) continue
+      const s = m.get(t.parent_task_id) ?? { total: 0, done: 0 }
+      s.total += 1
+      if (t.status === 'done') s.done += 1
+      m.set(t.parent_task_id, s)
+    }
+    return m
+  }, [tasks.data])
+
   const columns: ColumnDef[] = useMemo(() => {
     const orphan: Task[] = []
     const map = new Map<string, Task[]>()
     for (const t of tasks.data ?? []) {
+      // Подзадачи живут в карточке родителя, а не отдельными карточками.
+      if (t.parent_task_id) continue
       if (t.section_id === null) {
         orphan.push(t)
       } else {
@@ -159,6 +175,7 @@ export function BoardView({ projectId, myRole, onTaskClick, filters }: BoardView
             column={col}
             projectId={projectId}
             canEdit={canEdit}
+            childrenByParent={childrenByParent}
             onTaskClick={onTaskClick}
             onToggleDone={(task) =>
               update.mutate({

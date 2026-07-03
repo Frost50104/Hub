@@ -1,11 +1,12 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { Archive, Calendar, Flag, Link as LinkIcon, Tag, User, X } from 'lucide-react'
+import { Archive, Calendar, CornerLeftUp, Flag, Link as LinkIcon, Tag, User, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 import { PeoplePicker } from '@/components/PeoplePicker'
 import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
+import { SubtaskList } from '@/components/task/SubtaskList'
 import { TaskAttachments } from '@/components/task/TaskAttachments'
 import { TaskCustomFields } from '@/components/task/TaskCustomFields'
 import { TaskDependencies } from '@/components/task/TaskDependencies'
@@ -28,12 +29,41 @@ interface TaskDetailDrawerProps {
   taskId: string | null
   projectId: string
   onClose: () => void
+  /** Переключить drawer на другую задачу (родитель/подзадача). */
+  onOpenTask?: (id: string) => void
 }
 
 const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done']
 const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
 
-export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawerProps) {
+function ParentLink({
+  parentId,
+  onOpen,
+}: {
+  parentId: string
+  onOpen: (id: string) => void
+}) {
+  const parent = useTask(parentId)
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(parentId)}
+      className="flex max-w-full items-center gap-1 text-xs text-text2 hover:text-amber"
+    >
+      <CornerLeftUp className="h-3.5 w-3.5 shrink-0" />
+      <span className="truncate">
+        {parent.data ? `К родительской: ${parent.data.title}` : 'К родительской задаче'}
+      </span>
+    </button>
+  )
+}
+
+export function TaskDetailDrawer({
+  taskId,
+  projectId,
+  onClose,
+  onOpenTask,
+}: TaskDetailDrawerProps) {
   const taskQuery = useTask(taskId ?? undefined)
   const { data: task, isLoading } = taskQuery
   const project = useProject(projectId)
@@ -139,6 +169,12 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
 
           {task && (
             <div className="space-y-5">
+              {task.parent_task_id && onOpenTask && (
+                <ParentLink
+                  parentId={task.parent_task_id}
+                  onOpen={onOpenTask}
+                />
+              )}
               <Input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -261,6 +297,15 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                   placeholder="Что нужно сделать?"
                 />
               </div>
+
+              {!task.parent_task_id && (
+                <SubtaskList
+                  taskId={task.id}
+                  projectId={projectId}
+                  canEdit={!readOnly}
+                  onOpenTask={onOpenTask}
+                />
+              )}
 
               <TaskCustomFields taskId={task.id} projectId={projectId} />
 

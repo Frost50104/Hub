@@ -282,6 +282,7 @@ function SectionBlock({
   onTaskClick,
   visibleFields,
   valuesByTask,
+  childrenByParent,
 }: {
   section: Section | null
   projectId: string
@@ -291,6 +292,7 @@ function SectionBlock({
   onTaskClick: (id: string) => void
   visibleFields: CustomFieldDefinition[]
   valuesByTask: Map<string, Map<string, CustomFieldValue>>
+  childrenByParent?: Map<string, { total: number; done: number }>
 }) {
   const [collapsed, setCollapsed] = useState(false)
   const [renaming, setRenaming] = useState(false)
@@ -394,6 +396,7 @@ function SectionBlock({
               <TaskRow
                 key={t.id}
                 task={t}
+                subtasks={childrenByParent?.get(t.id)}
                 onClick={() => onTaskClick(t.id)}
                 onToggleDone={() =>
                   update.mutate({
@@ -446,11 +449,27 @@ function ListTab({
   const tasksBySection = useMemo(() => {
     const map = new Map<string | null, Task[]>()
     for (const t of tasks.data ?? []) {
+      // Подзадачи живут в карточке родителя, не отдельными строками.
+      if (t.parent_task_id) continue
       const list = map.get(t.section_id) ?? []
       list.push(t)
       map.set(t.section_id, list)
     }
     return map
+  }, [tasks.data])
+
+  // Счётчик k/N для чипа на строке родителя. При активных фильтрах дети
+  // могут быть отфильтрованы — чип занижен; полный счёт виден в карточке.
+  const childrenByParent = useMemo(() => {
+    const m = new Map<string, { total: number; done: number }>()
+    for (const t of tasks.data ?? []) {
+      if (!t.parent_task_id) continue
+      const s = m.get(t.parent_task_id) ?? { total: 0, done: 0 }
+      s.total += 1
+      if (t.status === 'done') s.done += 1
+      m.set(t.parent_task_id, s)
+    }
+    return m
   }, [tasks.data])
 
   // Definitions filtered + ordered by user's visibility config.
@@ -531,6 +550,7 @@ function ListTab({
           onTaskClick={onTaskClick}
           visibleFields={visibleFields}
           valuesByTask={valuesByTask}
+          childrenByParent={childrenByParent}
         />
       )}
 
@@ -545,6 +565,7 @@ function ListTab({
           onTaskClick={onTaskClick}
           visibleFields={visibleFields}
           valuesByTask={valuesByTask}
+          childrenByParent={childrenByParent}
         />
       ))}
 
@@ -712,6 +733,7 @@ export function ProjectPage() {
         taskId={selectedTaskId}
         projectId={id}
         onClose={closeTask}
+        onOpenTask={openTask}
       />
 
       <CustomFieldsManager

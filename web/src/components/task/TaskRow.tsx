@@ -1,4 +1,4 @@
-import { CheckCircle2, Circle, ClipboardCheck, Clock, MessageSquare } from 'lucide-react'
+import { CheckCircle2, Circle, ClipboardCheck, Clock, ListTree, MessageSquare } from 'lucide-react'
 
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
@@ -8,6 +8,7 @@ import { formatCustomFieldValue } from '@/lib/formatCustomField'
 import {
   PRIORITY_LABEL,
   STATUS_LABEL,
+  type SubtaskStats,
   type Task,
   type TaskStatus,
 } from '@/lib/tasks'
@@ -28,6 +29,7 @@ const STATUS_TONE: Record<TaskStatus, string> = {
 
 interface TaskRowProps {
   task: Task
+  subtasks?: SubtaskStats
   onClick?: () => void
   onToggleDone?: () => void
   /** Custom field definitions to render as trailing columns, in display order. */
@@ -46,6 +48,7 @@ interface TaskRowProps {
  */
 export function TaskRow({
   task,
+  subtasks,
   onClick,
   onToggleDone,
   visibleFields = [],
@@ -101,6 +104,14 @@ export function TaskRow({
           >
             {PRIORITY_LABEL[task.priority]}
           </Badge>
+        )}
+        {subtasks && subtasks.total > 0 && (
+          <span
+            className="inline-flex shrink-0 items-center gap-0.5 text-[10px] text-text3"
+            title={`Подзадачи: ${subtasks.done} из ${subtasks.total} готово`}
+          >
+            <ListTree className="h-3 w-3" /> {subtasks.done}/{subtasks.total}
+          </span>
         )}
       </div>
 
