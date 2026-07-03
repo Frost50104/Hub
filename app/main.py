@@ -130,6 +130,7 @@ def create_app() -> FastAPI:
     from app.api import custom_fields as custom_fields_api
     from app.api import dependencies as dependencies_api
     from app.api import env as env_api
+    from app.api import labels as labels_api
     from app.api import me as me_api
     from app.api import me_tasks as me_tasks_api
     from app.api import notifications as notifications_api
@@ -153,6 +154,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks_api.router, prefix="/api")
     app.include_router(calendar_api.router, prefix="/api")
     app.include_router(custom_fields_api.router, prefix="/api")
+    app.include_router(labels_api.router, prefix="/api")
     app.include_router(dependencies_api.router, prefix="/api")
     app.include_router(timeline_api.router, prefix="/api")
     app.include_router(share_api.router, prefix="/api")

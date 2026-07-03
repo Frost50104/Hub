@@ -199,6 +199,9 @@ class TaskLabelAssignment(Base):
         ForeignKey("task_labels.id", ondelete="CASCADE"),
         nullable=False,
     )
+    tenant_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), nullable=False, index=True
+    )
 
 
 class TaskActivity(Base):

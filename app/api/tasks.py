@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.section import Section
 from app.models.shadow import ShadowUser
-from app.models.task import Task, TaskWatcher
+from app.models.task import Task, TaskLabelAssignment, TaskWatcher
 from app.schemas.task import (
     AssigneeBrief,
     TaskCreate,
@@ -153,6 +153,7 @@ async def list_tasks(
     assignee_id: UUID | None = Query(default=None, alias="assignee"),
     section_id: UUID | None = Query(default=None),
     priority: TaskPriority | None = Query(default=None),
+    label: UUID | None = Query(default=None),
     due_from: datetime | None = Query(default=None),
     due_to: datetime | None = Query(default=None),
     sort: TaskSortField = Query(default="position"),
@@ -194,6 +195,15 @@ async def list_tasks(
         stmt = stmt.where(Task.section_id == section_id)
     if priority is not None:
         stmt = stmt.where(Task.priority == priority)
+    if label is not None:
+        stmt = stmt.where(
+            select(TaskLabelAssignment.task_id)
+            .where(
+                TaskLabelAssignment.task_id == Task.id,
+                TaskLabelAssignment.label_id == label,
+            )
+            .exists()
+        )
     if due_from is not None:
         stmt = stmt.where(Task.due_at >= due_from)
     if due_to is not None:
