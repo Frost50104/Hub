@@ -44,6 +44,8 @@ export interface TaskListFilters {
   assignee?: string
   section_id?: string
   priority?: TaskPriority
+  /** id метки — задачи, на которых она висит. */
+  label?: string
   /** ISO datetime — сервер сравнивает с due_at. */
   due_from?: string
   due_to?: string

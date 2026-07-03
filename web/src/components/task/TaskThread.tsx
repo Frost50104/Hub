@@ -63,6 +63,10 @@ function renderActivity(a: Activity): string | null {
       return `${actor} прикрепил файл «${String(p['filename'] ?? '—')}»`
     case 'unattached':
       return `${actor} удалил файл «${String(p['filename'] ?? '—')}»`
+    case 'labeled':
+      return `${actor} добавил метку «${String(p['name'] ?? '—')}»`
+    case 'unlabeled':
+      return `${actor} снял метку «${String(p['name'] ?? '—')}»`
     case 'commented':
       // Rendered as the comment itself — skip the activity row.
       return null

@@ -6,6 +6,7 @@ import type { CSSProperties } from 'react'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { cn } from '@/lib/cn'
+import { type Label } from '@/lib/labels'
 import {
   PRIORITY_LABEL,
   STATUS_LABEL,
@@ -31,6 +32,7 @@ const STATUS_TONE: Record<TaskStatus, string> = {
 interface KanbanCardProps {
   task: Task
   subtasks?: SubtaskStats
+  labels?: Label[]
   onClick?: () => void
   onToggleDone?: () => void
 }
@@ -41,7 +43,13 @@ interface KanbanCardProps {
  * `activationConstraint: { distance: 5 }` on the PointerSensor).
  * Status-icon stops propagation to handle done-toggle independently.
  */
-export function KanbanCard({ task, subtasks, onClick, onToggleDone }: KanbanCardProps) {
+export function KanbanCard({
+  task,
+  subtasks,
+  labels,
+  onClick,
+  onToggleDone,
+}: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: task.id })
   const style: CSSProperties = {
@@ -122,6 +130,23 @@ export function KanbanCard({ task, subtasks, onClick, onToggleDone }: KanbanCard
               >
                 <ListTree className="h-3 w-3" /> {subtasks.done}/{subtasks.total}
               </span>
+            )}
+            {labels?.slice(0, 3).map((l) => (
+              <span
+                key={l.id}
+                className="inline-flex items-center gap-1 rounded-full border border-glass-border px-1.5 text-[10px] text-text2"
+                title={l.name}
+              >
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ backgroundColor: l.color }}
+                  aria-hidden
+                />
+                {l.name}
+              </span>
+            ))}
+            {labels && labels.length > 3 && (
+              <span className="text-[10px] text-text3">+{labels.length - 3}</span>
             )}
             {task.due_at && (
               <span className="text-[10px] text-text3">

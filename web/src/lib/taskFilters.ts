@@ -13,6 +13,8 @@ export interface TaskViewFilters {
   assignee?: string
   status?: TaskStatus
   priority?: TaskPriority
+  /** id метки проекта. */
+  label?: string
   due?: DuePreset
   sort?: TaskSortField
   order?: 'asc' | 'desc'
@@ -28,6 +30,7 @@ const KEYS = {
   assignee: 'f_assignee',
   status: 'f_status',
   priority: 'f_priority',
+  label: 'f_label',
   due: 'f_due',
   sort: 'sort',
   order: 'order',
@@ -42,6 +45,7 @@ export function filtersFromSearchParams(sp: URLSearchParams): TaskViewFilters {
     assignee: sp.get(KEYS.assignee) ?? undefined,
     status: pick(sp.get(KEYS.status), STATUSES),
     priority: pick(sp.get(KEYS.priority), PRIORITIES),
+    label: sp.get(KEYS.label) ?? undefined,
     due: pick(sp.get(KEYS.due), DUE_PRESETS),
     sort: pick(sp.get(KEYS.sort), SORTS),
     order: pick(sp.get(KEYS.order), ['asc', 'desc'] as const),
@@ -61,9 +65,13 @@ export function applyFiltersToSearchParams(
 
 /** Число активных фильтров (сортировка не считается фильтром). */
 export function activeFilterCount(filters: TaskViewFilters): number {
-  return [filters.assignee, filters.status, filters.priority, filters.due].filter(
-    Boolean,
-  ).length
+  return [
+    filters.assignee,
+    filters.status,
+    filters.priority,
+    filters.label,
+    filters.due,
+  ].filter(Boolean).length
 }
 
 function startOfDay(d: Date): Date {
@@ -113,6 +121,7 @@ export function toListFilters(
   if (filters.assignee) out.assignee = filters.assignee
   if (filters.status) out.status = filters.status
   if (filters.priority) out.priority = filters.priority
+  if (filters.label) out.label = filters.label
   if (filters.due) Object.assign(out, dueRange(filters.due))
   if (!opts.forBoard && filters.sort && filters.sort !== 'position') {
     out.sort = filters.sort

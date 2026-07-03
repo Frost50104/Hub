@@ -11,8 +11,10 @@ import {
 } from '@dnd-kit/core'
 import { useMemo, useState } from 'react'
 
+import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
 import { useProjectSections } from '@/hooks/useProjects'
 import { useTasks, useUpdateTask } from '@/hooks/useTasks'
+import { type Label } from '@/lib/labels'
 import { type ProjectRole } from '@/lib/projects'
 import { toListFilters, type TaskViewFilters } from '@/lib/taskFilters'
 import { type Task } from '@/lib/tasks'
@@ -45,6 +47,21 @@ export function BoardView({ projectId, myRole, onTaskClick, filters }: BoardView
       activationConstraint: { delay: 200, tolerance: 5 },
     }),
   )
+
+  const labels = useLabels(projectId)
+  const labelAssignments = useLabelAssignments(projectId)
+  const labelsByTask = useMemo(() => {
+    const byId = new Map((labels.data ?? []).map((l) => [l.id, l]))
+    const m = new Map<string, Label[]>()
+    for (const a of labelAssignments.data ?? []) {
+      const l = byId.get(a.label_id)
+      if (!l) continue
+      const list = m.get(a.task_id) ?? []
+      list.push(l)
+      m.set(a.task_id, list)
+    }
+    return m
+  }, [labels.data, labelAssignments.data])
 
   // Счётчик k/N по родителям. При активных фильтрах дети могут быть
   // отфильтрованы — тогда чип занижен/скрыт; полный счёт виден в карточке.
@@ -176,6 +193,7 @@ export function BoardView({ projectId, myRole, onTaskClick, filters }: BoardView
             projectId={projectId}
             canEdit={canEdit}
             childrenByParent={childrenByParent}
+            labelsByTask={labelsByTask}
             onTaskClick={onTaskClick}
             onToggleDone={(task) =>
               update.mutate({

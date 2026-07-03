@@ -1,4 +1,4 @@
-import { ChevronDown, Link as LinkIcon, Loader2, MoreHorizontal, Plus, Settings2, Star, Trash2 } from 'lucide-react'
+import { ChevronDown, Link as LinkIcon, Loader2, MoreHorizontal, Plus, Settings2, Star, Tags, Trash2 } from 'lucide-react'
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -14,6 +14,7 @@ import { BoardView } from '@/components/kanban/BoardView'
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { ColumnsMenu } from '@/components/project/ColumnsMenu'
 import { CustomFieldsManager } from '@/components/project/CustomFieldsManager'
+import { LabelsManager } from '@/components/project/LabelsManager'
 import { MembersTab } from '@/components/project/MembersTab'
 import { TaskFilterBar } from '@/components/project/TaskFilterBar'
 import { QueryError } from '@/components/QueryError'
@@ -49,8 +50,10 @@ import {
   useProjectSections,
   useUpdateSection,
 } from '@/hooks/useProjects'
+import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
 import { useTasks, useUpdateTask } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
+import { type Label } from '@/lib/labels'
 import { type CustomFieldDefinition, type CustomFieldValue } from '@/lib/customFields'
 import { type Project, type ProjectRole, type Section } from '@/lib/projects'
 import {
@@ -104,11 +107,13 @@ function ProjectHeader({
   project,
   onArchive,
   onOpenFields,
+  onOpenLabels,
   onOpenShare,
 }: {
   project: Project
   onArchive: () => void
   onOpenFields: () => void
+  onOpenLabels: () => void
   onOpenShare: () => void
 }) {
   const isArchived = !!project.archived_at
@@ -169,6 +174,15 @@ function ProjectHeader({
               >
                 <Settings2 className="h-3.5 w-3.5" />
                 Поля
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={onOpenLabels}
+                aria-label="Метки проекта"
+              >
+                <Tags className="h-3.5 w-3.5" />
+                Метки
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -283,6 +297,7 @@ function SectionBlock({
   visibleFields,
   valuesByTask,
   childrenByParent,
+  labelsByTask,
 }: {
   section: Section | null
   projectId: string
@@ -293,6 +308,7 @@ function SectionBlock({
   visibleFields: CustomFieldDefinition[]
   valuesByTask: Map<string, Map<string, CustomFieldValue>>
   childrenByParent?: Map<string, { total: number; done: number }>
+  labelsByTask?: Map<string, Label[]>
 }) {
   const [collapsed, setCollapsed] = useState(false)
   const [renaming, setRenaming] = useState(false)
@@ -397,6 +413,7 @@ function SectionBlock({
                 key={t.id}
                 task={t}
                 subtasks={childrenByParent?.get(t.id)}
+                labels={labelsByTask?.get(t.id)}
                 onClick={() => onTaskClick(t.id)}
                 onToggleDone={() =>
                   update.mutate({
@@ -471,6 +488,21 @@ function ListTab({
     }
     return m
   }, [tasks.data])
+
+  const labels = useLabels(projectId)
+  const labelAssignments = useLabelAssignments(projectId)
+  const labelsByTask = useMemo(() => {
+    const byId = new Map((labels.data ?? []).map((l) => [l.id, l]))
+    const m = new Map<string, Label[]>()
+    for (const a of labelAssignments.data ?? []) {
+      const l = byId.get(a.label_id)
+      if (!l) continue
+      const list = m.get(a.task_id) ?? []
+      list.push(l)
+      m.set(a.task_id, list)
+    }
+    return m
+  }, [labels.data, labelAssignments.data])
 
   // Definitions filtered + ordered by user's visibility config.
   const visibleFields = useMemo(() => {
@@ -551,6 +583,7 @@ function ListTab({
           visibleFields={visibleFields}
           valuesByTask={valuesByTask}
           childrenByParent={childrenByParent}
+          labelsByTask={labelsByTask}
         />
       )}
 
@@ -566,6 +599,7 @@ function ListTab({
           visibleFields={visibleFields}
           valuesByTask={valuesByTask}
           childrenByParent={childrenByParent}
+          labelsByTask={labelsByTask}
         />
       ))}
 
@@ -618,6 +652,7 @@ export function ProjectPage() {
   const archive = useArchiveProject(id ?? '')
   const [tab, setTab] = useState<TabKey>('list')
   const [fieldsOpen, setFieldsOpen] = useState(false)
+  const [labelsOpen, setLabelsOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
 
   const selectedTaskId = searchParams.get('task')
@@ -671,6 +706,7 @@ export function ProjectPage() {
           }
         }}
         onOpenFields={() => setFieldsOpen(true)}
+        onOpenLabels={() => setLabelsOpen(true)}
         onOpenShare={() => setShareOpen(true)}
       />
 
@@ -679,7 +715,12 @@ export function ProjectPage() {
       {tab === 'list' && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-            <TaskFilterBar value={filters} onChange={setFilters} showSort />
+            <TaskFilterBar
+              projectId={id}
+              value={filters}
+              onChange={setFilters}
+              showSort
+            />
             <ColumnsMenu projectId={id} />
           </div>
           <ListTab
@@ -692,7 +733,7 @@ export function ProjectPage() {
       )}
       {tab === 'board' && (
         <div className="space-y-3">
-          <TaskFilterBar value={filters} onChange={setFilters} />
+          <TaskFilterBar projectId={id} value={filters} onChange={setFilters} />
           <BoardView
             projectId={id}
             myRole={p.my_role}
@@ -703,7 +744,12 @@ export function ProjectPage() {
       )}
       {tab === 'calendar' && (
         <div className="space-y-3">
-          <TaskFilterBar value={filters} onChange={setFilters} />
+          <TaskFilterBar
+            projectId={id}
+            value={filters}
+            onChange={setFilters}
+            showLabel={false}
+          />
           <CalendarView projectId={id} onTaskClick={openTask} filters={filters} />
         </div>
       )}
@@ -741,6 +787,8 @@ export function ProjectPage() {
         open={fieldsOpen}
         onOpenChange={setFieldsOpen}
       />
+
+      <LabelsManager projectId={id} open={labelsOpen} onOpenChange={setLabelsOpen} />
 
       <ShareDialog
         scope="project"

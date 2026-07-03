@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/Badge'
 import { cn } from '@/lib/cn'
 import { type CustomFieldDefinition, type CustomFieldValue } from '@/lib/customFields'
 import { formatCustomFieldValue } from '@/lib/formatCustomField'
+import { type Label } from '@/lib/labels'
 import {
   PRIORITY_LABEL,
   STATUS_LABEL,
@@ -30,6 +31,7 @@ const STATUS_TONE: Record<TaskStatus, string> = {
 interface TaskRowProps {
   task: Task
   subtasks?: SubtaskStats
+  labels?: Label[]
   onClick?: () => void
   onToggleDone?: () => void
   /** Custom field definitions to render as trailing columns, in display order. */
@@ -49,6 +51,7 @@ interface TaskRowProps {
 export function TaskRow({
   task,
   subtasks,
+  labels,
   onClick,
   onToggleDone,
   visibleFields = [],
@@ -111,6 +114,25 @@ export function TaskRow({
             title={`Подзадачи: ${subtasks.done} из ${subtasks.total} готово`}
           >
             <ListTree className="h-3 w-3" /> {subtasks.done}/{subtasks.total}
+          </span>
+        )}
+        {labels?.slice(0, 3).map((l) => (
+          <span
+            key={l.id}
+            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-glass-border px-1.5 text-[10px] text-text2"
+            title={l.name}
+          >
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: l.color }}
+              aria-hidden
+            />
+            {l.name}
+          </span>
+        ))}
+        {labels && labels.length > 3 && (
+          <span className="shrink-0 text-[10px] text-text3">
+            +{labels.length - 3}
           </span>
         )}
       </div>

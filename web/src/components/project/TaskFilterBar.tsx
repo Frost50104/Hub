@@ -2,6 +2,7 @@ import { X } from 'lucide-react'
 
 import { PeoplePicker } from '@/components/PeoplePicker'
 import { Button } from '@/components/ui/Button'
+import { useLabels } from '@/hooks/useLabels'
 import {
   activeFilterCount,
   type DuePreset,
@@ -33,13 +34,23 @@ const SELECT_CLASS =
   'h-8 rounded-md border border-glass-border bg-glass px-2 text-xs text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60'
 
 interface TaskFilterBarProps {
+  projectId: string
   value: TaskViewFilters
   onChange: (next: TaskViewFilters) => void
   /** Селект сортировки показывается только там, где он имеет смысл (List). */
   showSort?: boolean
+  /** Календарь не умеет фильтр по метке на бэке. */
+  showLabel?: boolean
 }
 
-export function TaskFilterBar({ value, onChange, showSort }: TaskFilterBarProps) {
+export function TaskFilterBar({
+  projectId,
+  value,
+  onChange,
+  showSort,
+  showLabel = true,
+}: TaskFilterBarProps) {
+  const labels = useLabels(projectId)
   const count = activeFilterCount(value)
   const set = (patch: Partial<TaskViewFilters>) => onChange({ ...value, ...patch })
 
@@ -86,6 +97,22 @@ export function TaskFilterBar({ value, onChange, showSort }: TaskFilterBarProps)
           </option>
         ))}
       </select>
+
+      {showLabel && (labels.data?.length ?? 0) > 0 && (
+        <select
+          value={value.label ?? ''}
+          onChange={(e) => set({ label: e.target.value || undefined })}
+          aria-label="Фильтр по метке"
+          className={SELECT_CLASS}
+        >
+          <option value="">Метка: любая</option>
+          {labels.data?.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.name}
+            </option>
+          ))}
+        </select>
+      )}
 
       <select
         value={value.due ?? ''}

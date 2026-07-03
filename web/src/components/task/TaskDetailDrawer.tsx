@@ -8,6 +8,7 @@ import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
 import { SubtaskList } from '@/components/task/SubtaskList'
 import { TaskAttachments } from '@/components/task/TaskAttachments'
+import { TaskLabels } from '@/components/task/TaskLabels'
 import { TaskCustomFields } from '@/components/task/TaskCustomFields'
 import { TaskDependencies } from '@/components/task/TaskDependencies'
 import { TaskThread } from '@/components/task/TaskThread'
@@ -297,6 +298,12 @@ export function TaskDetailDrawer({
                   placeholder="Что нужно сделать?"
                 />
               </div>
+
+              <TaskLabels
+                taskId={task.id}
+                projectId={projectId}
+                canEdit={!readOnly}
+              />
 
               {!task.parent_task_id && (
                 <SubtaskList
