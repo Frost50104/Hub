@@ -4,14 +4,13 @@
 
 ## Открытое
 
-- **Множественные uvicorn-воркеры опрашивают deletion-sync N раз.** В MVP крутим `--workers 1`. При масштабировании — Redis leader-election (см. `INTEGRATION.md` шаг 14, шаблон `try_acquire_lock`).
+- **`--workers > 1` заблокирован sid-sync'ом.** Deletion-sync к мульти-воркеру готов (супервизор + Redis leader-lock в `app/services/worker_supervisor.py`, этап 4), но revoked-sid store у sid-sync живёт в памяти процесса: не-лидер не узнаёт о ревокациях, а per-process запуск гоняет общий DB-курсор. Для масштабирования нужен Redis-backed revoked-store. Пока `--workers 1`.
 - **VAPID-ключ единый для prod+staging.** Удобно (как у Desk), но если staging-баг утечёт public key, теоретически prod-подписки можно подделать. Низкая вероятность. Раздельные ключи — future work.
-- **LexoRank-style `tasks.position NUMERIC`** может «насыщаться» при многих DnD-миграциях карточек. При дельте <0.001 — фоновый rebalance колонки в PATCH-хендлере (реализуется в MVP.3).
+- **LexoRank-style `tasks.position NUMERIC`** может «насыщаться» при многих DnD-миграциях карточек. Фоновый rebalance колонки так и НЕ реализован (заглушка в `app/api/tasks.py`); при дельте <0.001 порядок может «слипнуться».
 - **Подзадачи только 1 уровень** (`parent_task_id` CHECK depth=1). Глубже потребует tree-CTE в запросах и отдельной миграции.
 - **Email-коллизии между tenant'ами в `shadow_users`** — для пустого старта Hub проблемы нет; если когда-то будем мигрировать данные, нужен pre-migration report (см. `INTEGRATION.md` шаг 12).
-- **Sentry не подключён.** Backend SDK инициализируется только если `SIGNARIS_HUB_SENTRY_DSN` задан в `.env` — сейчас пусто, прод-баги уходят в `journalctl -u signaris-hub`. Frontend SDK (`@sentry/react` + Replay) ставится на старте через `lib/sentry.ts::initSentry` если `/api/env` отдал DSN — тоже не вызывается. **Решено отложить в финал.** Реальные варианты на нашем VPS (2 CPU / 2 GB RAM): (a) Sentry.io free tier — 5k events/мес, нужна регистрация; (b) GlitchTip self-hosted (Sentry-API-совместимый, Django+Postgres+Redis+Celery, ~500-800 MB RAM, влезает на наш VPS); (c) апгрейд VPS до 16 GB RAM под официальный Sentry self-hosted (15 контейнеров, Kafka+ClickHouse). По умолчанию приоритет — GlitchTip на `sentry.signaris.ru`.
-- **nginx `add_header` gotcha + Referrer-Policy для `/p/`.** Server-level security headers молча отменяются first `add_header` в location — обошли через include-snippet `hub-security-headers.conf`. Для `/p/{token}` запросов `try_files /index.html` делает internal-redirect в `location = /index.html` и хeders идут оттуда (Referrer-Policy = `strict-origin-when-cross-origin` вместо желаемого `no-referrer`). Компенсировано per-page `<meta name="referrer" content="no-referrer">` в `PublicViewPage.tsx`. Серверный override — named location или копия `index.html` под другим именем под /p/ root.
-- **Healthcheck email alerts требуют MTA на VPS.** `scripts/healthcheck.sh` шлёт `mail -s ... $HEALTHCHECK_ALERT_EMAIL`, но `mail(1)` не установлен. Чтобы включить: `apt install mailutils` + конфиг postfix/ssmtp. Сейчас alerts пишутся только в `journalctl` (`logger -t signaris-hub-health`).
+- **Sentry не подключён (DSN нет), проводка полностью готова.** Backend инициализируется при `SIGNARIS_HUB_SENTRY_DSN` в `.env` (deploy.sh с этапа 4 ставит extras `[sentry]`), frontend вызывает `initSentry` при DSN из `/api/env`. Включение = прописать DSN в оба `/opt/*/.env` + restart. Варианты на нашем VPS (2 CPU / 2 GB RAM): (a) Sentry.io free tier — 5k events/мес; (b) GlitchTip self-hosted (~500-800 MB RAM); (c) апгрейд VPS под официальный Sentry. По умолчанию приоритет — GlitchTip на `sentry.signaris.ru`.
+- **Healthcheck email-канал требует MTA на VPS** (`mail(1)` не установлен: `apt install mailutils` + postfix/ssmtp). С этапа 4 есть Telegram-канал (`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` в `/etc/default/signaris-hub-healthcheck`) — токен бота ещё не прописан. До настройки любого канала алерты видны только в `journalctl` (`logger -t signaris-hub-health`).
 - **S3 offsite backup** — флаг `BACKUP_S3_BUCKET` поддерживается в `scripts/backup-pg.sh`, но aws-cli не установлен и креды не настроены. При потере VPS-диска восстановление невозможно без offsite-копии. Минимум — настроить snapshot у VPS-провайдера.
 
 ## Упрощения MVP
@@ -26,17 +25,20 @@
 
 **Закрыто в Phase 4.1..4.9** (вынесено из backlog): Timeline/Gantt + task dependencies (4.3); Reports/Dashboard на recharts (4.6); FTS по комментам + `ts_headline` highlight + Cmd+K + comment-section в project public view (4.1.2); viewConfig + custom-fields-колонки в List view + UI rename + drag-to-reorder definitions (4.1.1); server-side `Referrer-Policy: no-referrer` для `/p/` (3.6.12, nginx per-route — см. `ops/nginx/hub.signaris.ru.conf`).
 
+**Закрыто в этапах 1-2 плана коммерциализации (2026-07-03, staging):** assignee-пикер + null-семантика PATCH; управление участниками в UI; фильтры (assignee/status/priority/label/due) + сортировка в List/Board/Calendar с состоянием в URL; подзадачи в UI; labels end-to-end (+RLS-фикс `task_label_assignments`, миграция 0011); избранные проекты (0012); rename секций; глобальный onError мутаций + QueryError; optimistic updates + undo; markdown в описании/комментах; скелетоны; My Tasks группы по срокам; route code-splitting (бандл 961→688 KB); Telegram-канал healthcheck; аватары-фото отложены (auth не отдаёт avatar_url).
+
 Осталось открытым:
 
 - **Guests** — email-приглашения внешних пользователей с view/comment-доступом к конкретному проекту. Блокер: нужна фича в `auth.signaris.ru` (новый scope `hub:guest`, JWT-claim `is_guest`, tenant_id хоста для гостя).
 - **Saved searches** — сохранить DSL-запрос как «фильтр» / smart-list. Лёгкая надстройка над 3.6.11.
-- **CF-фильтры в `GET /tasks?cf_<field_id>=<value>`** — server-side JSONB filters через GIN-индекс. Backend готов, добавить query-param parser.
+- **CF-фильтры в `GET /tasks?cf_<field_id>=<value>`** — server-side JSONB filters через GIN-индекс (базовые фильтры priority/due/label/sort добавлены в этапе 1; кастом-поля — нет).
 - **Time tracking** — оценка/факт по задаче.
 - **Email-уведомления fallback** — когда push не работает (не PWA, не Chrome, не разрешил). Через SMTP в `app/services/push_sender.py`.
-- **i18n** — сейчас русский hard-coded. UPPETIT — RU-only, но multi-tenant в будущем потребует.
+- **i18n** — сейчас русский hard-coded (англ. утечки enum'ов вычищены в этапе 2). UPPETIT — RU-only, но multi-tenant в будущем потребует.
 - **Audit log на admin-действия** — кто добавил/удалил project_member, кто архивировал проект, кто отозвал public link. Расширить `task_activity` или новую `admin_audit_log`.
 - **Кастом-статусы задач / Workflow-automation rules** — Asana-эквивалент (при изменении статуса → action). Большой scope.
-- **Offsite backup (S3/restic)** — локальный backup покрывает 95%; offsite-флаг `BACKUP_S3_BUCKET` есть, полноценно — когда БД large либо compliance.
+- **Offsite backup (S3/restic)** — локальный backup покрывает 95% (плюс pre-migration снапшоты deploy.sh с этапа 4); offsite-флаг `BACKUP_S3_BUCKET` есть, нужен бакет+креды. Минимум — snapshot у VPS-провайдера.
+- **Импорт из Asana НЕ планируется** — решение 2026-07-03: переноса данных из Asana не будет, CSV-импорт снят с roadmap.
 
 ## Решённое в MVP
 

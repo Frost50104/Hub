@@ -30,13 +30,20 @@
 - `sections` (project_id, name, position)
 
 ### Задачи
-- `tasks` (project_id, section_id, parent_task_id, title, description markdown, status: `todo` | `in_progress` | `in_review` | `done`, priority: `low` | `medium` | `high` | `urgent`, assignee_id, due_at, position NUMERIC)
-  - Подзадачи только 1 уровень — CHECK `parent_task_id IS NULL OR (SELECT parent_task_id FROM tasks t2 WHERE t2.id = parent_task_id) IS NULL`
+- `tasks` (project_id, section_id, parent_task_id, title, description markdown, status: `todo` | `in_progress` | `in_review` | `done`, priority: `low` | `medium` | `high` | `urgent`, assignee_id, start_at, due_at, position NUMERIC, search_vector tsvector)
+  - Подзадачи только 1 уровень — CHECK `parent_task_id IS NULL OR (SELECT parent_task_id FROM tasks t2 WHERE t2.id = parent_task_id) IS NULL`; UI — секция в карточке (SubtaskList), в топ-уровне List/Board не показываются
 - `task_watchers` — auto-добавление: assignee + creator + mentioned
 - `task_comments` (markdown, `mentioned_ids UUID[]`)
-- `task_labels`, `task_label_assignments`
-- `task_attachments` (whitelist mime, 20 MB)
+- `task_labels` (name, color) + `task_label_assignments` (с tenant_id и RLS с миграции 0011); API `app/api/labels.py`, чипы в List/Board/drawer, фильтр
+- `task_attachments` (whitelist mime без SVG, 20 MB)
 - `task_activity` (append-only event log)
+- `task_dependencies` (predecessor/successor, finish-to-start, BFS cycle-check `app/services/dependency_cycle.py`, миграция 0010) — стрелки на Timeline
+- `custom_field_definitions` + `task_custom_field_values` (7 типов, миграция 0007) — колонки List, агрегаты Dashboard
+- `public_share_tokens` (scope task|project, БЕЗ RLS — cross-tenant lookup по токену, миграция 0009) — view-only `/p/{token}`
+- `project_members.is_favorite` (миграция 0012) — личное избранное, секция в Sidebar
+
+### Представления проекта
+Список / Доска / Календарь (`app/api/calendar.py`) / Хронология (`app/api/timeline.py`) / Дашборд (`app/api/stats.py`, recharts lazy-chunk) / Участники. Фильтры (assignee/status/priority/label/due) + сортировка списка — состояние в URL searchParams; Board всегда в position-порядке. Полнотекстовый поиск: `app/api/search.py` + DSL `app/services/search_dsl.py` (0008: pg_trgm, tsvector). Мутации задач оптимистичные (rollback из снапшота, `useUpdateTask`), complete/archive — с undo-тостом.
 
 ### Уведомления
 - `push_subscriptions` (employee_id, endpoint UNIQUE, p256dh, auth, user_agent)
@@ -63,7 +70,7 @@
 
 - **Тёмная** — буквальный порт CSS-переменных из `IT_startup/index.html:18-30` (амбер `#FFB200`, фон `#08080E`, glass-эффект).
 - **Светлая** — спроектирована с нуля. Палитра согласована на границе Hub-MVP.1.
-- Переключатель System/Light/Dark в Topbar (`web/src/components/layout/ThemeToggle.tsx`). Default — `prefers-color-scheme`.
+- Переключатель Светлая/Тёмная — в Настройках → «Оформление» (`web/src/components/ThemeToggle.tsx`). Default — тёмная, `data-theme` на `<html>` всегда явный (режима System нет). Палитра recharts на дашборде читается из CSS-токенов при смене темы.
 
 ## Безопасность
 

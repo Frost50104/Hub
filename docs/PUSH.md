@@ -12,7 +12,7 @@
 
 1. При первом логине в PWA — **не auto-prompt**. Кнопка «Включить уведомления» в Settings или баннер `PushPermissionPrompt` после логина (только при `Notification.permission === 'default'`).
 2. `usePush().subscribe()` — `Notification.requestPermission()` → `pushManager.subscribe({userVisibleOnly: true, applicationServerKey: <vapid_public_key>})`.
-3. `POST /api/notifications/subscribe` — `{endpoint, keys: {p256dh, auth}}`. Backend делает UPSERT по `endpoint` (`ON CONFLICT (endpoint) DO UPDATE SET employee_id=EXCLUDED.employee_id, last_seen_at=NOW()`).
+3. `POST /api/push/subscribe` — `{endpoint, keys: {p256dh, auth}}`. Backend делает UPSERT по `endpoint` (`ON CONFLICT (endpoint) DO UPDATE SET employee_id=EXCLUDED.employee_id, last_seen_at=NOW()`).
 
 ## Триггеры (MVP)
 
@@ -50,7 +50,7 @@
 
 - `GET /api/notifications?unread_only=&limit=&before=` — keyset-пагинация.
 - `POST /api/notifications/{id}/read` + `POST /api/notifications/read-all`.
-- `GET /api/notifications/unread-count` — для счётчика в Topbar.
+- `GET /api/notifications/unread-count` — бейдж «Входящие» (Sidebar на десктопе, нижний tab bar на мобиле).
 
 ## iOS особенности
 
