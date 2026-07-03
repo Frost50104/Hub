@@ -149,9 +149,12 @@ if [[ -d "$REPO_ROOT/ops/systemd" ]]; then
   systemctl enable --now signaris-hub-healthcheck.timer
 fi
 
-echo "==> nginx site configs"
+echo "==> nginx configs (sites + security-headers snippet + gzip/rate-limit tuning)"
 if [[ -d "$REPO_ROOT/ops/nginx" ]]; then
-  cp "$REPO_ROOT/ops/nginx/"*.conf /etc/nginx/sites-available/
+  install -m 644 "$REPO_ROOT/ops/nginx/hub.signaris.ru.conf"         /etc/nginx/sites-available/
+  install -m 644 "$REPO_ROOT/ops/nginx/hub-staging.signaris.ru.conf" /etc/nginx/sites-available/
+  install -m 644 "$REPO_ROOT/ops/nginx/hub-security-headers.conf"    /etc/nginx/snippets/
+  install -m 644 "$REPO_ROOT/ops/nginx/hub-tuning.conf"              /etc/nginx/conf.d/
   ln -sf /etc/nginx/sites-available/hub.signaris.ru.conf         /etc/nginx/sites-enabled/
   ln -sf /etc/nginx/sites-available/hub-staging.signaris.ru.conf /etc/nginx/sites-enabled/
   rm -f /etc/nginx/sites-enabled/default
