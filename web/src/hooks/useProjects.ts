@@ -85,6 +85,15 @@ export function useArchiveProject(id: string) {
   })
 }
 
+export function useSetFavorite(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (isFavorite: boolean) => projectsApi.setFavorite(projectId, isFavorite),
+    meta: { errorMessage: 'Не удалось обновить избранное' },
+    onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.all }),
+  })
+}
+
 export function useAddMember(projectId: string) {
   const qc = useQueryClient()
   return useMutation({

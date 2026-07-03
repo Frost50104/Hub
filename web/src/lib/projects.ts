@@ -12,6 +12,8 @@ export interface Project {
   created_at: string
   updated_at: string
   my_role: ProjectRole | null
+  /** Личное избранное текущего пользователя. */
+  is_favorite: boolean
 }
 
 export interface ProjectMember {
@@ -58,6 +60,10 @@ export const projectsApi = {
     api.post<Project>(`/projects/${id}/archive`).then((r) => r.data),
   unarchive: (id: string): Promise<Project> =>
     api.post<Project>(`/projects/${id}/unarchive`).then((r) => r.data),
+  setFavorite: (id: string, isFavorite: boolean): Promise<Project> =>
+    api
+      .put<Project>(`/projects/${id}/favorite`, { is_favorite: isFavorite })
+      .then((r) => r.data),
 }
 
 export const membersApi = {

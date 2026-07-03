@@ -9,6 +9,7 @@ import {
   LogOut,
   Plus,
   Settings,
+  Star,
 } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink, Link, useNavigate } from 'react-router-dom'
@@ -78,35 +79,62 @@ function ProjectsList({ onItemClick }: { onItemClick?: () => void }) {
   if (!data || data.length === 0) {
     return <p className="px-3 py-1 text-xs text-text3">Нет проектов</p>
   }
+  const favorites = data.filter((p) => p.is_favorite)
   return (
-    <ul className="space-y-0.5">
-      {data.map((p) => (
-        <li key={p.id}>
-          <NavLink
-            to={`/projects/${p.id}`}
-            onClick={onItemClick}
-            className={({ isActive }) =>
-              cn(
-                'group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
-                isActive
-                  ? 'bg-surface text-text'
-                  : 'text-text2 hover:bg-glass hover:text-text',
-              )
-            }
-          >
-            <span
-              className={cn(
-                'flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] font-semibold uppercase',
-                projectColorFor(p),
-              )}
-            >
-              {p.key.slice(0, 2)}
-            </span>
-            <span className="truncate">{p.name}</span>
-          </NavLink>
-        </li>
-      ))}
-    </ul>
+    <>
+      {favorites.length > 0 && (
+        <>
+          <p className="flex items-center gap-1 px-2 pb-0.5 text-[11px] font-semibold uppercase tracking-wider text-text3">
+            <Star className="h-3 w-3 fill-amber text-amber" /> Избранное
+          </p>
+          <ul className="space-y-0.5 pb-2">
+            {favorites.map((p) => (
+              <ProjectLinkItem key={p.id} project={p} onItemClick={onItemClick} />
+            ))}
+          </ul>
+        </>
+      )}
+      <ul className="space-y-0.5">
+        {data.map((p) => (
+          <ProjectLinkItem key={p.id} project={p} onItemClick={onItemClick} />
+        ))}
+      </ul>
+    </>
+  )
+}
+
+function ProjectLinkItem({
+  project,
+  onItemClick,
+}: {
+  project: Project
+  onItemClick?: () => void
+}) {
+  return (
+    <li>
+      <NavLink
+        to={`/projects/${project.id}`}
+        onClick={onItemClick}
+        className={({ isActive }) =>
+          cn(
+            'group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
+            isActive
+              ? 'bg-surface text-text'
+              : 'text-text2 hover:bg-glass hover:text-text',
+          )
+        }
+      >
+        <span
+          className={cn(
+            'flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] font-semibold uppercase',
+            projectColorFor(project),
+          )}
+        >
+          {project.key.slice(0, 2)}
+        </span>
+        <span className="truncate">{project.name}</span>
+      </NavLink>
+    </li>
   )
 }
 

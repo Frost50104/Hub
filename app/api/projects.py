@@ -15,6 +15,7 @@ from app.models.project import Project, ProjectMember
 from app.models.shadow import ShadowUser
 from app.schemas.project import (
     ProjectCreate,
+    ProjectFavoriteUpdate,
     ProjectMemberAdd,
     ProjectMemberResponse,
     ProjectMemberUpdate,
@@ -24,7 +25,6 @@ from app.schemas.project import (
 from app.services.project_access import (
     can_create_project,
     fetch_project_or_404,
-    get_my_role,
     is_hub_admin,
     require_project_role,
 )
@@ -33,7 +33,9 @@ from app.services.project_key import generate_unique_key
 router = APIRouter(tags=["projects"])
 
 
-def _project_to_response(project: Project, my_role: str | None) -> ProjectResponse:
+def _project_to_response(
+    project: Project, my_role: str | None, is_favorite: bool = False
+) -> ProjectResponse:
     return ProjectResponse(
         id=project.id,
         key=project.key,
@@ -44,7 +46,25 @@ def _project_to_response(project: Project, my_role: str | None) -> ProjectRespon
         created_at=project.created_at,
         updated_at=project.updated_at,
         my_role=my_role,  # type: ignore[arg-type]
+        is_favorite=is_favorite,
     )
+
+
+async def _my_membership(
+    db: AsyncSession, project_id: UUID, employee_id: UUID
+) -> tuple[str | None, bool]:
+    """(role, is_favorite) текущего пользователя; (None, False) вне членства."""
+    row = (
+        await db.execute(
+            select(ProjectMember.role, ProjectMember.is_favorite).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.employee_id == employee_id,
+            )
+        )
+    ).first()
+    if row is None:
+        return None, False
+    return row.role, row.is_favorite
 
 
 @router.get("/projects", response_model=list[ProjectResponse])
@@ -60,28 +80,35 @@ async def list_projects(
         if not include_archived:
             stmt = stmt.where(Project.archived_at.is_(None))
         rows = (await db.execute(stmt.order_by(Project.created_at.desc()))).scalars().all()
-        # Bulk-load my_role for these projects so admin still sees their role.
+        # Bulk-load my_role + is_favorite so admin still sees their state.
         if rows:
             roles_q = await db.execute(
-                select(ProjectMember.project_id, ProjectMember.role).where(
+                select(
+                    ProjectMember.project_id,
+                    ProjectMember.role,
+                    ProjectMember.is_favorite,
+                ).where(
                     ProjectMember.employee_id == principal.employee_id,
                     ProjectMember.project_id.in_([p.id for p in rows]),
                 )
             )
-            role_map = dict(roles_q.all())
+            member_map = {pid: (role, fav) for pid, role, fav in roles_q.all()}
         else:
-            role_map = {}
-        return [_project_to_response(p, role_map.get(p.id)) for p in rows]
+            member_map = {}
+        return [
+            _project_to_response(p, *member_map.get(p.id, (None, False)))
+            for p in rows
+        ]
 
     stmt = (
-        select(Project, ProjectMember.role)
+        select(Project, ProjectMember.role, ProjectMember.is_favorite)
         .join(ProjectMember, ProjectMember.project_id == Project.id)
         .where(ProjectMember.employee_id == principal.employee_id)
     )
     if not include_archived:
         stmt = stmt.where(Project.archived_at.is_(None))
     rows = (await db.execute(stmt.order_by(Project.created_at.desc()))).all()
-    return [_project_to_response(p, role) for (p, role) in rows]
+    return [_project_to_response(p, role, fav) for (p, role, fav) in rows]
 
 
 @router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
@@ -146,9 +173,38 @@ async def get_project(
     db: AsyncSession = Depends(get_db),
 ) -> ProjectResponse:
     project, my_role = await require_project_role(db, project_id, principal)
-    if my_role is None:
-        my_role = await get_my_role(db, project_id, principal.employee_id)
-    return _project_to_response(project, my_role)
+    member_role, is_favorite = await _my_membership(
+        db, project_id, principal.employee_id
+    )
+    return _project_to_response(project, my_role or member_role, is_favorite)
+
+
+@router.put("/projects/{project_id}/favorite", response_model=ProjectResponse)
+async def set_favorite(
+    project_id: UUID,
+    body: ProjectFavoriteUpdate,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> ProjectResponse:
+    """Личное избранное: любой участник переключает флаг на СВОЁМ членстве."""
+    project, _ = await require_project_role(db, project_id, principal)
+    member = (
+        await db.execute(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.employee_id == principal.employee_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if member is None:
+        # hub:admin вне членства — избранное вешать не на что.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Избранное доступно только участникам проекта",
+        )
+    member.is_favorite = body.is_favorite
+    await db.commit()
+    return _project_to_response(project, member.role, member.is_favorite)
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)

@@ -48,6 +48,7 @@ import {
   useDeleteSection,
   useProject,
   useProjectSections,
+  useSetFavorite,
   useUpdateSection,
 } from '@/hooks/useProjects'
 import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
@@ -118,6 +119,7 @@ function ProjectHeader({
 }) {
   const isArchived = !!project.archived_at
   const myRole = project.my_role
+  const setFavorite = useSetFavorite(project.id)
   return (
     <div className="flex items-start justify-between gap-4 px-1">
       <div className="flex min-w-0 items-center gap-3">
@@ -132,14 +134,25 @@ function ProjectHeader({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="truncate font-display text-2xl font-semibold">{project.name}</h1>
-            <button
-              type="button"
-              className="text-text3 hover:text-amber"
-              aria-label="В избранное (скоро)"
-              title="В избранное (скоро)"
-            >
-              <Star className="h-4 w-4" />
-            </button>
+            {myRole && (
+              <button
+                type="button"
+                onClick={() => setFavorite.mutate(!project.is_favorite)}
+                disabled={setFavorite.isPending}
+                className={cn(
+                  'hover:text-amber',
+                  project.is_favorite ? 'text-amber' : 'text-text3',
+                )}
+                aria-label={
+                  project.is_favorite ? 'Убрать из избранного' : 'В избранное'
+                }
+                title={project.is_favorite ? 'Убрать из избранного' : 'В избранное'}
+              >
+                <Star
+                  className={cn('h-4 w-4', project.is_favorite && 'fill-amber')}
+                />
+              </button>
+            )}
             <Badge variant="outline">{project.key}</Badge>
             {isArchived && <Badge variant="secondary">архив</Badge>}
             {myRole && <Badge variant="default">{myRole}</Badge>}

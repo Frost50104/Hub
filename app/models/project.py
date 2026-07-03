@@ -15,6 +15,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -83,6 +84,10 @@ class ProjectMember(Base):
         nullable=False,
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Личное избранное участника — не общий атрибут проекта.
+    is_favorite: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), nullable=False
     )

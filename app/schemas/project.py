@@ -39,6 +39,11 @@ class ProjectResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     my_role: ProjectRole | None = None  # filled from project_members for current principal
+    is_favorite: bool = False  # личное избранное текущего пользователя
+
+
+class ProjectFavoriteUpdate(BaseModel):
+    is_favorite: bool
 
 
 class ProjectMemberAdd(BaseModel):
