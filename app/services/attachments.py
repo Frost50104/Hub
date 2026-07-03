@@ -18,12 +18,12 @@ from app.config import get_settings
 # A small but permissive MIME whitelist. Anything else → 415.
 ALLOWED_MIME: frozenset[str] = frozenset(
     {
-        # Images
+        # Images. SVG намеренно исключён: это XML с поддержкой <script> —
+        # stored-XSS вектор при любом inline-рендере.
         "image/png",
         "image/jpeg",
         "image/webp",
         "image/gif",
-        "image/svg+xml",
         # Documents
         "application/pdf",
         "application/zip",

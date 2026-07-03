@@ -11,7 +11,7 @@ from signaris_auth import Principal
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_db, require_auth_any
+from app.deps import get_db, require_auth
 from app.models.shadow import ShadowUser
 from app.schemas.tenant import TenantMemberBrief
 
@@ -22,7 +22,9 @@ router = APIRouter(tags=["tenant"])
 async def list_tenant_members(
     q: str | None = Query(default=None, max_length=128),
     limit: int = Query(default=10, ge=1, le=50),
-    _principal: Principal = Depends(require_auth_any()),
+    # Справочник сотрудников (email, ФИО) — только пользователям Hub,
+    # а не любому валидному Signaris-JWT.
+    _principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> list[TenantMemberBrief]:
     stmt = (

@@ -17,6 +17,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 log = structlog.get_logger("rate_limit")
 
 
+def _notify_sentry(exc: Exception) -> None:
+    """Best-effort: fail-open лимитов — событие для он-колла, не просто лог."""
+    try:
+        import sentry_sdk
+
+        sentry_sdk.capture_exception(exc)
+    except Exception:  # noqa: BLE001 — sentry опционален (extras [sentry])
+        pass
+
+
 class RateLimitExceeded(Exception):
     def __init__(self, key: str, limit: int, window_sec: int):
         self.key = key
@@ -45,6 +55,10 @@ async def check_and_increment(
             return await _db_check_and_increment(
                 session, key=full_key, limit=limit, window_sec=window_sec
             )
+        # Fail-open осознанно (fail-closed запер бы всех при флапе Redis),
+        # но это деградация защиты — эскалируем в error-лог и Sentry.
+        log.error("rate_limit.fail_open", key=key, err=str(e))
+        _notify_sentry(e)
         return 0  # fail-open
 
     if count > limit:
