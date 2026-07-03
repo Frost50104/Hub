@@ -1,5 +1,7 @@
+import { Suspense } from 'react'
 import { Outlet } from 'react-router-dom'
 
+import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 
 import { MobileBottomTabBar } from './MobileBottomTabBar'
@@ -28,7 +30,10 @@ export function Shell() {
             : undefined
         }
       >
-        <Outlet />
+        {/* Suspense внутри Shell: при загрузке lazy-страницы layout не мигает. */}
+        <Suspense fallback={<SkeletonRows rows={6} className="p-6" />}>
+          <Outlet />
+        </Suspense>
       </main>
       {!isDesktop && <MobileBottomTabBar />}
     </div>
