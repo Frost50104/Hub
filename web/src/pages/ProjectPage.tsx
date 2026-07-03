@@ -14,6 +14,7 @@ import { BoardView } from '@/components/kanban/BoardView'
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { ColumnsMenu } from '@/components/project/ColumnsMenu'
 import { CustomFieldsManager } from '@/components/project/CustomFieldsManager'
+import { MembersTab } from '@/components/project/MembersTab'
 import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
 import { TaskDetailDrawer } from '@/components/task/TaskDetailDrawer'
@@ -25,7 +26,6 @@ import {
   BottomSheet,
   BottomSheetItem,
 } from '@/components/ui/BottomSheet'
-import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import {
@@ -45,7 +45,6 @@ import {
   useCreateSection,
   useDeleteSection,
   useProject,
-  useProjectMembers,
   useProjectSections,
 } from '@/hooks/useProjects'
 import { useTasks, useUpdateTask } from '@/hooks/useTasks'
@@ -533,38 +532,6 @@ function ListTab({
   )
 }
 
-function MembersTab({ projectId }: { projectId: string }) {
-  const members = useProjectMembers(projectId)
-  return (
-    <div className="space-y-2">
-      {members.isLoading && <p className="text-text2">Загружаем участников…</p>}
-      {members.error && (
-        <p className="text-red">Ошибка: {(members.error as Error).message}</p>
-      )}
-      {members.data && members.data.length === 0 && (
-        <p className="text-text2">Пока нет участников.</p>
-      )}
-      {members.data?.map((m) => (
-        <div key={m.id} className="glass flex items-center justify-between p-3">
-          <div className="flex items-center gap-3">
-            <Avatar name={m.full_name} email={m.email} />
-            <div>
-              <p className="text-sm font-medium text-text">
-                {m.full_name || m.email || m.employee_id}
-              </p>
-              {m.email && <p className="text-xs text-text3">{m.email}</p>}
-            </div>
-          </div>
-          <Badge variant={m.role === 'owner' ? 'default' : 'secondary'}>{m.role}</Badge>
-        </div>
-      ))}
-      <p className="pt-2 text-xs text-text3">
-        Управление участниками (добавить / убрать / поменять роль) — в следующей итерации MVP.
-      </p>
-    </div>
-  )
-}
-
 export function ProjectPage() {
   const { id } = useParams<{ id: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -653,7 +620,9 @@ export function ProjectPage() {
           <ProjectDashboard projectId={id} />
         </Suspense>
       )}
-      {tab === 'members' && <MembersTab projectId={id} />}
+      {tab === 'members' && (
+        <MembersTab projectId={id} canManage={canManage(p.my_role)} />
+      )}
 
       {/* Mobile: floating view picker + FAB above the bottom tab bar. */}
       <MobileViewControlBar active={tab} onChange={setTab} />
