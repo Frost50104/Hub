@@ -35,7 +35,7 @@ jobs:
         run: pytest -x -m "not integration"
 
   frontend:
-    name: frontend (typecheck + build)
+    name: frontend (lint + typecheck + test + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -50,5 +50,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - run: npm ci
+      - run: npm run lint
       - run: npm run typecheck
+      - run: npm run test -- --run
       - run: npm run build

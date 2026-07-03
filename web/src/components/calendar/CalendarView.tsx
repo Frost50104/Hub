@@ -85,7 +85,7 @@ function bucketByDay(
     const due = startOfDay(new Date(task.due_at))
     const start = task.start_at ? startOfDay(new Date(task.start_at)) : due
     // Iterate from start..due (inclusive) but clip to visible grid.
-    let cursor = new Date(start)
+    const cursor = new Date(start)
     while (cursor <= due) {
       const key = toIsoDate(cursor)
       const bucket = buckets.get(key)
