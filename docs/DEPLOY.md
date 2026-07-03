@@ -34,6 +34,36 @@
 3. На VPS: `pip install` + `alembic upgrade head` (backend) и `npm install && npm run build[:staging]` (frontend).
 4. `systemctl restart signaris-hub[-staging]` + smoke-check на `https://hub[-staging].signaris.ru/api/env`.
 
+## Rollback
+
+Релизного каталога нет (rsync поверх `/opt/...`), откат = redeploy предыдущего git-состояния + при необходимости откат БД.
+
+1. **Код (backend + frontend):**
+   ```bash
+   git stash                      # если есть незакоммиченное
+   git checkout <прошлый-hash>    # хеш из version.json до деплоя
+   ./deploy/deploy.sh prod
+   git checkout main && git stash pop
+   ```
+   `alembic upgrade head` на старом коде — no-op (лишние ревизии БД он не откатит, аддитивные миграции старому коду не мешают).
+
+2. **Миграция, которую нужно откатить** (деструктивная/сломанная):
+   ```bash
+   ssh root@94.241.168.8
+   cd /opt/signaris-hub && ./.venv/bin/alembic downgrade <prev_rev>
+   ```
+
+3. **Данные испорчены** — restore из pre-migration снапшота (deploy.sh снимает его перед каждым `alembic upgrade`, хранятся последние 5 в `/opt/signaris-hub/backups/pre-migrate/`):
+   ```bash
+   systemctl stop signaris-hub
+   sudo -u postgres pg_restore --clean --if-exists -d signaris_hub_db \
+     /opt/signaris-hub/backups/pre-migrate/db-signaris_hub_db-<ts>.dump
+   systemctl start signaris-hub
+   ```
+   Суточные дампы — в `/opt/signaris-hub/backups/daily/` (plain SQL.gz: `zcat ... | sudo -u postgres psql -d <db>`).
+
+После любого отката: `curl https://hub.signaris.ru/api/env` + smoke по основным страницам; фронт может требовать hard-refresh из-за PWA-кэша (баннер обновления).
+
 ## Bootstrap нового VPS
 
 Один раз при provision'е `94.241.168.8`:
