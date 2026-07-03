@@ -53,7 +53,7 @@ import {
   useUpdateSection,
 } from '@/hooks/useProjects'
 import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
-import { useTasks, useUpdateTask } from '@/hooks/useTasks'
+import { useTasks, useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
 import { type CustomFieldDefinition, type CustomFieldValue } from '@/lib/customFields'
@@ -334,7 +334,7 @@ function SectionBlock({
   const [draftName, setDraftName] = useState('')
   const del = useDeleteSection(projectId)
   const updateSection = useUpdateSection(projectId)
-  const update = useUpdateTask(projectId)
+  const toggleDone = useToggleDone(projectId)
   const title = section ? section.name : 'Без секции'
 
   const commitRename = async () => {
@@ -434,12 +434,7 @@ function SectionBlock({
                 subtasks={childrenByParent?.get(t.id)}
                 labels={labelsByTask?.get(t.id)}
                 onClick={() => onTaskClick(t.id)}
-                onToggleDone={() =>
-                  update.mutate({
-                    id: t.id,
-                    status: t.status === 'done' ? 'todo' : 'done',
-                  })
-                }
+                onToggleDone={() => toggleDone(t)}
                 visibleFields={visibleFields}
                 customValues={valuesByTask.get(t.id)}
               />

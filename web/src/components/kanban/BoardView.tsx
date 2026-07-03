@@ -14,7 +14,7 @@ import { useMemo, useState } from 'react'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
 import { useProjectSections } from '@/hooks/useProjects'
-import { useTasks, useUpdateTask } from '@/hooks/useTasks'
+import { useTasks, useToggleDone, useUpdateTask } from '@/hooks/useTasks'
 import { type Label } from '@/lib/labels'
 import { type ProjectRole } from '@/lib/projects'
 import { toListFilters, type TaskViewFilters } from '@/lib/taskFilters'
@@ -40,6 +40,7 @@ export function BoardView({ projectId, myRole, onTaskClick, filters }: BoardView
   const listFilters = useMemo(() => toListFilters(filters ?? {}, { forBoard: true }), [filters])
   const tasks = useTasks(projectId, listFilters)
   const update = useUpdateTask(projectId)
+  const toggleDone = useToggleDone(projectId)
   const [activeId, setActiveId] = useState<string | null>(null)
 
   const sensors = useSensors(
@@ -206,12 +207,7 @@ export function BoardView({ projectId, myRole, onTaskClick, filters }: BoardView
             childrenByParent={childrenByParent}
             labelsByTask={labelsByTask}
             onTaskClick={onTaskClick}
-            onToggleDone={(task) =>
-              update.mutate({
-                id: task.id,
-                status: task.status === 'done' ? 'todo' : 'done',
-              })
-            }
+            onToggleDone={toggleDone}
           />
         ))}
       </div>

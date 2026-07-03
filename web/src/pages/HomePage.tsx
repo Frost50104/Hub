@@ -13,7 +13,7 @@ import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMe } from '@/hooks/useMe'
 import { useMyTasks, type DueWindow } from '@/hooks/useMyTasks'
 import { useProjects } from '@/hooks/useProjects'
-import { useUpdateTask } from '@/hooks/useTasks'
+import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { type Project } from '@/lib/projects'
 
@@ -67,7 +67,7 @@ function MobileHome() {
   const me = useMe()
   const projects = useProjects()
   const recentTasks = useMyTasks({ due_window: 'upcoming' })
-  const update = useUpdateTask('')
+  const toggleDone = useToggleDone('')
 
   const firstName = me.data?.full_name?.split(/\s+/)[0] ?? ''
   const recentProjects = (projects.data ?? []).slice(0, 6)
@@ -118,12 +118,7 @@ function MobileHome() {
                       ? projectsById.get(t.project_id)?.name
                       : undefined
                   }
-                  onToggleDone={() =>
-                    update.mutate({
-                      id: t.id,
-                      status: t.status === 'done' ? 'todo' : 'done',
-                    })
-                  }
+                  onToggleDone={() => toggleDone(t)}
                 />
               ))}
             </div>
@@ -215,7 +210,7 @@ function DesktopHome() {
   const projects = useProjects()
   const [taskTab, setTaskTab] = useState<DueWindow>('upcoming')
   const myTasks = useMyTasks({ due_window: taskTab })
-  const update = useUpdateTask('')
+  const toggleDone = useToggleDone('')
 
   const firstName = me.data?.full_name?.split(/\s+/)[0] ?? ''
   const today = new Date().toLocaleDateString('ru-RU', {
@@ -286,16 +281,7 @@ function DesktopHome() {
               </p>
             )}
             {myTasks.data?.slice(0, 6).map((t) => (
-              <TaskRow
-                key={t.id}
-                task={t}
-                onToggleDone={() =>
-                  update.mutate({
-                    id: t.id,
-                    status: t.status === 'done' ? 'todo' : 'done',
-                  })
-                }
-              />
+              <TaskRow key={t.id} task={t} onToggleDone={() => toggleDone(t)} />
             ))}
           </div>
         </section>

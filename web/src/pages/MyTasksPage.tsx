@@ -14,7 +14,7 @@ import {
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMyTasks, type DueWindow } from '@/hooks/useMyTasks'
 import { useProjects } from '@/hooks/useProjects'
-import { useUpdateTask } from '@/hooks/useTasks'
+import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { type Task } from '@/lib/tasks'
 
@@ -106,7 +106,7 @@ function MobileMyTasks() {
   const [pickerOpen, setPickerOpen] = useState(false)
   const tasks = useMyTasks({ due_window: tab })
   const projects = useProjects()
-  const update = useUpdateTask('')
+  const toggleDone = useToggleDone('')
   const projectsById = new Map((projects.data ?? []).map((p) => [p.id, p]))
 
   const current = TABS.find((t) => t.key === tab)!
@@ -153,12 +153,7 @@ function MobileMyTasks() {
                   subtitle={
                     t.project_id ? projectsById.get(t.project_id)?.name : undefined
                   }
-                  onToggleDone={() =>
-                    update.mutate({
-                      id: t.id,
-                      status: t.status === 'done' ? 'todo' : 'done',
-                    })
-                  }
+                  onToggleDone={() => toggleDone(t)}
                 />
               )}
             />
@@ -170,12 +165,7 @@ function MobileMyTasks() {
                 subtitle={
                   t.project_id ? projectsById.get(t.project_id)?.name : undefined
                 }
-                onToggleDone={() =>
-                  update.mutate({
-                    id: t.id,
-                    status: t.status === 'done' ? 'todo' : 'done',
-                  })
-                }
+                onToggleDone={() => toggleDone(t)}
               />
             ))
           ))}
@@ -208,7 +198,7 @@ function MobileMyTasks() {
 function DesktopMyTasks() {
   const [tab, setTab] = useState<DueWindow>('upcoming')
   const tasks = useMyTasks({ due_window: tab })
-  const update = useUpdateTask('')
+  const toggleDone = useToggleDone('')
 
   return (
     <div className="mx-auto max-w-4xl space-y-4 p-6">
@@ -260,12 +250,7 @@ function DesktopMyTasks() {
                 <TaskRow
                   key={t.id}
                   task={t}
-                  onToggleDone={() =>
-                    update.mutate({
-                      id: t.id,
-                      status: t.status === 'done' ? 'todo' : 'done',
-                    })
-                  }
+                  onToggleDone={() => toggleDone(t)}
                 />
               )}
             />
@@ -274,12 +259,7 @@ function DesktopMyTasks() {
               <TaskRow
                 key={t.id}
                 task={t}
-                onToggleDone={() =>
-                  update.mutate({
-                    id: t.id,
-                    status: t.status === 'done' ? 'todo' : 'done',
-                  })
-                }
+                onToggleDone={() => toggleDone(t)}
               />
             ))
           ))}

@@ -3,7 +3,7 @@ import { useMemo } from 'react'
 
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { cn } from '@/lib/cn'
-import { useTasks, useUpdateTask } from '@/hooks/useTasks'
+import { useTasks, useToggleDone } from '@/hooks/useTasks'
 
 interface SubtaskListProps {
   /** Родительская задача. */
@@ -22,7 +22,7 @@ interface SubtaskListProps {
  */
 export function SubtaskList({ taskId, projectId, canEdit, onOpenTask }: SubtaskListProps) {
   const tasks = useTasks(projectId)
-  const update = useUpdateTask(projectId)
+  const toggleDone = useToggleDone(projectId)
 
   const subtasks = useMemo(
     () =>
@@ -50,12 +50,7 @@ export function SubtaskList({ taskId, projectId, canEdit, onOpenTask }: SubtaskL
           >
             <button
               type="button"
-              onClick={() =>
-                update.mutate({
-                  id: t.id,
-                  status: t.status === 'done' ? 'todo' : 'done',
-                })
-              }
+              onClick={() => toggleDone(t)}
               disabled={!canEdit}
               aria-label={t.status === 'done' ? 'Вернуть в работу' : 'Завершить'}
               className={cn(

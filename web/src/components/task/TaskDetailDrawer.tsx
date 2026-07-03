@@ -340,8 +340,16 @@ export function TaskDetailDrawer({
                         id: task.id,
                         archive: !task.archived_at,
                       })
+                      const wasArchived = !!task.archived_at
                       toast.success(
-                        task.archived_at ? 'Задача восстановлена' : 'Задача в архиве',
+                        wasArchived ? 'Задача восстановлена' : 'Задача в архиве',
+                        {
+                          action: {
+                            label: 'Отменить',
+                            onClick: () =>
+                              archive.mutate({ id: task.id, archive: wasArchived }),
+                          },
+                        },
                       )
                       onClose()
                     } catch {
