@@ -46,6 +46,7 @@ import {
   useDeleteSection,
   useProject,
   useProjectSections,
+  useUpdateSection,
 } from '@/hooks/useProjects'
 import { useTasks, useUpdateTask } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
@@ -285,21 +286,57 @@ function SectionBlock({
   valuesByTask: Map<string, Map<string, CustomFieldValue>>
 }) {
   const [collapsed, setCollapsed] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [draftName, setDraftName] = useState('')
   const del = useDeleteSection(projectId)
+  const updateSection = useUpdateSection(projectId)
   const update = useUpdateTask(projectId)
   const title = section ? section.name : 'Без секции'
+
+  const commitRename = async () => {
+    if (!section) return
+    const trimmed = draftName.trim()
+    if (!trimmed || trimmed === section.name) {
+      setRenaming(false)
+      return
+    }
+    try {
+      await updateSection.mutateAsync({ sectionId: section.id, name: trimmed })
+      setRenaming(false)
+    } catch {
+      // тост показывает глобальный onError мутаций; остаёмся в режиме правки
+    }
+  }
 
   return (
     <section>
       <header className="flex items-center justify-between border-b border-glass-border px-1 py-2">
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          className="flex items-baseline gap-2 text-left text-text hover:text-amber"
-        >
-          <span className="font-display text-base font-semibold">{title}</span>
-          <span className="text-xs text-text3">{tasks.length}</span>
-        </button>
+        {renaming && section ? (
+          <Input
+            autoFocus
+            value={draftName}
+            onChange={(e) => setDraftName(e.target.value)}
+            onBlur={() => setRenaming(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                void commitRename()
+              } else if (e.key === 'Escape') {
+                setRenaming(false)
+              }
+            }}
+            className="h-8 max-w-[280px] font-display text-base font-semibold"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setCollapsed((v) => !v)}
+            className="flex items-baseline gap-2 text-left text-text hover:text-amber"
+          >
+            <span className="font-display text-base font-semibold">{title}</span>
+            <span className="text-xs text-text3">{tasks.length}</span>
+          </button>
+        )}
         {section && (canEditFlag || canManageFlag) && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -308,7 +345,18 @@ function SectionBlock({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem disabled>Переименовать (скоро)</DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  // после закрытия меню Radix вернёт фокус на trigger —
+                  // монтируем input тиком позже, чтобы autoFocus сработал
+                  setTimeout(() => {
+                    setDraftName(section.name)
+                    setRenaming(true)
+                  }, 0)
+                }}
+              >
+                Переименовать
+              </DropdownMenuItem>
               {canManageFlag && (
                 <>
                   <DropdownMenuSeparator />
