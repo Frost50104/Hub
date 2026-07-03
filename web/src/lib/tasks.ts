@@ -30,11 +30,26 @@ export interface Task {
   archived_at: string | null
 }
 
+export type TaskSortField = 'position' | 'due_at' | 'priority' | 'created_at' | 'title'
+
 export interface TaskListFilters {
   include_archived?: boolean
   status?: TaskStatus
   assignee?: string
   section_id?: string
+  priority?: TaskPriority
+  /** ISO datetime — сервер сравнивает с due_at. */
+  due_from?: string
+  due_to?: string
+  sort?: TaskSortField
+  order?: 'asc' | 'desc'
+}
+
+/** Фильтры, применимые к calendar-эндпоинту (диапазон дат у него свой). */
+export interface CalendarFilters {
+  status?: TaskStatus
+  assignee?: string
+  priority?: TaskPriority
 }
 
 export interface TaskCreateBody {
@@ -82,9 +97,15 @@ export const tasksApi = {
     api.post<Task>(`/tasks/${id}/unarchive`).then((r) => r.data),
   remove: (id: string): Promise<void> =>
     api.delete(`/tasks/${id}`).then(() => undefined),
-  calendar: (projectId: string, range: CalendarRange): Promise<Task[]> =>
+  calendar: (
+    projectId: string,
+    range: CalendarRange,
+    filters?: CalendarFilters,
+  ): Promise<Task[]> =>
     api
-      .get<Task[]>(`/projects/${projectId}/tasks/calendar`, { params: range })
+      .get<Task[]>(`/projects/${projectId}/tasks/calendar`, {
+        params: { ...range, ...filters },
+      })
       .then((r) => r.data),
 }
 

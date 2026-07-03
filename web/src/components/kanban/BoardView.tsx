@@ -14,6 +14,7 @@ import { useMemo, useState } from 'react'
 import { useProjectSections } from '@/hooks/useProjects'
 import { useTasks, useUpdateTask } from '@/hooks/useTasks'
 import { type ProjectRole } from '@/lib/projects'
+import { toListFilters, type TaskViewFilters } from '@/lib/taskFilters'
 import { type Task } from '@/lib/tasks'
 
 import { KanbanCard } from './KanbanCard'
@@ -23,13 +24,18 @@ interface BoardViewProps {
   projectId: string
   myRole: ProjectRole | null | undefined
   onTaskClick: (id: string) => void
+  filters?: TaskViewFilters
 }
 
 const ORPHAN_ID = '__orphan__'
 
-export function BoardView({ projectId, myRole, onTaskClick }: BoardViewProps) {
+export function BoardView({ projectId, myRole, onTaskClick, filters }: BoardViewProps) {
   const sections = useProjectSections(projectId)
-  const tasks = useTasks(projectId)
+  // forBoard: доска всегда в position-порядке, иначе ломается drag.
+  // При активных фильтрах позиция drag считается между видимыми соседями —
+  // допустимый компромисс (так же ведёт себя Asana).
+  const listFilters = useMemo(() => toListFilters(filters ?? {}, { forBoard: true }), [filters])
+  const tasks = useTasks(projectId, listFilters)
   const update = useUpdateTask(projectId)
   const [activeId, setActiveId] = useState<string | null>(null)
 

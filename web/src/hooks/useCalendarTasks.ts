@@ -1,10 +1,10 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 
-import { tasksApi, type Task } from '@/lib/tasks'
+import { tasksApi, type CalendarFilters, type Task } from '@/lib/tasks'
 
 export const calendarKeys = {
-  range: (projectId: string, from: string, to: string) =>
-    ['tasks', projectId, 'calendar', from, to] as const,
+  range: (projectId: string, from: string, to: string, filters?: CalendarFilters) =>
+    ['tasks', projectId, 'calendar', from, to, filters ?? {}] as const,
 }
 
 /**
@@ -17,12 +17,13 @@ export function useCalendarTasks(
   projectId: string | undefined,
   from: string,
   to: string,
+  filters?: CalendarFilters,
 ): UseQueryResult<Task[]> {
   return useQuery({
     queryKey: projectId
-      ? calendarKeys.range(projectId, from, to)
+      ? calendarKeys.range(projectId, from, to, filters)
       : ['tasks', 'none', 'calendar', from, to],
-    queryFn: () => tasksApi.calendar(projectId!, { from, to }),
+    queryFn: () => tasksApi.calendar(projectId!, { from, to }, filters),
     enabled: !!projectId,
     staleTime: 30_000,
   })

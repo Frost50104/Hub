@@ -11,6 +11,7 @@ import { useMemo, useState } from 'react'
 
 import { useCalendarTasks } from '@/hooks/useCalendarTasks'
 import { useUpdateTask } from '@/hooks/useTasks'
+import { toCalendarFilters, type TaskViewFilters } from '@/lib/taskFilters'
 import { type Task } from '@/lib/tasks'
 
 import { CalendarCell } from './CalendarCell'
@@ -21,6 +22,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 interface CalendarViewProps {
   projectId: string
   onTaskClick: (id: string) => void
+  filters?: TaskViewFilters
 }
 
 function toIsoDate(d: Date): string {
@@ -94,7 +96,7 @@ function bucketByDay(
   return buckets
 }
 
-export function CalendarView({ projectId, onTaskClick }: CalendarViewProps) {
+export function CalendarView({ projectId, onTaskClick, filters }: CalendarViewProps) {
   const today = useMemo(() => startOfDay(new Date()), [])
   const [viewMonth, setViewMonth] = useState<Date>(
     new Date(today.getFullYear(), today.getMonth(), 1),
@@ -104,7 +106,8 @@ export function CalendarView({ projectId, onTaskClick }: CalendarViewProps) {
   const fromIso = toIsoDate(cells[0]!)
   const toIso = toIsoDate(cells[cells.length - 1]!)
 
-  const tasks = useCalendarTasks(projectId, fromIso, toIso)
+  const calendarFilters = useMemo(() => toCalendarFilters(filters ?? {}), [filters])
+  const tasks = useCalendarTasks(projectId, fromIso, toIso, calendarFilters)
   const update = useUpdateTask(projectId)
   const buckets = useMemo(
     () => bucketByDay(tasks.data ?? [], cells),

@@ -1,4 +1,4 @@
-import { ChevronDown, Filter, Link as LinkIcon, Loader2, MoreHorizontal, Plus, Settings2, Star, Trash2 } from 'lucide-react'
+import { ChevronDown, Link as LinkIcon, Loader2, MoreHorizontal, Plus, Settings2, Star, Trash2 } from 'lucide-react'
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -15,6 +15,7 @@ import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { ColumnsMenu } from '@/components/project/ColumnsMenu'
 import { CustomFieldsManager } from '@/components/project/CustomFieldsManager'
 import { MembersTab } from '@/components/project/MembersTab'
+import { TaskFilterBar } from '@/components/project/TaskFilterBar'
 import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
 import { TaskDetailDrawer } from '@/components/task/TaskDetailDrawer'
@@ -52,6 +53,12 @@ import { useTasks, useUpdateTask } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { type CustomFieldDefinition, type CustomFieldValue } from '@/lib/customFields'
 import { type Project, type ProjectRole, type Section } from '@/lib/projects'
+import {
+  applyFiltersToSearchParams,
+  filtersFromSearchParams,
+  toListFilters,
+  type TaskViewFilters,
+} from '@/lib/taskFilters'
 import { type Task } from '@/lib/tasks'
 import { useViewConfig } from '@/stores/viewConfig'
 
@@ -417,13 +424,16 @@ function ListTab({
   projectId,
   myRole,
   onTaskClick,
+  filters,
 }: {
   projectId: string
   myRole: ProjectRole | null | undefined
   onTaskClick: (id: string) => void
+  filters: TaskViewFilters
 }) {
   const sections = useProjectSections(projectId)
-  const tasks = useTasks(projectId)
+  const listFilters = useMemo(() => toListFilters(filters), [filters])
+  const tasks = useTasks(projectId, listFilters)
   const defs = useCustomFieldDefinitions(projectId)
   const values = useProjectCustomValues(projectId)
   const visibleIds = useViewConfig(
@@ -601,6 +611,14 @@ export function ProjectPage() {
     setSearchParams(next, { replace: true })
   }
 
+  // Фильтры видов живут в URL — переживают F5 и шарятся ссылкой.
+  const filters = useMemo(() => filtersFromSearchParams(searchParams), [searchParams])
+  const setFilters = (next: TaskViewFilters) => {
+    const sp = new URLSearchParams(searchParams)
+    applyFiltersToSearchParams(sp, next)
+    setSearchParams(sp, { replace: true })
+  }
+
   if (!id) return null
   if (project.isLoading) return <div className="p-6 text-text2">Загружаем проект…</div>
   if (project.error) {
@@ -639,20 +657,34 @@ export function ProjectPage() {
 
       {tab === 'list' && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2 px-1">
-            <Button variant="secondary" size="sm" disabled title="Фильтры (скоро)">
-              <Filter className="h-3.5 w-3.5" /> Фильтр
-            </Button>
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+            <TaskFilterBar value={filters} onChange={setFilters} showSort />
             <ColumnsMenu projectId={id} />
           </div>
-          <ListTab projectId={id} myRole={p.my_role} onTaskClick={openTask} />
+          <ListTab
+            projectId={id}
+            myRole={p.my_role}
+            onTaskClick={openTask}
+            filters={filters}
+          />
         </div>
       )}
       {tab === 'board' && (
-        <BoardView projectId={id} myRole={p.my_role} onTaskClick={openTask} />
+        <div className="space-y-3">
+          <TaskFilterBar value={filters} onChange={setFilters} />
+          <BoardView
+            projectId={id}
+            myRole={p.my_role}
+            onTaskClick={openTask}
+            filters={filters}
+          />
+        </div>
       )}
       {tab === 'calendar' && (
-        <CalendarView projectId={id} onTaskClick={openTask} />
+        <div className="space-y-3">
+          <TaskFilterBar value={filters} onChange={setFilters} />
+          <CalendarView projectId={id} onTaskClick={openTask} filters={filters} />
+        </div>
       )}
       {tab === 'timeline' && (
         <TimelineView projectId={id} onTaskClick={openTask} />
