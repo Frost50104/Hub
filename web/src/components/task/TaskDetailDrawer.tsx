@@ -3,6 +3,7 @@ import { Archive, Calendar, CornerLeftUp, Flag, Link as LinkIcon, Tag, User, X }
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
+import { Markdown } from '@/components/Markdown'
 import { PeoplePicker } from '@/components/PeoplePicker'
 import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
@@ -78,6 +79,7 @@ export function TaskDetailDrawer({
   const [description, setDescription] = useState('')
   const [dueAt, setDueAt] = useState('')
   const [startAt, setStartAt] = useState('')
+  const [editingDesc, setEditingDesc] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
 
   useEffect(() => {
@@ -295,15 +297,57 @@ export function TaskDetailDrawer({
               </section>
 
               <div className="space-y-2">
-                <label className="text-xs font-medium text-text2">Описание</label>
-                <Textarea
-                  rows={6}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  onBlur={saveDescription}
-                  readOnly={readOnly}
-                  placeholder="Что нужно сделать?"
-                />
+                <label className="text-xs font-medium text-text2">
+                  Описание
+                  {!readOnly && (
+                    <span className="ml-1 font-normal text-text3">
+                      (markdown)
+                    </span>
+                  )}
+                </label>
+                {editingDesc && !readOnly ? (
+                  <Textarea
+                    autoFocus
+                    rows={6}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    onBlur={() => {
+                      void saveDescription()
+                      setEditingDesc(false)
+                    }}
+                    placeholder="Что нужно сделать? Поддерживается markdown."
+                  />
+                ) : description ? (
+                  <div
+                    role={readOnly ? undefined : 'button'}
+                    tabIndex={readOnly ? undefined : 0}
+                    onClick={readOnly ? undefined : () => setEditingDesc(true)}
+                    onKeyDown={
+                      readOnly
+                        ? undefined
+                        : (e) => {
+                            if (e.key === 'Enter') setEditingDesc(true)
+                          }
+                    }
+                    className={cn(
+                      'rounded-lg border border-transparent px-1 py-0.5',
+                      !readOnly &&
+                        'cursor-text hover:border-glass-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+                    )}
+                    title={readOnly ? undefined : 'Нажмите, чтобы редактировать'}
+                  >
+                    <Markdown text={description} />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setEditingDesc(true)}
+                    disabled={readOnly}
+                    className="w-full rounded-lg border border-dashed border-glass-border px-3 py-2 text-left text-sm text-text3 hover:text-text2 disabled:cursor-default"
+                  >
+                    Что нужно сделать? Поддерживается markdown.
+                  </button>
+                )}
               </div>
 
               <TaskLabels

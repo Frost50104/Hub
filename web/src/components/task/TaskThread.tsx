@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, History, Trash2 } from 'lucide-react'
-import { Fragment, useState } from 'react'
+import { useState } from 'react'
 
+import { Markdown } from '@/components/Markdown'
 import { MentionTextarea } from '@/components/task/MentionTextarea'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
@@ -14,23 +15,6 @@ import {
 import { cn } from '@/lib/cn'
 import { STATUS_LABEL, type TaskStatus } from '@/lib/tasks'
 import { type Activity, type Comment } from '@/lib/threads'
-
-const MENTION_TOKEN_RE = /(@[A-Za-z0-9._-]+)/g
-
-function renderCommentBody(body: string): React.ReactNode {
-  const parts = body.split(MENTION_TOKEN_RE)
-  return parts.map((part, idx) => {
-    if (MENTION_TOKEN_RE.test(part)) {
-      MENTION_TOKEN_RE.lastIndex = 0
-      return (
-        <span key={idx} className="rounded bg-amber/20 px-1 font-medium text-amber">
-          {part}
-        </span>
-      )
-    }
-    return <Fragment key={idx}>{part}</Fragment>
-  })
-}
 
 function renderActivity(a: Activity): string | null {
   const actor = a.actor_full_name || a.actor_email || 'Кто-то'
@@ -118,9 +102,7 @@ function CommentBubble({
             </button>
           )}
         </div>
-        <p className="whitespace-pre-wrap break-words text-sm text-text">
-          {renderCommentBody(comment.body)}
-        </p>
+        <Markdown text={comment.body} highlightMentions />
       </div>
     </div>
   )

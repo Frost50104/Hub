@@ -2,6 +2,7 @@ import { Calendar, Loader2, Paperclip } from 'lucide-react'
 import { useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 
+import { Markdown } from '@/components/Markdown'
 import { usePublicShare } from '@/hooks/usePublicShare'
 import { cn } from '@/lib/cn'
 import { type PublicProjectView, type PublicTaskView } from '@/lib/publicApi'
@@ -190,8 +191,8 @@ function TaskView({ data }: { data: PublicTaskView }) {
       </header>
 
       {data.description && (
-        <section className="whitespace-pre-wrap text-sm text-text">
-          {data.description}
+        <section>
+          <Markdown text={data.description} />
         </section>
       )}
 
