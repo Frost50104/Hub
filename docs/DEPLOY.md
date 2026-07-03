@@ -29,7 +29,7 @@
 
 Что делает:
 
-1. Пишет `backend/VERSION` и `web/public/version.json` — git-hash + dirty-флаг + timestamp.
+1. Пишет корневой `VERSION` и `web/public/version.json` — git-hash + dirty-флаг + timestamp.
 2. `rsync` (без `--delete`) в `/opt/signaris-hub[-staging]/`.
 3. На VPS: `pip install` + `alembic upgrade head` (backend) и `npm install && npm run build[:staging]` (frontend).
 4. `systemctl restart signaris-hub[-staging]` + smoke-check на `https://hub[-staging].signaris.ru/api/env`.
@@ -52,6 +52,22 @@
 6. Копирование systemd-юнитов из `ops/systemd/` + `systemctl enable`
 7. Копирование nginx-конфигов из `ops/nginx/`
 8. `certbot --nginx -d hub.signaris.ru -d hub-staging.signaris.ru`
+
+## Healthcheck-алерты
+
+`signaris-hub-healthcheck.timer` каждые 5 минут запускает `scripts/healthcheck.sh` (деплоится bootstrap-скриптом в `/opt/signaris-hub/scripts/`). Скрипт curl-ит `/api/env` обоих окружений и на 2 consecutive failures шлёт алерт (edge-trigger, recovery-сообщение при восстановлении).
+
+Каналы (оба опциональны, настраиваются в `/etc/default/signaris-hub-healthcheck` на VPS — файл НЕ в git):
+
+```bash
+# email — требует установленного mail(1)/MTA на VPS
+HEALTHCHECK_ALERT_EMAIL=ops@signaris.ru
+# Telegram — бот от @BotFather; без обеих переменных канал молча выключен
+TELEGRAM_BOT_TOKEN=123456:ABC-...
+TELEGRAM_CHAT_ID=-100123456789
+```
+
+После правки env-файла ничего перезапускать не нужно (oneshot-сервис читает его при каждом запуске). Проверка: временно вписать несуществующий URL в `HEALTHCHECK_URLS` → через ~10 минут придёт DOWN-сообщение, после удаления — OK-сообщение.
 
 ## DNS
 
