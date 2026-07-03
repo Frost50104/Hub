@@ -7,12 +7,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from signaris_auth import Principal
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +33,11 @@ from app.services.notify import notify_assigned, notify_status_changed
 from app.services.project_access import is_hub_admin, require_project_role
 
 router = APIRouter(tags=["tasks"])
+
+# Ранжирование приоритета для ORDER BY (колонка — строковый enum).
+PRIORITY_ORDER: dict[str, int] = {"low": 1, "medium": 2, "high": 3, "urgent": 4}
+
+TaskSortField = Literal["position", "due_at", "priority", "created_at", "title"]
 
 
 async def _ensure_watcher(
@@ -147,10 +152,25 @@ async def list_tasks(
     status_: TaskStatus | None = Query(default=None, alias="status"),
     assignee_id: UUID | None = Query(default=None, alias="assignee"),
     section_id: UUID | None = Query(default=None),
+    priority: TaskPriority | None = Query(default=None),
+    due_from: datetime | None = Query(default=None),
+    due_to: datetime | None = Query(default=None),
+    sort: TaskSortField = Query(default="position"),
+    order: Literal["asc", "desc"] = Query(default="asc"),
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> list[TaskResponse]:
     await require_project_role(db, project_id, principal)
+
+    if sort == "priority":
+        sort_col = case(PRIORITY_ORDER, value=Task.priority, else_=0)
+    elif sort == "title":
+        sort_col = func.lower(Task.title)
+    else:
+        sort_col = getattr(Task, sort)
+    sort_expr = sort_col.desc() if order == "desc" else sort_col.asc()
+    if sort == "due_at":
+        sort_expr = sort_expr.nulls_last()
 
     stmt = (
         select(Task, ShadowUser.email, ShadowUser.full_name)
@@ -161,7 +181,8 @@ async def list_tasks(
             isouter=True,
         )
         .where(Task.project_id == project_id)
-        .order_by(Task.position)
+        # Вторичный ключ position — стабильный порядок при равных значениях.
+        .order_by(sort_expr, Task.position)
     )
     if not include_archived:
         stmt = stmt.where(Task.archived_at.is_(None))
@@ -171,6 +192,12 @@ async def list_tasks(
         stmt = stmt.where(Task.assignee_id == assignee_id)
     if section_id is not None:
         stmt = stmt.where(Task.section_id == section_id)
+    if priority is not None:
+        stmt = stmt.where(Task.priority == priority)
+    if due_from is not None:
+        stmt = stmt.where(Task.due_at >= due_from)
+    if due_to is not None:
+        stmt = stmt.where(Task.due_at <= due_to)
 
     out: list[TaskResponse] = []
     for task, email, full_name in (await db.execute(stmt)).all():

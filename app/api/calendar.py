@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps import get_db, require_auth
 from app.models.shadow import ShadowUser
 from app.models.task import Task
-from app.schemas.task import AssigneeBrief, TaskResponse
+from app.schemas.task import AssigneeBrief, TaskPriority, TaskResponse, TaskStatus
 from app.services.project_access import require_project_role
 
 router = APIRouter(tags=["calendar"])
@@ -52,6 +52,9 @@ async def list_calendar_tasks(
     project_id: UUID,
     from_: str = Query(..., alias="from", description="Inclusive YYYY-MM-DD"),
     to: str = Query(..., description="Inclusive YYYY-MM-DD"),
+    status_: TaskStatus | None = Query(default=None, alias="status"),
+    assignee_id: UUID | None = Query(default=None, alias="assignee"),
+    priority: TaskPriority | None = Query(default=None),
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> list[TaskResponse]:
@@ -98,6 +101,12 @@ async def list_calendar_tasks(
         )
         .order_by(Task.start_at.nulls_last(), Task.due_at)
     )
+    if status_ is not None:
+        stmt = stmt.where(Task.status == status_)
+    if assignee_id is not None:
+        stmt = stmt.where(Task.assignee_id == assignee_id)
+    if priority is not None:
+        stmt = stmt.where(Task.priority == priority)
 
     out: list[TaskResponse] = []
     for task, email, full_name in (await db.execute(stmt)).all():
