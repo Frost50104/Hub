@@ -116,11 +116,8 @@ export function CustomFieldsManager({
       })
       toast.success(`Поле «${name.trim()}» создано`)
       reset()
-    } catch (err) {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } }).response?.data
-          ?.detail ?? (err as Error).message
-      toast.error('Не удалось создать поле', { description: detail })
+    } catch {
+      // тост показывает глобальный onError мутаций
     }
   }
 
@@ -159,16 +156,7 @@ export function CustomFieldsManager({
     else if (before !== null && after !== null) newPosition = (before + after) / 2
     else newPosition = Number(moved.position)
 
-    update.mutate(
-      { fieldId: moved.id, body: { position: newPosition } },
-      {
-        onError: (err) => {
-          toast.error('Не удалось переместить', {
-            description: (err as Error).message,
-          })
-        },
-      },
-    )
+    update.mutate({ fieldId: moved.id, body: { position: newPosition } })
   }
 
   return (
@@ -218,11 +206,8 @@ export function CustomFieldsManager({
                           body: { name: newName.trim() },
                         })
                         toast.success(`Переименовано в «${newName.trim()}»`)
-                      } catch (err) {
-                        const detail =
-                          (err as { response?: { data?: { detail?: string } } })
-                            .response?.data?.detail ?? (err as Error).message
-                        toast.error('Не удалось переименовать', { description: detail })
+                      } catch {
+                        // тост показывает глобальный onError мутаций
                       }
                     }}
                     onDelete={async () => {
@@ -230,10 +215,8 @@ export function CustomFieldsManager({
                       try {
                         await remove.mutateAsync(d.id)
                         toast.success(`Поле «${d.name}» удалено`)
-                      } catch (err) {
-                        toast.error('Не получилось', {
-                          description: (err as Error).message,
-                        })
+                      } catch {
+                        // тост показывает глобальный onError мутаций
                       }
                     }}
                   />

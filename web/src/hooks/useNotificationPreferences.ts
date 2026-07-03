@@ -23,6 +23,7 @@ export function useSetNotificationPreferences() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (prefs: PreferencesMap) => notificationsApi.setPreferences(prefs),
+    meta: { errorMessage: 'Не удалось сохранить настройки' },
     onSuccess: (data) => {
       qc.setQueryData(['notifications', 'preferences'], data)
     },

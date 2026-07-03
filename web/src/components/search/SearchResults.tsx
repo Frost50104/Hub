@@ -1,6 +1,7 @@
 import { MessageSquare } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
+import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
 import { cn } from '@/lib/cn'
 import { type SearchGroup, type SearchTaskHit } from '@/lib/search'
@@ -26,6 +27,9 @@ interface SearchResultsProps {
   total: number
   loading?: boolean
   empty?: boolean
+  /** Ошибка запроса поиска — при наличии рендерится вместо результатов. */
+  error?: unknown
+  onRetry?: () => void
 }
 
 export function SearchResults({
@@ -33,9 +37,16 @@ export function SearchResults({
   total,
   loading,
   empty,
+  error,
+  onRetry,
 }: SearchResultsProps) {
   if (loading) {
     return <p className="px-1 text-sm text-text3">Ищем…</p>
+  }
+  if (error !== undefined) {
+    return (
+      <QueryError error={error} onRetry={onRetry} title="Поиск не удался" />
+    )
   }
   if (empty) {
     return (

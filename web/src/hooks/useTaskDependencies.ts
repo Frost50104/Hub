@@ -25,6 +25,7 @@ export function useAddDependency(taskId: string, projectId: string) {
   return useMutation({
     mutationFn: (predecessorId: string) =>
       timelineApi.addDependency(taskId, predecessorId),
+    meta: { errorMessage: 'Не удалось добавить зависимость' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: key(taskId) })
       qc.invalidateQueries({ queryKey: ['timeline', projectId] })
@@ -37,6 +38,7 @@ export function useRemoveDependency(taskId: string, projectId: string) {
   return useMutation({
     mutationFn: (predecessorId: string) =>
       timelineApi.removeDependency(taskId, predecessorId),
+    meta: { errorMessage: 'Не удалось удалить зависимость' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: key(taskId) })
       qc.invalidateQueries({ queryKey: ['timeline', projectId] })

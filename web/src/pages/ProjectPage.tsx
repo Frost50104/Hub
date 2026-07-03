@@ -14,6 +14,7 @@ import { BoardView } from '@/components/kanban/BoardView'
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { ColumnsMenu } from '@/components/project/ColumnsMenu'
 import { CustomFieldsManager } from '@/components/project/CustomFieldsManager'
+import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
 import { TaskDetailDrawer } from '@/components/task/TaskDetailDrawer'
 import { TaskListHeader } from '@/components/task/TaskListHeader'
@@ -318,10 +319,8 @@ function SectionBlock({
                       try {
                         await del.mutateAsync(section.id)
                         toast.success(`Секция «${section.name}» удалена`)
-                      } catch (err) {
-                        toast.error('Не удалось удалить', {
-                          description: (err as Error).message,
-                        })
+                      } catch {
+                        // тост показывает глобальный onError мутаций
                       }
                     }}
                   >
@@ -426,10 +425,8 @@ function ListTab({
       setNewSectionName('')
       setAddingSection(false)
       toast.success(`Секция «${trimmed}» создана`)
-    } catch (err) {
-      toast.error('Не удалось создать секцию', {
-        description: (err as Error).message,
-      })
+    } catch {
+      // ввод сохраняем в поле; тост показывает глобальный onError мутаций
     }
   }
 
@@ -440,8 +437,29 @@ function ListTab({
   return (
     <div className="space-y-6">
       {sections.isLoading && <p className="text-text2">Загружаем секции…</p>}
-      {sections.error && (
-        <p className="text-red">Ошибка: {(sections.error as Error).message}</p>
+      {sections.isError && (
+        <QueryError
+          error={sections.error}
+          onRetry={() => void sections.refetch()}
+          title="Не удалось загрузить секции"
+        />
+      )}
+      {tasks.isError && (
+        <QueryError
+          error={tasks.error}
+          onRetry={() => void tasks.refetch()}
+          title="Не удалось загрузить задачи"
+        />
+      )}
+      {(defs.isError || values.isError) && (
+        <QueryError
+          error={defs.error ?? values.error}
+          onRetry={() => {
+            if (defs.isError) void defs.refetch()
+            if (values.isError) void values.refetch()
+          }}
+          title="Не удалось загрузить кастом-поля"
+        />
       )}
 
       <TaskListHeader visibleFields={visibleFields} />
@@ -594,8 +612,8 @@ export function ProjectPage() {
           try {
             await archive.mutateAsync(!isArchived)
             toast.success(isArchived ? 'Проект разархивирован' : 'Проект архивирован')
-          } catch (err) {
-            toast.error('Не получилось', { description: (err as Error).message })
+          } catch {
+            // тост показывает глобальный onError мутаций
           }
         }}
         onOpenFields={() => setFieldsOpen(true)}

@@ -55,6 +55,7 @@ export function useCreateProject() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateProjectBody) => projectsApi.create(body),
+    meta: { errorMessage: 'Не удалось создать проект' },
     onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.all }),
   })
 }
@@ -63,6 +64,7 @@ export function useUpdateProject(id: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: UpdateProjectBody) => projectsApi.update(id, body),
+    meta: { errorMessage: 'Не удалось обновить проект' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.detail(id) })
       qc.invalidateQueries({ queryKey: projectKeys.all })
@@ -75,6 +77,7 @@ export function useArchiveProject(id: string) {
   return useMutation({
     mutationFn: (archive: boolean) =>
       archive ? projectsApi.archive(id) : projectsApi.unarchive(id),
+    meta: { errorMessage: 'Не удалось обновить проект' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.detail(id) })
       qc.invalidateQueries({ queryKey: projectKeys.all })
@@ -87,6 +90,7 @@ export function useAddMember(projectId: string) {
   return useMutation({
     mutationFn: (body: { employee_id: string; role: ProjectRole }) =>
       membersApi.add(projectId, body),
+    meta: { errorMessage: 'Не удалось добавить участника' },
     onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.members(projectId) }),
   })
 }
@@ -96,6 +100,7 @@ export function useUpdateMember(projectId: string) {
   return useMutation({
     mutationFn: ({ memberId, role }: { memberId: string; role: ProjectRole }) =>
       membersApi.update(projectId, memberId, { role }),
+    meta: { errorMessage: 'Не удалось изменить роль' },
     onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.members(projectId) }),
   })
 }
@@ -104,6 +109,7 @@ export function useRemoveMember(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (memberId: string) => membersApi.remove(projectId, memberId),
+    meta: { errorMessage: 'Не удалось удалить участника' },
     onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.members(projectId) }),
   })
 }
@@ -113,6 +119,7 @@ export function useCreateSection(projectId: string) {
   return useMutation({
     mutationFn: (body: { name: string; position?: number }) =>
       sectionsApi.create(projectId, body),
+    meta: { errorMessage: 'Не удалось создать секцию' },
     onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.sections(projectId) }),
   })
 }
@@ -128,6 +135,7 @@ export function useUpdateSection(projectId: string) {
       name?: string
       position?: number
     }) => sectionsApi.update(sectionId, body),
+    meta: { errorMessage: 'Не удалось обновить секцию' },
     onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.sections(projectId) }),
   })
 }
@@ -136,6 +144,7 @@ export function useDeleteSection(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (sectionId: string) => sectionsApi.remove(sectionId),
+    meta: { errorMessage: 'Не удалось удалить секцию' },
     onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.sections(projectId) }),
   })
 }

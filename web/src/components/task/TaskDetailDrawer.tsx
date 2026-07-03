@@ -3,6 +3,7 @@ import { Archive, Calendar, Flag, Link as LinkIcon, Tag, User, X } from 'lucide-
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
+import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
 import { TaskAttachments } from '@/components/task/TaskAttachments'
 import { TaskCustomFields } from '@/components/task/TaskCustomFields'
@@ -32,7 +33,8 @@ const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done']
 const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
 
 export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawerProps) {
-  const { data: task, isLoading } = useTask(taskId ?? undefined)
+  const taskQuery = useTask(taskId ?? undefined)
+  const { data: task, isLoading } = taskQuery
   const update = useUpdateTask(projectId)
   const archive = useArchiveTask(projectId)
   const [title, setTitle] = useState('')
@@ -54,8 +56,8 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
     if (!task || title.trim() === task.title) return
     try {
       await update.mutateAsync({ id: task.id, title: title.trim() })
-    } catch (err) {
-      toast.error('Не удалось обновить', { description: (err as Error).message })
+    } catch {
+      // тост показывает глобальный onError мутаций
     }
   }
 
@@ -63,8 +65,8 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
     if (!task || description === (task.description ?? '')) return
     try {
       await update.mutateAsync({ id: task.id, description })
-    } catch (err) {
-      toast.error('Не удалось обновить', { description: (err as Error).message })
+    } catch {
+      // тост показывает глобальный onError мутаций
     }
   }
 
@@ -73,8 +75,8 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
     const iso = val ? new Date(val + 'T12:00:00').toISOString() : null
     try {
       await update.mutateAsync({ id: task.id, due_at: iso })
-    } catch (err) {
-      toast.error('Не удалось обновить', { description: (err as Error).message })
+    } catch {
+      // тост показывает глобальный onError мутаций
     }
   }
 
@@ -83,8 +85,8 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
     const iso = val ? new Date(val + 'T12:00:00').toISOString() : null
     try {
       await update.mutateAsync({ id: task.id, start_at: iso })
-    } catch (err) {
-      toast.error('Не удалось обновить', { description: (err as Error).message })
+    } catch {
+      // тост показывает глобальный onError мутаций
     }
   }
 
@@ -122,6 +124,13 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
           </header>
 
           {isLoading && <p className="text-text2">Загружаем…</p>}
+          {taskQuery.isError && (
+            <QueryError
+              error={taskQuery.error}
+              onRetry={() => void taskQuery.refetch()}
+              title="Не удалось загрузить задачу"
+            />
+          )}
 
           {task && (
             <div className="space-y-5">
@@ -264,10 +273,8 @@ export function TaskDetailDrawer({ taskId, projectId, onClose }: TaskDetailDrawe
                         task.archived_at ? 'Задача восстановлена' : 'Задача в архиве',
                       )
                       onClose()
-                    } catch (err) {
-                      toast.error('Не получилось', {
-                        description: (err as Error).message,
-                      })
+                    } catch {
+                      // тост показывает глобальный onError мутаций
                     }
                   }}
                 >

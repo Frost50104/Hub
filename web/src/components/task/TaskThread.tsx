@@ -1,6 +1,5 @@
 import { ChevronDown, ChevronRight, History, Trash2 } from 'lucide-react'
 import { Fragment, useState } from 'react'
-import { toast } from 'sonner'
 
 import { MentionTextarea } from '@/components/task/MentionTextarea'
 import { Avatar } from '@/components/ui/Avatar'
@@ -162,10 +161,8 @@ export function TaskThread({ taskId }: TaskThreadProps) {
     try {
       await create.mutateAsync(trimmed)
       setDraft('')
-    } catch (err) {
-      toast.error('Не удалось отправить', {
-        description: (err as Error).message,
-      })
+    } catch {
+      // черновик сохраняем в поле; тост показывает глобальный onError мутаций
     }
   }
 
@@ -187,11 +184,7 @@ export function TaskThread({ taskId }: TaskThreadProps) {
               isMine={c.author_id === me.data?.employee_id}
               onDelete={() => {
                 if (confirm('Удалить комментарий?')) {
-                  del.mutateAsync(c.id).catch((err) => {
-                    toast.error('Не удалось удалить', {
-                      description: (err as Error).message,
-                    })
-                  })
+                  del.mutate(c.id)
                 }
               }}
             />

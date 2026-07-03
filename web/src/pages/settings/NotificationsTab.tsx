@@ -45,11 +45,7 @@ export function NotificationsSettingsTab() {
   ) => {
     const current = prefs[kind] ?? { push: true, in_app: true }
     const next: PreferencesMap = { ...prefs, [kind]: { ...current, [channel]: value } }
-    setPrefs.mutate(next, {
-      onError: (err) => {
-        toast.error('Не удалось сохранить', { description: (err as Error).message })
-      },
-    })
+    setPrefs.mutate(next)
   }
 
   return (

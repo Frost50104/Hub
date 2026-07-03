@@ -68,6 +68,7 @@ export function useCreateCustomField(projectId: string) {
   return useMutation({
     mutationFn: (body: CustomFieldDefinitionCreate) =>
       customFieldsApi.create(projectId, body),
+    meta: { errorMessage: 'Не удалось создать поле' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: customFieldKeys.defs(projectId) })
     },
@@ -84,6 +85,7 @@ export function useUpdateCustomField(projectId: string) {
       fieldId: string
       body: CustomFieldDefinitionUpdate
     }) => customFieldsApi.update(projectId, fieldId, body),
+    meta: { errorMessage: 'Не удалось обновить поле' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: customFieldKeys.defs(projectId) })
     },
@@ -94,6 +96,7 @@ export function useDeleteCustomField(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (fieldId: string) => customFieldsApi.remove(projectId, fieldId),
+    meta: { errorMessage: 'Не удалось удалить поле' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: customFieldKeys.defs(projectId) })
     },
@@ -105,6 +108,7 @@ export function useSetTaskCustomValue(taskId: string) {
   return useMutation({
     mutationFn: ({ fieldId, value }: { fieldId: string; value: unknown }) =>
       customFieldsApi.setValue(taskId, fieldId, value),
+    meta: { errorMessage: 'Не удалось сохранить значение' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: customFieldKeys.values(taskId) })
       // Also blow away batch project-values cache — without this, the List
@@ -118,6 +122,7 @@ export function useClearTaskCustomValue(taskId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (fieldId: string) => customFieldsApi.clearValue(taskId, fieldId),
+    meta: { errorMessage: 'Не удалось очистить значение' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: customFieldKeys.values(taskId) })
       qc.invalidateQueries({ queryKey: ['custom-fields', 'project-values'] })

@@ -10,7 +10,6 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useMemo, useState, type CSSProperties } from 'react'
-import { toast } from 'sonner'
 
 import { useTimeline } from '@/hooks/useTimeline'
 import { useUpdateTask } from '@/hooks/useTasks'
@@ -178,12 +177,7 @@ export function TimelineView({ projectId, onTaskClick }: TimelineViewProps) {
       const newStart = addDays(oldStart, deltaDays)
       patch.start_at = newStart.toISOString()
     }
-    update.mutate(patch, {
-      onError: (err) =>
-        toast.error('Не удалось перенести', {
-          description: (err as Error).message,
-        }),
-    })
+    update.mutate(patch)
   }
 
   // Date header ticks. For day-scale — every day. For week — Mondays. For month — 1st.

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/Button'
@@ -58,11 +59,8 @@ export function CreateTaskDialog({
       setDescription('')
       setSectionId('')
       onOpenChange(false)
-    } catch (err) {
-      const message =
-        (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ??
-        (err as Error).message
-      toast.error('Не удалось создать задачу', { description: message })
+    } catch {
+      // ввод сохраняем в форме; тост показывает глобальный onError мутаций
     }
   }
 
@@ -80,6 +78,16 @@ export function CreateTaskDialog({
                 : 'Сначала создайте проект — задачи живут внутри проектов.'}
             </DialogDescription>
           </DialogHeader>
+
+          {!hasProjects && !projects.isLoading && (
+            <Link
+              to="/projects"
+              onClick={() => onOpenChange(false)}
+              className="inline-block text-sm text-amber hover:underline"
+            >
+              Создать проект →
+            </Link>
+          )}
 
           <div className="space-y-4">
             <div className="space-y-1.5">

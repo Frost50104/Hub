@@ -55,19 +55,16 @@ export function TaskDependencies({ taskId, projectId }: TaskDependenciesProps) {
     try {
       await add.mutateAsync(predId)
       toast.success('Зависимость добавлена')
-    } catch (err) {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } }).response?.data
-          ?.detail ?? (err as Error).message
-      toast.error('Не удалось', { description: detail })
+    } catch {
+      // тост (включая 409 о цикле) показывает глобальный onError мутаций
     }
   }
 
   const onRemove = async (predId: string) => {
     try {
       await remove.mutateAsync(predId)
-    } catch (err) {
-      toast.error('Не получилось', { description: (err as Error).message })
+    } catch {
+      // тост показывает глобальный onError мутаций
     }
   }
 

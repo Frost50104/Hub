@@ -24,8 +24,8 @@ export function WatchControl({ taskId }: WatchControlProps) {
     try {
       await toggle.mutateAsync(iWatch)
       toast.success(iWatch ? 'Вы отписались от задачи' : 'Вы подписались на задачу')
-    } catch (err) {
-      toast.error('Не получилось', { description: (err as Error).message })
+    } catch {
+      // тост показывает глобальный onError мутаций
     }
   }
 

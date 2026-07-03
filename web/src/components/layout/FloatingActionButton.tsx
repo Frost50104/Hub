@@ -116,11 +116,8 @@ function MobileCreateProjectDialog({
       setDescription('')
       onOpenChange(false)
       nav(`/projects/${project.id}`)
-    } catch (err) {
-      const message =
-        (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ??
-        (err as Error).message
-      toast.error('Не удалось создать проект', { description: message })
+    } catch {
+      // тост показывает глобальный onError мутаций
     }
   }
   return (

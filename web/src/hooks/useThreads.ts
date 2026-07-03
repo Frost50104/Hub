@@ -48,6 +48,7 @@ export function useCreateComment(taskId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: string) => commentsApi.create(taskId, body),
+    meta: { errorMessage: 'Не удалось отправить комментарий' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: threadKeys.comments(taskId) })
       qc.invalidateQueries({ queryKey: threadKeys.activity(taskId) })
@@ -60,6 +61,7 @@ export function useDeleteComment(taskId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (commentId: string) => commentsApi.remove(commentId),
+    meta: { errorMessage: 'Не удалось удалить комментарий' },
     onSuccess: () => qc.invalidateQueries({ queryKey: threadKeys.comments(taskId) }),
   })
 }
@@ -74,6 +76,7 @@ export function useToggleWatch(taskId: string) {
         await watchersApi.join(taskId)
       }
     },
+    meta: { errorMessage: 'Не удалось изменить подписку' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: threadKeys.watchers(taskId) })
       qc.invalidateQueries({ queryKey: threadKeys.activity(taskId) })

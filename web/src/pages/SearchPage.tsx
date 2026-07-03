@@ -185,6 +185,8 @@ function MobileSearch() {
               total={result.data?.total ?? 0}
               loading={result.isLoading}
               empty={empty}
+              error={result.isError ? result.error : undefined}
+              onRetry={() => void result.refetch()}
             />
           </div>
         )}
@@ -284,6 +286,8 @@ function DesktopSearch() {
           total={result.data?.total ?? 0}
           loading={result.isLoading}
           empty={empty}
+          error={result.isError ? result.error : undefined}
+          onRetry={() => void result.refetch()}
         />
       )}
     </div>

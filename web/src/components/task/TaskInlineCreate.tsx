@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { toast } from 'sonner'
 
 import { Input } from '@/components/ui/Input'
 import { useCreateTask } from '@/hooks/useTasks'
@@ -20,10 +19,8 @@ export function TaskInlineCreate({ projectId, sectionId }: TaskInlineCreateProps
     try {
       await create.mutateAsync({ title: trimmed, section_id: sectionId })
       setTitle('')
-    } catch (err) {
-      toast.error('Не удалось создать задачу', {
-        description: (err as Error).message,
-      })
+    } catch {
+      // ввод сохраняем в поле; тост показывает глобальный onError мутаций
     }
   }
 

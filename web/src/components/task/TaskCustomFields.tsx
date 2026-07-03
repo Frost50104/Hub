@@ -1,5 +1,4 @@
 import { Loader2 } from 'lucide-react'
-import { toast } from 'sonner'
 
 import { CustomFieldEditor } from '@/components/task/CustomFieldEditor'
 import {
@@ -61,19 +60,7 @@ export function TaskCustomFields({ taskId, projectId }: TaskCustomFieldsProps) {
                   value={current}
                   disabled={setValue.isPending}
                   onChange={(next) => {
-                    setValue.mutate(
-                      { fieldId: def.id, value: next },
-                      {
-                        onError: (err) => {
-                          const detail =
-                            (err as { response?: { data?: { detail?: string } } })
-                              .response?.data?.detail ?? (err as Error).message
-                          toast.error('Не удалось сохранить значение', {
-                            description: detail,
-                          })
-                        },
-                      },
-                    )
+                    setValue.mutate({ fieldId: def.id, value: next })
                   }}
                 />
               </div>

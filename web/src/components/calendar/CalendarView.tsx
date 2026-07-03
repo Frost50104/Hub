@@ -8,7 +8,6 @@ import {
 } from '@dnd-kit/core'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { toast } from 'sonner'
 
 import { useCalendarTasks } from '@/hooks/useCalendarTasks'
 import { useUpdateTask } from '@/hooks/useTasks'
@@ -164,12 +163,7 @@ export function CalendarView({ projectId, onTaskClick }: CalendarViewProps) {
       newStart.setDate(oldStart.getDate() + offsetDays)
       patch.start_at = newStart.toISOString()
     }
-    update.mutate(patch, {
-      onError: (err) =>
-        toast.error('Не удалось перенести задачу', {
-          description: (err as Error).message,
-        }),
-    })
+    update.mutate(patch)
   }
 
   return (

@@ -70,10 +70,8 @@ export function ShareDialog({
           : await createTask.mutateAsync({})
       toast.success('Ссылка создана')
       void copyToClipboard(created.url)
-    } catch (err) {
-      toast.error('Не удалось создать ссылку', {
-        description: (err as Error).message,
-      })
+    } catch {
+      // тост показывает глобальный onError мутаций
     }
   }
 
@@ -109,10 +107,8 @@ export function ShareDialog({
                   try {
                     await revoke.mutateAsync(s.token)
                     toast.success('Ссылка отозвана')
-                  } catch (err) {
-                    toast.error('Не удалось отозвать', {
-                      description: (err as Error).message,
-                    })
+                  } catch {
+                    // тост показывает глобальный onError мутаций
                   }
                 }}
               />

@@ -27,6 +27,7 @@ export function useMarkRead() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => notificationsApi.markRead(id),
+    meta: { errorMessage: 'Не удалось отметить прочитанным' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['notifications'] })
     },
@@ -37,6 +38,7 @@ export function useMarkAllRead() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: () => notificationsApi.markAllRead(),
+    meta: { errorMessage: 'Не удалось отметить прочитанным' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['notifications'] })
     },

@@ -43,6 +43,7 @@ export function useCreateTask(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: TaskCreateBody) => tasksApi.create(projectId, body),
+    meta: { errorMessage: 'Не удалось создать задачу' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tasks', projectId] })
     },
@@ -54,6 +55,7 @@ export function useUpdateTask(projectId: string) {
   return useMutation({
     mutationFn: ({ id, ...body }: TaskUpdateBody & { id: string }) =>
       tasksApi.update(id, body),
+    meta: { errorMessage: 'Не удалось обновить задачу' },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['tasks', projectId] })
       qc.invalidateQueries({ queryKey: taskKeys.detail(data.id) })
@@ -66,6 +68,7 @@ export function useArchiveTask(projectId: string) {
   return useMutation({
     mutationFn: ({ id, archive }: { id: string; archive: boolean }) =>
       archive ? tasksApi.archive(id) : tasksApi.unarchive(id),
+    meta: { errorMessage: 'Не удалось обновить задачу' },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', projectId] }),
   })
 }
@@ -74,6 +77,7 @@ export function useDeleteTask(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => tasksApi.remove(id),
+    meta: { errorMessage: 'Не удалось удалить задачу' },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', projectId] }),
   })
 }

@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { PushPermissionPrompt } from '@/components/PushPermissionPrompt'
+import { QueryError } from '@/components/QueryError'
 import { MobileTaskRow } from '@/components/task/MobileTaskRow'
 import { TaskRow } from '@/components/task/TaskRow'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
@@ -94,6 +95,13 @@ function MobileHome() {
         <Section title="Недавние">
           {recentTasks.isLoading ? (
             <p className="px-4 py-3 text-sm text-text3">Загружаем…</p>
+          ) : recentTasks.isError ? (
+            <QueryError
+              error={recentTasks.error}
+              onRetry={() => void recentTasks.refetch()}
+              title="Не удалось загрузить задачи"
+              className="m-3"
+            />
           ) : tasks.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-text3">
               Все задачи разобраны.
@@ -132,7 +140,14 @@ function MobileHome() {
             </Link>
           }
         >
-          {recentProjects.length === 0 ? (
+          {projects.isError ? (
+            <QueryError
+              error={projects.error}
+              onRetry={() => void projects.refetch()}
+              title="Не удалось загрузить проекты"
+              className="m-3"
+            />
+          ) : recentProjects.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-text3">
               Проектов ещё нет. Нажмите «+» внизу, чтобы создать первый.
             </p>
@@ -255,6 +270,13 @@ function DesktopHome() {
             {myTasks.isLoading && (
               <p className="px-2 py-2 text-xs text-text2">Загружаем…</p>
             )}
+            {myTasks.isError && (
+              <QueryError
+                error={myTasks.error}
+                onRetry={() => void myTasks.refetch()}
+                title="Не удалось загрузить задачи"
+              />
+            )}
             {myTasks.data && myTasks.data.length === 0 && (
               <p className="px-2 py-3 text-xs text-text3">
                 {taskTab === 'overdue'
@@ -286,7 +308,13 @@ function DesktopHome() {
               Все →
             </Link>
           </div>
-          {recent.length === 0 ? (
+          {projects.isError ? (
+            <QueryError
+              error={projects.error}
+              onRetry={() => void projects.refetch()}
+              title="Не удалось загрузить проекты"
+            />
+          ) : recent.length === 0 ? (
             <p className="px-2 py-3 text-xs text-text3">
               Проектов пока нет — создайте первый из левого меню.
             </p>

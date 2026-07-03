@@ -3,6 +3,7 @@ import { useState } from 'react'
 
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
+import { QueryError } from '@/components/QueryError'
 import { MobileTaskRow } from '@/components/task/MobileTaskRow'
 import { TaskRow } from '@/components/task/TaskRow'
 import {
@@ -56,6 +57,14 @@ function MobileMyTasks() {
       <div>
         {tasks.isLoading && (
           <p className="px-4 py-4 text-sm text-text2">Загружаем…</p>
+        )}
+        {tasks.isError && (
+          <QueryError
+            error={tasks.error}
+            onRetry={() => void tasks.refetch()}
+            title="Не удалось загрузить задачи"
+            className="m-4"
+          />
         )}
         {tasks.data && tasks.data.length === 0 && (
           <p className="px-4 py-10 text-center text-sm text-text3">
@@ -136,10 +145,12 @@ function DesktopMyTasks() {
 
       <div>
         {tasks.isLoading && <p className="text-sm text-text2">Загружаем…</p>}
-        {tasks.error && (
-          <p className="text-sm text-red">
-            Ошибка: {(tasks.error as Error).message}
-          </p>
+        {tasks.isError && (
+          <QueryError
+            error={tasks.error}
+            onRetry={() => void tasks.refetch()}
+            title="Не удалось загрузить задачи"
+          />
         )}
         {tasks.data && tasks.data.length === 0 && (
           <p className="rounded-lg border border-glass-border p-6 text-center text-sm text-text3">

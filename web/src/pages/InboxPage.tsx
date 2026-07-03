@@ -12,6 +12,7 @@ import { Link } from 'react-router-dom'
 
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
+import { QueryError } from '@/components/QueryError'
 import { Button } from '@/components/ui/Button'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import {
@@ -78,6 +79,14 @@ function MobileInbox() {
         <p className="flex items-center gap-2 px-4 py-4 text-sm text-text2">
           <Loader2 className="h-4 w-4 animate-spin" /> Загружаем…
         </p>
+      )}
+      {notifications.isError && (
+        <QueryError
+          error={notifications.error}
+          onRetry={() => void notifications.refetch()}
+          title="Не удалось загрузить уведомления"
+          className="m-4"
+        />
       )}
       {notifications.data && notifications.data.length === 0 && (
         <EmptyInbox />
@@ -241,6 +250,13 @@ function DesktopInbox() {
 
       {notifications.isLoading && (
         <p className="text-sm text-text2">Загружаем…</p>
+      )}
+      {notifications.isError && (
+        <QueryError
+          error={notifications.error}
+          onRetry={() => void notifications.refetch()}
+          title="Не удалось загрузить уведомления"
+        />
       )}
       {notifications.data && notifications.data.length === 0 && (
         <EmptyInbox />

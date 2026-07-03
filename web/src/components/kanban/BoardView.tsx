@@ -10,7 +10,6 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { useMemo, useState } from 'react'
-import { toast } from 'sonner'
 
 import { useProjectSections } from '@/hooks/useProjects'
 import { useTasks, useUpdateTask } from '@/hooks/useTasks'
@@ -129,20 +128,11 @@ export function BoardView({ projectId, myRole, onTaskClick }: BoardViewProps) {
     const sameSection = sourceColumn.sectionId === targetColumn.sectionId
     if (samePosition && sameSection) return
 
-    update.mutate(
-      {
-        id: taskId,
-        section_id: targetColumn.sectionId,
-        position: newPosition,
-      },
-      {
-        onError: (err) => {
-          toast.error('Не удалось переместить задачу', {
-            description: (err as Error).message,
-          })
-        },
-      },
-    )
+    update.mutate({
+      id: taskId,
+      section_id: targetColumn.sectionId,
+      position: newPosition,
+    })
   }
 
   if (tasks.isLoading || sections.isLoading) {

@@ -39,6 +39,7 @@ export function useCreateProjectShare(projectId: string) {
   return useMutation({
     mutationFn: (body: { expires_at?: string | null } = {}) =>
       shareApi.createForProject(projectId, body),
+    meta: { errorMessage: 'Не удалось создать ссылку' },
     onSuccess: () => qc.invalidateQueries({ queryKey: projectKey(projectId) }),
   })
 }
@@ -48,6 +49,7 @@ export function useCreateTaskShare(taskId: string) {
   return useMutation({
     mutationFn: (body: { expires_at?: string | null } = {}) =>
       shareApi.createForTask(taskId, body),
+    meta: { errorMessage: 'Не удалось создать ссылку' },
     onSuccess: () => qc.invalidateQueries({ queryKey: taskKey(taskId) }),
   })
 }
@@ -56,6 +58,7 @@ export function useRevokeShare(scope: 'project' | 'task', entityId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (token: string) => shareApi.revoke(token),
+    meta: { errorMessage: 'Не удалось отозвать ссылку' },
     onSuccess: () =>
       qc.invalidateQueries({
         queryKey: scope === 'project' ? projectKey(entityId) : taskKey(entityId),

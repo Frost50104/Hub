@@ -62,8 +62,19 @@ function projectColorFor(p: Project): string {
 }
 
 function ProjectsList({ onItemClick }: { onItemClick?: () => void }) {
-  const { data, isLoading } = useProjects()
+  const { data, isLoading, isError, refetch } = useProjects()
   if (isLoading) return <p className="px-3 py-1 text-xs text-text3">Загружаем…</p>
+  if (isError) {
+    return (
+      <button
+        type="button"
+        onClick={() => void refetch()}
+        className="px-3 py-1 text-left text-xs text-red hover:underline"
+      >
+        Не удалось загрузить — повторить
+      </button>
+    )
+  }
   if (!data || data.length === 0) {
     return <p className="px-3 py-1 text-xs text-text3">Нет проектов</p>
   }
@@ -124,11 +135,8 @@ function CreateProjectFromSidebar({
       setDescription('')
       onOpenChange(false)
       nav(`/projects/${project.id}`)
-    } catch (err) {
-      const message =
-        (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ??
-        (err as Error).message
-      toast.error('Не удалось создать проект', { description: message })
+    } catch {
+      // тост показывает глобальный onError мутаций
     }
   }
   return (

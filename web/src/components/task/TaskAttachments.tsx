@@ -84,11 +84,8 @@ export function TaskAttachments({ taskId }: TaskAttachmentsProps) {
     try {
       await upload.mutateAsync(file)
       toast.success(`«${file.name}» загружен`)
-    } catch (err) {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ??
-        (err as Error).message
-      toast.error('Не удалось загрузить', { description: detail })
+    } catch {
+      // тост показывает глобальный onError мутаций
     }
   }
 
