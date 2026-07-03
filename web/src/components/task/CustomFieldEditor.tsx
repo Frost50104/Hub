@@ -1,14 +1,13 @@
 import { Check, ChevronDown } from 'lucide-react'
 import { useState } from 'react'
 
-import { Avatar } from '@/components/ui/Avatar'
+import { PeoplePicker } from '@/components/PeoplePicker'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
-import { useTenantMembers } from '@/hooks/useTenantMembers'
 import { cn } from '@/lib/cn'
 import { type CustomFieldDefinition } from '@/lib/customFields'
 
@@ -270,79 +269,13 @@ function PersonEditor({
   onChange: (v: unknown) => void
   disabled?: boolean
 }) {
-  const [query, setQuery] = useState('')
-  const members = useTenantMembers(query)
   const currentId = typeof value === 'string' ? value : null
-  const current = members.data?.find((m) => m.employee_id === currentId)
-
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild disabled={disabled}>
-        <button
-          type="button"
-          className={cn(
-            INPUT_CLASS,
-            'flex items-center justify-between gap-2 text-left',
-          )}
-        >
-          <div className="flex min-w-0 items-center gap-2">
-            {current && (
-              <Avatar
-                name={current.full_name}
-                email={current.email}
-                className="h-5 w-5 text-[9px]"
-              />
-            )}
-            <span
-              className={cn(
-                'truncate',
-                current ? 'text-text' : 'text-text3',
-              )}
-            >
-              {current
-                ? current.full_name || current.email || current.employee_id
-                : '—'}
-            </span>
-          </div>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-[260px]">
-        <div className="px-2 py-1">
-          <input
-            type="text"
-            placeholder="Поиск…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full rounded border border-glass-border bg-glass px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
-          />
-        </div>
-        {members.data?.length === 0 && (
-          <div className="px-2 py-1.5 text-xs text-text3">Никого не нашли</div>
-        )}
-        {members.data?.map((m) => (
-          <DropdownMenuItem
-            key={m.employee_id}
-            onSelect={() => onChange(m.employee_id)}
-          >
-            <Avatar
-              name={m.full_name}
-              email={m.email}
-              className="mr-2 h-5 w-5 text-[9px]"
-            />
-            <span className="flex-1 truncate">
-              {m.full_name || m.email || m.employee_id}
-            </span>
-            {m.employee_id === currentId && <Check className="h-3.5 w-3.5" />}
-          </DropdownMenuItem>
-        ))}
-        {currentId && (
-          <DropdownMenuItem onSelect={() => onChange(null)}>
-            Очистить
-          </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <PeoplePicker
+      value={currentId}
+      onChange={(id) => onChange(id)}
+      disabled={disabled}
+    />
   )
 }
 
