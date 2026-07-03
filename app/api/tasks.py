@@ -317,11 +317,14 @@ async def update_task(
         changes["description"] = True  # not logging full body
         task.description = body.description
 
-    if body.section_id is not None and body.section_id != task.section_id:
-        await _assert_section_in_project(db, task.project_id, body.section_id)
+    # Nullable-поля различают «не пришло» (нет в model_fields_set — не трогаем)
+    # и «пришёл явный null» (очистить значение).
+    if "section_id" in body.model_fields_set and body.section_id != task.section_id:
+        if body.section_id is not None:
+            await _assert_section_in_project(db, task.project_id, body.section_id)
         changes["section_id"] = {
             "old": str(task.section_id) if task.section_id else None,
-            "new": str(body.section_id),
+            "new": str(body.section_id) if body.section_id else None,
         }
         task.section_id = body.section_id
 
@@ -329,17 +332,17 @@ async def update_task(
         changes["priority"] = {"old": task.priority, "new": body.priority}
         task.priority = body.priority
 
-    if body.due_at is not None and body.due_at != task.due_at:
+    if "due_at" in body.model_fields_set and body.due_at != task.due_at:
         changes["due_at"] = {
             "old": task.due_at.isoformat() if task.due_at else None,
-            "new": body.due_at.isoformat(),
+            "new": body.due_at.isoformat() if body.due_at else None,
         }
         task.due_at = body.due_at
 
-    if body.start_at is not None and body.start_at != task.start_at:
+    if "start_at" in body.model_fields_set and body.start_at != task.start_at:
         changes["start_at"] = {
             "old": task.start_at.isoformat() if task.start_at else None,
-            "new": body.start_at.isoformat(),
+            "new": body.start_at.isoformat() if body.start_at else None,
         }
         task.start_at = body.start_at
 
@@ -353,18 +356,21 @@ async def update_task(
         actor_rec.email if actor_rec else "Кто-то"
     )
 
-    if body.assignee_id is not None and body.assignee_id != task.assignee_id:
-        await _assert_assignee_in_tenant(db, body.assignee_id)
+    if "assignee_id" in body.model_fields_set and body.assignee_id != task.assignee_id:
         old_assignee = task.assignee_id
+        if body.assignee_id is not None:
+            await _assert_assignee_in_tenant(db, body.assignee_id)
         task.assignee_id = body.assignee_id
-        # New assignee auto-subscribes (no-op if already a watcher).
-        await _ensure_watcher(
-            db,
-            task_id=task.id,
-            tenant_id=task.tenant_id,
-            employee_id=body.assignee_id,
-            reason="assignee",
-        )
+        if body.assignee_id is not None:
+            # New assignee auto-subscribes (no-op if already a watcher).
+            # Снятие исполнителя подписку НЕ снимает — он остаётся watcher'ом.
+            await _ensure_watcher(
+                db,
+                task_id=task.id,
+                tenant_id=task.tenant_id,
+                employee_id=body.assignee_id,
+                reason="assignee",
+            )
         await record_activity(
             db,
             tenant_id=principal.tenant_id,
@@ -373,11 +379,11 @@ async def update_task(
             kind="assigned",
             payload={
                 "old": str(old_assignee) if old_assignee else None,
-                "new": str(body.assignee_id),
+                "new": str(body.assignee_id) if body.assignee_id else None,
             },
         )
         # Notify the new assignee (unless they assigned themselves).
-        if body.assignee_id != principal.employee_id:
+        if body.assignee_id is not None and body.assignee_id != principal.employee_id:
             await notify_assigned(
                 db,
                 task=task,

@@ -45,11 +45,10 @@ class TaskUpdate(BaseModel):
     start_at: datetime | None = None
     due_at: datetime | None = None
     position: Decimal | None = None
-    # Pydantic v2 has trouble distinguishing "explicit null" from "absent" by
-    # default. For section/assignee/due/description we want "explicit null"
-    # = unset, "absent" = keep current. Endpoint layer treats `is None` as
-    # "absent" — clients send `null` only when they really mean "clear it".
-    # TODO Hub-MVP.3b: switch to Pydantic Optional + Unset sentinel if needed.
+    # Для nullable-полей (section_id/assignee_id/start_at/due_at) endpoint
+    # различает «поле не пришло» (нет в model_fields_set → не трогаем) и
+    # «пришёл явный null» (очистить значение). Не-nullable поля (title/status/
+    # priority/position) по-прежнему игнорируют null.
 
 
 class TaskResponse(BaseModel):
