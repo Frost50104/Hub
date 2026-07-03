@@ -55,11 +55,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         version=settings.app_version,
     )
 
+    # Воркеры — под супервизором: рестарт с backoff при падении + Redis-лок
+    # лидера, чтобы при uvicorn --workers N синхронизация бежала в одном
+    # процессе (см. app/services/worker_supervisor.py).
+    # ВАЖНО: --workers > 1 пока заблокирован sid-sync'ом — его revoked-store
+    # живёт в памяти процесса; не-лидер не узнает о ревокациях. Для
+    # масштабирования нужен Redis-backed store (см. docs/TECH_DEBT.md).
+    from app.services.worker_supervisor import supervise
+
     deletion_task: asyncio.Task | None = None
     if settings.signaris_service_key and settings.deletion_sync_enabled:
         from app.services.deletion_sync import start_worker
 
-        deletion_task = asyncio.create_task(start_worker())
+        deletion_task = asyncio.create_task(supervise("deletion-sync", start_worker))
         log.info("deletion_sync.task_created")
     else:
         log.info(
@@ -74,7 +82,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if settings.signaris_service_key and settings.sid_sync_enabled:
         from app.services.sid_sync import start_worker as start_sid_worker
 
-        sid_sync_task = asyncio.create_task(start_sid_worker())
+        sid_sync_task = asyncio.create_task(supervise("sid-sync", start_sid_worker))
         log.info("sid_sync.task_created")
     else:
         log.info(
