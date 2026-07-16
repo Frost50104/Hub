@@ -16,6 +16,7 @@ import { NavLink, Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { SidebarSearch } from './SidebarSearch'
+import { SpaceSwitcher } from './SpaceSwitcher'
 import { CreateTaskDialog } from '@/components/task/CreateTaskDialog'
 import { Avatar } from '@/components/ui/Avatar'
 import { SkeletonRows } from '@/components/ui/Skeleton'
@@ -237,6 +238,8 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
           Hub
         </span>
       </Link>
+
+      <SpaceSwitcher />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

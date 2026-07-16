@@ -4,6 +4,16 @@ import { useEffect } from 'react'
 import { api } from '@/lib/api'
 import { clearSentryUser, identifySentryUser } from '@/lib/sentry'
 
+export interface MeProfile {
+  id: string
+  org_role: 'employee' | 'tu' | 'franchisee_owner' | 'office'
+  content_role: 'none' | 'author' | 'publisher'
+  status: 'active' | 'archived'
+  position_id: string | null
+  store_id: string | null
+  status_text: string | null
+}
+
 export interface Me {
   employee_id: string
   email: string
@@ -11,6 +21,10 @@ export interface Me {
   tenant_id: string
   tenant_slug: string
   hub_role: 'admin' | 'member' | 'viewer' | null
+  /** Learn-профиль (HR-карточка); null у юзеров без hub-роли. */
+  profile: MeProfile | null
+  /** Карточка с этим email в архиве — требуется восстановление админом. */
+  profile_needs_restore: boolean
 }
 
 export function useMe(): UseQueryResult<Me> {

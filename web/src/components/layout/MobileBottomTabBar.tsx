@@ -1,8 +1,9 @@
-import { Bell, CheckCircle2, Home, Search, User } from 'lucide-react'
+import { Bell, CheckCircle2, Home, Search, Sparkles, User } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 
 import { useUnreadCount } from '@/hooks/useNotifications'
 import { cn } from '@/lib/cn'
+import { type Space } from '@/lib/workspace'
 
 interface TabDef {
   to: string
@@ -12,9 +13,18 @@ interface TabDef {
   showUnreadDot?: boolean
 }
 
-const TABS: TabDef[] = [
+const TASK_TABS: TabDef[] = [
   { to: '/', label: 'Главная', icon: Home, end: true },
   { to: '/my', label: 'Мои задачи', icon: CheckCircle2 },
+  { to: '/inbox', label: 'Входящие', icon: Bell, showUnreadDot: true },
+  { to: '/search', label: 'Поиск', icon: Search },
+  { to: '/profile', label: 'Профиль', icon: User },
+]
+
+// Табы learn-пространства (Ф0): «Обучение» появится в Ф3a, пока — витрина.
+const LEARN_TABS: TabDef[] = [
+  { to: '/learn', label: 'Витрина', icon: Sparkles, end: true },
+  { to: '/', label: 'Задачи', icon: CheckCircle2, end: true },
   { to: '/inbox', label: 'Входящие', icon: Bell, showUnreadDot: true },
   { to: '/search', label: 'Поиск', icon: Search },
   { to: '/profile', label: 'Профиль', icon: User },
@@ -28,9 +38,10 @@ const TABS: TabDef[] = [
  * padding so it stays clear of the iOS home indicator without doubling the
  * height in browsers without a notch.
  */
-export function MobileBottomTabBar() {
+export function MobileBottomTabBar({ space = 'tasks' }: { space?: Space }) {
   const unread = useUnreadCount()
   const unreadCount = unread.data?.count ?? 0
+  const tabs = space === 'learn' ? LEARN_TABS : TASK_TABS
 
   return (
     <nav
@@ -39,8 +50,8 @@ export function MobileBottomTabBar() {
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0)' }}
     >
       <ul className="flex items-end justify-around px-1 pb-1 pt-2">
-        {TABS.map(({ to, label, icon: Icon, end, showUnreadDot }) => (
-          <li key={to} className="flex-1">
+        {tabs.map(({ to, label, icon: Icon, end, showUnreadDot }) => (
+          <li key={to + label} className="flex-1">
             <NavLink
               to={to}
               end={end}

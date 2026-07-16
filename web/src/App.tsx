@@ -43,6 +43,22 @@ const AppearanceTab = lazy(() =>
     default: m.AppearanceTab,
   })),
 )
+// Learn-пространство (LMS, Ф0+). Админ-страницы — отдельные chunk'и:
+// линейный персонал их не грузит.
+const LearnHomePage = lazy(() =>
+  import('@/pages/learn/LearnHomePage').then((m) => ({ default: m.LearnHomePage })),
+)
+const LearnOrgPage = lazy(() =>
+  import('@/pages/learn/LearnOrgPage').then((m) => ({ default: m.LearnOrgPage })),
+)
+const LearnEmployeesPage = lazy(() =>
+  import('@/pages/learn/LearnEmployeesPage').then((m) => ({
+    default: m.LearnEmployeesPage,
+  })),
+)
+const LearnAuditPage = lazy(() =>
+  import('@/pages/learn/LearnAuditPage').then((m) => ({ default: m.LearnAuditPage })),
+)
 const NotificationsSettingsTab = lazy(() =>
   import('@/pages/settings/NotificationsTab').then((m) => ({
     default: m.NotificationsSettingsTab,
@@ -67,6 +83,10 @@ export function App() {
           <Route path="/projects/:id" element={<ProjectPage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/learn" element={<LearnHomePage />} />
+          <Route path="/learn/admin/org" element={<LearnOrgPage />} />
+          <Route path="/learn/admin/employees" element={<LearnEmployeesPage />} />
+          <Route path="/learn/admin/audit" element={<LearnAuditPage />} />
           <Route path="/settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="notifications" replace />} />
             <Route path="notifications" element={<NotificationsSettingsTab />} />

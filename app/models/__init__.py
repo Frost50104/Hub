@@ -1,9 +1,27 @@
 """Importing all model modules so Base.metadata sees them at alembic time."""
 
 from app.models.attachment import TaskAttachment
+from app.models.audience import Audience, AudienceMember, AudienceRule
+from app.models.audit import AuditLog
 from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
 from app.models.dependency import TaskDependency
+from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
+from app.models.learning_settings import LearningSettings
 from app.models.notification import Notification, NotificationPreferences
+from app.models.org import (
+    Department,
+    Franchisee,
+    FranchiseeGroup,
+    FranchiseeGroupMember,
+    Position,
+    PositionGroup,
+    PositionGroupMember,
+    Store,
+    StoreGroup,
+    StoreGroupMember,
+    UserGroup,
+    UserGroupMember,
+)
 from app.models.project import Project, ProjectMember
 from app.models.push_subscription import PushSubscription
 from app.models.rate_limit import RateLimit
@@ -21,9 +39,22 @@ from app.models.task import (
 )
 
 __all__ = [
+    "Audience",
+    "AudienceMember",
+    "AudienceRule",
+    "AuditLog",
     "CustomFieldDefinition",
+    "Department",
+    "EmployeeProfile",
+    "Franchisee",
+    "FranchiseeGroup",
+    "FranchiseeGroupMember",
+    "LearningSettings",
     "Notification",
     "NotificationPreferences",
+    "Position",
+    "PositionGroup",
+    "PositionGroupMember",
     "Project",
     "ProjectMember",
     "PublicShareToken",
@@ -32,6 +63,9 @@ __all__ = [
     "Section",
     "ShadowTenant",
     "ShadowUser",
+    "Store",
+    "StoreGroup",
+    "StoreGroupMember",
     "SyncState",
     "Task",
     "TaskActivity",
@@ -42,4 +76,7 @@ __all__ = [
     "TaskLabel",
     "TaskLabelAssignment",
     "TaskWatcher",
+    "TuStoreAssignment",
+    "UserGroup",
+    "UserGroupMember",
 ]

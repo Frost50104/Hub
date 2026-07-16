@@ -133,15 +133,18 @@ def create_app() -> FastAPI:
 
     from app.api import activity as activity_api
     from app.api import attachments as attachments_api
+    from app.api import audit as audit_api
     from app.api import calendar as calendar_api
     from app.api import comments as comments_api
     from app.api import custom_fields as custom_fields_api
     from app.api import dependencies as dependencies_api
+    from app.api import employees as employees_api
     from app.api import env as env_api
     from app.api import labels as labels_api
     from app.api import me as me_api
     from app.api import me_tasks as me_tasks_api
     from app.api import notifications as notifications_api
+    from app.api import org as org_api
     from app.api import projects as projects_api
     from app.api import public as public_api
     from app.api import push as push_api
@@ -176,6 +179,10 @@ def create_app() -> FastAPI:
     app.include_router(push_api.router, prefix="/api")
     app.include_router(notifications_api.router, prefix="/api")
     app.include_router(stats_api.router, prefix="/api")
+    # Learn-домен (LMS, Ф0+)
+    app.include_router(org_api.router, prefix="/api")
+    app.include_router(employees_api.router, prefix="/api")
+    app.include_router(audit_api.router, prefix="/api")
 
     return app
 
