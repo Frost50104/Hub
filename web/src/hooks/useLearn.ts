@@ -12,8 +12,11 @@ import {
   type AuditList,
   type EmployeeList,
   type EmployeeProfile,
+  type FavoriteItem,
   type LibraryData,
+  type NewsList,
   type OrgSnapshot,
+  type SurveyListData,
   type UnlinkedLogin,
 } from '@/lib/learn'
 
@@ -115,6 +118,62 @@ export function useLibraryMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['learn-library'] })
     },
+  })
+}
+
+// ─── Новости / Опросы / Избранное (Ф2) ───────────────────────────────────────
+
+export function useNews(manage: boolean, enabled = true): UseQueryResult<NewsList> {
+  return useQuery({
+    queryKey: ['learn-news', manage],
+    queryFn: () => learnApi.news(manage),
+    staleTime: 30_000,
+    enabled,
+  })
+}
+
+export function useNewsMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['learn-news'] })
+    },
+  })
+}
+
+export function useSurveys(manage: boolean, enabled = true): UseQueryResult<SurveyListData> {
+  return useQuery({
+    queryKey: ['learn-surveys', manage],
+    queryFn: () => learnApi.surveys(manage),
+    staleTime: 30_000,
+    enabled,
+  })
+}
+
+export function useSurveyMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['learn-surveys'] })
+    },
+  })
+}
+
+export function useRecent(): UseQueryResult<FavoriteItem[]> {
+  return useQuery({
+    queryKey: ['learn-recent'],
+    queryFn: learnApi.recent,
+    staleTime: 60_000,
+  })
+}
+
+export function useFavorites(): UseQueryResult<FavoriteItem[]> {
+  return useQuery({
+    queryKey: ['learn-favorites'],
+    queryFn: learnApi.favorites,
+    staleTime: 60_000,
   })
 }
 

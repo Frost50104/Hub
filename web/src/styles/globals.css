@@ -17,3 +17,90 @@
     border-radius: 6px;
   }
 }
+
+/* ── TipTap-редактор (Ф2): контент внутри .prose-hub ─────────────────────── */
+@layer components {
+  .prose-hub p {
+    margin: 0.375rem 0;
+    line-height: 1.6;
+  }
+  .prose-hub h2 {
+    margin: 0.75rem 0 0.375rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+  .prose-hub h3 {
+    margin: 0.75rem 0 0.375rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+  }
+  .prose-hub ul {
+    margin: 0.375rem 0;
+    padding-left: 1.25rem;
+    list-style: disc;
+  }
+  .prose-hub ol {
+    margin: 0.375rem 0;
+    padding-left: 1.25rem;
+    list-style: decimal;
+  }
+  .prose-hub blockquote {
+    margin: 0.5rem 0;
+    border-left: 2px solid rgb(var(--amber) / 0.6);
+    padding-left: 0.75rem;
+    color: rgb(var(--text2));
+  }
+  .prose-hub hr {
+    margin: 0.75rem 0;
+    border-color: var(--glass-border);
+  }
+  .prose-hub table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.5rem 0;
+    font-size: 0.85rem;
+  }
+  .prose-hub th,
+  .prose-hub td {
+    border: 1px solid var(--glass-border);
+    padding: 0.25rem 0.5rem;
+    vertical-align: top;
+  }
+  .prose-hub th {
+    background: var(--surface);
+    font-weight: 600;
+    text-align: left;
+  }
+  .prose-hub .hub-callout {
+    margin: 0.5rem 0;
+    border: 1px solid rgb(var(--amber) / 0.4);
+    background: rgb(var(--amber) / 0.08);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+  .prose-hub a {
+    color: rgb(var(--amber));
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  /* Placeholder (@tiptap/extension-placeholder) */
+  .prose-hub p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+    color: rgb(var(--text3));
+  }
+  /* Курсор выделения таблиц ProseMirror */
+  .prose-hub .selectedCell:after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgb(var(--amber) / 0.12);
+    pointer-events: none;
+  }
+  .prose-hub td,
+  .prose-hub th {
+    position: relative;
+  }
+}

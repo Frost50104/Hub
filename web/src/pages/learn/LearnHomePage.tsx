@@ -2,6 +2,8 @@ import {
   Archive,
   BookOpen,
   Building2,
+  ClipboardList,
+  Clock,
   GraduationCap,
   Newspaper,
   ScrollText,
@@ -12,6 +14,7 @@ import {
 import { Link } from 'react-router-dom'
 
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
+import { useRecent } from '@/hooks/useLearn'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMe } from '@/hooks/useMe'
 
@@ -30,11 +33,22 @@ const READY_SECTIONS = [
     title: 'Библиотека',
     text: 'Инструкции, регламенты, бланки',
   },
+  {
+    to: '/learn/news',
+    icon: Newspaper,
+    title: 'Новости',
+    text: 'Объявления и события компании',
+  },
+  {
+    to: '/learn/surveys',
+    icon: ClipboardList,
+    title: 'Опросы',
+    text: 'eNPS, пульс-опросы и обратная связь',
+  },
 ] as const
 
 const UPCOMING = [
   { icon: GraduationCap, title: 'Обучение', text: 'Курсы, уроки и тесты' },
-  { icon: Newspaper, title: 'Новости', text: 'Объявления и события компании' },
   { icon: ShoppingBag, title: 'Ассортимент', text: 'Карточки товаров для работы с гостями' },
   { icon: Trophy, title: 'Рейтинг', text: 'Баллы за активность и обучение' },
 ] as const
@@ -68,6 +82,7 @@ const ADMIN_LINKS = [
 export function LearnHomePage() {
   const isDesktop = useIsDesktop()
   const me = useMe()
+  const recent = useRecent()
   const isAdmin = me.data?.hub_role === 'admin'
   const firstName = me.data?.full_name?.split(/\s+/)[0] ?? ''
 
@@ -133,6 +148,26 @@ export function LearnHomePage() {
             </div>
           ))}
         </div>
+
+        {(recent.data?.length ?? 0) > 0 && (
+          <div>
+            <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-text3">
+              <Clock className="h-3.5 w-3.5" /> Недавнее
+            </h2>
+            <ul className="divide-y divide-glass-border rounded-xl border border-glass-border bg-glass">
+              {recent.data!.map((item) => (
+                <li key={item.object_type + item.object_id}>
+                  <Link
+                    to={item.url_path}
+                    className="block px-4 py-2 text-sm text-text hover:bg-surface/50"
+                  >
+                    {item.title}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {isAdmin && (
           <div>

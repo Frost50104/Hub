@@ -51,6 +51,15 @@ export default defineConfig(({ mode }) => ({
       filename: 'sw.ts',
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,webp,woff2}'],
+        // Тяжёлые редакторско-админские чанки НЕ прекешируем каждому
+        // сотруднику при каждом деплое — докачаются on-demand у авторов
+        // (adversarial-ревью плана: precache тянул TipTap всем).
+        globIgnores: [
+          '**/RichEditor-*.js',
+          '**/LearnOrgPage-*.js',
+          '**/LearnEmployeesPage-*.js',
+          '**/LearnAuditPage-*.js',
+        ],
       },
       manifest: {
         name: 'Signaris Hub',

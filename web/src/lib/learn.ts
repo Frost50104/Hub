@@ -272,6 +272,139 @@ export interface AckReport {
   rows: AckReportRow[]
 }
 
+// ─── Новости (Ф2) ────────────────────────────────────────────────────────────
+
+// Единый тип rich-контента — структура описана в рендерере.
+export type { RichDoc } from '@/components/learn/rich/RichRenderer'
+import { type RichDoc } from '@/components/learn/rich/RichRenderer'
+
+export const REACTION_EMOJIS = ['👍', '❤️', '🎉', '👏', '😄'] as const
+
+export interface NewsPost {
+  id: string
+  audience_id: string | null
+  title: string
+  body: RichDoc
+  allow_comments: boolean
+  allow_reactions: boolean
+  requires_acknowledgement: boolean
+  pinned_until: string | null
+  status: ContentStatus
+  published_at: string | null
+  created_at: string
+  updated_at: string
+  author_name: string | null
+  reactions: Record<string, number>
+  my_reactions: string[]
+  comments_count: number
+  acked_by_me: boolean
+  ack_pending: boolean
+  is_favorite: boolean
+}
+
+export interface NewsList {
+  items: NewsPost[]
+  total: number
+  content_role: 'admin' | 'publisher' | 'author' | 'none'
+}
+
+export interface NewsComment {
+  id: string
+  author_id: string
+  author_name: string | null
+  body: string
+  edited_at: string | null
+  deleted_at: string | null
+  created_at: string
+}
+
+// ─── Опросы (Ф2) ─────────────────────────────────────────────────────────────
+
+export type QuestionType = 'single' | 'multi' | 'open' | 'scale' | 'enps'
+
+export const QUESTION_TYPE_LABEL: Record<QuestionType, string> = {
+  single: 'Один вариант',
+  multi: 'Несколько вариантов',
+  open: 'Открытый ответ',
+  scale: 'Шкала',
+  enps: 'eNPS (0–10)',
+}
+
+export interface SurveyQuestion {
+  id: string
+  qtype: QuestionType
+  prompt: string
+  options: { options?: string[]; min?: number; max?: number } | null
+  required: boolean
+  position: number
+}
+
+export interface Survey {
+  id: string
+  audience_id: string | null
+  title: string
+  description: string | null
+  kind: 'standard' | 'enps' | 'pulse'
+  is_anonymous: boolean
+  opens_at: string | null
+  closes_at: string | null
+  status: ContentStatus
+  published_at: string | null
+  created_at: string
+  questions: SurveyQuestion[]
+  participated: boolean
+  is_open_now: boolean
+  participants: number
+}
+
+export interface SurveyListData {
+  items: Survey[]
+  content_role: 'admin' | 'publisher' | 'author' | 'none'
+}
+
+export interface QuestionDraft {
+  qtype: QuestionType
+  prompt: string
+  options: { options?: string[]; min?: number; max?: number } | null
+  required: boolean
+}
+
+export type AnswerValue =
+  | { option: number }
+  | { options: number[] }
+  | { text: string }
+  | { value: number }
+
+export interface QuestionStats {
+  question_id: string
+  qtype: QuestionType
+  prompt: string
+  total_answers: number
+  distribution: Record<string, number>
+  texts: string[]
+  enps_score: number | null
+  groups: Record<
+    string,
+    'suppressed' | { total: number; distribution: Record<string, number>; enps_score?: number }
+  >
+}
+
+export interface SurveyResults {
+  survey_id: string
+  participants: number
+  audience_size: number
+  dimension: string | null
+  questions: QuestionStats[]
+}
+
+export interface FavoriteItem {
+  object_type: string
+  object_id: string
+  title: string
+  url_path: string
+  created_at: string | null
+}
+
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 export const learnApi = {
@@ -445,6 +578,112 @@ export const learnApi = {
       .then((r) => r.data),
   ackReport: (id: string): Promise<AckReport> =>
     api.get<AckReport>(`/learn/library/materials/${id}/ack-report`).then((r) => r.data),
+
+  // ─── Новости ───────────────────────────────────────────────────────────────
+  news: (manage: boolean, offset = 0): Promise<NewsList> =>
+    api
+      .get<NewsList>('/learn/news', {
+        params: { manage: manage || undefined, offset, limit: 20 },
+      })
+      .then((r) => r.data),
+  createNews: (body: {
+    title: string
+    body: RichDoc
+    allow_comments: boolean
+    allow_reactions: boolean
+    requires_acknowledgement: boolean
+  }): Promise<NewsPost> => api.post<NewsPost>('/learn/news', body).then((r) => r.data),
+  updateNews: (
+    id: string,
+    body: Partial<{
+      title: string
+      body: RichDoc
+      allow_comments: boolean
+      allow_reactions: boolean
+      requires_acknowledgement: boolean
+    }>,
+  ): Promise<NewsPost> => api.patch<NewsPost>(`/learn/news/${id}`, body).then((r) => r.data),
+  deleteNews: (id: string): Promise<void> =>
+    api.delete(`/learn/news/${id}`).then(() => undefined),
+  setNewsStatus: (id: string, status: ContentStatus): Promise<NewsPost> =>
+    api.post<NewsPost>(`/learn/news/${id}/status`, { status }).then((r) => r.data),
+  setNewsAudience: (
+    id: string,
+    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+  ): Promise<NewsPost> =>
+    api.put<NewsPost>(`/learn/news/${id}/audience`, body).then((r) => r.data),
+  toggleReaction: (id: string, emoji: string): Promise<void> =>
+    api.post(`/learn/news/${id}/reactions`, { emoji }).then(() => undefined),
+  ackNews: (id: string): Promise<void> =>
+    api.post(`/learn/news/${id}/ack`).then(() => undefined),
+  newsComments: (id: string): Promise<NewsComment[]> =>
+    api.get<NewsComment[]>(`/learn/news/${id}/comments`).then((r) => r.data),
+  addNewsComment: (id: string, body: string): Promise<NewsComment> =>
+    api.post<NewsComment>(`/learn/news/${id}/comments`, { body }).then((r) => r.data),
+  deleteNewsComment: (postId: string, commentId: string): Promise<void> =>
+    api.delete(`/learn/news/${postId}/comments/${commentId}`).then(() => undefined),
+
+  // ─── Опросы ────────────────────────────────────────────────────────────────
+  surveys: (manage: boolean): Promise<SurveyListData> =>
+    api
+      .get<SurveyListData>('/learn/surveys', { params: { manage: manage || undefined } })
+      .then((r) => r.data),
+  survey: (id: string): Promise<Survey> =>
+    api.get<Survey>(`/learn/surveys/${id}`).then((r) => r.data),
+  createSurvey: (body: {
+    title: string
+    description?: string | null
+    kind: string
+    is_anonymous: boolean
+    opens_at?: string | null
+    closes_at?: string | null
+  }): Promise<Survey> => api.post<Survey>('/learn/surveys', body).then((r) => r.data),
+  updateSurvey: (
+    id: string,
+    body: Partial<{
+      title: string
+      description: string | null
+      kind: string
+      is_anonymous: boolean
+      opens_at: string | null
+      closes_at: string | null
+    }>,
+  ): Promise<Survey> => api.patch<Survey>(`/learn/surveys/${id}`, body).then((r) => r.data),
+  replaceQuestions: (id: string, questions: QuestionDraft[]): Promise<Survey> =>
+    api.put<Survey>(`/learn/surveys/${id}/questions`, { questions }).then((r) => r.data),
+  deleteSurvey: (id: string): Promise<void> =>
+    api.delete(`/learn/surveys/${id}`).then(() => undefined),
+  setSurveyStatus: (id: string, status: ContentStatus): Promise<Survey> =>
+    api.post<Survey>(`/learn/surveys/${id}/status`, { status }).then((r) => r.data),
+  setSurveyAudience: (
+    id: string,
+    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+  ): Promise<Survey> =>
+    api.put<Survey>(`/learn/surveys/${id}/audience`, body).then((r) => r.data),
+  submitSurvey: (
+    id: string,
+    answers: { question_id: string; value: AnswerValue }[],
+  ): Promise<Survey> =>
+    api.post<Survey>(`/learn/surveys/${id}/submit`, { answers }).then((r) => r.data),
+  surveyResults: (id: string, dimension?: string): Promise<SurveyResults> =>
+    api
+      .get<SurveyResults>(`/learn/surveys/${id}/results`, {
+        params: { dimension: dimension || undefined },
+      })
+      .then((r) => r.data),
+
+  // ─── Избранное / недавнее ──────────────────────────────────────────────────
+  toggleFavorite: (objectType: string, objectId: string): Promise<{ is_favorite: boolean }> =>
+    api
+      .post<{ is_favorite: boolean }>('/learn/favorites/toggle', {
+        object_type: objectType,
+        object_id: objectId,
+      })
+      .then((r) => r.data),
+  favorites: (): Promise<FavoriteItem[]> =>
+    api.get<FavoriteItem[]>('/learn/favorites').then((r) => r.data),
+  recent: (): Promise<FavoriteItem[]> =>
+    api.get<FavoriteItem[]>('/learn/recent').then((r) => r.data),
 
   /**
    * Открыть файл материала в новой вкладке. Тег <a href> не несёт Bearer —
