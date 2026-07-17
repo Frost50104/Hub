@@ -184,6 +184,94 @@ export interface AuditList {
   total: number
 }
 
+// ─── Библиотека (Ф1) ─────────────────────────────────────────────────────────
+
+export type ContentStatus = 'draft' | 'review' | 'published' | 'archived'
+
+export const CONTENT_STATUS_LABEL: Record<ContentStatus, string> = {
+  draft: 'Черновик',
+  review: 'На согласовании',
+  published: 'Опубликован',
+  archived: 'Архив',
+}
+
+export interface LibrarySection {
+  id: string
+  parent_id: string | null
+  title: string
+  position: number
+  audience_id: string | null
+}
+
+export interface MaterialVersion {
+  version_no: number
+  file_name: string
+  mime: string
+  size_bytes: number
+  note: string | null
+  created_at: string
+}
+
+export interface LibraryMaterial {
+  id: string
+  section_id: string | null
+  audience_id: string | null
+  title: string
+  description: string | null
+  kind: 'file' | 'link'
+  url: string | null
+  current_version_no: number | null
+  requires_acknowledgement: boolean
+  re_ack_on_new_version: boolean
+  ack_deadline_days: number | null
+  status: ContentStatus
+  owner_id: string | null
+  owner_name: string | null
+  published_at: string | null
+  review_period_months: number | null
+  next_review_at: string | null
+  updated_at: string
+  current_version: MaterialVersion | null
+  opened_by_me: boolean
+  acked_by_me: boolean
+  ack_pending: boolean
+}
+
+export interface LibraryData {
+  sections: LibrarySection[]
+  materials: LibraryMaterial[]
+  content_role: 'admin' | 'publisher' | 'author' | 'none'
+}
+
+export interface MaterialUpsert {
+  title?: string
+  description?: string | null
+  url?: string | null
+  section_id?: string | null
+  requires_acknowledgement?: boolean
+  re_ack_on_new_version?: boolean
+  ack_deadline_days?: number | null
+  review_period_months?: number | null
+}
+
+export interface AckReportRow {
+  profile_id: string
+  full_name: string
+  store_id: string | null
+  granted_at: string | null
+  opened_at: string | null
+  acknowledged_at: string | null
+  deadline_at: string | null
+  overdue: boolean
+}
+
+export interface AckReport {
+  material_id: string
+  total: number
+  acked: number
+  rows: AckReportRow[]
+}
+
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 export const learnApi = {
@@ -306,4 +394,84 @@ export const learnApi = {
     limit?: number
     offset?: number
   }): Promise<AuditList> => api.get<AuditList>('/learn/audit', { params }).then((r) => r.data),
+
+  // ─── Библиотека ────────────────────────────────────────────────────────────
+  library: (manage: boolean): Promise<LibraryData> =>
+    api
+      .get<LibraryData>('/learn/library', { params: { manage: manage || undefined } })
+      .then((r) => r.data),
+  createSection: (body: { title: string; parent_id?: string | null }): Promise<LibrarySection> =>
+    api.post<LibrarySection>('/learn/library/sections', body).then((r) => r.data),
+  renameSection: (id: string, title: string): Promise<LibrarySection> =>
+    api.patch<LibrarySection>(`/learn/library/sections/${id}`, { title }).then((r) => r.data),
+  deleteSection: (id: string): Promise<void> =>
+    api.delete(`/learn/library/sections/${id}`).then(() => undefined),
+
+  createMaterial: (
+    body: MaterialUpsert & { title: string; kind: 'file' | 'link' },
+  ): Promise<LibraryMaterial> =>
+    api.post<LibraryMaterial>('/learn/library/materials', body).then((r) => r.data),
+  updateMaterial: (id: string, body: MaterialUpsert): Promise<LibraryMaterial> =>
+    api.patch<LibraryMaterial>(`/learn/library/materials/${id}`, body).then((r) => r.data),
+  deleteMaterial: (id: string): Promise<void> =>
+    api.delete(`/learn/library/materials/${id}`).then(() => undefined),
+  uploadVersion: (id: string, file: File): Promise<LibraryMaterial> => {
+    const form = new FormData()
+    form.append('file', file)
+    return api
+      .post<LibraryMaterial>(`/learn/library/materials/${id}/versions`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data)
+  },
+  materialVersions: (id: string): Promise<MaterialVersion[]> =>
+    api.get<MaterialVersion[]>(`/learn/library/materials/${id}/versions`).then((r) => r.data),
+  setMaterialStatus: (id: string, status: ContentStatus): Promise<LibraryMaterial> =>
+    api
+      .post<LibraryMaterial>(`/learn/library/materials/${id}/status`, { status })
+      .then((r) => r.data),
+  setMaterialAudience: (
+    id: string,
+    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+  ): Promise<LibraryMaterial> =>
+    api
+      .put<LibraryMaterial>(`/learn/library/materials/${id}/audience`, body)
+      .then((r) => r.data),
+  trackOpen: (id: string): Promise<void> =>
+    api.post(`/learn/library/materials/${id}/open`).then(() => undefined),
+  acknowledge: (id: string, versionNo: number): Promise<LibraryMaterial> =>
+    api
+      .post<LibraryMaterial>(`/learn/library/materials/${id}/ack`, { version_no: versionNo })
+      .then((r) => r.data),
+  ackReport: (id: string): Promise<AckReport> =>
+    api.get<AckReport>(`/learn/library/materials/${id}/ack-report`).then((r) => r.data),
+
+  /**
+   * Открыть файл материала в новой вкладке. Тег <a href> не несёт Bearer —
+   * качаем blob через axios и открываем object-URL. Окно создаём ДО fetch
+   * (в жесте клика), иначе попап-блокер.
+   */
+  openMaterialFile: async (material: LibraryMaterial): Promise<void> => {
+    const win = window.open('', '_blank')
+    try {
+      const resp = await api.get(`/learn/library/materials/${material.id}/download`, {
+        responseType: 'blob',
+      })
+      const url = URL.createObjectURL(resp.data as Blob)
+      if (win) {
+        win.location.href = url
+      } else {
+        const a = document.createElement('a')
+        a.href = url
+        a.download = material.current_version?.file_name ?? material.title
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (e) {
+      win?.close()
+      throw e
+    }
+  },
 }

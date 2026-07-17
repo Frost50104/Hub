@@ -1,0 +1,10 @@
+[Unit]
+Description=Run signaris-hub-backup-files daily 00:15 UTC (после pg_dump)
+
+[Timer]
+OnCalendar=*-*-* 00:15:00
+Persistent=true
+Unit=signaris-hub-backup-files.service
+
+[Install]
+WantedBy=timers.target

@@ -35,7 +35,7 @@ interface LearnNavItem {
 const LEARN_NAV: LearnNavItem[] = [
   { to: '/learn', label: 'Витрина', icon: Sparkles, end: true },
   { to: '/learn/courses', label: 'Моё обучение', icon: GraduationCap, soon: true },
-  { to: '/learn/library', label: 'Библиотека', icon: BookOpen, soon: true },
+  { to: '/learn/library', label: 'Библиотека', icon: BookOpen },
   { to: '/learn/news', label: 'Новости', icon: Newspaper, soon: true },
   { to: '/learn/products', label: 'Ассортимент', icon: ShoppingBag, soon: true },
   { to: '/learn/rating', label: 'Рейтинг', icon: Trophy, soon: true },

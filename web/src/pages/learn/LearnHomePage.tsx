@@ -23,9 +23,17 @@ function greeting(): string {
   return 'Добрый вечер'
 }
 
+const READY_SECTIONS = [
+  {
+    to: '/learn/library',
+    icon: BookOpen,
+    title: 'Библиотека',
+    text: 'Инструкции, регламенты, бланки',
+  },
+] as const
+
 const UPCOMING = [
   { icon: GraduationCap, title: 'Обучение', text: 'Курсы, уроки и тесты' },
-  { icon: BookOpen, title: 'Библиотека', text: 'Инструкции, регламенты, бланки' },
   { icon: Newspaper, title: 'Новости', text: 'Объявления и события компании' },
   { icon: ShoppingBag, title: 'Ассортимент', text: 'Карточки товаров для работы с гостями' },
   { icon: Trophy, title: 'Рейтинг', text: 'Баллы за активность и обучение' },
@@ -98,6 +106,17 @@ export function LearnHomePage() {
         )}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {READY_SECTIONS.map(({ to, icon: Icon, title, text }) => (
+            <Link
+              key={to}
+              to={to}
+              className="rounded-xl border border-glass-border bg-glass p-4 transition-colors hover:border-amber/40 hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+            >
+              <Icon className="h-5 w-5 text-amber" />
+              <p className="mt-3 text-sm font-semibold text-text">{title}</p>
+              <p className="mt-0.5 text-xs text-text3">{text}</p>
+            </Link>
+          ))}
           {UPCOMING.map(({ icon: Icon, title, text }) => (
             <div
               key={title}

@@ -1,0 +1,14 @@
+[Unit]
+Description=Signaris Hub — daily attachments/files snapshot (prod + staging)
+After=network.target
+
+[Service]
+Type=oneshot
+# root: attachments принадлежат signaris, снапшоты пишутся в backups/ —
+# postgres-пользователь pg-бэкапа их бы не прочитал.
+User=root
+Group=root
+ExecStart=/opt/signaris-hub/scripts/backup-files.sh
+EnvironmentFile=-/etc/default/signaris-hub-backup
+StandardOutput=journal
+StandardError=journal

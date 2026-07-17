@@ -60,6 +60,9 @@ const LearnEmployeesPage = lazy(() =>
 const LearnAuditPage = lazy(() =>
   import('@/pages/learn/LearnAuditPage').then((m) => ({ default: m.LearnAuditPage })),
 )
+const LearnLibraryPage = lazy(() =>
+  import('@/pages/learn/LearnLibraryPage').then((m) => ({ default: m.LearnLibraryPage })),
+)
 const NotificationsSettingsTab = lazy(() =>
   import('@/pages/settings/NotificationsTab').then((m) => ({
     default: m.NotificationsSettingsTab,
@@ -94,6 +97,7 @@ export function App() {
           <Route path="/search" element={<SearchPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/learn" element={<LearnHomePage />} />
+          <Route path="/learn/library" element={<LearnLibraryPage />} />
           <Route
             path="/learn/admin/org"
             element={

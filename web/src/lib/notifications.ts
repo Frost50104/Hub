@@ -45,6 +45,8 @@ export const NOTIFICATION_KINDS = [
   'task.status_changed_on_watched',
   'task.due_soon',
   'task.overdue',
+  'library.ack_required',
+  'content.review_due',
 ] as const
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
@@ -56,6 +58,8 @@ export const NOTIFICATION_KIND_LABEL: Record<NotificationKind, string> = {
   'task.status_changed_on_watched': 'Статус задачи изменён',
   'task.due_soon': 'Дедлайн через 24 часа',
   'task.overdue': 'Задача просрочена',
+  'library.ack_required': 'Требуется ознакомление с документом',
+  'content.review_due': 'Пора проверить актуальность материала',
 }
 
 export const notificationsApi = {

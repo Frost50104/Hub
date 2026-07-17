@@ -12,6 +12,7 @@ import {
   type AuditList,
   type EmployeeList,
   type EmployeeProfile,
+  type LibraryData,
   type OrgSnapshot,
   type UnlinkedLogin,
 } from '@/lib/learn'
@@ -93,6 +94,27 @@ export function useAudienceDryRun(
     enabled: body !== null,
     placeholderData: (prev) => prev,
     meta: { suppressGlobalError: true },
+  })
+}
+
+// ─── Библиотека ──────────────────────────────────────────────────────────────
+
+export function useLibrary(manage: boolean, enabled = true): UseQueryResult<LibraryData> {
+  return useQuery({
+    queryKey: ['learn-library', manage],
+    queryFn: () => learnApi.library(manage),
+    staleTime: 30_000,
+    enabled,
+  })
+}
+
+export function useLibraryMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['learn-library'] })
+    },
   })
 }
 
