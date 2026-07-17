@@ -20,6 +20,7 @@ import { useMe } from '@/hooks/useMe'
 import { useUnreadCount } from '@/hooks/useNotifications'
 import { authClient } from '@/lib/auth'
 import { cn } from '@/lib/cn'
+import { HUB_ROLE_BADGE } from '@/lib/learn'
 
 interface LearnNavItem {
   to: string
@@ -107,6 +108,11 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
         <span className="font-display text-lg font-black leading-none tracking-tight">
           Hub
         </span>
+        {me.data?.hub_role && (
+          <span className="ml-1 text-[10px] font-semibold uppercase tracking-widest text-text3">
+            {HUB_ROLE_BADGE[me.data.hub_role]}
+          </span>
+        )}
       </Link>
 
       <SpaceSwitcher />
@@ -151,7 +157,7 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
             <p className="truncate text-xs font-medium text-text">
               {me.data?.full_name || me.data?.email || '—'}
             </p>
-            <p className="truncate text-[10px] text-text3">{me.data?.tenant_slug ?? ''}</p>
+            <p className="truncate text-[10px] text-text3">{me.data?.email ?? ''}</p>
           </div>
         </div>
         <div className="flex items-center gap-1">

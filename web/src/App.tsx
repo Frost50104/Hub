@@ -1,10 +1,11 @@
 import * as Sentry from '@sentry/react'
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, type ReactElement } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { ErrorFallback } from '@/components/ErrorFallback'
 import { Shell } from '@/components/layout/Shell'
 import { SkeletonRows } from '@/components/ui/Skeleton'
+import { useMe } from '@/hooks/useMe'
 // Auth-роуты — eager: критичны для входа и крошечные.
 import { AuthCallback } from '@/pages/AuthCallback'
 import { LoginRedirect } from '@/pages/LoginRedirect'
@@ -65,6 +66,15 @@ const NotificationsSettingsTab = lazy(() =>
   })),
 )
 
+/** Client-гейт админ-раздела learn: сервер и так отдаёт 403 не-админам,
+ * но рендерить страницу с падающими кнопками не нужно — редирект на витрину. */
+function RequireHubAdmin({ children }: { children: ReactElement }) {
+  const me = useMe()
+  if (me.isLoading) return <SkeletonRows rows={6} className="p-6" />
+  if (me.data?.hub_role !== 'admin') return <Navigate to="/learn" replace />
+  return children
+}
+
 export function App() {
   return (
     <Sentry.ErrorBoundary fallback={<ErrorFallback />}>
@@ -84,9 +94,30 @@ export function App() {
           <Route path="/search" element={<SearchPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/learn" element={<LearnHomePage />} />
-          <Route path="/learn/admin/org" element={<LearnOrgPage />} />
-          <Route path="/learn/admin/employees" element={<LearnEmployeesPage />} />
-          <Route path="/learn/admin/audit" element={<LearnAuditPage />} />
+          <Route
+            path="/learn/admin/org"
+            element={
+              <RequireHubAdmin>
+                <LearnOrgPage />
+              </RequireHubAdmin>
+            }
+          />
+          <Route
+            path="/learn/admin/employees"
+            element={
+              <RequireHubAdmin>
+                <LearnEmployeesPage />
+              </RequireHubAdmin>
+            }
+          />
+          <Route
+            path="/learn/admin/audit"
+            element={
+              <RequireHubAdmin>
+                <LearnAuditPage />
+              </RequireHubAdmin>
+            }
+          />
           <Route path="/settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="notifications" replace />} />
             <Route path="notifications" element={<NotificationsSettingsTab />} />

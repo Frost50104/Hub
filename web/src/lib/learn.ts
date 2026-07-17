@@ -66,6 +66,13 @@ export const CONTENT_ROLE_LABEL: Record<ContentRole, string> = {
   publisher: 'Публикатор',
 }
 
+/** Бейдж продукт-роли у логотипа в сайдбаре (стиль Sonar). */
+export const HUB_ROLE_BADGE: Record<'admin' | 'member' | 'viewer', string> = {
+  admin: 'АДМИН',
+  member: 'УЧАСТНИК',
+  viewer: 'ПРОСМОТР',
+}
+
 export interface EmployeeProfile {
   id: string
   employee_id: string | null
