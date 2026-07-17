@@ -439,15 +439,23 @@ function SurveyBuilderDialog({
   const [description, setDescription] = useState(survey?.description ?? '')
   const [kind, setKind] = useState(survey?.kind ?? 'standard')
   const [anonymous, setAnonymous] = useState(survey?.is_anonymous ?? false)
-  const [questions, setQuestions] = useState<QuestionDraft[]>(
-    survey?.questions.map((q) => ({
-      qtype: q.qtype,
-      prompt: q.prompt,
-      options: q.options,
-      required: q.required,
-    })) ?? [],
-  )
+  const [questions, setQuestions] = useState<QuestionDraft[]>([])
   const [audienceOpen, setAudienceOpen] = useState(false)
+
+  // Список отдаёт опросы БЕЗ вопросов — при редактировании дочитываем полный.
+  useEffect(() => {
+    if (survey === null) return
+    void learnApi.survey(survey.id).then((full) => {
+      setQuestions(
+        full.questions.map((q) => ({
+          qtype: q.qtype,
+          prompt: q.prompt,
+          options: q.options,
+          required: q.required,
+        })),
+      )
+    })
+  }, [survey])
 
   const save = useSurveyMutation(async () => {
     const meta = {
