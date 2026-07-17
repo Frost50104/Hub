@@ -30,6 +30,9 @@ NOTIFICATION_KINDS: tuple[str, ...] = (
     # Learn-домен (Ф1+)
     "library.ack_required",
     "content.review_due",
+    "news.published",
+    "news.ack_required",
+    "survey.assigned",
 )
 
 

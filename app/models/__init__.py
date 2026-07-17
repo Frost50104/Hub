@@ -6,6 +6,7 @@ from app.models.audit import AuditLog
 from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
 from app.models.dependency import TaskDependency
 from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
+from app.models.engagement import Favorite, SearchQueryLog
 from app.models.learning_settings import LearningSettings
 from app.models.library import (
     LibraryMaterial,
@@ -14,6 +15,7 @@ from app.models.library import (
     MaterialVersion,
     ViewHistory,
 )
+from app.models.news import NewsAcknowledgement, NewsComment, NewsPost, NewsReaction
 from app.models.notification import Notification, NotificationPreferences
 from app.models.org import (
     Department,
@@ -36,6 +38,13 @@ from app.models.search_document import SearchDocument, TextExtractionJob
 from app.models.section import Section
 from app.models.shadow import ShadowTenant, ShadowUser
 from app.models.share import PublicShareToken
+from app.models.survey import (
+    Survey,
+    SurveyAnswer,
+    SurveyAnswerSet,
+    SurveyParticipation,
+    SurveyQuestion,
+)
 from app.models.sync_state import SyncState
 from app.models.task import (
     Task,
@@ -54,6 +63,7 @@ __all__ = [
     "CustomFieldDefinition",
     "Department",
     "EmployeeProfile",
+    "Favorite",
     "Franchisee",
     "FranchiseeGroup",
     "FranchiseeGroupMember",
@@ -62,6 +72,10 @@ __all__ = [
     "LibrarySection",
     "MaterialAcknowledgement",
     "MaterialVersion",
+    "NewsAcknowledgement",
+    "NewsComment",
+    "NewsPost",
+    "NewsReaction",
     "Notification",
     "NotificationPreferences",
     "Position",
@@ -73,12 +87,18 @@ __all__ = [
     "PushSubscription",
     "RateLimit",
     "SearchDocument",
+    "SearchQueryLog",
     "Section",
     "ShadowTenant",
     "ShadowUser",
     "Store",
     "StoreGroup",
     "StoreGroupMember",
+    "Survey",
+    "SurveyAnswer",
+    "SurveyAnswerSet",
+    "SurveyParticipation",
+    "SurveyQuestion",
     "SyncState",
     "Task",
     "TaskActivity",

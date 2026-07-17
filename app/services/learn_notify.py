@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.employee_profile import EmployeeProfile
 from app.models.library import LibraryMaterial, MaterialAcknowledgement
 from app.services.audience_resolver import MembershipDiff
-from app.services.notification_dispatcher import dispatch
+from app.services.notify_batch import notify_many
 
 log = structlog.get_logger("learn_notify")
 
@@ -53,18 +53,16 @@ async def notify_ack_required(
 ) -> int:
     """Разослать library.ack_required списку профилей. → сколько отправлено."""
     recipients = await _employee_ids(db, profile_ids)
-    for employee_id in recipients.values():
-        await dispatch(
-            db,
-            tenant_id=material.tenant_id,
-            employee_id=employee_id,
-            kind="library.ack_required",
-            title="Требуется ознакомление",
-            body=f"«{material.title}» — подтвердите ознакомление с документом.",
-            url=_material_url(material),
-            payload={"material_id": str(material.id)},
-        )
-    return len(recipients)
+    return await notify_many(
+        db,
+        tenant_id=material.tenant_id,
+        employee_ids=list(recipients.values()),
+        kind="library.ack_required",
+        title="Требуется ознакомление",
+        body=f"«{material.title}» — подтвердите ознакомление с документом.",
+        url=_material_url(material),
+        payload={"material_id": str(material.id)},
+    )
 
 
 async def notify_new_audience_members(

@@ -140,10 +140,12 @@ def create_app() -> FastAPI:
     from app.api import dependencies as dependencies_api
     from app.api import employees as employees_api
     from app.api import env as env_api
+    from app.api import favorites as favorites_api
     from app.api import labels as labels_api
     from app.api import library as library_api
     from app.api import me as me_api
     from app.api import me_tasks as me_tasks_api
+    from app.api import news as news_api
     from app.api import notifications as notifications_api
     from app.api import org as org_api
     from app.api import projects as projects_api
@@ -153,6 +155,7 @@ def create_app() -> FastAPI:
     from app.api import sections as sections_api
     from app.api import share as share_api
     from app.api import stats as stats_api
+    from app.api import surveys as surveys_api
     from app.api import tasks as tasks_api
     from app.api import tenant as tenant_api
     from app.api import timeline as timeline_api
@@ -185,6 +188,9 @@ def create_app() -> FastAPI:
     app.include_router(employees_api.router, prefix="/api")
     app.include_router(audit_api.router, prefix="/api")
     app.include_router(library_api.router, prefix="/api")
+    app.include_router(news_api.router, prefix="/api")
+    app.include_router(surveys_api.router, prefix="/api")
+    app.include_router(favorites_api.router, prefix="/api")
 
     return app
 
