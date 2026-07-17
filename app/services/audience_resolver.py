@@ -470,6 +470,85 @@ async def rebuild_tenant(db: AsyncSession, tenant_id: UUID) -> dict[UUID, Member
     return diffs
 
 
+# --- Управление audience контентного объекта ---------------------------------
+
+
+async def set_object_audience(
+    db: AsyncSession,
+    *,
+    tenant_id: UUID,
+    current_audience_id: UUID | None,
+    is_all: bool,
+    rules: list[RuleSpec],
+    object_hint: str,
+) -> tuple[UUID | None, MembershipDiff | None]:
+    """Установить/заменить аудиторию объекта.
+
+    «Всем» (is_all без правил) = audience_id NULL — существующая audience
+    удаляется. Иначе — reuse существующей row (правила заменяются) или
+    создание новой + немедленный пересчёт членства.
+
+    → (новый audience_id, diff пересчёта или None).
+    """
+    validate_rules(rules)
+
+    if is_all and not rules:
+        if current_audience_id is not None:
+            audience = await db.get(Audience, current_audience_id)
+            if audience is not None:
+                await db.delete(audience)  # members каскадом
+        return None, None
+
+    if current_audience_id is not None:
+        audience = await db.get(Audience, current_audience_id)
+    else:
+        audience = None
+    if audience is None:
+        audience = Audience(tenant_id=tenant_id, object_hint=object_hint[:64])
+        db.add(audience)
+        await db.flush()
+
+    audience.is_all = is_all
+    await db.execute(delete(AudienceRule).where(AudienceRule.audience_id == audience.id))
+    for spec in rules:
+        db.add(
+            AudienceRule(
+                tenant_id=tenant_id,
+                audience_id=audience.id,
+                mode=spec.mode,
+                profile_ids=list(spec.profile_ids) or None,
+                position_ids=list(spec.position_ids) or None,
+                position_group_ids=list(spec.position_group_ids) or None,
+                store_ids=list(spec.store_ids) or None,
+                store_group_ids=list(spec.store_group_ids) or None,
+                franchisee_ids=list(spec.franchisee_ids) or None,
+                franchisee_group_ids=list(spec.franchisee_group_ids) or None,
+                department_ids=list(spec.department_ids) or None,
+                user_group_ids=list(spec.user_group_ids) or None,
+            )
+        )
+    await db.flush()
+    diff = await recalc_audience(db, audience)
+    return audience.id, diff
+
+
+async def load_audience_rules(
+    db: AsyncSession, audience_id: UUID | None
+) -> tuple[bool, list[AudienceRule]]:
+    """→ (is_all, строки правил) для отдачи фронту. NULL → (True, [])."""
+    if audience_id is None:
+        return True, []
+    audience = await db.get(Audience, audience_id)
+    if audience is None:
+        return True, []
+    rules = (
+        (await db.execute(select(AudienceRule).where(AudienceRule.audience_id == audience_id)))
+        .scalars()
+        .all()
+    )
+    return audience.is_all, list(rules)
+
+
 # --- Утилиты для API ---------------------------------------------------------
 
 

@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.employee_profile import EmployeeProfile
 from app.services import audit
 from app.services.audience_resolver import recalc_profile
+from app.services.learn_notify import notify_new_audience_members
 
 log = structlog.get_logger("employee_profiles")
 
@@ -90,7 +91,8 @@ async def ensure_profile_for_principal(db: AsyncSession, principal: Principal) -
             if result.rowcount:
                 log.info("profile.linked", profile_id=str(active.id))
                 await db.refresh(active)
-                await recalc_profile(db, active)
+                diffs = await recalc_profile(db, active)
+                await notify_new_audience_members(db, diffs)
                 return MatchResult(outcome="linked", profile=active)
             existing = await _find_by_employee_id(db, principal.employee_id)
             return MatchResult(outcome="already_linked", profile=existing)
@@ -132,6 +134,9 @@ async def ensure_profile_for_principal(db: AsyncSession, principal: Principal) -
     profile = (
         await db.execute(select(EmployeeProfile).where(EmployeeProfile.id == inserted_id))
     ).scalar_one()
+    # Членство сразу: is_all/exclude-only аудитории должны включить новичка.
+    diffs = await recalc_profile(db, profile)
+    await notify_new_audience_members(db, diffs)
     log.info("profile.autocreated", profile_id=str(inserted_id), email=email)
     return MatchResult(outcome="created", profile=profile)
 
@@ -228,7 +233,8 @@ async def restore_profile(
     profile.archived_at = None
     profile.archive_reason = None
     await db.flush()
-    await recalc_profile(db, profile)
+    diffs = await recalc_profile(db, profile)
+    await notify_new_audience_members(db, diffs)
     audit.record(
         db,
         tenant_id=profile.tenant_id,

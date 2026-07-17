@@ -1,0 +1,11 @@
+[Unit]
+Description=Run signaris-hub-staging-review-due daily 09:30 Moscow time
+
+[Timer]
+# 06:30 UTC = 09:30 MSK (UTC+3, no DST in RU)
+OnCalendar=*-*-* 06:30:00
+Persistent=true
+Unit=signaris-hub-staging-review-due.service
+
+[Install]
+WantedBy=timers.target

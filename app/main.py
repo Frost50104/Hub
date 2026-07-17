@@ -141,6 +141,7 @@ def create_app() -> FastAPI:
     from app.api import employees as employees_api
     from app.api import env as env_api
     from app.api import labels as labels_api
+    from app.api import library as library_api
     from app.api import me as me_api
     from app.api import me_tasks as me_tasks_api
     from app.api import notifications as notifications_api
@@ -183,6 +184,7 @@ def create_app() -> FastAPI:
     app.include_router(org_api.router, prefix="/api")
     app.include_router(employees_api.router, prefix="/api")
     app.include_router(audit_api.router, prefix="/api")
+    app.include_router(library_api.router, prefix="/api")
 
     return app
 

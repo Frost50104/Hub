@@ -27,6 +27,9 @@ NOTIFICATION_KINDS: tuple[str, ...] = (
     "task.commented_on_watched",
     "task.due_soon",
     "task.overdue",
+    # Learn-домен (Ф1+)
+    "library.ack_required",
+    "content.review_due",
 )
 
 

@@ -61,6 +61,7 @@ from app.services.audience_resolver import (
     rebuild_tenant,
     validate_rules,
 )
+from app.services.learn_notify import notify_new_audience_members
 
 router = APIRouter(tags=["learn-org"])
 
@@ -217,7 +218,8 @@ async def _delete_ref(
         object_label=row.name,
     )
     await db.delete(row)
-    await rebuild_tenant(db, principal.tenant_id)
+    diffs = await rebuild_tenant(db, principal.tenant_id)
+    await notify_new_audience_members(db, diffs)
     await db.commit()
 
 
@@ -375,7 +377,8 @@ async def update_store(
     )
     if franchisee_changed or "archived" in diff:
         # Франчайзи магазина участвует в атрибутах его сотрудников.
-        await rebuild_tenant(db, principal.tenant_id)
+        diffs = await rebuild_tenant(db, principal.tenant_id)
+        await notify_new_audience_members(db, diffs)
     await db.commit()
     await db.refresh(store)
     return StoreResponse.model_validate(store)
@@ -447,7 +450,8 @@ async def update_department(
     )
     if parent_changed:
         # Правило «отделу X» матчит и под-отделы — иерархия влияет на членство.
-        await rebuild_tenant(db, principal.tenant_id)
+        diffs = await rebuild_tenant(db, principal.tenant_id)
+        await notify_new_audience_members(db, diffs)
     await db.commit()
     await db.refresh(dep)
     return DepartmentResponse.model_validate(dep)
@@ -593,7 +597,8 @@ async def replace_group_members(
         diff={"members_count": {"old": None, "new": len(unique_ids)}},
     )
     # Состав группы — измерение audience-правил.
-    await rebuild_tenant(db, principal.tenant_id)
+    diffs = await rebuild_tenant(db, principal.tenant_id)
+    await notify_new_audience_members(db, diffs)
     await db.commit()
     return GroupResponse(
         id=group.id,
@@ -624,7 +629,8 @@ async def delete_group(
         object_label=group.name,
     )
     await db.delete(group)
-    await rebuild_tenant(db, principal.tenant_id)
+    diffs = await rebuild_tenant(db, principal.tenant_id)
+    await notify_new_audience_members(db, diffs)
     await db.commit()
 
 

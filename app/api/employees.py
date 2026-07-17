@@ -48,6 +48,7 @@ from app.services.employee_profiles import (
     normalize_email,
     restore_profile,
 )
+from app.services.learn_notify import notify_new_audience_members
 from app.services.org_scope import resolve_scope
 
 router = APIRouter(tags=["learn-employees"])
@@ -239,7 +240,8 @@ async def create_employee(
     )
     db.add(profile)
     await db.flush()
-    await recalc_profile(db, profile)
+    diffs = await recalc_profile(db, profile)
+    await notify_new_audience_members(db, diffs)
     audit.record(
         db,
         tenant_id=principal.tenant_id,
@@ -282,7 +284,8 @@ async def update_employee(
     await db.flush()
     if org_changed and profile.status == "active":
         # «Перевели в другой отдел — доступы меняются автоматически» (ТЗ §2.1).
-        await recalc_profile(db, profile)
+        diffs = await recalc_profile(db, profile)
+    await notify_new_audience_members(db, diffs)
     audit.record(
         db,
         tenant_id=principal.tenant_id,
@@ -321,7 +324,8 @@ async def replace_tu_stores(
             )
         )
     await db.flush()
-    await recalc_profile(db, profile)
+    diffs = await recalc_profile(db, profile)
+    await notify_new_audience_members(db, diffs)
     audit.record(
         db,
         tenant_id=principal.tenant_id,
@@ -400,7 +404,8 @@ async def link_employee_login(
         )
     profile.employee_id = body.employee_id
     await db.flush()
-    await recalc_profile(db, profile)
+    diffs = await recalc_profile(db, profile)
+    await notify_new_audience_members(db, diffs)
     audit.record(
         db,
         tenant_id=principal.tenant_id,
@@ -583,7 +588,8 @@ async def import_employees(
 
     from app.services.audience_resolver import rebuild_tenant
 
-    await rebuild_tenant(db, principal.tenant_id)
+    rebuild_diffs = await rebuild_tenant(db, principal.tenant_id)
+    await notify_new_audience_members(db, rebuild_diffs)
     audit.record(
         db,
         tenant_id=principal.tenant_id,

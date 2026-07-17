@@ -7,6 +7,13 @@ from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
 from app.models.dependency import TaskDependency
 from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
 from app.models.learning_settings import LearningSettings
+from app.models.library import (
+    LibraryMaterial,
+    LibrarySection,
+    MaterialAcknowledgement,
+    MaterialVersion,
+    ViewHistory,
+)
 from app.models.notification import Notification, NotificationPreferences
 from app.models.org import (
     Department,
@@ -25,6 +32,7 @@ from app.models.org import (
 from app.models.project import Project, ProjectMember
 from app.models.push_subscription import PushSubscription
 from app.models.rate_limit import RateLimit
+from app.models.search_document import SearchDocument, TextExtractionJob
 from app.models.section import Section
 from app.models.shadow import ShadowTenant, ShadowUser
 from app.models.share import PublicShareToken
@@ -50,6 +58,10 @@ __all__ = [
     "FranchiseeGroup",
     "FranchiseeGroupMember",
     "LearningSettings",
+    "LibraryMaterial",
+    "LibrarySection",
+    "MaterialAcknowledgement",
+    "MaterialVersion",
     "Notification",
     "NotificationPreferences",
     "Position",
@@ -60,6 +72,7 @@ __all__ = [
     "PublicShareToken",
     "PushSubscription",
     "RateLimit",
+    "SearchDocument",
     "Section",
     "ShadowTenant",
     "ShadowUser",
@@ -76,7 +89,9 @@ __all__ = [
     "TaskLabel",
     "TaskLabelAssignment",
     "TaskWatcher",
+    "TextExtractionJob",
     "TuStoreAssignment",
+    "ViewHistory",
     "UserGroup",
     "UserGroupMember",
 ]
