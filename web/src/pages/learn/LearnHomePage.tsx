@@ -61,7 +61,7 @@ export function LearnHomePage() {
   const isDesktop = useIsDesktop()
   const me = useMe()
   const isAdmin = me.data?.hub_role === 'admin'
-  const firstName = (me.data?.full_name ?? '').split(' ')[1] || me.data?.full_name
+  const firstName = me.data?.full_name?.split(/\s+/)[0] ?? ''
 
   const archived = me.data?.profile?.status === 'archived'
   const needsRestore = me.data?.profile_needs_restore
