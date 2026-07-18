@@ -10,9 +10,13 @@ import {
   type AudienceDryRun,
   type AudienceRuleDraft,
   type AuditList,
+  type CourseDetail,
+  type CourseList,
   type EmployeeList,
   type EmployeeProfile,
   type FavoriteItem,
+  type LessonContent,
+  type LessonTemplate,
   type LibraryData,
   type NewsList,
   type OrgSnapshot,
@@ -174,6 +178,54 @@ export function useFavorites(): UseQueryResult<FavoriteItem[]> {
     queryKey: ['learn-favorites'],
     queryFn: learnApi.favorites,
     staleTime: 60_000,
+  })
+}
+
+// ─── Курсы (Ф3a) ─────────────────────────────────────────────────────────────
+
+export function useCourses(manage: boolean, enabled = true): UseQueryResult<CourseList> {
+  return useQuery({
+    queryKey: ['learn-courses', manage],
+    queryFn: () => learnApi.courses(manage),
+    staleTime: 30_000,
+    enabled,
+  })
+}
+
+export function useCourse(id: string | undefined): UseQueryResult<CourseDetail> {
+  return useQuery({
+    queryKey: ['learn-course', id],
+    queryFn: () => learnApi.course(id!),
+    enabled: Boolean(id),
+  })
+}
+
+export function useLesson(id: string | undefined): UseQueryResult<LessonContent> {
+  return useQuery({
+    queryKey: ['learn-lesson', id],
+    queryFn: () => learnApi.lesson(id!),
+    enabled: Boolean(id),
+    retry: false, // 403 «урок заперт» не лечится ретраями
+    meta: { suppressGlobalError: true },
+  })
+}
+
+export function useCourseMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['learn-courses'] })
+      void qc.invalidateQueries({ queryKey: ['learn-course'] })
+    },
+  })
+}
+
+export function useLessonTemplates(enabled: boolean): UseQueryResult<LessonTemplate[]> {
+  return useQuery({
+    queryKey: ['learn-lesson-templates'],
+    queryFn: learnApi.lessonTemplates,
+    enabled,
   })
 }
 

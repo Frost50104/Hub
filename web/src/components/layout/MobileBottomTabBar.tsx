@@ -1,4 +1,4 @@
-import { Bell, CheckCircle2, Home, Search, Sparkles, User } from 'lucide-react'
+import { Bell, CheckCircle2, GraduationCap, Home, Search, Sparkles, User } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 
 import { useUnreadCount } from '@/hooks/useNotifications'
@@ -21,10 +21,9 @@ const TASK_TABS: TabDef[] = [
   { to: '/profile', label: 'Профиль', icon: User },
 ]
 
-// Табы learn-пространства (Ф0): «Обучение» появится в Ф3a, пока — витрина.
 const LEARN_TABS: TabDef[] = [
   { to: '/learn', label: 'Витрина', icon: Sparkles, end: true },
-  { to: '/', label: 'Задачи', icon: CheckCircle2, end: true },
+  { to: '/learn/courses', label: 'Обучение', icon: GraduationCap },
   { to: '/inbox', label: 'Входящие', icon: Bell, showUnreadDot: true },
   { to: '/search', label: 'Поиск', icon: Search },
   { to: '/profile', label: 'Профиль', icon: User },

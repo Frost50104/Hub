@@ -1,3 +1,4 @@
+import { type AnyExtension } from '@tiptap/core'
 import { Color } from '@tiptap/extension-color'
 import { Highlight } from '@tiptap/extension-highlight'
 import { Link } from '@tiptap/extension-link'
@@ -239,11 +240,17 @@ export default function RichEditor({
   onChange,
   placeholder = 'Текст…',
   className,
+  extraExtensions,
+  extraToolbar,
 }: {
   value: RichDoc | null
   onChange: (doc: RichDoc) => void
   placeholder?: string
   className?: string
+  /** Доменные ноды поверх базового набора (уроки Ф3a — lessonNodes.ts). */
+  extraExtensions?: AnyExtension[]
+  /** Дополнительные кнопки тулбара (загрузка медиа и т.п.). */
+  extraToolbar?: (editor: Editor) => React.ReactNode
 }) {
   const editor = useEditor({
     extensions: [
@@ -263,6 +270,7 @@ export default function RichEditor({
       TableHeader,
       Callout,
       Placeholder.configure({ placeholder }),
+      ...(extraExtensions ?? []),
     ],
     content: value?.doc ?? undefined,
     editorProps: {
@@ -285,6 +293,11 @@ export default function RichEditor({
       )}
     >
       <Toolbar editor={editor} />
+      {extraToolbar && (
+        <div className="flex flex-wrap items-center gap-0.5 border-b border-glass-border p-1">
+          {extraToolbar(editor)}
+        </div>
+      )}
       <EditorContent editor={editor} />
     </div>
   )

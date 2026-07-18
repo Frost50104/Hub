@@ -405,6 +405,108 @@ export interface FavoriteItem {
   created_at: string | null
 }
 
+// ─── Курсы (Ф3a) ─────────────────────────────────────────────────────────────
+
+export type CourseType = 'mandatory' | 'recommended' | 'career' | 'info'
+export type ProgressionMode = 'sequential' | 'free' | 'mixed'
+export type LessonUnlockRule = 'inherit' | 'free' | 'after_prev_test'
+export type LessonContentFormat = 'blocks' | 'pdf'
+
+export const COURSE_TYPE_LABEL: Record<CourseType, string> = {
+  mandatory: 'Обязательный',
+  recommended: 'Рекомендованный',
+  career: 'Карьерный',
+  info: 'Информационный',
+}
+
+export const PROGRESSION_MODE_LABEL: Record<ProgressionMode, string> = {
+  sequential: 'Последовательный',
+  free: 'Свободный',
+  mixed: 'Смешанный',
+}
+
+export interface LessonMeta {
+  id: string
+  title: string
+  position: number
+  content_format: LessonContentFormat
+  unlock_rule: LessonUnlockRule
+  status: 'draft' | 'published'
+  locked: boolean
+  completed: boolean
+  started: boolean
+}
+
+export interface Course {
+  id: string
+  audience_id: string | null
+  title: string
+  description: string | null
+  course_type: CourseType
+  progression_mode: ProgressionMode
+  status: ContentStatus
+  published_at: string | null
+  created_at: string
+  updated_at: string
+  lessons_total: number
+  lessons_completed: number
+  enrolled: boolean
+  due_at: string | null
+  completed: boolean
+}
+
+export interface CourseList {
+  items: Course[]
+  content_role: string
+}
+
+export interface CourseDetail extends Course {
+  lessons: LessonMeta[]
+}
+
+export interface LessonBlockState {
+  answers?: Record<string, { answer: number; correct: boolean }>
+  video?: Record<string, { intervals: [number, number][]; duration: number }>
+}
+
+export interface LessonContent {
+  id: string
+  course_id: string
+  title: string
+  position: number
+  content_format: LessonContentFormat
+  content: RichDoc | null
+  pdf_url: string | null
+  forbid_download: boolean
+  unlock_rule: LessonUnlockRule
+  status: 'draft' | 'published'
+  completed: boolean
+  block_state: LessonBlockState
+  gate_blocks: string[]
+  required_videos: string[]
+  prev_lesson_id: string | null
+  next_lesson_id: string | null
+  next_locked: boolean
+}
+
+export interface LessonTemplate {
+  id: string
+  title: string
+  content: RichDoc
+  created_at: string
+}
+
+export type MediaKind = 'image' | 'video' | 'pdf'
+
+export interface MediaUploadResult {
+  id: string
+  kind: MediaKind
+  file_name: string
+  mime: string
+  size_bytes: number
+  url: string
+}
+
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 export const learnApi = {
@@ -684,6 +786,105 @@ export const learnApi = {
     api.get<FavoriteItem[]>('/learn/favorites').then((r) => r.data),
   recent: (): Promise<FavoriteItem[]> =>
     api.get<FavoriteItem[]>('/learn/recent').then((r) => r.data),
+
+  // ─── Курсы (Ф3a) ───────────────────────────────────────────────────────────
+  courses: (manage: boolean): Promise<CourseList> =>
+    api
+      .get<CourseList>('/learn/courses', { params: { manage: manage || undefined } })
+      .then((r) => r.data),
+  course: (id: string): Promise<CourseDetail> =>
+    api.get<CourseDetail>(`/learn/courses/${id}`).then((r) => r.data),
+  createCourse: (body: {
+    title: string
+    description?: string | null
+    course_type: CourseType
+    progression_mode: ProgressionMode
+  }): Promise<Course> => api.post<Course>('/learn/courses', body).then((r) => r.data),
+  updateCourse: (
+    id: string,
+    body: Partial<{
+      title: string
+      description: string | null
+      course_type: CourseType
+      progression_mode: ProgressionMode
+    }>,
+  ): Promise<Course> => api.patch<Course>(`/learn/courses/${id}`, body).then((r) => r.data),
+  deleteCourse: (id: string): Promise<void> =>
+    api.delete(`/learn/courses/${id}`).then(() => undefined),
+  setCourseStatus: (id: string, status: ContentStatus): Promise<Course> =>
+    api.post<Course>(`/learn/courses/${id}/status`, { status }).then((r) => r.data),
+  setCourseAudience: (
+    id: string,
+    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+  ): Promise<Course> =>
+    api.put<Course>(`/learn/courses/${id}/audience`, body).then((r) => r.data),
+  assignCourse: (
+    id: string,
+    body: { profile_ids: string[]; due_at?: string | null },
+  ): Promise<Course> =>
+    api.post<Course>(`/learn/courses/${id}/assign`, body).then((r) => r.data),
+
+  createLesson: (
+    courseId: string,
+    body: { title: string; content_format?: LessonContentFormat },
+  ): Promise<LessonMeta> =>
+    api.post<LessonMeta>(`/learn/courses/${courseId}/lessons`, body).then((r) => r.data),
+  updateLesson: (
+    id: string,
+    body: Partial<{
+      title: string
+      content: RichDoc
+      content_format: LessonContentFormat
+      pdf_media_id: string | null
+      forbid_download: boolean
+      unlock_rule: LessonUnlockRule
+      status: 'draft' | 'published'
+    }>,
+  ): Promise<LessonMeta> =>
+    api.patch<LessonMeta>(`/learn/lessons/${id}`, body).then((r) => r.data),
+  deleteLesson: (id: string): Promise<void> =>
+    api.delete(`/learn/lessons/${id}`).then(() => undefined),
+  reorderLessons: (courseId: string, lessonIds: string[]): Promise<void> =>
+    api
+      .put(`/learn/courses/${courseId}/lessons/reorder`, { lesson_ids: lessonIds })
+      .then(() => undefined),
+
+  lesson: (id: string): Promise<LessonContent> =>
+    api.get<LessonContent>(`/learn/lessons/${id}`).then((r) => r.data),
+  completeLesson: (id: string): Promise<LessonContent> =>
+    api.post<LessonContent>(`/learn/lessons/${id}/complete`).then((r) => r.data),
+  answerBlock: (
+    lessonId: string,
+    blockId: string,
+    answer: number,
+  ): Promise<{ correct: boolean }> =>
+    api
+      .post<{ correct: boolean }>(`/learn/lessons/${lessonId}/blocks/${blockId}/answer`, {
+        answer,
+      })
+      .then((r) => r.data),
+  reportVideoProgress: (
+    lessonId: string,
+    body: { media_id: string; intervals: [number, number][]; duration: number },
+  ): Promise<void> =>
+    api.post(`/learn/lessons/${lessonId}/video-progress`, body).then(() => undefined),
+
+  lessonTemplates: (): Promise<LessonTemplate[]> =>
+    api.get<LessonTemplate[]>('/learn/lesson-templates').then((r) => r.data),
+  createLessonTemplate: (body: { title: string; content: RichDoc }): Promise<LessonTemplate> =>
+    api.post<LessonTemplate>('/learn/lesson-templates', body).then((r) => r.data),
+  deleteLessonTemplate: (id: string): Promise<void> =>
+    api.delete(`/learn/lesson-templates/${id}`).then(() => undefined),
+
+  uploadMedia: (file: File): Promise<MediaUploadResult> => {
+    const form = new FormData()
+    form.append('file', file)
+    return api
+      .post<MediaUploadResult>('/learn/media', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data)
+  },
 
   /**
    * Открыть файл материала в новой вкладке. Тег <a href> не несёт Bearer —

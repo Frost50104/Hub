@@ -69,6 +69,18 @@ const LearnNewsPage = lazy(() =>
 const LearnSurveysPage = lazy(() =>
   import('@/pages/learn/LearnSurveysPage').then((m) => ({ default: m.LearnSurveysPage })),
 )
+const LearnCoursesPage = lazy(() =>
+  import('@/pages/learn/LearnCoursesPage').then((m) => ({ default: m.LearnCoursesPage })),
+)
+const LearnCoursePage = lazy(() =>
+  import('@/pages/learn/LearnCoursePage').then((m) => ({ default: m.LearnCoursePage })),
+)
+const LearnLessonPage = lazy(() =>
+  import('@/pages/learn/LearnLessonPage').then((m) => ({ default: m.LearnLessonPage })),
+)
+const CourseBuilderPage = lazy(() =>
+  import('@/pages/learn/CourseBuilderPage').then((m) => ({ default: m.CourseBuilderPage })),
+)
 const NotificationsSettingsTab = lazy(() =>
   import('@/pages/settings/NotificationsTab').then((m) => ({
     default: m.NotificationsSettingsTab,
@@ -106,6 +118,10 @@ export function App() {
           <Route path="/learn/library" element={<LearnLibraryPage />} />
           <Route path="/learn/news" element={<LearnNewsPage />} />
           <Route path="/learn/surveys" element={<LearnSurveysPage />} />
+          <Route path="/learn/courses" element={<LearnCoursesPage />} />
+          <Route path="/learn/courses/:courseId" element={<LearnCoursePage />} />
+          <Route path="/learn/courses/:courseId/edit" element={<CourseBuilderPage />} />
+          <Route path="/learn/lessons/:lessonId" element={<LearnLessonPage />} />
           <Route
             path="/learn/admin/org"
             element={

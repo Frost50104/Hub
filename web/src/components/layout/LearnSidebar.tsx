@@ -35,7 +35,7 @@ interface LearnNavItem {
 // Разделы включаются по мере этапов Ф1–Ф4; до готовности — «скоро» (disabled).
 const LEARN_NAV: LearnNavItem[] = [
   { to: '/learn', label: 'Витрина', icon: Sparkles, end: true },
-  { to: '/learn/courses', label: 'Моё обучение', icon: GraduationCap, soon: true },
+  { to: '/learn/courses', label: 'Моё обучение', icon: GraduationCap },
   { to: '/learn/library', label: 'Библиотека', icon: BookOpen },
   { to: '/learn/news', label: 'Новости', icon: Newspaper },
   { to: '/learn/surveys', label: 'Опросы', icon: ClipboardList },

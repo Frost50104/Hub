@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode } from 'react'
+import { createContext, useContext, type CSSProperties, type ReactNode } from 'react'
 
 import { cn } from '@/lib/cn'
 
@@ -10,9 +10,13 @@ import { CALLOUT_META, type CalloutKind } from './calloutMeta'
  *
  * Fail-closed: неизвестная нода → плашка «обновите приложение» (старый
  * precache-клиент не должен молча терять блоки).
+ *
+ * extraNodes: расширение доменными нодами (уроки Ф3a — video/figure/
+ * checkQuestion) без импорта их рендереров сюда — LessonRenderer передаёт
+ * карту `{type: render}`; неизвестные типы по-прежнему fail-closed.
  */
 
-interface RichNode {
+export interface RichNode {
   type?: string
   text?: string
   attrs?: Record<string, unknown>
@@ -24,6 +28,13 @@ export interface RichDoc {
   schema: number
   doc: RichNode
 }
+
+export type ExtraNodeRenderers = Record<
+  string,
+  (node: RichNode, index: number) => ReactNode
+>
+
+const ExtraNodesContext = createContext<ExtraNodeRenderers>({})
 
 const CALLOUT_STYLE: Record<CalloutKind, string> = {
   important: 'border-amber/50 bg-amber/10',
@@ -107,6 +118,7 @@ function renderChildren(node: RichNode): ReactNode {
 }
 
 function RenderNode({ node, index }: { node: RichNode; index: number }): ReactNode {
+  const extraNodes = useContext(ExtraNodesContext)
   switch (node.type) {
     case 'text':
       return renderText(node, index)
@@ -173,19 +185,32 @@ function RenderNode({ node, index }: { node: RichNode; index: number }): ReactNo
           {renderChildren(node)}
         </td>
       )
-    default:
+    default: {
+      const renderExtra = node.type ? extraNodes[node.type] : undefined
+      if (renderExtra) return renderExtra(node, index)
       // Fail-closed: старый клиент + новая нода → видимая плашка, не молчание.
       return (
         <div className="my-2 rounded border border-dashed border-glass-border px-3 py-2 text-xs text-text3">
           Этот блок не поддерживается вашей версией приложения — обновите страницу.
         </div>
       )
+    }
   }
 }
 
-export function RichRenderer({ value, className }: { value: RichDoc | null; className?: string }) {
+export function RichRenderer({
+  value,
+  className,
+  extraNodes,
+}: {
+  value: RichDoc | null
+  className?: string
+  extraNodes?: ExtraNodeRenderers
+}) {
   if (!value || value.schema !== 1 || !value.doc) return null
-  return (
+  const body = (
     <div className={cn('text-sm text-text', className)}>{renderChildren(value.doc)}</div>
   )
+  if (!extraNodes) return body
+  return <ExtraNodesContext.Provider value={extraNodes}>{body}</ExtraNodesContext.Provider>
 }
