@@ -35,6 +35,7 @@ class CourseUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=10_000)
     course_type: str | None = Field(default=None, pattern="^(mandatory|recommended|career|info)$")
     progression_mode: str | None = Field(default=None, pattern="^(sequential|free|mixed)$")
+    certificate_enabled: bool | None = None
 
 
 class LessonMeta(BaseModel):
@@ -60,6 +61,7 @@ class CourseResponse(BaseModel):
     description: str | None
     course_type: str
     progression_mode: str
+    certificate_enabled: bool = False
     status: str
     published_at: datetime | None
     created_at: datetime

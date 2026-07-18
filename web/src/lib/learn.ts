@@ -444,6 +444,7 @@ export interface Course {
   description: string | null
   course_type: CourseType
   progression_mode: ProgressionMode
+  certificate_enabled: boolean
   status: ContentStatus
   published_at: string | null
   created_at: string
@@ -939,6 +940,7 @@ export const learnApi = {
       description: string | null
       course_type: CourseType
       progression_mode: ProgressionMode
+      certificate_enabled: boolean
     }>,
   ): Promise<Course> => api.patch<Course>(`/learn/courses/${id}`, body).then((r) => r.data),
   deleteCourse: (id: string): Promise<void> =>

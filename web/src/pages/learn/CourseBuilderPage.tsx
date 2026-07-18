@@ -44,6 +44,7 @@ import {
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select } from '@/components/ui/Select'
+import { Switch } from '@/components/ui/Switch'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useCourse, useCourseMutation, useEmployees } from '@/hooks/useLearn'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
@@ -157,6 +158,7 @@ function CourseSettingsCard({
   const [description, setDescription] = useState(course.description ?? '')
   const [courseType, setCourseType] = useState<CourseType>(course.course_type)
   const [mode, setMode] = useState<ProgressionMode>(course.progression_mode)
+  const [certificate, setCertificate] = useState(course.certificate_enabled)
 
   const save = useCourseMutation(() =>
     learnApi.updateCourse(course.id, {
@@ -164,6 +166,7 @@ function CourseSettingsCard({
       description: description.trim() || null,
       course_type: courseType,
       progression_mode: mode,
+      certificate_enabled: certificate,
     }),
   )
   const setStatus = useCourseMutation((status: ContentStatus) =>
@@ -175,7 +178,8 @@ function CourseSettingsCard({
     title.trim() !== course.title ||
     (description.trim() || null) !== course.description ||
     courseType !== course.course_type ||
-    mode !== course.progression_mode
+    mode !== course.progression_mode ||
+    certificate !== course.certificate_enabled
 
   return (
     <div className="space-y-3 rounded-xl border border-glass-border bg-glass p-4">
@@ -240,6 +244,10 @@ function CourseSettingsCard({
             </Select>
           </div>
         </div>
+        <label className="flex items-center gap-2 pt-1 text-xs text-text2">
+          <Switch checked={certificate} onCheckedChange={setCertificate} />
+          выдавать сертификат за прохождение курса
+        </label>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-t border-glass-border pt-3">

@@ -36,7 +36,7 @@ _SOURCES: tuple[tuple[str, str, str], ...] = (
         "news_post",
     ),
     (
-        "SELECT profile_id, survey_id AS object_id, participated_at AS occurred_at, "
+        "SELECT profile_id, survey_id AS object_id, submitted_at AS occurred_at, "
         "tenant_id FROM survey_participations",
         "survey.completed",
         "survey",
