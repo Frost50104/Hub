@@ -81,6 +81,15 @@ const LearnLessonPage = lazy(() =>
 const CourseBuilderPage = lazy(() =>
   import('@/pages/learn/CourseBuilderPage').then((m) => ({ default: m.CourseBuilderPage })),
 )
+const LearnRatingPage = lazy(() =>
+  import('@/pages/learn/LearnRatingPage').then((m) => ({ default: m.LearnRatingPage })),
+)
+const LearnReviewPage = lazy(() =>
+  import('@/pages/learn/LearnReviewPage').then((m) => ({ default: m.LearnReviewPage })),
+)
+const CertificatePage = lazy(() =>
+  import('@/pages/learn/CertificatePage').then((m) => ({ default: m.CertificatePage })),
+)
 const NotificationsSettingsTab = lazy(() =>
   import('@/pages/settings/NotificationsTab').then((m) => ({
     default: m.NotificationsSettingsTab,
@@ -122,6 +131,9 @@ export function App() {
           <Route path="/learn/courses/:courseId" element={<LearnCoursePage />} />
           <Route path="/learn/courses/:courseId/edit" element={<CourseBuilderPage />} />
           <Route path="/learn/lessons/:lessonId" element={<LearnLessonPage />} />
+          <Route path="/learn/rating" element={<LearnRatingPage />} />
+          <Route path="/learn/admin/review" element={<LearnReviewPage />} />
+          <Route path="/learn/certificates/:certificateId" element={<CertificatePage />} />
           <Route
             path="/learn/admin/org"
             element={

@@ -13,6 +13,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { LessonRenderer } from '@/components/learn/lesson/LessonRenderer'
+import { QuizRunner } from '@/components/learn/lesson/QuizRunner'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Button } from '@/components/ui/Button'
@@ -203,6 +204,8 @@ export function LearnLessonPage() {
                 }
               />
             )}
+
+            <QuizRunner lessonId={data.id} />
 
             <div className="rounded-xl border border-glass-border bg-glass p-4">
               {data.completed ? (

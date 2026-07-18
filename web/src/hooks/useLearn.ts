@@ -10,6 +10,7 @@ import {
   type AudienceDryRun,
   type AudienceRuleDraft,
   type AuditList,
+  type CertificateInfo,
   type CourseDetail,
   type CourseList,
   type EmployeeList,
@@ -20,6 +21,10 @@ import {
   type LibraryData,
   type NewsList,
   type OrgSnapshot,
+  type QuizConsumer,
+  type QuizManage,
+  type RatingData,
+  type ReviewQueueItem,
   type SurveyListData,
   type UnlinkedLogin,
 } from '@/lib/learn'
@@ -226,6 +231,68 @@ export function useLessonTemplates(enabled: boolean): UseQueryResult<LessonTempl
     queryKey: ['learn-lesson-templates'],
     queryFn: learnApi.lessonTemplates,
     enabled,
+  })
+}
+
+// ─── Тесты + рейтинг + сертификаты (Ф3b) ─────────────────────────────────────
+
+export function useLessonQuiz(lessonId: string | undefined): UseQueryResult<QuizConsumer | null> {
+  return useQuery({
+    queryKey: ['learn-lesson-quiz', lessonId],
+    queryFn: () => learnApi.lessonQuiz(lessonId!),
+    enabled: Boolean(lessonId),
+  })
+}
+
+export function useLessonQuizManage(
+  lessonId: string | undefined,
+): UseQueryResult<QuizManage | null> {
+  return useQuery({
+    queryKey: ['learn-lesson-quiz-manage', lessonId],
+    queryFn: () => learnApi.lessonQuizManage(lessonId!),
+    enabled: Boolean(lessonId),
+  })
+}
+
+export function useQuizMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['learn-lesson-quiz'] })
+      void qc.invalidateQueries({ queryKey: ['learn-lesson-quiz-manage'] })
+      void qc.invalidateQueries({ queryKey: ['learn-review-queue'] })
+    },
+  })
+}
+
+export function useReviewQueue(enabled = true): UseQueryResult<ReviewQueueItem[]> {
+  return useQuery({
+    queryKey: ['learn-review-queue'],
+    queryFn: learnApi.reviewQueue,
+    enabled,
+    retry: false,
+    meta: { suppressGlobalError: true }, // не-publisher получает 403
+  })
+}
+
+export function useRating(
+  period: 'month' | 'quarter',
+  scope: 'all' | 'store',
+): UseQueryResult<RatingData> {
+  return useQuery({
+    queryKey: ['learn-rating', period, scope],
+    queryFn: () => learnApi.rating(period, scope),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  })
+}
+
+export function useMyCertificates(): UseQueryResult<CertificateInfo[]> {
+  return useQuery({
+    queryKey: ['learn-certificates'],
+    queryFn: learnApi.myCertificates,
+    staleTime: 60_000,
   })
 }
 

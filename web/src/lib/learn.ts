@@ -496,6 +496,138 @@ export interface LessonTemplate {
   created_at: string
 }
 
+// ─── Тесты + рейтинг + сертификаты (Ф3b) ─────────────────────────────────────
+
+export type QuizQuestionType = 'single' | 'multi' | 'open' | 'match' | 'order'
+
+export const QUIZ_QUESTION_TYPE_LABEL: Record<QuizQuestionType, string> = {
+  single: 'Один из списка',
+  multi: 'Несколько из списка',
+  open: 'Открытый ответ',
+  match: 'Сопоставление',
+  order: 'Порядок',
+}
+
+export interface QuizQuestionDraft {
+  qtype: QuizQuestionType
+  prompt: string
+  media_id?: string | null
+  options: Record<string, unknown>
+  answer?: Record<string, unknown> | null
+  points: number
+}
+
+export interface QuizQuestionFull extends QuizQuestionDraft {
+  id: string
+  position: number
+  media_url?: string | null
+}
+
+export interface QuizSettings {
+  title: string
+  description?: string | null
+  status: 'draft' | 'published'
+  pass_score_pct: number
+  attempts_limit: number | null
+  shuffle_questions: boolean
+  shuffle_options: boolean
+  show_correct_answers: boolean
+  is_required: boolean
+}
+
+export interface QuizManage extends QuizSettings {
+  id: string
+  course_id: string
+  lesson_id: string | null
+  questions: QuizQuestionFull[]
+}
+
+export interface QuizConsumer {
+  id: string
+  lesson_id: string | null
+  title: string
+  description: string | null
+  pass_score_pct: number
+  attempts_limit: number | null
+  is_required: boolean
+  show_correct_answers: boolean
+  question_count: number
+  attempts_used: number
+  best_score_pct: number | null
+  passed: boolean
+  pending_review: boolean
+  active_attempt_id: string | null
+  can_start: boolean
+}
+
+export interface QuizSnapshotQuestion {
+  id: string
+  qtype: QuizQuestionType
+  prompt: string
+  media_id: string | null
+  media_url: string | null
+  options: {
+    options?: string[]
+    left?: string[]
+    right?: string[]
+    items?: string[]
+  }
+  points: number
+}
+
+export interface QuizAttempt {
+  id: string
+  quiz_id: string
+  attempt_no: number
+  questions: QuizSnapshotQuestion[]
+  answers: Record<string, unknown>
+  started_at: string
+  finished_at: string | null
+  score_pct: number | null
+  passed: boolean | null
+  needs_review: boolean
+  results: Record<string, boolean | null> | null
+  correct_answers: Record<string, Record<string, unknown>> | null
+}
+
+export interface ReviewQueueItem {
+  attempt_id: string
+  quiz_id: string
+  quiz_title: string
+  course_id: string
+  profile_id: string
+  employee_name: string
+  finished_at: string | null
+  open_question_count: number
+}
+
+export interface RatingRow {
+  profile_id: string
+  full_name: string
+  position_name: string | null
+  store_name: string | null
+  points: number
+  rank: number
+  is_me: boolean
+}
+
+export interface RatingData {
+  period: 'month' | 'quarter'
+  scope: 'all' | 'store'
+  rows: RatingRow[]
+  me: RatingRow | null
+  total_participants: number
+}
+
+export interface CertificateInfo {
+  id: string
+  serial: string
+  course_id: string
+  course_title: string
+  full_name: string
+  issued_at: string
+}
+
 export type MediaKind = 'image' | 'video' | 'pdf'
 
 export interface MediaUploadResult {
@@ -875,6 +1007,60 @@ export const learnApi = {
     api.post<LessonTemplate>('/learn/lesson-templates', body).then((r) => r.data),
   deleteLessonTemplate: (id: string): Promise<void> =>
     api.delete(`/learn/lesson-templates/${id}`).then(() => undefined),
+
+  // ─── Тесты (Ф3b) ───────────────────────────────────────────────────────────
+  lessonQuiz: (lessonId: string): Promise<QuizConsumer | null> =>
+    api
+      .get<QuizConsumer | null>(`/learn/lessons/${lessonId}/quiz`)
+      .then((r) => r.data ?? null),
+  lessonQuizManage: (lessonId: string): Promise<QuizManage | null> =>
+    api
+      .get<QuizManage | null>(`/learn/lessons/${lessonId}/quiz`, {
+        params: { manage: true },
+      })
+      .then((r) => r.data ?? null),
+  upsertLessonQuiz: (
+    lessonId: string,
+    body: QuizSettings & { questions: QuizQuestionDraft[] },
+  ): Promise<QuizManage> =>
+    api.put<QuizManage>(`/learn/lessons/${lessonId}/quiz`, body).then((r) => r.data),
+  deleteQuiz: (quizId: string): Promise<void> =>
+    api.delete(`/learn/quizzes/${quizId}`).then(() => undefined),
+  resetQuizAttempts: (quizId: string, profileId: string): Promise<void> =>
+    api
+      .post(`/learn/quizzes/${quizId}/reset-attempts`, { profile_id: profileId })
+      .then(() => undefined),
+
+  startQuizAttempt: (quizId: string): Promise<QuizAttempt> =>
+    api.post<QuizAttempt>(`/learn/quizzes/${quizId}/attempts`).then((r) => r.data),
+  quizAttempt: (attemptId: string): Promise<QuizAttempt> =>
+    api.get<QuizAttempt>(`/learn/quiz-attempts/${attemptId}`).then((r) => r.data),
+  saveQuizAnswer: (attemptId: string, questionId: string, value: unknown): Promise<void> =>
+    api
+      .patch(`/learn/quiz-attempts/${attemptId}`, { question_id: questionId, value })
+      .then(() => undefined),
+  submitQuizAttempt: (attemptId: string): Promise<QuizAttempt> =>
+    api.post<QuizAttempt>(`/learn/quiz-attempts/${attemptId}/submit`).then((r) => r.data),
+
+  reviewQueue: (): Promise<ReviewQueueItem[]> =>
+    api.get<ReviewQueueItem[]>('/learn/review-queue').then((r) => r.data),
+  reviewQuizAttempt: (
+    attemptId: string,
+    scores: Record<string, number>,
+  ): Promise<QuizAttempt> =>
+    api
+      .post<QuizAttempt>(`/learn/quiz-attempts/${attemptId}/review`, { scores })
+      .then((r) => r.data),
+
+  rating: (period: 'month' | 'quarter', scope: 'all' | 'store'): Promise<RatingData> =>
+    api
+      .get<RatingData>('/learn/rating', { params: { period, scope } })
+      .then((r) => r.data),
+
+  myCertificates: (): Promise<CertificateInfo[]> =>
+    api.get<CertificateInfo[]>('/learn/certificates').then((r) => r.data),
+  certificate: (id: string): Promise<CertificateInfo> =>
+    api.get<CertificateInfo>(`/learn/certificates/${id}`).then((r) => r.data),
 
   uploadMedia: (file: File): Promise<MediaUploadResult> => {
     const form = new FormData()

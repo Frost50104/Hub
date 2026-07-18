@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  Award,
   CalendarClock,
   Check,
   CircleDashed,
@@ -13,7 +14,7 @@ import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { SkeletonRows } from '@/components/ui/Skeleton'
-import { useCourse } from '@/hooks/useLearn'
+import { useCourse, useMyCertificates } from '@/hooks/useLearn'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/cn'
 import { COURSE_TYPE_LABEL, type LessonMeta } from '@/lib/learn'
@@ -82,8 +83,10 @@ export function LearnCoursePage() {
   const isDesktop = useIsDesktop()
   const navigate = useNavigate()
   const course = useCourse(courseId)
+  const certificates = useMyCertificates()
 
   const data = course.data
+  const myCert = certificates.data?.find((c) => c.course_id === courseId) ?? null
   const published = (data?.lessons ?? []).filter((lesson) => lesson.status === 'published')
   const next = published.find((lesson) => !lesson.completed && !lesson.locked)
   const pct =
@@ -173,9 +176,19 @@ export function LearnCoursePage() {
                 </Button>
               )}
               {data.completed && (
-                <p className="mt-3 inline-flex items-center gap-1.5 text-sm text-green">
-                  <Check className="h-4 w-4" /> Все уроки пройдены
-                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <p className="inline-flex items-center gap-1.5 text-sm text-green">
+                    <Check className="h-4 w-4" /> Все уроки пройдены
+                  </p>
+                  {myCert && (
+                    <Link
+                      to={`/learn/certificates/${myCert.id}`}
+                      className="inline-flex items-center gap-1.5 text-sm text-amber hover:opacity-80"
+                    >
+                      <Award className="h-4 w-4" /> Сертификат
+                    </Link>
+                  )}
+                </div>
               )}
             </div>
 

@@ -40,13 +40,14 @@ const LEARN_NAV: LearnNavItem[] = [
   { to: '/learn/news', label: 'Новости', icon: Newspaper },
   { to: '/learn/surveys', label: 'Опросы', icon: ClipboardList },
   { to: '/learn/products', label: 'Ассортимент', icon: ShoppingBag, soon: true },
-  { to: '/learn/rating', label: 'Рейтинг', icon: Trophy, soon: true },
+  { to: '/learn/rating', label: 'Рейтинг', icon: Trophy },
   { to: '/inbox', label: 'Входящие', icon: Inbox, badge: true },
 ]
 
 const ADMIN_NAV: LearnNavItem[] = [
   { to: '/learn/admin/org', label: 'Оргструктура', icon: Building2 },
   { to: '/learn/admin/employees', label: 'Сотрудники', icon: Users },
+  { to: '/learn/admin/review', label: 'Проверка тестов', icon: ClipboardList },
   { to: '/learn/admin/audit', label: 'Журнал', icon: ScrollText },
 ]
 

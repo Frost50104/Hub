@@ -104,3 +104,20 @@
     position: relative;
   }
 }
+
+/* ─── Печать (Ф3b: сертификат) ─────────────────────────────────────────────
+   Прячем навигацию/оболочку — на бумагу уходит только контент страницы. */
+@media print {
+  aside,
+  nav,
+  .print-hide {
+    display: none !important;
+  }
+  main {
+    width: 100% !important;
+    max-width: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+}

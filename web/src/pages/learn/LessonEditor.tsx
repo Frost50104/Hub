@@ -41,6 +41,8 @@ import {
   useLessonTemplates,
   useSurveys,
 } from '@/hooks/useLearn'
+
+import { QuizBuilder } from './QuizBuilder'
 import { extractErrorDetail } from '@/lib/errors'
 import {
   learnApi,
@@ -362,6 +364,8 @@ function LessonEditorInner({
           </>
         )}
       </div>
+
+      <QuizBuilder lessonId={lesson.id} />
 
       {/* Скрытые file-инпуты */}
       <input ref={imageInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => void onImagePick(e)} />

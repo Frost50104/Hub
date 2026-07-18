@@ -60,6 +60,7 @@ export default defineConfig(({ mode }) => ({
           '**/LearnEmployeesPage-*.js',
           '**/LearnAuditPage-*.js',
           '**/CourseBuilderPage-*.js',
+          '**/LearnReviewPage-*.js',
         ],
       },
       manifest: {
