@@ -3,6 +3,7 @@
 from app.models.attachment import TaskAttachment
 from app.models.audience import Audience, AudienceMember, AudienceRule
 from app.models.audit import AuditLog
+from app.models.course import Course, CourseLesson, LessonTemplate, MediaFile
 from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
 from app.models.dependency import TaskDependency
 from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
@@ -31,6 +32,7 @@ from app.models.org import (
     UserGroup,
     UserGroupMember,
 )
+from app.models.progress import CourseAssignment, CourseProgress, LessonProgress
 from app.models.project import Project, ProjectMember
 from app.models.push_subscription import PushSubscription
 from app.models.rate_limit import RateLimit
@@ -60,6 +62,10 @@ __all__ = [
     "AudienceMember",
     "AudienceRule",
     "AuditLog",
+    "Course",
+    "CourseAssignment",
+    "CourseLesson",
+    "CourseProgress",
     "CustomFieldDefinition",
     "Department",
     "EmployeeProfile",
@@ -68,10 +74,13 @@ __all__ = [
     "FranchiseeGroup",
     "FranchiseeGroupMember",
     "LearningSettings",
+    "LessonProgress",
+    "LessonTemplate",
     "LibraryMaterial",
     "LibrarySection",
     "MaterialAcknowledgement",
     "MaterialVersion",
+    "MediaFile",
     "NewsAcknowledgement",
     "NewsComment",
     "NewsPost",

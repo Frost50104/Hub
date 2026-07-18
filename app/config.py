@@ -70,6 +70,16 @@ class Settings(BaseSettings):
     attachments_root: Path = Field(default=Path("/opt/signaris-hub/attachments"))
     attachment_max_bytes: int = Field(default=20 * 1024 * 1024)
 
+    # Learn-медиа (Ф3a): подписанные URL для <video>/<img>/pdf (Bearer в тегах
+    # не работает). Секрет — HMAC-ключ подписей; если не задан, derive из
+    # database_url (стабильно per-env). media_accel: отдача через nginx
+    # X-Accel-Redirect (в тестах/локально False → FileResponse напрямую).
+    media_url_secret: str | None = Field(default=None)
+    media_accel_enabled: bool = Field(default=True)
+    media_url_ttl_sec: int = Field(default=6 * 3600)
+    # Отказ загрузки при малом свободном месте: диск общий с Postgres/WAL.
+    media_min_free_bytes: int = Field(default=5 * 1024 * 1024 * 1024)
+
     # Public links (3.6.12) — view-only no-auth deep-links to a task/project.
     # Feature-flag so we can kill-switch the entire surface without a redeploy.
     public_links_enabled: bool = Field(default=True)

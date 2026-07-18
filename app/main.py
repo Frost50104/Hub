@@ -136,6 +136,7 @@ def create_app() -> FastAPI:
     from app.api import audit as audit_api
     from app.api import calendar as calendar_api
     from app.api import comments as comments_api
+    from app.api import courses as courses_api
     from app.api import custom_fields as custom_fields_api
     from app.api import dependencies as dependencies_api
     from app.api import employees as employees_api
@@ -145,6 +146,7 @@ def create_app() -> FastAPI:
     from app.api import library as library_api
     from app.api import me as me_api
     from app.api import me_tasks as me_tasks_api
+    from app.api import media as media_api
     from app.api import news as news_api
     from app.api import notifications as notifications_api
     from app.api import org as org_api
@@ -191,6 +193,8 @@ def create_app() -> FastAPI:
     app.include_router(news_api.router, prefix="/api")
     app.include_router(surveys_api.router, prefix="/api")
     app.include_router(favorites_api.router, prefix="/api")
+    app.include_router(media_api.router, prefix="/api")
+    app.include_router(courses_api.router, prefix="/api")
 
     return app
 

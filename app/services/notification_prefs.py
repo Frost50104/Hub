@@ -33,6 +33,8 @@ NOTIFICATION_KINDS: tuple[str, ...] = (
     "news.published",
     "news.ack_required",
     "survey.assigned",
+    "course.assigned",
+    "course.due_soon",
 )
 
 

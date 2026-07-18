@@ -83,12 +83,16 @@ def make_principal(
     email: str = "user@test.ru",
     full_name: str = "Тест Юзер",
     role: str = "member",
+    tenant_slug: str = "test",
 ) -> Principal:
+    """tenant_slug: тесты, которые КОММИТЯТ (endpoint-функции), обязаны
+    передавать уникальный slug — иначе UNIQUE shadow_tenants.slug конфликтует
+    между тестами (rollback-only тестам дефолт безопасен)."""
     return Principal(
         employee_id=uuid.uuid4(),
         email=email,
         tenant_id=tenant_id,
-        tenant_slug="test",
+        tenant_slug=tenant_slug,
         full_name=full_name,
         product_roles={"hub": role},
         jti=str(uuid.uuid4()),

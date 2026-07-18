@@ -20,8 +20,10 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.course import Course
 from app.models.employee_profile import EmployeeProfile
 from app.models.library import LibraryMaterial, MaterialAcknowledgement
+from app.models.progress import CourseProgress
 from app.services.audience_resolver import MembershipDiff
 from app.services.notify_batch import notify_many
 
@@ -108,5 +110,54 @@ async def notify_new_audience_members(
             log.info(
                 "learn_notify.ack_on_grant",
                 material_id=str(material.id),
+                sent=sent,
+            )
+
+    # Mandatory-курсы (Ф3a): поздно вошедший в аудиторию обязан узнать
+    # о курсе так же, как о документе на ознакомление.
+    courses = (
+        (
+            await db.execute(
+                select(Course).where(
+                    Course.audience_id.in_(added_by_audience.keys()),
+                    Course.status == "published",
+                    Course.course_type == "mandatory",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for course in courses:
+        profile_ids = added_by_audience.get(course.audience_id, [])
+        if not profile_ids:
+            continue
+        # Уже завершившим курс (re-add в аудиторию) — не шуметь.
+        done = {
+            r[0]
+            for r in await db.execute(
+                select(CourseProgress.profile_id).where(
+                    CourseProgress.course_id == course.id,
+                    CourseProgress.profile_id.in_(profile_ids),
+                    CourseProgress.completed_at.is_not(None),
+                )
+            )
+        }
+        fresh = [pid for pid in profile_ids if pid not in done]
+        recipients = await _employee_ids(db, fresh)
+        sent = await notify_many(
+            db,
+            tenant_id=course.tenant_id,
+            employee_ids=list(recipients.values()),
+            kind="course.assigned",
+            title=course.title,
+            body="Вам назначен обязательный курс.",
+            url=f"/learn/courses/{course.id}",
+            payload={"course_id": str(course.id)},
+        )
+        if sent:
+            log.info(
+                "learn_notify.course_on_grant",
+                course_id=str(course.id),
                 sent=sent,
             )
