@@ -1,0 +1,11 @@
+[Unit]
+Description=Signaris Hub — course due-soon reminders (staging daily cron)
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=signaris
+Group=signaris
+WorkingDirectory=/opt/signaris-hub-staging
+EnvironmentFile=/opt/signaris-hub-staging/.env
+ExecStart=/opt/signaris-hub-staging/.venv/bin/python -m app.jobs.course_due_soon

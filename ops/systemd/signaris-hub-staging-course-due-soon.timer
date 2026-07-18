@@ -1,0 +1,11 @@
+[Unit]
+Description=Run signaris-hub-staging-course-due-soon daily 09:15 Moscow time
+
+[Timer]
+# 06:15 UTC = 09:15 MSK (UTC+3, no DST in RU)
+OnCalendar=*-*-* 06:15:00
+Persistent=true
+Unit=signaris-hub-staging-course-due-soon.service
+
+[Install]
+WantedBy=timers.target
