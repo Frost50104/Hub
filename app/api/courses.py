@@ -47,6 +47,7 @@ from app.schemas.course import (
 from app.schemas.library import AudienceBody, StatusBody
 from app.services import audit, lifecycle
 from app.services.audience_resolver import RuleSpec, set_object_audience, visible_filter
+from app.services.certificate import issue_if_earned
 from app.services.content_access import require_content_role, resolve_content_role
 from app.services.learn_media import sign_media_path
 from app.services.learn_notify import _employee_ids
@@ -60,6 +61,8 @@ from app.services.lesson_content import (
 )
 from app.services.notify_batch import notify_many
 from app.services.org_scope import get_profile
+from app.services.points import award
+from app.services.quiz_gate import passed_required_quiz_lessons
 from app.services.search_indexer import delete_document, upsert_document
 from app.services.video_progress import is_watched, merge_intervals
 
@@ -186,21 +189,33 @@ def _lesson_locked(
     lessons: list[CourseLesson],
     lesson: CourseLesson,
     progress: dict[UUID, LessonProgress],
+    quiz_gate: dict[UUID, bool] | None = None,
 ) -> bool:
-    """Серверный замок. Монотонность: свой прогресс = никогда не заперт."""
+    """Серверный замок. Монотонность: свой прогресс = никогда не заперт.
+
+    quiz_gate (Ф3b): lesson_id → пройден ли его required-тест; урок с
+    unlock_rule='after_prev_test' дополнительно требует сданный тест
+    предыдущего урока."""
     if lesson.id in progress:
         return False
     if course.progression_mode == "free":
         return False
     if course.progression_mode == "mixed" and lesson.unlock_rule == "free":
         return False
+    prev_lesson: CourseLesson | None = None
     for prev in lessons:
         if prev.id == lesson.id:
-            return False
+            break
+        prev_lesson = prev
         prev_progress = progress.get(prev.id)
         if prev_progress is None or prev_progress.status != "completed":
             return True
-    return False
+    return (
+        lesson.unlock_rule == "after_prev_test"
+        and prev_lesson is not None
+        and quiz_gate is not None
+        and quiz_gate.get(prev_lesson.id) is False
+    )
 
 
 async def _reindex(db: AsyncSession, course: Course) -> None:
@@ -406,11 +421,16 @@ async def get_course(
 
     progress = await _progress_map(db, course_id, profile_id) if profile_id else {}
     published = [lesson for lesson in lessons if lesson.status == "published"]
+    quiz_gate = (
+        await passed_required_quiz_lessons(db, course_id, profile_id)
+        if profile_id and not manager
+        else {}
+    )
 
     metas = []
     for lesson in lessons:
         locked = (
-            _lesson_locked(course, published, lesson, progress)
+            _lesson_locked(course, published, lesson, progress, quiz_gate)
             if lesson.status == "published" and not manager
             else False
         )
@@ -870,8 +890,13 @@ async def get_lesson(
 
     published = await _published_lessons(db, lesson.course_id)
     progress = await _progress_map(db, lesson.course_id, profile_id) if profile_id else {}
+    quiz_gate = (
+        await passed_required_quiz_lessons(db, lesson.course_id, profile_id)
+        if profile_id and not manager
+        else {}
+    )
 
-    if not manager and _lesson_locked(course, published, lesson, progress):
+    if not manager and _lesson_locked(course, published, lesson, progress, quiz_gate):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Урок откроется после завершения предыдущих",
@@ -915,7 +940,7 @@ async def get_lesson(
     prev_id = ordered[idx - 1].id if idx is not None and idx > 0 else None
     next_lesson = ordered[idx + 1] if idx is not None and idx + 1 < len(ordered) else None
     next_locked = (
-        _lesson_locked(course, ordered, next_lesson, progress)
+        _lesson_locked(course, ordered, next_lesson, progress, quiz_gate)
         if next_lesson is not None and not manager
         else False
     )
@@ -1053,6 +1078,26 @@ async def complete_lesson(
         await db.flush()  # autoflush=False: счётчик в _update_course_progress
         course = await _get_course_or_404(db, lesson.course_id)
         await _update_course_progress(db, course, profile.id)
+        # Рейтинг (Ф3b): идемпотентное «первое действие».
+        await award(
+            db,
+            tenant_id=course.tenant_id,
+            profile_id=profile.id,
+            event_type="lesson.completed",
+            object_type="course_lesson",
+            object_id=lesson.id,
+        )
+        # Завершил курс → сертификат (если включён у курса).
+        completed_at = (
+            await db.execute(
+                select(CourseProgress.completed_at).where(
+                    CourseProgress.course_id == course.id,
+                    CourseProgress.profile_id == profile.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if completed_at is not None:
+            await issue_if_earned(db, course, profile)
         await db.commit()
 
     return await get_lesson(lesson_id, principal, db)  # свежий ответ с замками

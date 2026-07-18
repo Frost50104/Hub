@@ -153,6 +153,7 @@ def create_app() -> FastAPI:
     from app.api import projects as projects_api
     from app.api import public as public_api
     from app.api import push as push_api
+    from app.api import quizzes as quizzes_api
     from app.api import search as search_api
     from app.api import sections as sections_api
     from app.api import share as share_api
@@ -195,6 +196,7 @@ def create_app() -> FastAPI:
     app.include_router(favorites_api.router, prefix="/api")
     app.include_router(media_api.router, prefix="/api")
     app.include_router(courses_api.router, prefix="/api")
+    app.include_router(quizzes_api.router, prefix="/api")
 
     return app
 

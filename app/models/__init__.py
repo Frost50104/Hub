@@ -1,5 +1,6 @@
 """Importing all model modules so Base.metadata sees them at alembic time."""
 
+from app.models.activity import ActivityEvent, Certificate
 from app.models.attachment import TaskAttachment
 from app.models.audience import Audience, AudienceMember, AudienceRule
 from app.models.audit import AuditLog
@@ -35,6 +36,7 @@ from app.models.org import (
 from app.models.progress import CourseAssignment, CourseProgress, LessonProgress
 from app.models.project import Project, ProjectMember
 from app.models.push_subscription import PushSubscription
+from app.models.quiz import Quiz, QuizAttempt, QuizQuestion
 from app.models.rate_limit import RateLimit
 from app.models.search_document import SearchDocument, TextExtractionJob
 from app.models.section import Section
@@ -104,6 +106,11 @@ __all__ = [
     "StoreGroup",
     "StoreGroupMember",
     "Survey",
+    "ActivityEvent",
+    "Certificate",
+    "Quiz",
+    "QuizAttempt",
+    "QuizQuestion",
     "SurveyAnswer",
     "SurveyAnswerSet",
     "SurveyParticipation",

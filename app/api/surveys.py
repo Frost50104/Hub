@@ -46,6 +46,7 @@ from app.services.learn_notify import _employee_ids
 from app.services.learn_settings import get_settings_dict
 from app.services.notify_batch import notify_many
 from app.services.org_scope import get_profile
+from app.services.points import award
 from app.services.survey_stats import participants_count, question_stats
 
 router = APIRouter(tags=["learn-surveys"])
@@ -524,6 +525,16 @@ async def submit_survey(
     )
     if result.rowcount == 0:
         raise HTTPException(status_code=409, detail="Вы уже проходили этот опрос")
+
+    # Рейтинг (Ф3b): факт участия — «первое действие», ответы не трогаем.
+    await award(
+        db,
+        tenant_id=survey.tenant_id,
+        profile_id=profile.id,
+        event_type="survey.completed",
+        object_type="survey",
+        object_id=survey.id,
+    )
 
     answer_set = SurveyAnswerSet(
         tenant_id=survey.tenant_id,

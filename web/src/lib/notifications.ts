@@ -52,6 +52,8 @@ export const NOTIFICATION_KINDS = [
   'survey.assigned',
   'course.assigned',
   'course.due_soon',
+  'quiz.review_needed',
+  'quiz.reviewed',
 ] as const
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
@@ -70,6 +72,8 @@ export const NOTIFICATION_KIND_LABEL: Record<NotificationKind, string> = {
   'survey.assigned': 'Назначен опрос',
   'course.assigned': 'Назначен курс обучения',
   'course.due_soon': 'Скоро дедлайн курса',
+  'quiz.review_needed': 'Тест ждёт проверки (для проверяющих)',
+  'quiz.reviewed': 'Мой тест проверен',
 }
 
 export const notificationsApi = {

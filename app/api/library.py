@@ -68,6 +68,7 @@ from app.services.library_storage import (
     storage_key_for_version,
 )
 from app.services.org_scope import get_profile, resolve_scope
+from app.services.points import award
 from app.services.search_indexer import delete_document, upsert_document
 
 router = APIRouter(tags=["learn-library"])
@@ -933,6 +934,15 @@ async def acknowledge(
         stmt.on_conflict_do_nothing(
             index_elements=["material_id", "version_no", "profile_id"]
         )
+    )
+    # Рейтинг (Ф3b): «первое действие», повторный ack версии не дублирует.
+    await award(
+        db,
+        tenant_id=material.tenant_id,
+        profile_id=profile.id,
+        event_type="material.acknowledged",
+        object_type="library_material",
+        object_id=material.id,
     )
     await db.commit()
     await db.refresh(material)

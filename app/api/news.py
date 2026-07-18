@@ -44,6 +44,7 @@ from app.services.content_access import require_content_role, resolve_content_ro
 from app.services.learn_notify import _employee_ids
 from app.services.notify_batch import notify_many
 from app.services.org_scope import get_profile
+from app.services.points import award
 from app.services.rich_content import (
     NEWS_NODES,
     RichContentError,
@@ -524,6 +525,14 @@ async def acknowledge_news(
         post_id=post_id, profile_id=profile.id, tenant_id=post.tenant_id
     )
     await db.execute(stmt.on_conflict_do_nothing(index_elements=["post_id", "profile_id"]))
+    await award(
+        db,
+        tenant_id=post.tenant_id,
+        profile_id=profile.id,
+        event_type="news.acknowledged",
+        object_type="news_post",
+        object_id=post.id,
+    )
     await db.commit()
 
 
