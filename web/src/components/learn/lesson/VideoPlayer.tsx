@@ -61,8 +61,10 @@ export function VideoPlayer({
   className?: string
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  // Просмотренное копится микро-интервалами [prev, now] между timeupdate —
+  // модель без «открытых сегментов» переживает waiting/паузы/буферизацию,
+  // из-за которых сегментная версия теряла куски.
   const intervalsRef = useRef<Interval[]>(mergeLocal(initialIntervals))
-  const segStartRef = useRef<number | null>(null)
   const lastTimeRef = useRef(0)
   const maxReachedRef = useRef(
     intervalsRef.current.reduce((acc, [, e]) => Math.max(acc, e), 0),
@@ -75,34 +77,18 @@ export function VideoPlayer({
   )
 
   const snapshot = useCallback((): Interval[] => {
-    const current: Interval[] = [...intervalsRef.current]
-    const seg = segStartRef.current
-    const now = videoRef.current?.currentTime ?? lastTimeRef.current
-    if (seg !== null && now > seg) current.push([seg, now])
-    return mergeLocal(current)
+    intervalsRef.current = mergeLocal(intervalsRef.current)
+    return intervalsRef.current
   }, [])
 
   const refreshCoverage = useCallback(() => {
-    const merged = snapshot()
-    const c = coverageOf(merged, durationRef.current)
+    const c = coverageOf(snapshot(), durationRef.current)
     setCoverage(c)
     onCoverageChange?.(c)
   }, [snapshot, onCoverageChange])
 
-  const closeSegment = useCallback(() => {
-    const seg = segStartRef.current
-    if (seg === null) return
-    const end = videoRef.current?.currentTime ?? lastTimeRef.current
-    if (end > seg) {
-      intervalsRef.current = mergeLocal([...intervalsRef.current, [seg, end]])
-      dirtyRef.current = true
-    }
-    segStartRef.current = null
-    refreshCoverage()
-  }, [refreshCoverage])
-
   const flush = useCallback(async () => {
-    if (!dirtyRef.current && segStartRef.current === null) return
+    if (!dirtyRef.current) return
     const merged = snapshot()
     if (!merged.length || durationRef.current <= 0) return
     dirtyRef.current = false
@@ -172,23 +158,17 @@ export function VideoPlayer({
 
   const onTimeUpdate = () => {
     const video = videoRef.current
-    if (!video || video.paused || video.seeking) return
+    if (!video || video.seeking) return
     const t = video.currentTime
-    if (segStartRef.current === null) {
-      segStartRef.current = t
-    } else if (Math.abs(t - lastTimeRef.current) > SEEK_JUMP_THRESHOLD) {
-      // Разрыв (перемотка) — закрываем интервал по последней позиции.
-      const seg = segStartRef.current
-      if (lastTimeRef.current > seg) {
-        intervalsRef.current = mergeLocal([
-          ...intervalsRef.current,
-          [seg, lastTimeRef.current],
-        ])
-        dirtyRef.current = true
-      }
-      segStartRef.current = t
-    }
+    const last = lastTimeRef.current
     lastTimeRef.current = t
+    // Шаг вперёд в пределах порога = реально просмотренный кусок;
+    // больший скачок — перемотка, время не засчитывается.
+    if (t > last && t - last <= SEEK_JUMP_THRESHOLD) {
+      intervalsRef.current.push([last, t])
+      dirtyRef.current = true
+      if (intervalsRef.current.length > 200) snapshot() // компактизация
+    }
     maxReachedRef.current = Math.max(maxReachedRef.current, t)
     refreshCoverage()
   }
@@ -220,9 +200,8 @@ export function VideoPlayer({
         }}
         onTimeUpdate={onTimeUpdate}
         onSeeking={onSeeking}
-        onPause={closeSegment}
-        onEnded={closeSegment}
-        onWaiting={closeSegment}
+        onPause={refreshCoverage}
+        onEnded={refreshCoverage}
       />
       {requireFullWatch && (
         <figcaption className="mt-1 flex items-center gap-2 text-xs text-text3">

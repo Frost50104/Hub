@@ -87,8 +87,9 @@ export const LessonFigure = Node.create({
     return {
       insertFigure:
         (attrs) =>
-        ({ commands }) =>
-          commands.insertContent({ type: this.name, attrs }),
+        ({ state, commands }) =>
+          // Вставка ПОСЛЕ выделения: NodeSelection выделенного атома не затирается.
+          commands.insertContentAt(state.selection.to, { type: this.name, attrs }),
     }
   },
 })
@@ -136,8 +137,11 @@ export const LessonGallery = Node.create({
     return {
       insertGallery:
         (items) =>
-        ({ commands }) =>
-          commands.insertContent({ type: this.name, attrs: { items, mode: 'steps' } }),
+        ({ state, commands }) =>
+          commands.insertContentAt(state.selection.to, {
+            type: this.name,
+            attrs: { items, mode: 'steps' },
+          }),
     }
   },
 })
@@ -193,8 +197,9 @@ export const LessonVideo = Node.create({
     return {
       insertVideo:
         (attrs) =>
-        ({ commands }) =>
-          commands.insertContent({ type: this.name, attrs }),
+        ({ state, commands }) =>
+          // Вставка ПОСЛЕ выделения: NodeSelection выделенного атома не затирается.
+          commands.insertContentAt(state.selection.to, { type: this.name, attrs }),
     }
   },
 })
@@ -233,8 +238,9 @@ export const LessonPdfEmbed = Node.create({
     return {
       insertPdfEmbed:
         (attrs) =>
-        ({ commands }) =>
-          commands.insertContent({ type: this.name, attrs }),
+        ({ state, commands }) =>
+          // Вставка ПОСЛЕ выделения: NodeSelection выделенного атома не затирается.
+          commands.insertContentAt(state.selection.to, { type: this.name, attrs }),
     }
   },
 })
@@ -269,8 +275,11 @@ export const LessonSurveyEmbed = Node.create({
     return {
       insertSurveyEmbed:
         (surveyId) =>
-        ({ commands }) =>
-          commands.insertContent({ type: this.name, attrs: { surveyId } }),
+        ({ state, commands }) =>
+          commands.insertContentAt(state.selection.to, {
+            type: this.name,
+            attrs: { surveyId },
+          }),
     }
   },
 })
@@ -318,8 +327,9 @@ export const LessonCheckQuestion = Node.create({
     return {
       insertCheckQuestion:
         (attrs) =>
-        ({ commands }) =>
-          commands.insertContent({ type: this.name, attrs }),
+        ({ state, commands }) =>
+          // Вставка ПОСЛЕ выделения: NodeSelection выделенного атома не затирается.
+          commands.insertContentAt(state.selection.to, { type: this.name, attrs }),
     }
   },
 })
