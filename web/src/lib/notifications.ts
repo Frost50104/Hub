@@ -58,6 +58,7 @@ export const NOTIFICATION_KINDS = [
   'shift.new',
   'shift.application',
   'shift.result',
+  'assessment.assigned',
 ] as const
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
@@ -82,6 +83,7 @@ export const NOTIFICATION_KIND_LABEL: Record<NotificationKind, string> = {
   'shift.new': 'Новая смена на бирже (моя должность)',
   'shift.application': 'Отклик на мою смену (для руководителей)',
   'shift.result': 'Результат по смене (назначили/отменили)',
+  'assessment.assigned': 'Назначена аттестация',
 }
 
 export const notificationsApi = {

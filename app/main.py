@@ -133,6 +133,7 @@ def create_app() -> FastAPI:
 
     from app.api import activity as activity_api
     from app.api import ai as ai_api
+    from app.api import assessments as assessments_api
     from app.api import attachments as attachments_api
     from app.api import audit as audit_api
     from app.api import automations as automations_api
@@ -211,6 +212,7 @@ def create_app() -> FastAPI:
     app.include_router(automations_api.router, prefix="/api")
     app.include_router(ai_api.router, prefix="/api")
     app.include_router(shifts_api.router, prefix="/api")
+    app.include_router(assessments_api.router, prefix="/api")
 
     return app
 

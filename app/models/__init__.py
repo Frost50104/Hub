@@ -2,6 +2,7 @@
 
 from app.models.activity import ActivityEvent, Certificate
 from app.models.ai import AiConversation, AiMessage, RagChunk
+from app.models.assessment import AssessmentCampaign
 from app.models.attachment import TaskAttachment
 from app.models.audience import Audience, AudienceMember, AudienceRule
 from app.models.audit import AuditLog
@@ -114,6 +115,7 @@ __all__ = [
     "Survey",
     "ActivityEvent",
     "AiConversation",
+    "AssessmentCampaign",
     "AiMessage",
     "AutomationJob",
     "AutomationRule",

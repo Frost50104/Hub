@@ -56,10 +56,18 @@ class Quiz(Base):
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
-    course_id: Mapped[UUID] = mapped_column(
+    # Ровно один владелец: курс (тест урока/финальный) ИЛИ кампания
+    # аттестации (Ф8) — CHECK в миграции 0030.
+    course_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("courses.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+        index=True,
+    )
+    campaign_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("assessment_campaigns.id", ondelete="CASCADE"),
+        nullable=True,
         index=True,
     )
     lesson_id: Mapped[UUID | None] = mapped_column(

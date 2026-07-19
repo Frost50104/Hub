@@ -97,7 +97,7 @@ class QuizManageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    course_id: UUID
+    course_id: UUID | None
     lesson_id: UUID | None
     title: str
     description: str | None
@@ -173,7 +173,7 @@ class ReviewQueueItem(BaseModel):
     attempt_id: UUID
     quiz_id: UUID
     quiz_title: str
-    course_id: UUID
+    course_id: UUID | None  # NULL = квиз кампании аттестации (Ф8)
     profile_id: UUID
     employee_name: str
     finished_at: datetime | None

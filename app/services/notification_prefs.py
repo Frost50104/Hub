@@ -41,6 +41,7 @@ NOTIFICATION_KINDS: tuple[str, ...] = (
     "shift.new",
     "shift.application",
     "shift.result",
+    "assessment.assigned",
 )
 
 

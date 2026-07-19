@@ -31,6 +31,7 @@ from app.api.courses import (
 )
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.activity import Certificate
+from app.models.audience import AudienceMember
 from app.models.employee_profile import EmployeeProfile
 from app.models.quiz import Quiz, QuizAttempt, QuizQuestion
 from app.schemas.quiz import (
@@ -71,6 +72,44 @@ async def _get_quiz_or_404(db: AsyncSession, quiz_id: UUID) -> Quiz:
     if quiz is None:
         raise HTTPException(status_code=404, detail="Тест не найден")
     return quiz
+
+
+async def _consumer_quiz_access(
+    db: AsyncSession, quiz: Quiz, principal: Principal, profile_id: UUID | None
+) -> bool:
+    """Может ли потребитель проходить квиз (курс visible ИЛИ кампания
+    active+окно+audience). Manager-роли проходят всегда."""
+    role = await resolve_content_role(db, principal)
+    if quiz.campaign_id is not None:
+        from datetime import UTC, datetime
+
+        from app.models.assessment import AssessmentCampaign
+
+        campaign = await db.get(AssessmentCampaign, quiz.campaign_id)
+        if campaign is None:
+            return False
+        if lifecycle.can(role, "publisher"):
+            return True
+        now = datetime.now(UTC)
+        if campaign.status != "active":
+            return False
+        if campaign.starts_at is not None and campaign.starts_at > now:
+            return False
+        if campaign.ends_at is not None and campaign.ends_at <= now:
+            return False
+        if campaign.audience_id is None:
+            return True
+        if profile_id is None:
+            return False
+        member = await db.execute(
+            select(AudienceMember.profile_id).where(
+                AudienceMember.audience_id == campaign.audience_id,
+                AudienceMember.profile_id == profile_id,
+            )
+        )
+        return member.scalar_one_or_none() is not None
+    course = await _get_course_or_404(db, quiz.course_id)
+    return await _course_visible_to(db, course, principal, role, profile_id)
 
 
 async def _get_attempt_or_404(db: AsyncSession, attempt_id: UUID) -> QuizAttempt:
@@ -137,6 +176,9 @@ def _attempt_response(
 async def _quiz_manager(
     db: AsyncSession, principal: Principal, quiz: Quiz
 ) -> lifecycle.ContentRole:
+    if quiz.campaign_id is not None:
+        # Квиз кампании аттестации управляется publisher'ом (Ф8).
+        return await require_content_role(db, principal, "publisher")
     role = await require_content_role(db, principal, "author")
     course = await _get_course_or_404(db, quiz.course_id)
     _require_manage(course, principal, role)
@@ -330,7 +372,12 @@ async def get_lesson_quiz(
 
     if quiz is None or quiz.status != "published":
         return None
+    return await consumer_quiz_state(db, quiz, profile)
 
+
+async def consumer_quiz_state(
+    db: AsyncSession, quiz: Quiz, profile
+) -> QuizConsumerResponse:  # noqa: ANN001 — EmployeeProfile | None
     question_count = (
         await db.execute(
             select(func.count()).select_from(QuizQuestion).where(
@@ -398,12 +445,10 @@ async def start_or_resume_attempt(
     quiz = await _get_quiz_or_404(db, quiz_id)
     if quiz.status != "published":
         raise HTTPException(status_code=404, detail="Тест не найден")
-    course = await _get_course_or_404(db, quiz.course_id)
-    role = await resolve_content_role(db, principal)
     profile = await get_profile(db, principal)
     if profile is None:
         raise HTTPException(status_code=404, detail="Профиль не найден")
-    if not await _course_visible_to(db, course, principal, role, profile.id):
+    if not await _consumer_quiz_access(db, quiz, principal, profile.id):
         raise HTTPException(status_code=404, detail="Тест не найден")
 
     attempts = (
