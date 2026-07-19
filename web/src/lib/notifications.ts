@@ -55,6 +55,9 @@ export const NOTIFICATION_KINDS = [
   'quiz.review_needed',
   'quiz.reviewed',
   'profile.inactivity',
+  'shift.new',
+  'shift.application',
+  'shift.result',
 ] as const
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
@@ -76,6 +79,9 @@ export const NOTIFICATION_KIND_LABEL: Record<NotificationKind, string> = {
   'quiz.review_needed': 'Тест ждёт проверки (для проверяющих)',
   'quiz.reviewed': 'Мой тест проверен',
   'profile.inactivity': 'Предупреждение о неактивности',
+  'shift.new': 'Новая смена на бирже (моя должность)',
+  'shift.application': 'Отклик на мою смену (для руководителей)',
+  'shift.result': 'Результат по смене (назначили/отменили)',
 }
 
 export const notificationsApi = {

@@ -45,6 +45,7 @@ from app.models.search_document import SearchDocument, TextExtractionJob
 from app.models.section import Section
 from app.models.shadow import ShadowTenant, ShadowUser
 from app.models.share import PublicShareToken
+from app.models.shift import ShiftApplication, ShiftPosting
 from app.models.survey import (
     Survey,
     SurveyAnswer,
@@ -101,6 +102,8 @@ __all__ = [
     "PushSubscription",
     "RateLimit",
     "SearchDocument",
+    "ShiftApplication",
+    "ShiftPosting",
     "SearchQueryLog",
     "Section",
     "ShadowTenant",

@@ -163,6 +163,7 @@ def create_app() -> FastAPI:
     from app.api import search as search_api
     from app.api import sections as sections_api
     from app.api import share as share_api
+    from app.api import shifts as shifts_api
     from app.api import stats as stats_api
     from app.api import surveys as surveys_api
     from app.api import tasks as tasks_api
@@ -209,6 +210,7 @@ def create_app() -> FastAPI:
     app.include_router(learn_analytics_api.router, prefix="/api")
     app.include_router(automations_api.router, prefix="/api")
     app.include_router(ai_api.router, prefix="/api")
+    app.include_router(shifts_api.router, prefix="/api")
 
     return app
 

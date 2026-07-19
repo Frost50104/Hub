@@ -38,6 +38,9 @@ NOTIFICATION_KINDS: tuple[str, ...] = (
     "quiz.review_needed",
     "quiz.reviewed",
     "profile.inactivity",
+    "shift.new",
+    "shift.application",
+    "shift.result",
 )
 
 
