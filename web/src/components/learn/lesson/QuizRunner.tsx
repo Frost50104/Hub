@@ -216,7 +216,7 @@ function correctAnswerText(
   return ''
 }
 
-function AttemptView({
+export function AttemptView({
   attempt,
   onFinished,
 }: {
@@ -308,7 +308,7 @@ function AttemptView({
   )
 }
 
-function ResultView({
+export function ResultView({
   attempt,
   quiz,
   onRetry,

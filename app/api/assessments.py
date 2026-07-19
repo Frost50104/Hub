@@ -336,6 +336,20 @@ async def set_campaign_audience(
     await db.commit()
 
 
+@router.get("/learn/assessments/{campaign_id}/quiz", response_model=QuizManageResponse)
+async def get_campaign_quiz(
+    campaign_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> QuizManageResponse:
+    await require_content_role(db, principal, "publisher")
+    await _campaign_or_404(db, campaign_id)
+    quiz = await _campaign_quiz(db, campaign_id)
+    if quiz is None:
+        raise HTTPException(status_code=404, detail="Квиз кампании не найден")
+    return await _manage_response(db, quiz)
+
+
 @router.put("/learn/assessments/{campaign_id}/quiz", response_model=QuizManageResponse)
 async def upsert_campaign_quiz(
     campaign_id: UUID,

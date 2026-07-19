@@ -1,4 +1,5 @@
 import {
+  BadgeCheck,
   BarChart3,
   BookOpen,
   Bot,
@@ -47,6 +48,7 @@ const LEARN_NAV: LearnNavItem[] = [
   { to: '/learn/rating', label: 'Рейтинг', icon: Trophy },
   { to: '/learn/assistant', label: 'AI-помощник', icon: Bot },
   { to: '/learn/shifts', label: 'Биржа смен', icon: Handshake },
+  { to: '/learn/assessments', label: 'Аттестации', icon: BadgeCheck },
   { to: '/inbox', label: 'Входящие', icon: Inbox, badge: true },
 ]
 

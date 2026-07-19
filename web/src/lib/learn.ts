@@ -894,6 +894,46 @@ export interface ShiftPostingCreate {
   auto_confirm?: boolean
 }
 
+// ─── Аттестации (Ф8) ─────────────────────────────────────────────────────────
+
+export type CampaignStatus = 'draft' | 'active' | 'closed'
+
+export const CAMPAIGN_STATUS_LABEL: Record<CampaignStatus, string> = {
+  draft: 'Черновик',
+  active: 'Идёт',
+  closed: 'Закрыта',
+}
+
+export interface AssessmentCampaign {
+  id: string
+  title: string
+  description: string | null
+  audience_id: string | null
+  starts_at: string | null
+  ends_at: string | null
+  status: CampaignStatus
+  quiz_id: string | null
+  question_count: number
+  created_at: string
+  my_state: QuizConsumer | null
+  audience_size: number
+  completed_count: number
+}
+
+export interface AssessmentReportRow {
+  profile_id: string
+  full_name: string
+  status: 'not_started' | 'in_progress' | 'pending_review' | 'passed' | 'failed'
+  score_pct: number | null
+  finished_at: string | null
+}
+
+export interface AssessmentReport {
+  campaign_id: string
+  title: string
+  rows: AssessmentReportRow[]
+}
+
 export type MediaKind = 'image' | 'video' | 'pdf'
 
 export interface MediaUploadResult {
@@ -1424,6 +1464,51 @@ export const learnApi = {
     api.post(`/learn/shifts/${id}/cancel`).then(() => undefined),
   completeShift: (id: string): Promise<void> =>
     api.post(`/learn/shifts/${id}/complete`).then(() => undefined),
+
+  // ─── Аттестации (Ф8) ───────────────────────────────────────────────────────
+  assessments: (): Promise<AssessmentCampaign[]> =>
+    api.get<AssessmentCampaign[]>('/learn/assessments').then((r) => r.data),
+  createAssessment: (body: {
+    title: string
+    description?: string | null
+    starts_at?: string | null
+    ends_at?: string | null
+  }): Promise<AssessmentCampaign> =>
+    api.post<AssessmentCampaign>('/learn/assessments', body).then((r) => r.data),
+  updateAssessment: (
+    id: string,
+    body: {
+      title: string
+      description?: string | null
+      starts_at?: string | null
+      ends_at?: string | null
+    },
+  ): Promise<AssessmentCampaign> =>
+    api.patch<AssessmentCampaign>(`/learn/assessments/${id}`, body).then((r) => r.data),
+  setAssessmentAudience: (
+    id: string,
+    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+  ): Promise<void> =>
+    api.put(`/learn/assessments/${id}/audience`, body).then(() => undefined),
+  assessmentQuiz: (id: string): Promise<QuizManage> =>
+    api.get<QuizManage>(`/learn/assessments/${id}/quiz`).then((r) => r.data),
+  upsertAssessmentQuiz: (
+    id: string,
+    body: QuizSettings & { questions: QuizQuestionDraft[] },
+  ): Promise<QuizManage> =>
+    api.put<QuizManage>(`/learn/assessments/${id}/quiz`, body).then((r) => r.data),
+  importAssessmentQuestions: (id: string, quizId: string): Promise<QuizManage> =>
+    api
+      .post<QuizManage>(`/learn/assessments/${id}/import-questions`, { quiz_id: quizId })
+      .then((r) => r.data),
+  activateAssessment: (id: string): Promise<void> =>
+    api.post(`/learn/assessments/${id}/activate`).then(() => undefined),
+  closeAssessment: (id: string): Promise<void> =>
+    api.post(`/learn/assessments/${id}/close`).then(() => undefined),
+  deleteAssessment: (id: string): Promise<void> =>
+    api.delete(`/learn/assessments/${id}`).then(() => undefined),
+  assessmentReport: (id: string): Promise<AssessmentReport> =>
+    api.get<AssessmentReport>(`/learn/assessments/${id}/report`).then((r) => r.data),
 
   uploadMedia: (file: File): Promise<MediaUploadResult> => {
     const form = new FormData()

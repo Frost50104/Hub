@@ -272,7 +272,7 @@ export function QuizBuilder({ lessonId }: { lessonId: string }) {
 
 // ─── Диалог вопроса ──────────────────────────────────────────────────────────
 
-function QuestionDialog({
+export function QuestionDialog({
   initial,
   onClose,
   onSave,
