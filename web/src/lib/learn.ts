@@ -834,6 +834,66 @@ export interface AiMessage {
   created_at: string
 }
 
+// ─── Биржа смен (Ф7) ─────────────────────────────────────────────────────────
+
+export type ShiftStatus = 'open' | 'assigned' | 'done' | 'cancelled'
+export type ShiftApplicationStatus = 'pending' | 'accepted' | 'declined' | 'withdrawn'
+
+export const SHIFT_STATUS_LABEL: Record<ShiftStatus, string> = {
+  open: 'Открыта',
+  assigned: 'Назначена',
+  done: 'Завершена',
+  cancelled: 'Отменена',
+}
+
+export interface ShiftApplicationView {
+  id: string
+  profile_id: string
+  employee_name: string | null
+  status: ShiftApplicationStatus
+  comment: string | null
+  created_at: string
+}
+
+export interface ShiftPosting {
+  id: string
+  store_id: string
+  store_name: string | null
+  position_id: string
+  position_name: string | null
+  starts_at: string
+  ends_at: string
+  pay_note: string | null
+  note: string | null
+  required_course_ids: string[]
+  required_course_titles: string[]
+  auto_confirm: boolean
+  status: ShiftStatus
+  assigned_profile_id: string | null
+  assigned_name: string | null
+  created_at: string
+  my_application_status: ShiftApplicationStatus | null
+  can_apply: boolean
+  missing_courses: string[]
+  applications: ShiftApplicationView[] | null
+}
+
+export interface ShiftListData {
+  items: ShiftPosting[]
+  can_manage: boolean
+}
+
+export interface ShiftPostingCreate {
+  store_id: string
+  position_id: string
+  starts_at: string
+  ends_at: string
+  pay_note?: string | null
+  note?: string | null
+  required_course_ids?: string[]
+  auto_confirm?: boolean
+}
+
 export type MediaKind = 'image' | 'video' | 'pdf'
 
 export interface MediaUploadResult {
@@ -1346,6 +1406,24 @@ export const learnApi = {
       .then((r) => r.data),
   aiDeleteConversation: (conversationId: string): Promise<void> =>
     api.delete(`/learn/ai/conversations/${conversationId}`).then(() => undefined),
+
+  // ─── Биржа смен (Ф7) ───────────────────────────────────────────────────────
+  shifts: (manage: boolean): Promise<ShiftListData> =>
+    api
+      .get<ShiftListData>('/learn/shifts', { params: { manage: manage || undefined } })
+      .then((r) => r.data),
+  createShift: (body: ShiftPostingCreate): Promise<ShiftPosting> =>
+    api.post<ShiftPosting>('/learn/shifts', body).then((r) => r.data),
+  applyShift: (id: string, comment?: string): Promise<void> =>
+    api.post(`/learn/shifts/${id}/apply`, { comment: comment || null }).then(() => undefined),
+  withdrawShift: (id: string): Promise<void> =>
+    api.post(`/learn/shifts/${id}/withdraw`).then(() => undefined),
+  acceptShiftApplication: (applicationId: string): Promise<void> =>
+    api.post(`/learn/shift-applications/${applicationId}/accept`).then(() => undefined),
+  cancelShift: (id: string): Promise<void> =>
+    api.post(`/learn/shifts/${id}/cancel`).then(() => undefined),
+  completeShift: (id: string): Promise<void> =>
+    api.post(`/learn/shifts/${id}/complete`).then(() => undefined),
 
   uploadMedia: (file: File): Promise<MediaUploadResult> => {
     const form = new FormData()

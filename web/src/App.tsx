@@ -93,6 +93,9 @@ const CertificatePage = lazy(() =>
 const LearnProductsPage = lazy(() =>
   import('@/pages/learn/LearnProductsPage').then((m) => ({ default: m.LearnProductsPage })),
 )
+const LearnShiftsPage = lazy(() =>
+  import('@/pages/learn/LearnShiftsPage').then((m) => ({ default: m.LearnShiftsPage })),
+)
 const LearnAssistantPage = lazy(() =>
   import('@/pages/learn/LearnAssistantPage').then((m) => ({
     default: m.LearnAssistantPage,
@@ -150,6 +153,7 @@ export function App() {
           <Route path="/learn/products" element={<LearnProductsPage />} />
           <Route path="/learn/rating" element={<LearnRatingPage />} />
           <Route path="/learn/assistant" element={<LearnAssistantPage />} />
+          <Route path="/learn/shifts" element={<LearnShiftsPage />} />
           <Route path="/learn/admin/review" element={<LearnReviewPage />} />
           <Route path="/learn/certificates/:certificateId" element={<CertificatePage />} />
           <Route

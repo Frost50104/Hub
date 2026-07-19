@@ -5,6 +5,7 @@ import {
   ClipboardList,
   Building2,
   GraduationCap,
+  Handshake,
   Inbox,
   LogOut,
   Newspaper,
@@ -45,6 +46,7 @@ const LEARN_NAV: LearnNavItem[] = [
   { to: '/learn/products', label: 'Ассортимент', icon: ShoppingBag },
   { to: '/learn/rating', label: 'Рейтинг', icon: Trophy },
   { to: '/learn/assistant', label: 'AI-помощник', icon: Bot },
+  { to: '/learn/shifts', label: 'Биржа смен', icon: Handshake },
   { to: '/inbox', label: 'Входящие', icon: Inbox, badge: true },
 ]
 
