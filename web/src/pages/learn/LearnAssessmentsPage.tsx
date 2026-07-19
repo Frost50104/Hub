@@ -282,7 +282,7 @@ function CampaignQuizDialog({
     }
   }, [quiz.data])
 
-  const save = useCampaignMutation(() =>
+  const persist = () =>
     learnApi.upsertAssessmentQuiz(campaign.id, {
       title: campaign.title,
       description: campaign.description,
@@ -294,8 +294,8 @@ function CampaignQuizDialog({
       show_correct_answers: false,
       is_required: false,
       questions,
-    }),
-  )
+    })
+  const save = useCampaignMutation(persist)
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
@@ -405,6 +405,7 @@ function CampaignQuizDialog({
         {importOpen && (
           <ImportQuestionsDialog
             campaign={campaign}
+            beforeImport={persist}
             onClose={() => setImportOpen(false)}
             onImported={() => {
               setImportOpen(false)
@@ -419,10 +420,14 @@ function CampaignQuizDialog({
 
 function ImportQuestionsDialog({
   campaign,
+  beforeImport,
   onClose,
   onImported,
 }: {
   campaign: AssessmentCampaign
+  // Сохраняет несохранённые локальные вопросы: после импорта редактор
+  // перечитывает квиз с сервера, и несохранённое иначе потеряется.
+  beforeImport: () => Promise<unknown>
   onClose: () => void
   onImported: () => void
 }) {
@@ -433,6 +438,7 @@ function ImportQuestionsDialog({
   const importFrom = async (lessonId: string, title: string) => {
     setBusy(true)
     try {
+      await beforeImport()
       const quiz = await learnApi.lessonQuizManage(lessonId)
       if (!quiz) {
         toast.error(`У урока «${title}» нет теста`)
