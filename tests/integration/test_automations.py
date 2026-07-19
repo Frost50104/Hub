@@ -43,8 +43,10 @@ async def test_automation_assigns_course_once(db: AsyncSession, tenant_id: uuid.
     db.add(rule)
     await db.flush()
 
+    # Ассерты по СВОЕМУ профилю: superuser в testcontainers видит
+    # закоммиченные профили других тестов, точные счётчики нестабильны.
     created = await _materialize(db, rule)
-    assert created == 1
+    assert created >= 1
     executed = await _execute_pending(db, tenant_id)
     assert executed >= 1
     await db.flush()
@@ -60,8 +62,21 @@ async def test_automation_assigns_course_once(db: AsyncSession, tenant_id: uuid.
     assert assignment.source == "automation"
     assert assignment.due_at is not None
 
-    # Повторный прогон — job не дублируется.
-    assert await _materialize(db, rule) == 0
+    # Повторный прогон — job НАШЕГО профиля не дублируется.
+    await _materialize(db, rule)
+    my_jobs = (
+        (
+            await db.execute(
+                select(AutomationJob).where(
+                    AutomationJob.rule_id == rule.id,
+                    AutomationJob.profile_id == profile.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(my_jobs) == 1
 
 
 async def test_automation_no_retro_and_position_filter(

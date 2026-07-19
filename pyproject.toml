@@ -18,6 +18,10 @@ dependencies = [
     "python-multipart>=0.0.9",
     "pywebpush>=2.0.0",
     "signaris-auth-client[fastapi,sqlalchemy]>=0.5.0,<0.6",
+    # Ф6 AI: pgvector-тип для SQLAlchemy + извлечение текста файлов.
+    "pgvector>=0.2.5",
+    "pypdf>=4.0",
+    "python-docx>=1.1",
 ]
 
 [project.optional-dependencies]

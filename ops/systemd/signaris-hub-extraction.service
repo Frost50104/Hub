@@ -1,0 +1,19 @@
+[Unit]
+Description=Signaris Hub — extraction + RAG worker (prod, long-running)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=signaris
+Group=signaris
+WorkingDirectory=/opt/signaris-hub
+EnvironmentFile=/opt/signaris-hub/.env
+ExecStart=/opt/signaris-hub/.venv/bin/python -m app.workers.extraction
+Restart=always
+RestartSec=10
+# Парсинг файлов CPU-bound — не даём воркеру душить API.
+CPUWeight=50
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

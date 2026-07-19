@@ -1,6 +1,7 @@
 """Importing all model modules so Base.metadata sees them at alembic time."""
 
 from app.models.activity import ActivityEvent, Certificate
+from app.models.ai import AiConversation, AiMessage, RagChunk
 from app.models.attachment import TaskAttachment
 from app.models.audience import Audience, AudienceMember, AudienceRule
 from app.models.audit import AuditLog
@@ -109,6 +110,8 @@ __all__ = [
     "StoreGroupMember",
     "Survey",
     "ActivityEvent",
+    "AiConversation",
+    "AiMessage",
     "AutomationJob",
     "AutomationRule",
     "Certificate",
@@ -116,6 +119,7 @@ __all__ = [
     "ProductCardLink",
     "ProductCategory",
     "Quiz",
+    "RagChunk",
     "QuizAttempt",
     "QuizQuestion",
     "SurveyAnswer",

@@ -170,15 +170,17 @@ async def test_matching_link_create_and_rehire(db: AsyncSession, tenant_id: uuid
 
 
 async def test_archive_cascade_removes_membership(db: AsyncSession, tenant_id: uuid.UUID):
+    # Ассерты по КОНКРЕТНОМУ профилю: testcontainers-юзер — superuser, RLS
+    # не изолирует is_all-аудиторию от закоммиченных профилей других тестов.
     employee = await _mk_profile(db, tenant_id, email="x@t.ru")
     audience = Audience(tenant_id=tenant_id, is_all=True)
     db.add(audience)
     await db.flush()
     await recalc_audience(db, audience)
-    assert set(await _members(db, audience.id)) == {employee.id}
+    assert employee.id in set(await _members(db, audience.id))
 
     await archive_profile(db, employee, reason="manual", actor_id=None)
-    assert set(await _members(db, audience.id)) == set()
+    assert employee.id not in set(await _members(db, audience.id))
 
     await restore_profile(db, employee, actor_id=None)
-    assert set(await _members(db, audience.id)) == {employee.id}
+    assert employee.id in set(await _members(db, audience.id))

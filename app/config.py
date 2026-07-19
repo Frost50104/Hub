@@ -80,6 +80,18 @@ class Settings(BaseSettings):
     # Отказ загрузки при малом свободном месте: диск общий с Postgres/WAL.
     media_min_free_bytes: int = Field(default=5 * 1024 * 1024 * 1024)
 
+    # AI-помощник (Ф6). Провайдер: yandex | gigachat | openai (последний —
+    # OpenAI-compatible API: OpenAI/Mistral/DeepSeek/прокси, переключение
+    # конфигом без кода). Без api_key ассистент отвечает 503 «не настроен».
+    ai_enabled: bool = Field(default=True)
+    ai_provider: str = Field(default="yandex")
+    ai_api_key: str | None = Field(default=None)
+    # yandex: folder_id обязателен; openai: base_url обязателен.
+    ai_folder_id: str | None = Field(default=None)
+    ai_base_url: str | None = Field(default=None)
+    ai_chat_model: str | None = Field(default=None)
+    ai_embed_model: str | None = Field(default=None)
+
     # Public links (3.6.12) — view-only no-auth deep-links to a task/project.
     # Feature-flag so we can kill-switch the entire surface without a redeploy.
     public_links_enabled: bool = Field(default=True)

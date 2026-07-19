@@ -23,7 +23,8 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture(scope="session")
 def pg_container():
-    with PostgresContainer("postgres:16-alpine") as pg:
+    # pgvector-образ: alembic head (0028) требует EXTENSION vector.
+    with PostgresContainer("pgvector/pgvector:pg16") as pg:
         yield pg
 
 
