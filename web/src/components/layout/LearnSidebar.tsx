@@ -1,6 +1,7 @@
 import {
   BarChart3,
   BookOpen,
+  Bot,
   ClipboardList,
   Building2,
   GraduationCap,
@@ -43,6 +44,7 @@ const LEARN_NAV: LearnNavItem[] = [
   { to: '/learn/surveys', label: 'Опросы', icon: ClipboardList },
   { to: '/learn/products', label: 'Ассортимент', icon: ShoppingBag },
   { to: '/learn/rating', label: 'Рейтинг', icon: Trophy },
+  { to: '/learn/assistant', label: 'AI-помощник', icon: Bot },
   { to: '/inbox', label: 'Входящие', icon: Inbox, badge: true },
 ]
 

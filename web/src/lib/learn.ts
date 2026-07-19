@@ -802,6 +802,38 @@ export interface AutomationJob {
   executed_at: string | null
 }
 
+// ─── AI-помощник (Ф6) ────────────────────────────────────────────────────────
+
+export interface AiStatus {
+  configured: boolean
+  provider: string | null
+}
+
+export interface AiSource {
+  title: string
+  url_path: string
+}
+
+export interface AiAskResponse {
+  conversation_id: string
+  answer: string
+  sources: AiSource[]
+}
+
+export interface AiConversation {
+  id: string
+  title: string
+  updated_at: string
+}
+
+export interface AiMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  sources: AiSource[] | null
+  created_at: string
+}
+
 export type MediaKind = 'image' | 'video' | 'pdf'
 
 export interface MediaUploadResult {
@@ -1295,6 +1327,25 @@ export const learnApi = {
     api.get<AutomationJob[]>(`/learn/automations/${id}/jobs`).then((r) => r.data),
   cancelAutomationJob: (jobId: string): Promise<void> =>
     api.post(`/learn/automation-jobs/${jobId}/cancel`).then(() => undefined),
+
+  // ─── AI-помощник (Ф6) ──────────────────────────────────────────────────────
+  aiStatus: (): Promise<AiStatus> =>
+    api.get<AiStatus>('/learn/ai/status').then((r) => r.data),
+  aiAsk: (question: string, conversationId?: string | null): Promise<AiAskResponse> =>
+    api
+      .post<AiAskResponse>('/learn/ai/ask', {
+        question,
+        conversation_id: conversationId ?? null,
+      })
+      .then((r) => r.data),
+  aiConversations: (): Promise<AiConversation[]> =>
+    api.get<AiConversation[]>('/learn/ai/conversations').then((r) => r.data),
+  aiMessages: (conversationId: string): Promise<AiMessage[]> =>
+    api
+      .get<AiMessage[]>(`/learn/ai/conversations/${conversationId}/messages`)
+      .then((r) => r.data),
+  aiDeleteConversation: (conversationId: string): Promise<void> =>
+    api.delete(`/learn/ai/conversations/${conversationId}`).then(() => undefined),
 
   uploadMedia: (file: File): Promise<MediaUploadResult> => {
     const form = new FormData()
