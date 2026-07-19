@@ -720,6 +720,88 @@ export interface LearnProfile {
   tenure_days: number | null
 }
 
+// ─── Поиск + аналитика + автосценарии (Ф5) ───────────────────────────────────
+
+export interface LearnSearchHit {
+  object_type: string
+  object_id: string
+  title: string
+  snippet: string | null
+  url_path: string
+  type_label: string
+}
+
+export interface LearnSearchData {
+  query: string
+  total: number
+  hits: LearnSearchHit[]
+}
+
+export interface AnalyticsData {
+  scope: string
+  overview: {
+    employees_total: number
+    employees_linked: number
+    engaged_30d: number
+    points_30d: number
+  }
+  courses: {
+    id: string
+    title: string
+    course_type: CourseType
+    enrolled: number
+    completed: number
+    avg_quiz_score: number | null
+  }[]
+  fail_questions: {
+    prompt: string
+    quiz_title: string
+    attempts: number
+    fail_rate_pct: number
+  }[]
+  acks: { id: string; title: string; acked: number; total: number }[]
+}
+
+export type AutomationTrigger = 'profile_activated' | 'position_assigned'
+
+export const AUTOMATION_TRIGGER_LABEL: Record<AutomationTrigger, string> = {
+  profile_activated: 'Сотрудник активирован (первый вход)',
+  position_assigned: 'Назначена должность',
+}
+
+export interface AutomationRule {
+  id: string
+  title: string
+  trigger: AutomationTrigger
+  position_ids: string[]
+  course_id: string
+  course_title: string | null
+  due_days: number | null
+  enabled: boolean
+  applies_from: string
+  jobs_pending: number
+  jobs_done: number
+}
+
+export interface AutomationRuleUpsert {
+  title: string
+  trigger: AutomationTrigger
+  position_ids: string[]
+  course_id: string
+  due_days: number | null
+  enabled: boolean
+}
+
+export interface AutomationJob {
+  id: string
+  profile_id: string
+  employee_name: string | null
+  status: 'pending' | 'done' | 'cancelled'
+  due_at: string | null
+  created_at: string
+  executed_at: string | null
+}
+
 export type MediaKind = 'image' | 'video' | 'pdf'
 
 export interface MediaUploadResult {
@@ -1183,6 +1265,36 @@ export const learnApi = {
   home: (): Promise<HomeData> => api.get<HomeData>('/learn/home').then((r) => r.data),
   learnProfile: (): Promise<LearnProfile> =>
     api.get<LearnProfile>('/learn/profile').then((r) => r.data),
+
+  // ─── Поиск + аналитика + автосценарии (Ф5) ─────────────────────────────────
+  learnSearch: (q: string): Promise<LearnSearchData> =>
+    api.get<LearnSearchData>('/learn/search', { params: { q } }).then((r) => r.data),
+  analytics: (): Promise<AnalyticsData> =>
+    api.get<AnalyticsData>('/learn/analytics').then((r) => r.data),
+  downloadAnalyticsCsv: async (): Promise<void> => {
+    const resp = await api.get('/learn/analytics/export', { responseType: 'blob' })
+    const url = URL.createObjectURL(resp.data as Blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'learning-report.csv'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  },
+
+  automations: (): Promise<AutomationRule[]> =>
+    api.get<AutomationRule[]>('/learn/automations').then((r) => r.data),
+  createAutomation: (body: AutomationRuleUpsert): Promise<AutomationRule> =>
+    api.post<AutomationRule>('/learn/automations', body).then((r) => r.data),
+  updateAutomation: (id: string, body: AutomationRuleUpsert): Promise<AutomationRule> =>
+    api.patch<AutomationRule>(`/learn/automations/${id}`, body).then((r) => r.data),
+  deleteAutomation: (id: string): Promise<void> =>
+    api.delete(`/learn/automations/${id}`).then(() => undefined),
+  automationJobs: (id: string): Promise<AutomationJob[]> =>
+    api.get<AutomationJob[]>(`/learn/automations/${id}/jobs`).then((r) => r.data),
+  cancelAutomationJob: (jobId: string): Promise<void> =>
+    api.post(`/learn/automation-jobs/${jobId}/cancel`).then(() => undefined),
 
   uploadMedia: (file: File): Promise<MediaUploadResult> => {
     const form = new FormData()

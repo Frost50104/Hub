@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   BookOpen,
   ClipboardList,
   Building2,
@@ -12,6 +13,7 @@ import {
   Sparkles,
   Trophy,
   Users,
+  Workflow,
 } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 
@@ -48,6 +50,8 @@ const ADMIN_NAV: LearnNavItem[] = [
   { to: '/learn/admin/org', label: 'Оргструктура', icon: Building2 },
   { to: '/learn/admin/employees', label: 'Сотрудники', icon: Users },
   { to: '/learn/admin/review', label: 'Проверка тестов', icon: ClipboardList },
+  { to: '/learn/admin/analytics', label: 'Аналитика', icon: BarChart3 },
+  { to: '/learn/admin/automations', label: 'Автосценарии', icon: Workflow },
   { to: '/learn/admin/audit', label: 'Журнал', icon: ScrollText },
 ]
 

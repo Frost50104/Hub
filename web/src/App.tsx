@@ -93,6 +93,14 @@ const CertificatePage = lazy(() =>
 const LearnProductsPage = lazy(() =>
   import('@/pages/learn/LearnProductsPage').then((m) => ({ default: m.LearnProductsPage })),
 )
+const LearnAnalyticsPage = lazy(() =>
+  import('@/pages/learn/LearnAnalyticsPage').then((m) => ({ default: m.LearnAnalyticsPage })),
+)
+const LearnAutomationsPage = lazy(() =>
+  import('@/pages/learn/LearnAutomationsPage').then((m) => ({
+    default: m.LearnAutomationsPage,
+  })),
+)
 const NotificationsSettingsTab = lazy(() =>
   import('@/pages/settings/NotificationsTab').then((m) => ({
     default: m.NotificationsSettingsTab,
@@ -151,6 +159,15 @@ export function App() {
             element={
               <RequireHubAdmin>
                 <LearnEmployeesPage />
+              </RequireHubAdmin>
+            }
+          />
+          <Route path="/learn/admin/analytics" element={<LearnAnalyticsPage />} />
+          <Route
+            path="/learn/admin/automations"
+            element={
+              <RequireHubAdmin>
+                <LearnAutomationsPage />
               </RequireHubAdmin>
             }
           />

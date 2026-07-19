@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { SearchChips } from '@/components/search/SearchChips'
+import { LearnSearchSection } from '@/components/search/LearnSearchSection'
 import { SearchResults } from '@/components/search/SearchResults'
 import { useAdvancedSearch } from '@/hooks/useSearch'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
@@ -188,6 +189,7 @@ function MobileSearch() {
               error={result.isError ? result.error : undefined}
               onRetry={() => void result.refetch()}
             />
+            <LearnSearchSection query={query} />
           </div>
         )}
       </div>
@@ -281,14 +283,17 @@ function DesktopSearch() {
           Введите не меньше двух символов, чтобы начать поиск.
         </p>
       ) : (
-        <SearchResults
-          groups={result.data?.groups ?? []}
-          total={result.data?.total ?? 0}
-          loading={result.isLoading}
-          empty={empty}
-          error={result.isError ? result.error : undefined}
-          onRetry={() => void result.refetch()}
-        />
+        <>
+          <SearchResults
+            groups={result.data?.groups ?? []}
+            total={result.data?.total ?? 0}
+            loading={result.isLoading}
+            empty={empty}
+            error={result.isError ? result.error : undefined}
+            onRetry={() => void result.refetch()}
+          />
+          <LearnSearchSection query={query} />
+        </>
       )}
     </div>
   )
