@@ -56,6 +56,7 @@ from app.services.lesson_content import (
     check_answer,
     collect_gate_blocks,
     collect_required_videos,
+    extract_lesson_text,
     prepare_for_consumer,
     validate_lesson_content,
 )
@@ -220,6 +221,20 @@ def _lesson_locked(
 
 async def _reindex(db: AsyncSession, course: Course) -> None:
     if course.status == "published":
+        # Тексты published-уроков → body_text: поиск и AI-ассистент находят
+        # курс по содержимому, а не только по названию (Ф6).
+        lesson_rows = (
+            await db.execute(
+                select(CourseLesson.title, CourseLesson.content).where(
+                    CourseLesson.course_id == course.id,
+                    CourseLesson.status == "published",
+                )
+            )
+        ).all()
+        parts = []
+        for lesson_title, content in lesson_rows:
+            body = extract_lesson_text(content) if content else ""
+            parts.append(f"{lesson_title}. {body}".strip())
         await upsert_document(
             db,
             tenant_id=course.tenant_id,
@@ -227,6 +242,7 @@ async def _reindex(db: AsyncSession, course: Course) -> None:
             object_id=course.id,
             title=course.title,
             snippet=course.description,
+            body_text="\n".join(parts)[:50_000] or None,
             audience_id=course.audience_id,
             published_at=course.published_at,
             url_path=f"/learn/courses/{course.id}",
@@ -793,6 +809,10 @@ async def update_lesson(
         object_id=lesson.id,
         object_label=lesson.title,
     )
+    # Контент/статус урока меняет поисковый текст курса (Ф6).
+    if {"content", "status", "title"} & fields.keys():
+        await db.flush()
+        await _reindex(db, course)
     await db.commit()
     await db.refresh(lesson)
     return LessonMeta(
