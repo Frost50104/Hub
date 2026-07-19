@@ -143,6 +143,7 @@ def create_app() -> FastAPI:
     from app.api import env as env_api
     from app.api import favorites as favorites_api
     from app.api import labels as labels_api
+    from app.api import learn_home as learn_home_api
     from app.api import library as library_api
     from app.api import me as me_api
     from app.api import me_tasks as me_tasks_api
@@ -150,6 +151,7 @@ def create_app() -> FastAPI:
     from app.api import news as news_api
     from app.api import notifications as notifications_api
     from app.api import org as org_api
+    from app.api import products as products_api
     from app.api import projects as projects_api
     from app.api import public as public_api
     from app.api import push as push_api
@@ -197,6 +199,8 @@ def create_app() -> FastAPI:
     app.include_router(media_api.router, prefix="/api")
     app.include_router(courses_api.router, prefix="/api")
     app.include_router(quizzes_api.router, prefix="/api")
+    app.include_router(products_api.router, prefix="/api")
+    app.include_router(learn_home_api.router, prefix="/api")
 
     return app
 

@@ -33,6 +33,7 @@ from app.models.org import (
     UserGroup,
     UserGroupMember,
 )
+from app.models.product import ProductCard, ProductCardLink, ProductCategory
 from app.models.progress import CourseAssignment, CourseProgress, LessonProgress
 from app.models.project import Project, ProjectMember
 from app.models.push_subscription import PushSubscription
@@ -108,6 +109,9 @@ __all__ = [
     "Survey",
     "ActivityEvent",
     "Certificate",
+    "ProductCard",
+    "ProductCardLink",
+    "ProductCategory",
     "Quiz",
     "QuizAttempt",
     "QuizQuestion",
