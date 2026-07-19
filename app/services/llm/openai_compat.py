@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import httpx
 
-from app.services.llm.base import ChatMessage, LLMError
+from app.services.llm.base import ChatMessage, LLMEmbeddingsUnsupported, LLMError
 
 
 class OpenAICompatProvider:
@@ -38,6 +38,12 @@ class OpenAICompatProvider:
                 f"{self._base}/embeddings",
                 headers=self._headers(),
                 json={"model": self._embed, "input": [t[:8000] for t in texts]},
+            )
+        if resp.status_code == 404:
+            # DeepSeek и часть совместимых не дают embeddings — ассистент
+            # работает через лексический retrieval.
+            raise LLMEmbeddingsUnsupported(
+                f"{self._base} не поддерживает /embeddings"
             )
         if resp.status_code != 200:
             raise LLMError(f"openai embed {resp.status_code}: {resp.text[:200]}")

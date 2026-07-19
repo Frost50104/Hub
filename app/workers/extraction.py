@@ -27,7 +27,7 @@ from app.db import tenant_scoped_session
 from app.models.library import LibraryMaterial
 from app.models.search_document import TextExtractionJob
 from app.services.library_storage import absolute_path
-from app.services.llm import LLMNotConfigured, get_provider
+from app.services.llm import LLMEmbeddingsUnsupported, LLMNotConfigured, get_provider
 from app.services.rag_indexer import reconcile
 from app.services.search_indexer import upsert_document
 
@@ -135,7 +135,12 @@ async def _process_rag() -> None:
         ]
     for tenant_id in tenant_ids:
         async with tenant_scoped_session(tenant_id) as session:
-            stats = await reconcile(session, provider, limit=5)
+            try:
+                stats = await reconcile(session, provider, limit=5)
+            except LLMEmbeddingsUnsupported:
+                # Провайдер без embeddings (DeepSeek): ассистент работает
+                # через лексический retrieval, вект-индекс не строим.
+                return
             await session.commit()
             if stats["docs"] or stats["orphans_deleted"]:
                 log.info("rag.reconciled", tenant_id=str(tenant_id), **stats)

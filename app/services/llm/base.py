@@ -16,6 +16,11 @@ class LLMError(RuntimeError):
     """Ошибка провайдера (сеть/квота/авторизация) — API мапит в 502."""
 
 
+class LLMEmbeddingsUnsupported(LLMError):
+    """Провайдер без embeddings API (DeepSeek): retrieval падает на
+    лексический поиск по search_documents, воркер пропускает RAG-шаг."""
+
+
 class LLMNotConfigured(RuntimeError):
     """Ассистент выключен или нет ключа — API мапит в 503."""
 

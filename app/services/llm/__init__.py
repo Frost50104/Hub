@@ -5,9 +5,22 @@ from __future__ import annotations
 from functools import lru_cache
 
 from app.config import get_settings
-from app.services.llm.base import ChatMessage, LLMError, LLMNotConfigured, LLMProvider
+from app.services.llm.base import (
+    ChatMessage,
+    LLMEmbeddingsUnsupported,
+    LLMError,
+    LLMNotConfigured,
+    LLMProvider,
+)
 
-__all__ = ["ChatMessage", "LLMError", "LLMNotConfigured", "LLMProvider", "get_provider"]
+__all__ = [
+    "ChatMessage",
+    "LLMEmbeddingsUnsupported",
+    "LLMError",
+    "LLMNotConfigured",
+    "LLMProvider",
+    "get_provider",
+]
 
 
 @lru_cache(maxsize=1)

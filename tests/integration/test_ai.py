@@ -222,3 +222,67 @@ async def test_ask_flow_saves_dialog(
         )
     ).scalars().all()
     assert len(saved) == 4
+
+
+async def test_lexical_fallback_when_no_embeddings(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """Провайдер без embeddings (DeepSeek): retrieval лексический, но
+    ИНВАРИАНТ audience-фильтра сохраняется."""
+    from app.api import ai as ai_api
+    from app.services.llm.base import LLMEmbeddingsUnsupported
+
+    class NoEmbedProvider(FakeProvider):
+        async def embed(self, texts):  # noqa: ANN001, ANN201
+            raise LLMEmbeddingsUnsupported("нет /embeddings")
+
+    provider = NoEmbedProvider()
+    monkeypatch.setattr(ai_api, "get_provider", lambda: provider)
+
+    async def _noop_rate_limit(**kw) -> None:
+        return None
+
+    monkeypatch.setattr(ai_api, "enforce_rate_limit", _noop_rate_limit)
+
+    member, profile = await _mk_member(db, tenant_id, email="ai3@t.ru")
+    audience = Audience(tenant_id=tenant_id)
+    db.add(audience)
+    await db.flush()
+
+    # Индексация без эмбеддингов: только search_documents (FTS-источник).
+    open_doc = uuid.uuid4()
+    secret_doc = uuid.uuid4()
+    await upsert_document(
+        db,
+        tenant_id=tenant_id,
+        object_type="library_material",
+        object_id=open_doc,
+        title="Регламент открытый",
+        body_text="Правила возврата напитков для всех бариста.",
+        published_at=datetime.now(UTC),
+        url_path=f"/learn/library?m={open_doc}",
+    )
+    await upsert_document(
+        db,
+        tenant_id=tenant_id,
+        object_type="library_material",
+        object_id=secret_doc,
+        title="Регламент управляющих секретный",
+        body_text="Правила возврата выручки — только управляющим.",
+        audience_id=audience.id,
+        published_at=datetime.now(UTC),
+        url_path=f"/learn/library?m={secret_doc}",
+    )
+    await db.flush()
+
+    from app.api.ai import AskBody, ask
+
+    resp = await ask(AskBody(question="Какие правила возврата?"), member, db)
+    assert resp.answer  # чат состоялся без эмбеддингов
+    titles = {s.title for s in resp.sources}
+    assert "Регламент открытый" in titles
+    assert "Регламент управляющих секретный" not in titles
+
+    # Контекст модели не содержит закрытый текст.
+    system = provider.chat_calls[-1][0]
+    assert "только управляющим" not in system.content
