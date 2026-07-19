@@ -127,6 +127,9 @@ class EmployeeProfile(Base):
 
     # Денормализация для правила «90 дней неактивности» (cron сверяет с
     # порогами из learning_settings).
+    inactivity_warned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_activity_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

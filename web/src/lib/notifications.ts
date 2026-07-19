@@ -54,6 +54,7 @@ export const NOTIFICATION_KINDS = [
   'course.due_soon',
   'quiz.review_needed',
   'quiz.reviewed',
+  'profile.inactivity',
 ] as const
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
@@ -74,6 +75,7 @@ export const NOTIFICATION_KIND_LABEL: Record<NotificationKind, string> = {
   'course.due_soon': 'Скоро дедлайн курса',
   'quiz.review_needed': 'Тест ждёт проверки (для проверяющих)',
   'quiz.reviewed': 'Мой тест проверен',
+  'profile.inactivity': 'Предупреждение о неактивности',
 }
 
 export const notificationsApi = {

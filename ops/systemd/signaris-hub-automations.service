@@ -1,0 +1,11 @@
+[Unit]
+Description=Signaris Hub — learn automations runner (prod hourly cron)
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=signaris
+Group=signaris
+WorkingDirectory=/opt/signaris-hub
+EnvironmentFile=/opt/signaris-hub/.env
+ExecStart=/opt/signaris-hub/.venv/bin/python -m app.jobs.automations_run

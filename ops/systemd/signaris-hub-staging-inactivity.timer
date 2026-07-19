@@ -1,0 +1,11 @@
+[Unit]
+Description=Run signaris-hub-staging-inactivity daily 10:00 Moscow time
+
+[Timer]
+# 07:00 UTC = 10:00 MSK
+OnCalendar=*-*-* 07:00:00
+Persistent=true
+Unit=signaris-hub-staging-inactivity.service
+
+[Install]
+WantedBy=timers.target

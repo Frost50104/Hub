@@ -193,7 +193,19 @@ async def archive_profile(
     await db.flush()
     # Каскад: членства аудиторий (recalc_profile для archived удаляет все).
     await recalc_profile(db, profile)
-    # TODO(Ф5): cancel pending automation_jobs профиля.
+    # Каскад Ф5: pending-автосценарии отменяются (курс не назначится вдогонку).
+    from sqlalchemy import update
+
+    from app.models.automation import AutomationJob
+
+    await db.execute(
+        update(AutomationJob)
+        .where(
+            AutomationJob.profile_id == profile.id,
+            AutomationJob.status == "pending",
+        )
+        .values(status="cancelled")
+    )
     audit.record(
         db,
         tenant_id=profile.tenant_id,

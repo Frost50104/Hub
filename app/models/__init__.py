@@ -4,6 +4,7 @@ from app.models.activity import ActivityEvent, Certificate
 from app.models.attachment import TaskAttachment
 from app.models.audience import Audience, AudienceMember, AudienceRule
 from app.models.audit import AuditLog
+from app.models.automation import AutomationJob, AutomationRule
 from app.models.course import Course, CourseLesson, LessonTemplate, MediaFile
 from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
 from app.models.dependency import TaskDependency
@@ -108,6 +109,8 @@ __all__ = [
     "StoreGroupMember",
     "Survey",
     "ActivityEvent",
+    "AutomationJob",
+    "AutomationRule",
     "Certificate",
     "ProductCard",
     "ProductCardLink",

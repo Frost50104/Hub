@@ -37,6 +37,7 @@ NOTIFICATION_KINDS: tuple[str, ...] = (
     "course.due_soon",
     "quiz.review_needed",
     "quiz.reviewed",
+    "profile.inactivity",
 )
 
 
