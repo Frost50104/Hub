@@ -629,6 +629,97 @@ export interface CertificateInfo {
   issued_at: string
 }
 
+// ─── Ассортимент + витрина + профиль (Ф4) ────────────────────────────────────
+
+export interface ProductCategory {
+  id: string
+  title: string
+  position: number
+}
+
+export interface ProductLink {
+  object_type: 'course' | 'lesson' | 'material'
+  object_id: string
+  title: string | null
+  url_path: string | null
+}
+
+export interface ProductCard {
+  id: string
+  category_id: string | null
+  audience_id: string | null
+  title: string
+  description: string | null
+  composition: string | null
+  allergens: string | null
+  shelf_life: string | null
+  serving: string | null
+  upsell: string | null
+  status: ContentStatus
+  published_at: string | null
+  updated_at: string
+  photo_urls: string[]
+  links: ProductLink[]
+  viewed_by_me: boolean
+}
+
+export interface ProductListData {
+  categories: ProductCategory[]
+  items: ProductCard[]
+  content_role: string
+}
+
+export interface ProductUpsert {
+  title?: string
+  description?: string | null
+  category_id?: string | null
+  photos?: { media_id: string }[]
+  composition?: string | null
+  allergens?: string | null
+  shelf_life?: string | null
+  serving?: string | null
+  upsell?: string | null
+  links?: { object_type: 'course' | 'lesson' | 'material'; object_id: string }[]
+}
+
+export interface HomeCourse {
+  id: string
+  title: string
+  course_type: CourseType
+  lessons_total: number
+  lessons_completed: number
+  due_at: string | null
+}
+
+export interface HomeData {
+  courses: HomeCourse[]
+  pending_acks: { id: string; title: string; deadline_at: string | null }[]
+  novelties: {
+    object_type: string
+    object_id: string
+    title: string
+    url_path: string
+    published_at: string | null
+  }[]
+  surveys: { id: string; title: string; kind: string; closes_at: string | null }[]
+  rating: { points: number; rank: number | null; total_participants: number } | null
+}
+
+export interface LearnProfile {
+  profile_id: string | null
+  full_name: string
+  email: string
+  avatar_url: string | null
+  position_name: string | null
+  store_name: string | null
+  department_name: string | null
+  org_role: OrgRole | null
+  content_role: string | null
+  status_text: string | null
+  hired_at: string | null
+  tenure_days: number | null
+}
+
 export type MediaKind = 'image' | 'video' | 'pdf'
 
 export interface MediaUploadResult {
@@ -1063,6 +1154,35 @@ export const learnApi = {
     api.get<CertificateInfo[]>('/learn/certificates').then((r) => r.data),
   certificate: (id: string): Promise<CertificateInfo> =>
     api.get<CertificateInfo>(`/learn/certificates/${id}`).then((r) => r.data),
+
+  // ─── Ассортимент + витрина + профиль (Ф4) ──────────────────────────────────
+  products: (manage: boolean): Promise<ProductListData> =>
+    api
+      .get<ProductListData>('/learn/products', { params: { manage: manage || undefined } })
+      .then((r) => r.data),
+  createProduct: (body: ProductUpsert & { title: string }): Promise<ProductCard> =>
+    api.post<ProductCard>('/learn/products', body).then((r) => r.data),
+  updateProduct: (id: string, body: ProductUpsert): Promise<ProductCard> =>
+    api.patch<ProductCard>(`/learn/products/${id}`, body).then((r) => r.data),
+  deleteProduct: (id: string): Promise<void> =>
+    api.delete(`/learn/products/${id}`).then(() => undefined),
+  setProductStatus: (id: string, status: ContentStatus): Promise<ProductCard> =>
+    api.post<ProductCard>(`/learn/products/${id}/status`, { status }).then((r) => r.data),
+  setProductAudience: (
+    id: string,
+    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+  ): Promise<ProductCard> =>
+    api.put<ProductCard>(`/learn/products/${id}/audience`, body).then((r) => r.data),
+  openProduct: (id: string): Promise<void> =>
+    api.post(`/learn/products/${id}/open`).then(() => undefined),
+  createProductCategory: (title: string): Promise<ProductCategory> =>
+    api.post<ProductCategory>('/learn/product-categories', { title }).then((r) => r.data),
+  deleteProductCategory: (id: string): Promise<void> =>
+    api.delete(`/learn/product-categories/${id}`).then(() => undefined),
+
+  home: (): Promise<HomeData> => api.get<HomeData>('/learn/home').then((r) => r.data),
+  learnProfile: (): Promise<LearnProfile> =>
+    api.get<LearnProfile>('/learn/profile').then((r) => r.data),
 
   uploadMedia: (file: File): Promise<MediaUploadResult> => {
     const form = new FormData()

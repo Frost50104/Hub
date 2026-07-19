@@ -20,7 +20,10 @@ import {
   type LessonTemplate,
   type LibraryData,
   type NewsList,
+  type HomeData,
+  type LearnProfile,
   type OrgSnapshot,
+  type ProductListData,
   type QuizConsumer,
   type QuizManage,
   type RatingData,
@@ -292,6 +295,43 @@ export function useMyCertificates(): UseQueryResult<CertificateInfo[]> {
   return useQuery({
     queryKey: ['learn-certificates'],
     queryFn: learnApi.myCertificates,
+    staleTime: 60_000,
+  })
+}
+
+// ─── Ассортимент + витрина + профиль (Ф4) ────────────────────────────────────
+
+export function useProducts(manage: boolean, enabled = true): UseQueryResult<ProductListData> {
+  return useQuery({
+    queryKey: ['learn-products', manage],
+    queryFn: () => learnApi.products(manage),
+    staleTime: 30_000,
+    enabled,
+  })
+}
+
+export function useProductMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['learn-products'] })
+    },
+  })
+}
+
+export function useLearnHome(): UseQueryResult<HomeData> {
+  return useQuery({
+    queryKey: ['learn-home-feed'],
+    queryFn: learnApi.home,
+    staleTime: 30_000,
+  })
+}
+
+export function useLearnProfile(): UseQueryResult<LearnProfile> {
+  return useQuery({
+    queryKey: ['learn-profile'],
+    queryFn: learnApi.learnProfile,
     staleTime: 60_000,
   })
 }

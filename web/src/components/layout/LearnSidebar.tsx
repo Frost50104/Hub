@@ -39,7 +39,7 @@ const LEARN_NAV: LearnNavItem[] = [
   { to: '/learn/library', label: 'Библиотека', icon: BookOpen },
   { to: '/learn/news', label: 'Новости', icon: Newspaper },
   { to: '/learn/surveys', label: 'Опросы', icon: ClipboardList },
-  { to: '/learn/products', label: 'Ассортимент', icon: ShoppingBag, soon: true },
+  { to: '/learn/products', label: 'Ассортимент', icon: ShoppingBag },
   { to: '/learn/rating', label: 'Рейтинг', icon: Trophy },
   { to: '/inbox', label: 'Входящие', icon: Inbox, badge: true },
 ]
