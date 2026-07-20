@@ -37,6 +37,7 @@ class PublicTaskHit(BaseModel):
     due_at: datetime | None
     assignee_initials: str | None
     has_attachments: bool
+    is_subtask: bool = False
 
 
 class PublicSection(BaseModel):

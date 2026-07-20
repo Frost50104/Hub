@@ -267,7 +267,10 @@ function ProjectViewBlock({ data }: { data: PublicProjectView }) {
             {s.tasks.map((t) => (
               <li
                 key={t.id}
-                className="flex items-center justify-between gap-3 rounded-md border border-glass-border bg-surface px-3 py-2 text-sm"
+                className={cn(
+                  'flex items-center justify-between gap-3 rounded-md border border-glass-border bg-surface px-3 py-2 text-sm',
+                  t.is_subtask && 'ml-5 opacity-80',
+                )}
               >
                 <span
                   className={cn(
@@ -275,6 +278,11 @@ function ProjectViewBlock({ data }: { data: PublicProjectView }) {
                     t.status === 'done' ? 'text-text3 line-through' : 'text-text',
                   )}
                 >
+                  {t.is_subtask && (
+                    <span aria-hidden className="mr-1 text-text3">
+                      ↳
+                    </span>
+                  )}
                   {t.title}
                 </span>
                 <span className="flex shrink-0 items-center gap-2">

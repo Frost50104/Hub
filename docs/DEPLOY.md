@@ -126,3 +126,10 @@ INTEGRATED_PRODUCTS: frozenset[str] = frozenset({"net", "sonar", "hub"})
 2. Владелец UPPETIT → RoleEditor → выдать `hub:admin`
 3. Получить service-key для deletion-sync → `SIGNARIS_HUB_SIGNARIS_SERVICE_KEY` в `/opt/signaris-hub/.env`
 4. `systemctl restart signaris-hub`
+
+## Обязательный env staging: SIGNARIS_HUB_PUBLIC_BASE_URL
+
+Дефолт `public_base_url` в `app/config.py` — прод-домен. На staging обязана
+стоять переменная `SIGNARIS_HUB_PUBLIC_BASE_URL=https://hub-staging.signaris.ru`
+в `/opt/signaris-hub-staging/.env` — иначе публичные ссылки (/p/<token>)
+генерируются с прод-доменом и не открываются (QA-находка 2026-07-20).

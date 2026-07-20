@@ -50,6 +50,7 @@ export interface PublicTaskHit {
   due_at: string | null
   assignee_initials: string | null
   has_attachments: boolean
+  is_subtask?: boolean
 }
 
 export interface PublicSection {

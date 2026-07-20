@@ -1,13 +1,37 @@
+import { LogOut, ShieldOff } from 'lucide-react'
 import { Suspense, useEffect } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 
+import { Button } from '@/components/ui/Button'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
+import { useMe } from '@/hooks/useMe'
+import { authClient } from '@/lib/auth'
 import { spaceFromPath, useWorkspace } from '@/lib/workspace'
 
 import { LearnSidebar } from './LearnSidebar'
 import { MobileBottomTabBar } from './MobileBottomTabBar'
 import { Sidebar } from './Sidebar'
+
+/** Signaris-аккаунт без hub-роли (например, юзер только Desk): раньше UI
+ * рендерил пустое приложение с тихими 403 — показываем явный экран. */
+function NoAccessScreen() {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 text-center">
+      <ShieldOff className="h-10 w-10 text-text3" />
+      <h1 className="font-display text-xl font-semibold text-text">
+        Нет доступа к Hub
+      </h1>
+      <p className="max-w-sm text-sm text-text2">
+        Вашему аккаунту не выдана роль в продукте Hub. Обратитесь к
+        администратору Signaris, чтобы получить доступ.
+      </p>
+      <Button variant="secondary" onClick={() => void authClient.logout()}>
+        <LogOut className="h-4 w-4" /> Выйти
+      </Button>
+    </div>
+  )
+}
 
 /**
  * Post-4.8 mobile redesign: instead of a burger + drawer like before, the
@@ -28,10 +52,14 @@ export function Shell() {
   const location = useLocation()
   const space = spaceFromPath(location.pathname)
   const rememberSpace = useWorkspace((s) => s.rememberSpace)
+  const me = useMe()
 
   useEffect(() => {
     rememberSpace(space)
   }, [space, rememberSpace])
+
+  // Только при ЗАГРУЖЕННОМ /api/me — иначе экран мигал бы у всех на старте.
+  if (me.data && me.data.hub_role === null) return <NoAccessScreen />
 
   return (
     <div className="min-h-screen lg:flex lg:gap-3 lg:p-3">

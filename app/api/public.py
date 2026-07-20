@@ -41,7 +41,7 @@ from app.schemas.share import (
     PublicTaskHit,
     PublicTaskView,
 )
-from app.services.public_token import initials, load_active_token
+from app.services.public_token import initials, load_active_token, mask_mentions
 
 router = APIRouter(tags=["public"])
 
@@ -94,6 +94,21 @@ async def _initials_for(session: AsyncSession, employee_id: UUID | None) -> str 
     return initials(rec.full_name, rec.email)
 
 
+async def _mention_names(session: AsyncSession) -> dict[str, str]:
+    """handle (email local-part, lower) → display name для mask_mentions.
+
+    Tenant-scoped сессия + RLS ограничивают выборку своим tenant'ом.
+    """
+    rows = await session.execute(
+        select(ShadowUser.email, ShadowUser.full_name).limit(500)
+    )
+    out: dict[str, str] = {}
+    for r in rows.all():
+        if r.email and r.full_name:
+            out[r.email.split("@", 1)[0].lower()] = r.full_name
+    return out
+
+
 async def _build_task_view(session: AsyncSession, task_id: UUID) -> PublicTaskView:
     task = await session.get(Task, task_id)
     if task is None or task.archived_at is not None:
@@ -121,10 +136,11 @@ async def _build_task_view(session: AsyncSession, task_id: UUID) -> PublicTaskVi
         )
         .order_by(TaskComment.created_at)
     )
+    mention_names = await _mention_names(session)
     comments = [
         PublicComment(
             author_initials=initials(r.full_name, r.email),
-            body=r.body,
+            body=mask_mentions(r.body, mention_names),
             created_at=r.created_at,
         )
         for r in comment_rows.all()
@@ -181,6 +197,7 @@ async def _build_project_view(
             Task.due_at,
             Task.section_id,
             Task.assignee_id,
+            Task.parent_task_id,
         )
         .where(Task.project_id == project_id, Task.archived_at.is_(None))
         .order_by(Task.position)
@@ -224,6 +241,7 @@ async def _build_project_view(
                 else None
             ),
             has_attachments=row.id in has_attachments_set,
+            is_subtask=row.parent_task_id is not None,
         )
 
     sections: list[PublicSection] = []
@@ -272,11 +290,12 @@ async def _build_project_view(
         .order_by(TaskComment.created_at.desc())
         .limit(10)
     )
+    mention_names = await _mention_names(session)
     recent_comments = [
         PublicProjectComment(
             task_title=r.title,
             author_initials=initials(r.full_name, r.email),
-            body=r.body,
+            body=mask_mentions(r.body, mention_names),
             created_at=r.created_at,
         )
         for r in recent_comment_rows.all()

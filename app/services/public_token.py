@@ -9,6 +9,7 @@ Two responsibilities:
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -16,6 +17,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.share import PublicShareToken
+
+# Синхронизировано с mention-регексом фронта (web/src/components/Markdown.tsx).
+_MENTION_RE = re.compile(r"@([A-Za-z0-9._-]+)")
 
 
 async def load_active_token(
@@ -58,3 +62,23 @@ def initials(name: str | None, email: str | None) -> str | None:
         if local:
             return local[0].upper()
     return None
+
+
+def mask_mentions(body: str, names_by_handle: dict[str, str]) -> str:
+    """Sanitize @mentions in comment bodies for anonymous public payloads.
+
+    Mention handles are email local-parts («@petr.popov.1104») — leaking them
+    in a login-less page is partial PII. Known handles become the person's
+    display name; anything unknown (including e-mails typed in comment text)
+    is masked down to its first letter. Deliberately aggressive: privacy over
+    display fidelity.
+    """
+
+    def _sub(m: re.Match[str]) -> str:
+        handle = m.group(1)
+        name = names_by_handle.get(handle.lower())
+        if name:
+            return f"@{name}"
+        return f"@{handle[0]}…"
+
+    return _MENTION_RE.sub(_sub, body)
