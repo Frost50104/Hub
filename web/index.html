@@ -12,16 +12,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Hub" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700;900&family=Onest:wght@300;400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Шрифты self-hosted (src/styles/fonts.css): CSP style-src 'self'
+         блокирует Google Fonts, внешних <link> здесь быть не должно. -->
     <title>Signaris Hub</title>
     <script>
       // Apply the saved theme before first paint (no FOUC). Keep in sync with
       // src/lib/theme.ts (key + resolution logic).
+      // ВАЖНО: CSP script-src разрешает этот скрипт по sha256-хэшу
+      // (ops/nginx/hub-security-headers.conf). Любая правка тела скрипта
+      // требует пересчёта хэша, иначе тема молча перестанет применяться.
       (function () {
         try {
           var t = localStorage.getItem('hub-theme')
