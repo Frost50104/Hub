@@ -116,7 +116,7 @@ export const MentionTextarea = forwardRef<HTMLTextAreaElement, MentionTextareaPr
           {...rest}
         />
         {query !== null && list.length > 0 && (
-          <div className="glass absolute left-0 right-0 z-30 mt-1 max-h-60 overflow-y-auto p-1 shadow-glass">
+          <div className="absolute left-0 right-0 z-30 mt-1 max-h-60 overflow-y-auto rounded-lg border border-glass-border bg-bg p-1 shadow-glass">
             {list.map((m, i) => (
               <button
                 type="button"

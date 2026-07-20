@@ -187,7 +187,9 @@ export function TimelineView({ projectId, onTaskClick }: TimelineViewProps) {
       const d = addDays(viewStart, i)
       const isMonth1 = d.getDate() === 1
       const isMonday = d.getDay() === 1
-      const showDayLabel = scale === 'day'
+      // 32px/день уже текста «13 июл.» — подписываем каждый 2-й день,
+      // иначе подписи сливаются в сплошную строку.
+      const showDayLabel = scale === 'day' && d.getDate() % 2 === 1
       const showWeekLabel = scale === 'week' && isMonday
       const showMonthLabel = scale === 'month' && isMonth1
       if (showDayLabel || showWeekLabel || showMonthLabel) {
@@ -280,8 +282,8 @@ export function TimelineView({ projectId, onTaskClick }: TimelineViewProps) {
               {headerTicks.map((t) => (
                 <div
                   key={t.left}
-                  className="absolute top-0 flex h-full items-center border-l border-glass-border px-1 text-[10px] text-text3"
-                  style={{ left: t.left }}
+                  className="absolute top-0 flex h-full items-center overflow-hidden whitespace-nowrap border-l border-glass-border px-1 text-[10px] text-text3"
+                  style={{ left: t.left, maxWidth: pxPerDay * 2 }}
                 >
                   <span className={t.isStrong ? 'font-semibold text-text2' : ''}>
                     {t.label}
@@ -378,7 +380,17 @@ function DraggableBar({ task, bar, onClick }: DraggableBarProps) {
       )}
       title={task.title}
     >
-      <span className="truncate text-text">{task.title}</span>
+      {bar.widthPx >= 120 ? (
+        <span className="truncate text-text">{task.title}</span>
+      ) : (
+        // Узкий бар: название целиком справа от бара, а не обрезком внутри.
+        <span
+          className="absolute left-full top-1/2 ml-1.5 max-w-[240px] -translate-y-1/2 truncate text-[11px] text-text2"
+          aria-hidden
+        >
+          {task.title}
+        </span>
+      )}
     </button>
   )
 }

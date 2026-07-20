@@ -25,6 +25,7 @@ from app.models.search_document import SearchDocument
 from app.models.survey import Survey, SurveyParticipation
 from app.schemas.product import (
     HomeAck,
+    HomeAssessment,
     HomeCourse,
     HomeNovelty,
     HomeRating,
@@ -153,7 +154,59 @@ async def learn_home(
             and (s.closes_at is None or s.closes_at > now)
         ][:5]
 
-    # 5) Рейтинг-виджет: моё место за месяц по всей сети.
+    # 5) Активные аттестации, которые ещё не сданы (QA-находка: сотрудник
+    # узнавал об аттестации только из уведомления или нав-пункта).
+    assessments: list[HomeAssessment] = []
+    if profile_id:
+        from app.api.assessments import _campaign_quiz, _in_window
+        from app.models.assessment import AssessmentCampaign
+        from app.models.audience import AudienceMember
+        from app.models.quiz import QuizAttempt
+
+        now = datetime.now(UTC)
+        member_of = select(AudienceMember.audience_id).where(
+            AudienceMember.profile_id == profile_id
+        )
+        campaign_rows = (
+            (
+                await db.execute(
+                    select(AssessmentCampaign)
+                    .where(
+                        AssessmentCampaign.status == "active",
+                        (AssessmentCampaign.audience_id.is_(None))
+                        | AssessmentCampaign.audience_id.in_(member_of),
+                    )
+                    .order_by(AssessmentCampaign.ends_at.asc().nulls_last())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for campaign in campaign_rows:
+            if not _in_window(campaign, now):
+                continue
+            quiz = await _campaign_quiz(db, campaign.id)
+            if quiz is None:
+                continue
+            passed = (
+                await db.execute(
+                    select(QuizAttempt.id).where(
+                        QuizAttempt.quiz_id == quiz.id,
+                        QuizAttempt.profile_id == profile_id,
+                        QuizAttempt.passed.is_(True),
+                    )
+                )
+            ).first()
+            if passed is None:
+                assessments.append(
+                    HomeAssessment(
+                        id=campaign.id, title=campaign.title, ends_at=campaign.ends_at
+                    )
+                )
+            if len(assessments) >= 5:
+                break
+
+    # 6) Рейтинг-виджет: моё место за месяц по всей сети.
     home_rating = None
     if profile_id:
         rating_data = await rating_endpoint("month", "all", principal, db)
@@ -170,6 +223,7 @@ async def learn_home(
         novelties=novelties,
         surveys=surveys,
         rating=home_rating,
+        assessments=assessments,
     )
 
 

@@ -15,6 +15,7 @@ import { useMyTasks, type DueWindow } from '@/hooks/useMyTasks'
 import { useProjects } from '@/hooks/useProjects'
 import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
+import { capitalizeFirst } from '@/lib/dates'
 import { type Project } from '@/lib/projects'
 
 function greeting(): string {
@@ -213,11 +214,13 @@ function DesktopHome() {
   const toggleDone = useToggleDone('')
 
   const firstName = me.data?.full_name?.split(/\s+/)[0] ?? ''
-  const today = new Date().toLocaleDateString('ru-RU', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  })
+  const today = capitalizeFirst(
+    new Date().toLocaleDateString('ru-RU', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    }),
+  )
 
   const recent = (projects.data ?? []).slice(0, 4)
   const completedCount =
@@ -228,7 +231,7 @@ function DesktopHome() {
     <div className="space-y-8 p-6">
       <PushPermissionPrompt />
       <header className="space-y-2 text-center">
-        <p className="text-sm capitalize text-text2">{today}</p>
+        <p className="text-sm text-text2">{today}</p>
         <h1 className="font-display text-3xl font-semibold">
           {greeting()}, {firstName || 'друг'}
         </h1>

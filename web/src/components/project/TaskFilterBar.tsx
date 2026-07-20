@@ -41,6 +41,9 @@ interface TaskFilterBarProps {
   showSort?: boolean
   /** Календарь не умеет фильтр по метке на бэке. */
   showLabel?: boolean
+  /** Хвостовые контролы (например «Колонки») — в ОДНОЙ wrap-строке с
+   * фильтрами, чтобы тулбар не разъезжался на три этажа. */
+  trailing?: React.ReactNode
 }
 
 export function TaskFilterBar({
@@ -49,6 +52,7 @@ export function TaskFilterBar({
   onChange,
   showSort,
   showLabel = true,
+  trailing,
 }: TaskFilterBarProps) {
   const labels = useLabels(projectId)
   const count = activeFilterCount(value)
@@ -173,6 +177,7 @@ export function TaskFilterBar({
           Сбросить{count > 1 ? ` (${count})` : ''}
         </Button>
       )}
+      {trailing}
     </div>
   )
 }

@@ -46,8 +46,10 @@ export function TaskDependencies({ taskId, projectId }: TaskDependenciesProps) {
     ...(deps.data?.predecessors ?? []).map((p) => p.id),
     ...(deps.data?.successors ?? []).map((s) => s.id),
   ])
+  // Свои подзадачи из кандидатов исключаем — «задача зависит от собственной
+  // подзадачи» дублирует смысл подзадач и шумит в пикере.
   const candidates = (allTasks.data ?? []).filter(
-    (t) => !existingIds.has(t.id),
+    (t) => !existingIds.has(t.id) && t.parent_task_id !== taskId,
   )
 
   const onAdd = async (predId: string) => {

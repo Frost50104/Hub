@@ -253,11 +253,14 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
         )}
         {org.stores.map((s) => (
           <li key={s.id} className="flex items-center gap-2 px-4 py-2.5">
-            {s.code && (
-              <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-amber">
-                {s.code}
-              </span>
-            )}
+            {/* Фикс-ширина: строки с кодом и без выравниваются одинаково. */}
+            <span className="inline-flex w-12 shrink-0 justify-center">
+              {s.code && (
+                <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-amber">
+                  {s.code}
+                </span>
+              )}
+            </span>
             <span className={cn('flex-1 text-sm', s.archived_at ? 'text-text3 line-through' : 'text-text')}>
               {s.name}
               {franchiseeName(s.franchisee_id) && (

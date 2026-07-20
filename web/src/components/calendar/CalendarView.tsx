@@ -10,6 +10,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { useCalendarTasks } from '@/hooks/useCalendarTasks'
+import { capitalizeFirst } from '@/lib/dates'
 import { useUpdateTask } from '@/hooks/useTasks'
 import { toCalendarFilters, type TaskViewFilters } from '@/lib/taskFilters'
 import { type Task } from '@/lib/tasks'
@@ -121,10 +122,12 @@ export function CalendarView({ projectId, onTaskClick, filters }: CalendarViewPr
     }),
   )
 
-  const monthLabel = viewMonth.toLocaleDateString('ru-RU', {
-    month: 'long',
-    year: 'numeric',
-  })
+  const monthLabel = capitalizeFirst(
+    viewMonth.toLocaleDateString('ru-RU', {
+      month: 'long',
+      year: 'numeric',
+    }),
+  )
 
   const onPrev = () =>
     setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))
@@ -198,7 +201,7 @@ export function CalendarView({ projectId, onTaskClick, filters }: CalendarViewPr
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
-          <h2 className="font-display text-base font-semibold capitalize text-text md:text-lg">
+          <h2 className="font-display text-base font-semibold text-text md:text-lg">
             {monthLabel}
           </h2>
           <div className="text-xs text-text3">

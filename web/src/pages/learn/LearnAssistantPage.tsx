@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
+import { Markdown } from '@/components/Markdown'
 import { Button } from '@/components/ui/Button'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
@@ -47,7 +48,13 @@ function Bubble({ message }: { message: Pick<AiMessage, 'role' | 'content' | 'so
             : 'rounded-bl-sm border border-glass-border bg-glass text-text',
         )}
       >
-        <p className="whitespace-pre-wrap">{message.content}</p>
+        {isUser ? (
+          <p className="whitespace-pre-wrap">{message.content}</p>
+        ) : (
+          // LLM отвечает markdown'ом — рендерим тем же безопасным
+          // компонентом, что и описания задач (иначе видны сырые **звёзды**).
+          <Markdown text={message.content} />
+        )}
         {!isUser && <SourceChips sources={message.sources} />}
       </div>
     </div>

@@ -152,6 +152,7 @@ export function LessonRenderer({
           options={options}
           gateNext={Boolean(node.attrs?.gateNext)}
           initialAnswer={answers[blockId]}
+          lessonCompleted={lesson.completed}
           onAnswered={onBlockAnswered}
         />
       )

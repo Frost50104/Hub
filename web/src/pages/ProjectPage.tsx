@@ -738,15 +738,13 @@ export function ProjectPage() {
 
       {tab === 'list' && (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-            <TaskFilterBar
-              projectId={id}
-              value={filters}
-              onChange={setFilters}
-              showSort
-            />
-            <ColumnsMenu projectId={id} />
-          </div>
+          <TaskFilterBar
+            projectId={id}
+            value={filters}
+            onChange={setFilters}
+            showSort
+            trailing={<ColumnsMenu projectId={id} />}
+          />
           <ListTab
             projectId={id}
             myRole={p.my_role}

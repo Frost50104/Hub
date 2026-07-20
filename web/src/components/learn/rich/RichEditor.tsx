@@ -212,25 +212,29 @@ function Toolbar({ editor }: { editor: Editor }) {
         <Eraser className="h-4 w-4" />
       </ToolbarButton>
       <span className="mx-1 h-5 w-px bg-glass-border" />
-      {(Object.keys(CALLOUT_META) as CalloutKind[]).map((kind) => (
-        <button
-          key={kind}
-          type="button"
-          title={CALLOUT_META[kind].label}
-          onMouseDown={(e) => {
-            e.preventDefault()
-            editor.chain().focus().toggleCallout(kind).run()
-          }}
-          className={cn(
-            'rounded px-1.5 py-1 text-xs',
-            editor.isActive('callout', { kind })
-              ? 'bg-surface text-amber'
-              : 'text-text3 hover:bg-glass hover:text-text',
-          )}
-        >
-          {CALLOUT_META[kind].emoji}
-        </button>
-      ))}
+      {/* shrink-0 без wrap внутри: группа callout-кнопок переносится целиком,
+          а не рвётся посередине при узком тулбаре. */}
+      <span className="flex shrink-0 items-center gap-0.5">
+        {(Object.keys(CALLOUT_META) as CalloutKind[]).map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            title={CALLOUT_META[kind].label}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              editor.chain().focus().toggleCallout(kind).run()
+            }}
+            className={cn(
+              'rounded px-1.5 py-1 text-xs',
+              editor.isActive('callout', { kind })
+                ? 'bg-surface text-amber'
+                : 'text-text3 hover:bg-glass hover:text-text',
+            )}
+          >
+            {CALLOUT_META[kind].emoji}
+          </button>
+        ))}
+      </span>
     </div>
   )
 }

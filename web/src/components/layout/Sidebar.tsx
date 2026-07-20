@@ -41,6 +41,7 @@ import { useMe } from '@/hooks/useMe'
 import { useUnreadCount } from '@/hooks/useNotifications'
 import { useCreateProject, useProjects } from '@/hooks/useProjects'
 import { authClient } from '@/lib/auth'
+import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/cn'
 import { HUB_ROLE_BADGE } from '@/lib/learn'
 import { type Project } from '@/lib/projects'
@@ -226,6 +227,7 @@ export interface SidebarProps {
 }
 
 export function Sidebar({ onItemClick }: SidebarProps = {}) {
+  const theme = useTheme((s) => s.theme)
   const me = useMe()
   const unread = useUnreadCount()
   const unreadCount = unread.data?.count ?? 0
@@ -234,7 +236,15 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
   return (
     <aside className="glass flex h-screen w-[280px] shrink-0 flex-col gap-4 p-4 md:h-[calc(100vh-1.5rem)] md:w-[260px]">
       <Link to="/" onClick={onItemClick} className="flex items-center gap-2 px-1">
-        <img src="/brand/signaris-horizontal-on-dark.svg" alt="Signaris" className="h-6" />
+        <img
+          src={
+            theme === 'light'
+              ? '/brand/signaris-horizontal-on-light.svg'
+              : '/brand/signaris-horizontal-on-dark.svg'
+          }
+          alt="Signaris"
+          className="h-6"
+        />
         <span className="font-display text-lg font-black leading-none tracking-tight">
           Hub
         </span>

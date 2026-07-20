@@ -1,5 +1,6 @@
 import {
   Archive,
+  BadgeCheck,
   BookOpen,
   Building2,
   CalendarClock,
@@ -19,7 +20,7 @@ import { useLearnHome, useRecent } from '@/hooks/useLearn'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMe } from '@/hooks/useMe'
 import { cn } from '@/lib/cn'
-import { COURSE_TYPE_LABEL } from '@/lib/learn'
+import { CONTENT_TYPE_LABEL, COURSE_TYPE_LABEL } from '@/lib/learn'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -212,6 +213,34 @@ export function LearnHomePage() {
           </div>
         )}
 
+
+        {data && data.assessments.length > 0 && (
+          <div>
+            <SectionTitle icon={BadgeCheck}>Аттестации</SectionTitle>
+            <ul className="divide-y divide-glass-border rounded-xl border border-amber/40 bg-amber/5">
+              {data.assessments.map((a) => (
+                <li key={a.id}>
+                  <Link
+                    to="/learn/assessments"
+                    className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm text-text hover:bg-surface/50"
+                  >
+                    <span className="min-w-0 flex-1 truncate">{a.title}</span>
+                    {a.ends_at && (
+                      <span className="shrink-0 text-xs text-text3">
+                        до{' '}
+                        {new Date(a.ends_at).toLocaleDateString('ru-RU', {
+                          day: 'numeric',
+                          month: 'short',
+                        })}
+                      </span>
+                    )}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {data && data.surveys.length > 0 && (
           <div>
             <SectionTitle icon={ClipboardList}>Активные опросы</SectionTitle>
@@ -247,9 +276,12 @@ export function LearnHomePage() {
                 <li key={`${n.object_type}-${n.object_id}`}>
                   <Link
                     to={n.url_path}
-                    className="block px-4 py-2.5 text-sm text-text hover:bg-surface/50"
+                    className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm text-text hover:bg-surface/50"
                   >
-                    {n.title}
+                    <span className="min-w-0 flex-1 truncate">{n.title}</span>
+                    <span className="shrink-0 rounded bg-surface px-1.5 py-0.5 text-[10px] text-text3">
+                      {CONTENT_TYPE_LABEL[n.object_type] ?? ''}
+                    </span>
                   </Link>
                 </li>
               ))}
@@ -265,15 +297,36 @@ export function LearnHomePage() {
                 <li key={item.object_type + item.object_id}>
                   <Link
                     to={item.url_path}
-                    className="block px-4 py-2 text-sm text-text hover:bg-surface/50"
+                    className="flex items-center justify-between gap-2 px-4 py-2 text-sm text-text hover:bg-surface/50"
                   >
-                    {item.title}
+                    <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                    <span className="shrink-0 rounded bg-surface px-1.5 py-0.5 text-[10px] text-text3">
+                      {CONTENT_TYPE_LABEL[item.object_type] ?? ''}
+                    </span>
                   </Link>
                 </li>
               ))}
             </ul>
           </div>
         )}
+
+
+        {data &&
+          !archived &&
+          !needsRestore &&
+          data.courses.length === 0 &&
+          data.pending_acks.length === 0 &&
+          data.assessments.length === 0 &&
+          data.surveys.length === 0 &&
+          data.novelties.length === 0 &&
+          (recent.data?.length ?? 0) === 0 && (
+            <div className="rounded-xl border border-glass-border bg-glass p-8 text-center">
+              <GraduationCap className="mx-auto h-8 w-8 text-text3" />
+              <p className="mt-3 text-sm text-text2">
+                Пока нет назначенного обучения и новинок — загляните позже.
+              </p>
+            </div>
+          )}
 
         {isAdmin && (
           <div>

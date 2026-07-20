@@ -122,12 +122,19 @@ class HomeRating(BaseModel):
     total_participants: int
 
 
+class HomeAssessment(BaseModel):
+    id: UUID
+    title: str
+    ends_at: datetime | None
+
+
 class HomeResponse(BaseModel):
     courses: list[HomeCourse]
     pending_acks: list[HomeAck]
     novelties: list[HomeNovelty]
     surveys: list[HomeSurvey]
     rating: HomeRating | None
+    assessments: list[HomeAssessment] = []
 
 
 class LearnProfileResponse(BaseModel):

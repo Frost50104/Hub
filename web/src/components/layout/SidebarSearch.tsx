@@ -62,7 +62,8 @@ export function SidebarSearch() {
       {show && (
         <div
           className={cn(
-            'glass absolute left-0 right-0 top-full z-30 mt-1 max-h-96 overflow-y-auto p-1 shadow-glass',
+            // bg-bg (непрозрачный): glass-фон просвечивал нав-пункты под дропдауном
+            'absolute left-0 right-0 top-full z-30 mt-1 max-h-96 overflow-y-auto rounded-lg border border-glass-border bg-bg p-1 shadow-glass',
           )}
         >
           {isLoading && (

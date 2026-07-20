@@ -119,7 +119,7 @@ export function TaskRow({
         {labels?.slice(0, 3).map((l) => (
           <span
             key={l.id}
-            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-glass-border px-1.5 text-[10px] text-text2"
+            className="hidden shrink-0 items-center gap-1 rounded-full border border-glass-border px-1.5 text-[10px] text-text2 lg:inline-flex"
             title={l.name}
           >
             <span
@@ -131,7 +131,7 @@ export function TaskRow({
           </span>
         ))}
         {labels && labels.length > 3 && (
-          <span className="shrink-0 text-[10px] text-text3">
+          <span className="hidden shrink-0 text-[10px] text-text3 lg:inline">
             +{labels.length - 3}
           </span>
         )}

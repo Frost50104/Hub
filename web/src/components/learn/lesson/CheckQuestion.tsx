@@ -18,6 +18,7 @@ export function CheckQuestion({
   options,
   gateNext = false,
   initialAnswer,
+  lessonCompleted = false,
   onAnswered,
 }: {
   lessonId: string
@@ -26,6 +27,9 @@ export function CheckQuestion({
   options: string[]
   gateNext?: boolean
   initialAnswer?: { answer: number; correct: boolean }
+  /** Урок завершён: block_state хранит ПОСЛЕДНИЙ ответ (мог быть неверным
+   * до верного) — красное «Неверно» при повторном просмотре сбивает с толку. */
+  lessonCompleted?: boolean
   onAnswered?: (blockId: string, correct: boolean) => void
 }) {
   const [selected, setSelected] = useState<number | null>(initialAnswer?.answer ?? null)
@@ -113,8 +117,11 @@ export function CheckQuestion({
           )
         })}
       </div>
-      {answered && !solvedCorrectly && (
+      {answered && !solvedCorrectly && !lessonCompleted && (
         <p className="mt-1.5 text-xs text-red">Неверно — попробуйте другой вариант.</p>
+      )}
+      {answered && !solvedCorrectly && lessonCompleted && (
+        <p className="mt-1.5 text-xs text-text3">Урок завершён — ответ учтён.</p>
       )}
       {solvedCorrectly && <p className="mt-1.5 text-xs text-green">Верно!</p>}
     </div>

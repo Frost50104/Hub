@@ -703,6 +703,20 @@ export interface HomeData {
   }[]
   surveys: { id: string; title: string; kind: string; closes_at: string | null }[]
   rating: { points: number; rank: number | null; total_participants: number } | null
+  assessments: { id: string; title: string; ends_at: string | null }[]
+}
+
+/** Тип контента в лентах витрины («Новинки»/«Недавнее») — иначе товар,
+ * курс и документ неразличимы в списке голых заголовков. */
+export const CONTENT_TYPE_LABEL: Record<string, string> = {
+  course: 'Курс',
+  lesson: 'Урок',
+  material: 'Документ',
+  library_material: 'Документ',
+  news: 'Новость',
+  news_post: 'Новость',
+  survey: 'Опрос',
+  product: 'Товар',
 }
 
 export interface LearnProfile {

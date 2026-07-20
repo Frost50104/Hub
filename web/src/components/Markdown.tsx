@@ -6,8 +6,12 @@ import { cn } from '@/lib/cn'
 
 const MENTION_TOKEN_RE = /(@[A-Za-z0-9._-]+)/g
 
-/** Строковые дети → подсветка @mention; элементы — как есть. */
-function withMentions(children: React.ReactNode): React.ReactNode {
+/** Строковые дети → подсветка @mention; элементы — как есть.
+ * `names` (handle → полное имя) превращает «@petr.popov.1104» в «@Петр Попов». */
+function withMentions(
+  children: React.ReactNode,
+  names?: Record<string, string>,
+): React.ReactNode {
   const arr = Array.isArray(children) ? children : [children]
   return arr.map((child, i) => {
     if (typeof child !== 'string') return <Fragment key={i}>{child}</Fragment>
@@ -17,12 +21,15 @@ function withMentions(children: React.ReactNode): React.ReactNode {
         {parts.map((part, j) => {
           if (MENTION_TOKEN_RE.test(part)) {
             MENTION_TOKEN_RE.lastIndex = 0
+            const handle = part.slice(1).toLowerCase()
+            const display = names?.[handle] ? `@${names[handle]}` : part
             return (
               <span
                 key={j}
+                title={part}
                 className="rounded bg-amber/20 px-1 font-medium text-amber"
               >
-                {part}
+                {display}
               </span>
             )
           }
@@ -37,6 +44,8 @@ interface MarkdownProps {
   text: string
   /** Подсвечивать @mention внутри текста (комментарии). */
   highlightMentions?: boolean
+  /** handle → полное имя: чип показывает имя вместо email-префикса. */
+  mentionNames?: Record<string, string>
   className?: string
 }
 
@@ -45,8 +54,15 @@ interface MarkdownProps {
  * открываются в новой вкладке. Данные остаются plain-text — старые
  * описания без разметки выглядят как раньше.
  */
-export function Markdown({ text, highlightMentions, className }: MarkdownProps) {
-  const wrap = highlightMentions ? withMentions : (c: React.ReactNode) => c
+export function Markdown({
+  text,
+  highlightMentions,
+  mentionNames,
+  className,
+}: MarkdownProps) {
+  const wrap = highlightMentions
+    ? (c: React.ReactNode) => withMentions(c, mentionNames)
+    : (c: React.ReactNode) => c
 
   const components: Components = {
     p: ({ children }) => (
