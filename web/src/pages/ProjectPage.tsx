@@ -127,7 +127,7 @@ function ProjectHeader({
   const myRole = project.my_role
   const setFavorite = useSetFavorite(project.id)
   return (
-    <div className="flex items-start justify-between gap-4 px-1">
+    <div className="flex flex-wrap items-start justify-between gap-4 px-1">
       <div className="flex min-w-0 items-center gap-3">
         <div
           className={cn(
@@ -138,8 +138,10 @@ function ProjectHeader({
           {project.key.slice(0, 2)}
         </div>
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="truncate font-display text-2xl font-semibold">{project.name}</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="min-w-0 truncate font-display text-2xl font-semibold">
+              {project.name}
+            </h1>
             {myRole && (
               <button
                 type="button"
@@ -171,7 +173,7 @@ function ProjectHeader({
         </div>
       </div>
       {(canManage(myRole) || canEdit(myRole)) && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {canEdit(myRole) && (
             <Button
               variant="secondary"

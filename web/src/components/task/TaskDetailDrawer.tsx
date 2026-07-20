@@ -16,7 +16,7 @@ import { TaskThread } from '@/components/task/TaskThread'
 import { WatchControl } from '@/components/task/WatchControl'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import { Input, Textarea } from '@/components/ui/Input'
+import { Textarea } from '@/components/ui/Input'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { useProject } from '@/hooks/useProjects'
 import { useArchiveTask, useTask, useUpdateTask } from '@/hooks/useTasks'
@@ -185,18 +185,31 @@ export function TaskDetailDrawer({
                   onOpen={onOpenTask}
                 />
               )}
-              <Input
+              {/* textarea с авторостом: длинные названия переносятся на узких
+                  экранах вместо обрезки за краем; Enter по-прежнему сохраняет. */}
+              <textarea
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                rows={1}
+                onChange={(e) => {
+                  setTitle(e.target.value)
+                  e.target.style.height = 'auto'
+                  e.target.style.height = `${e.target.scrollHeight}px`
+                }}
+                ref={(el) => {
+                  if (el) {
+                    el.style.height = 'auto'
+                    el.style.height = `${el.scrollHeight}px`
+                  }
+                }}
                 onBlur={saveTitle}
                 readOnly={readOnly}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault()
-                    ;(e.target as HTMLInputElement).blur()
+                    ;(e.target as HTMLTextAreaElement).blur()
                   }
                 }}
-                className="h-auto border-transparent bg-transparent px-0 py-1 font-display text-xl font-semibold focus-visible:border-amber"
+                className="w-full resize-none overflow-hidden rounded-lg border border-transparent bg-transparent px-0 py-1 font-display text-xl font-semibold text-text focus-visible:border-amber focus-visible:outline-none"
               />
 
               <section className="space-y-3 text-sm">

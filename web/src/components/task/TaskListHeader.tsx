@@ -24,13 +24,13 @@ export function TaskListHeader({ visibleFields }: TaskListHeaderProps) {
         {visibleFields.map((f) => (
           <span
             key={f.id}
-            className="inline-block w-24 truncate text-right"
+            className="hidden w-24 truncate text-right lg:inline-block"
             title={f.name}
           >
             {f.name}
           </span>
         ))}
-        <span className="inline-block w-24 text-right">Срок</span>
+        <span className="inline-block w-14 text-right lg:w-24">Срок</span>
       </div>
     </div>
   )

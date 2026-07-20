@@ -160,14 +160,14 @@ export function TaskRow({
           return (
             <span
               key={f.id}
-              className="inline-block w-24 truncate text-text2"
+              className="hidden w-24 truncate text-text2 lg:inline-block"
               title={`${f.name}: ${formatCustomFieldValue(f, v)}`}
             >
               {formatCustomFieldValue(f, v)}
             </span>
           )
         })}
-        <span className="inline-block w-24">
+        <span className="inline-block w-14 lg:w-24">
           {task.due_at ? (
             <span className={cn(overdue ? 'text-red' : 'text-text2')}>
               {new Date(task.due_at).toLocaleDateString('ru-RU', {
