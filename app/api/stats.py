@@ -28,7 +28,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from signaris_auth import Principal
-from sqlalchemy import and_, bindparam, func, select, text
+from sqlalchemy import Double, Integer, Text, and_, bindparam, cast, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
@@ -163,14 +163,12 @@ async def _workload(
             ShadowUser.full_name,
             ShadowUser.email,
             func.sum(
-                func.cast(
+                cast(
                     and_(Task.archived_at.is_(None), Task.status != "done"),
-                    type_=text("INTEGER").type,
+                    Integer,
                 )
             ).label("active_count"),
-            func.sum(
-                func.cast(Task.status == "done", type_=text("INTEGER").type)
-            ).label("done_count"),
+            func.sum(cast(Task.status == "done", Integer)).label("done_count"),
         )
         .join(
             ShadowUser,
@@ -219,7 +217,7 @@ async def _custom_field_stats(
     # clashing with the tuple `.count` method on Row.
     num_by_field: dict[UUID, Any] = {}
     if number_ids:
-        cast_f = func.cast(TaskCustomFieldValue.value, type_=text("float8").type)
+        cast_f = cast(TaskCustomFieldValue.value, Double)
         num_rows = await session.execute(
             select(
                 TaskCustomFieldValue.field_id,
@@ -245,9 +243,7 @@ async def _custom_field_stats(
     # by field_id has no collisions.
     options_by_field: dict[UUID, list[tuple[str, int]]] = {}
     if select_ids:
-        opt_id_col = func.cast(
-            TaskCustomFieldValue.value, type_=text("text").type
-        ).label("opt_id")
+        opt_id_col = cast(TaskCustomFieldValue.value, Text).label("opt_id")
         sel_rows = await session.execute(
             select(
                 TaskCustomFieldValue.field_id,

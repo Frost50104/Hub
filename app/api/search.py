@@ -139,10 +139,14 @@ def _apply_text(stmt, text_query: str):
     if len(text_query) >= _MIN_FTS_LEN:
         # `websearch_to_tsquery` accepts quotes, OR, - operators naturally —
         # safer surface than `plainto_tsquery` for free user input.
-        ts = func.websearch_to_tsquery("russian", text_query)
         # Reflect the generated column via text() — SQLAlchemy doesn't model
-        # `STORED GENERATED` columns gracefully.
-        return stmt.where(text("tasks.search_vector @@ :tsq").bindparams(tsq=ts))
+        # `STORED GENERATED` columns gracefully. The bind param must be the
+        # plain query STRING (an SQL function object is not bindable).
+        return stmt.where(
+            text(
+                "tasks.search_vector @@ websearch_to_tsquery('russian', :tsq)"
+            ).bindparams(tsq=text_query)
+        )
     # Sub-3-char: tsquery returns ø → ILIKE fallback on title.
     return stmt.where(Task.title.ilike(_ilike_pattern(text_query)))
 
