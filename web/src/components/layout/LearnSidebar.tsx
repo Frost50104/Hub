@@ -140,34 +140,38 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
 
       <SpaceSwitcher />
 
-      <nav className="flex flex-col gap-0.5">
-        {LEARN_NAV.map((item) => (
-          <NavEntry
-            key={item.to + item.label}
-            item={item}
-            unreadCount={unreadCount}
-            onItemClick={onItemClick}
-          />
-        ))}
-      </nav>
-
-      {isAdmin && (
-        <div className="flex flex-col gap-0.5">
-          <p className="px-2 pb-0.5 pt-2 text-[11px] font-semibold uppercase tracking-wider text-text3">
-            Управление
-          </p>
-          {ADMIN_NAV.map((item) => (
+      {/* Навигация — единственная растягивающаяся область панели. `min-h-0`
+       * обязателен: без него flex-элемент не ужимается ниже своего контента и
+       * у админа (11 разделов + 6 управления) футер с профилем выезжает за
+       * пределы `h-[calc(100vh-1.5rem)]`. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+        <nav className="flex flex-col gap-0.5">
+          {LEARN_NAV.map((item) => (
             <NavEntry
-              key={item.to}
+              key={item.to + item.label}
               item={item}
               unreadCount={unreadCount}
               onItemClick={onItemClick}
             />
           ))}
-        </div>
-      )}
+        </nav>
 
-      <div className="flex-1" />
+        {isAdmin && (
+          <div className="flex flex-col gap-0.5">
+            <p className="px-2 pb-0.5 pt-2 text-[11px] font-semibold uppercase tracking-wider text-text3">
+              Управление
+            </p>
+            {ADMIN_NAV.map((item) => (
+              <NavEntry
+                key={item.to}
+                item={item}
+                unreadCount={unreadCount}
+                onItemClick={onItemClick}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="flex items-center justify-between gap-2 border-t border-glass-border pt-3">
         <div className="flex items-center gap-2 overflow-hidden">

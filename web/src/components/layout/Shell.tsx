@@ -46,6 +46,11 @@ function NoAccessScreen() {
  *
  * `pb-20` on mobile main reserves space for the fixed bottom bar. On
  * desktop the sidebar handles spacing itself.
+ *
+ * Скролл-инвариант (desktop, ≥lg): корень — `h-screen overflow-hidden`,
+ * скроллится ТОЛЬКО `<main>`. Иначе (как было до 2026-07-22) документ
+ * скроллится целиком и сайдбар с профилем уезжает за верхний край экрана.
+ * Мобильный layout не трогаем — там скроллится документ.
  */
 export function Shell() {
   const isDesktop = useIsDesktop()
@@ -62,7 +67,7 @@ export function Shell() {
   if (me.data && me.data.hub_role === null) return <NoAccessScreen />
 
   return (
-    <div className="min-h-screen lg:flex lg:gap-3 lg:p-3">
+    <div className="min-h-screen lg:flex lg:h-screen lg:gap-3 lg:overflow-hidden lg:p-3">
       {isDesktop && (space === 'learn' ? <LearnSidebar /> : <Sidebar />)}
       <main
         className="min-w-0 flex-1 overflow-y-auto pb-20 lg:pb-0 lg:overflow-y-auto"
