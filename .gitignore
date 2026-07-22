@@ -29,7 +29,10 @@ uploads/
 attachments/
 
 # Build-time artifacts (written by deploy.sh)
-backend/VERSION
+# Путь именно /VERSION: каталога backend/ в репо нет, поэтому старое правило
+# не срабатывало — deploy.sh пачкал отслеживаемый файл, и следующий деплой
+# ложно клеймился «-dirty» в стампе версии.
+/VERSION
 web/public/version.json
 
 # OS
