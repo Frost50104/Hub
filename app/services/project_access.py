@@ -15,6 +15,8 @@ API:
         db, project_id, principal, *, allow=("owner",)
     ) -> tuple[Project, ProjectRole]
         → raises 404 if not visible, 403 if visible but role not in allow.
+    capabilities(principal, my_role) -> (can_edit, can_manage)
+        → эффективные права для UI; считаются ТОЛЬКО здесь.
 """
 
 from __future__ import annotations
@@ -32,6 +34,11 @@ from app.models.project import Project, ProjectMember
 ProjectRole = Literal["owner", "editor", "viewer"]
 HUB_ADMIN_ROLE = "admin"
 
+# Две ступени прав. Держим их РЯДОМ с require_project_role: списки обязаны
+# совпадать с `allow=` в ручках, иначе UI снова разъедется с бэкендом.
+EDIT_ROLES: tuple[ProjectRole, ...] = ("owner", "editor")
+MANAGE_ROLES: tuple[ProjectRole, ...] = ("owner",)
+
 
 def is_hub_admin(principal: Principal) -> bool:
     return principal.role_for("hub") == HUB_ADMIN_ROLE
@@ -40,6 +47,21 @@ def is_hub_admin(principal: Principal) -> bool:
 def can_create_project(principal: Principal) -> bool:
     role = principal.role_for("hub")
     return role in ("admin", "member")
+
+
+def capabilities(
+    principal: Principal, my_role: ProjectRole | None
+) -> tuple[bool, bool]:
+    """(can_edit, can_manage) — что вызывающий РЕАЛЬНО может в этом проекте.
+
+    Отдаётся клиенту в ProjectResponse, чтобы фронт не заводил свою копию
+    правила: раньше он её завёл, не знал про hub:admin-байпас ниже в
+    require_project_role и показывал админу вне членства проект read-only,
+    хотя запись сервером разрешена.
+    """
+    if is_hub_admin(principal):
+        return True, True
+    return my_role in EDIT_ROLES, my_role in MANAGE_ROLES
 
 
 async def fetch_project_or_404(db: AsyncSession, project_id: UUID) -> Project:

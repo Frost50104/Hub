@@ -16,7 +16,6 @@ import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
 import { useProjectSections } from '@/hooks/useProjects'
 import { useTasks, useToggleDone, useUpdateTask } from '@/hooks/useTasks'
 import { type Label } from '@/lib/labels'
-import { type ProjectRole } from '@/lib/projects'
 import { toListFilters, type TaskViewFilters } from '@/lib/taskFilters'
 import { type Task } from '@/lib/tasks'
 
@@ -25,14 +24,15 @@ import { KanbanColumn, type ColumnDef } from './KanbanColumn'
 
 interface BoardViewProps {
   projectId: string
-  myRole: ProjectRole | null | undefined
+  /** Эффективное право на правку — считает сервер (Project.can_edit). */
+  canEdit: boolean
   onTaskClick: (id: string) => void
   filters?: TaskViewFilters
 }
 
 const ORPHAN_ID = '__orphan__'
 
-export function BoardView({ projectId, myRole, onTaskClick, filters }: BoardViewProps) {
+export function BoardView({ projectId, canEdit, onTaskClick, filters }: BoardViewProps) {
   const sections = useProjectSections(projectId)
   // forBoard: доска всегда в position-порядке, иначе ломается drag.
   // При активных фильтрах позиция drag считается между видимыми соседями —
@@ -114,7 +114,6 @@ export function BoardView({ projectId, myRole, onTaskClick, filters }: BoardView
     return cols
   }, [tasks.data, sections.data])
 
-  const canEdit = myRole === 'owner' || myRole === 'editor'
   const activeTask = (tasks.data ?? []).find((t) => t.id === activeId) ?? null
 
   const onDragStart = (e: DragStartEvent) => {

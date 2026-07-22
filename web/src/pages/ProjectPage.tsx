@@ -60,7 +60,6 @@ import { type CustomFieldDefinition, type CustomFieldValue } from '@/lib/customF
 import {
   PROJECT_ROLE_LABEL,
   type Project,
-  type ProjectRole,
   type Section,
 } from '@/lib/projects'
 import {
@@ -88,13 +87,6 @@ const TABS: { key: TabKey; label: string; disabled?: boolean }[] = [
   { key: 'dashboard', label: 'Дашборд' },
   { key: 'members', label: 'Участники' },
 ]
-
-function canEdit(role: ProjectRole | null | undefined): boolean {
-  return role === 'owner' || role === 'editor'
-}
-function canManage(role: ProjectRole | null | undefined): boolean {
-  return role === 'owner'
-}
 
 function projectIconClasses(p: Project): string {
   let hash = 0
@@ -172,9 +164,9 @@ function ProjectHeader({
           )}
         </div>
       </div>
-      {(canManage(myRole) || canEdit(myRole)) && (
+      {(project.can_edit || project.can_manage) && (
         <div className="flex flex-wrap items-center gap-2">
-          {canEdit(myRole) && (
+          {project.can_edit && (
             <Button
               variant="secondary"
               size="sm"
@@ -185,7 +177,7 @@ function ProjectHeader({
               Поделиться
             </Button>
           )}
-          {canManage(myRole) && (
+          {project.can_manage && (
             <>
               <Button
                 variant="secondary"
@@ -458,12 +450,14 @@ function SectionBlock({
 
 function ListTab({
   projectId,
-  myRole,
+  canEditFlag,
+  canManageFlag,
   onTaskClick,
   filters,
 }: {
   projectId: string
-  myRole: ProjectRole | null | undefined
+  canEditFlag: boolean
+  canManageFlag: boolean
   onTaskClick: (id: string) => void
   filters: TaskViewFilters
 }) {
@@ -555,8 +549,6 @@ function ListTab({
   }
 
   const orphanTasks = tasksBySection.get(null) ?? []
-  const canEditFlag = canEdit(myRole)
-  const canManageFlag = canManage(myRole)
 
   return (
     <div className="space-y-6">
@@ -747,7 +739,8 @@ export function ProjectPage() {
           />
           <ListTab
             projectId={id}
-            myRole={p.my_role}
+            canEditFlag={p.can_edit}
+            canManageFlag={p.can_manage}
             onTaskClick={openTask}
             filters={filters}
           />
@@ -758,7 +751,7 @@ export function ProjectPage() {
           <TaskFilterBar projectId={id} value={filters} onChange={setFilters} />
           <BoardView
             projectId={id}
-            myRole={p.my_role}
+            canEdit={p.can_edit}
             onTaskClick={openTask}
             filters={filters}
           />
@@ -790,7 +783,7 @@ export function ProjectPage() {
         </Suspense>
       )}
       {tab === 'members' && (
-        <MembersTab projectId={id} canManage={canManage(p.my_role)} />
+        <MembersTab projectId={id} canManage={p.can_manage} />
       )}
 
       {/* Mobile: floating view picker + FAB above the bottom tab bar. */}

@@ -17,9 +17,16 @@ export interface Project {
   created_by: string
   created_at: string
   updated_at: string
+  /** ФАКТИЧЕСКОЕ членство — только для бейджа роли. У hub:admin вне проекта
+   * null, хотя права при этом полные: их смотри в can_edit/can_manage. */
   my_role: ProjectRole | null
   /** Личное избранное текущего пользователя. */
   is_favorite: boolean
+  /** Эффективные права, посчитанные сервером (членство ИЛИ hub:admin-байпас).
+   * Свою копию правила на клиенте НЕ заводим — именно она однажды разъехалась
+   * с бэкендом и показывала админу чужой проект read-only. */
+  can_edit: boolean
+  can_manage: boolean
 }
 
 export interface ProjectMember {

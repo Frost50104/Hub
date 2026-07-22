@@ -24,6 +24,7 @@ from app.schemas.project import (
 )
 from app.services.project_access import (
     can_create_project,
+    capabilities,
     fetch_project_or_404,
     is_hub_admin,
     require_project_role,
@@ -34,8 +35,16 @@ router = APIRouter(tags=["projects"])
 
 
 def _project_to_response(
-    project: Project, my_role: str | None, is_favorite: bool = False
+    project: Project,
+    my_role: str | None,
+    is_favorite: bool = False,
+    *,
+    principal: Principal,
 ) -> ProjectResponse:
+    """my_role — ФАКТИЧЕСКОЕ членство (для бейджа роли), может быть None у
+    hub:admin вне проекта. Права для UI считаются отдельно: у админа они полные
+    независимо от членства."""
+    can_edit, can_manage = capabilities(principal, my_role)  # type: ignore[arg-type]
     return ProjectResponse(
         id=project.id,
         key=project.key,
@@ -47,6 +56,8 @@ def _project_to_response(
         updated_at=project.updated_at,
         my_role=my_role,  # type: ignore[arg-type]
         is_favorite=is_favorite,
+        can_edit=can_edit,
+        can_manage=can_manage,
     )
 
 
@@ -96,7 +107,9 @@ async def list_projects(
         else:
             member_map = {}
         return [
-            _project_to_response(p, *member_map.get(p.id, (None, False)))
+            _project_to_response(
+                p, *member_map.get(p.id, (None, False)), principal=principal
+            )
             for p in rows
         ]
 
@@ -108,7 +121,10 @@ async def list_projects(
     if not include_archived:
         stmt = stmt.where(Project.archived_at.is_(None))
     rows = (await db.execute(stmt.order_by(Project.created_at.desc()))).all()
-    return [_project_to_response(p, role, fav) for (p, role, fav) in rows]
+    return [
+        _project_to_response(p, role, fav, principal=principal)
+        for (p, role, fav) in rows
+    ]
 
 
 @router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
@@ -163,7 +179,7 @@ async def create_project(
             detail=f"Проект с ключом {key!r} уже существует",
         ) from exc
     await db.refresh(project)
-    return _project_to_response(project, my_role="owner")
+    return _project_to_response(project, my_role="owner", principal=principal)
 
 
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
@@ -176,7 +192,9 @@ async def get_project(
     member_role, is_favorite = await _my_membership(
         db, project_id, principal.employee_id
     )
-    return _project_to_response(project, my_role or member_role, is_favorite)
+    return _project_to_response(
+        project, my_role or member_role, is_favorite, principal=principal
+    )
 
 
 @router.put("/projects/{project_id}/favorite", response_model=ProjectResponse)
@@ -204,7 +222,9 @@ async def set_favorite(
         )
     member.is_favorite = body.is_favorite
     await db.commit()
-    return _project_to_response(project, member.role, member.is_favorite)
+    return _project_to_response(
+        project, member.role, member.is_favorite, principal=principal
+    )
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)
@@ -214,7 +234,7 @@ async def update_project(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectResponse:
-    project, my_role = await require_project_role(
+    project, _ = await require_project_role(
         db, project_id, principal, allow=("owner",)
     )
     if body.name is not None:
@@ -223,7 +243,13 @@ async def update_project(
         project.description = body.description
     await db.commit()
     await db.refresh(project)
-    return _project_to_response(project, my_role or "owner")
+    # Членство перечитываем, а не берём роль из require_project_role: та отдаёт
+    # None ЛЮБОМУ hub:admin (short-circuit до запроса membership), и админ-owner
+    # потерял бы бейдж роли и флаг избранного сразу после правки.
+    member_role, is_favorite = await _my_membership(
+        db, project_id, principal.employee_id
+    )
+    return _project_to_response(project, member_role, is_favorite, principal=principal)
 
 
 @router.post("/projects/{project_id}/archive", response_model=ProjectResponse)
@@ -234,14 +260,17 @@ async def archive_project(
 ) -> ProjectResponse:
     from datetime import UTC, datetime
 
-    project, my_role = await require_project_role(
+    project, _ = await require_project_role(
         db, project_id, principal, allow=("owner",)
     )
     if project.archived_at is None:
         project.archived_at = datetime.now(UTC)
         await db.commit()
         await db.refresh(project)
-    return _project_to_response(project, my_role or "owner")
+    member_role, is_favorite = await _my_membership(
+        db, project_id, principal.employee_id
+    )
+    return _project_to_response(project, member_role, is_favorite, principal=principal)
 
 
 @router.post("/projects/{project_id}/unarchive", response_model=ProjectResponse)
@@ -250,14 +279,17 @@ async def unarchive_project(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectResponse:
-    project, my_role = await require_project_role(
+    project, _ = await require_project_role(
         db, project_id, principal, allow=("owner",)
     )
     if project.archived_at is not None:
         project.archived_at = None
         await db.commit()
         await db.refresh(project)
-    return _project_to_response(project, my_role or "owner")
+    member_role, is_favorite = await _my_membership(
+        db, project_id, principal.employee_id
+    )
+    return _project_to_response(project, member_role, is_favorite, principal=principal)
 
 
 # ─── Members ────────────────────────────────────────────────────────────────

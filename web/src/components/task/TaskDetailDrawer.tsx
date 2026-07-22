@@ -70,9 +70,8 @@ export function TaskDetailDrawer({
   const taskQuery = useTask(taskId ?? undefined)
   const { data: task, isLoading } = taskQuery
   const project = useProject(projectId)
-  // viewer — read-only; null (hub:admin вне членства) оставляем редактируемым,
-  // права всё равно enforced на backend.
-  const readOnly = project.data?.my_role === 'viewer'
+  // Права считает сервер: viewer → read-only, hub:admin вне членства → правит.
+  const readOnly = !project.data?.can_edit
   const update = useUpdateTask(projectId)
   const archive = useArchiveTask(projectId)
   const [title, setTitle] = useState('')
