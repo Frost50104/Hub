@@ -115,6 +115,12 @@ deploy_backend() {
 
   echo "==> Restarting $SERVICE..."
   $SSH_CMD "systemctl restart $SERVICE && sleep 5 && systemctl is-active $SERVICE"
+
+  # Extraction-воркер — отдельный процесс с тем же кодом: без рестарта
+  # остаётся на старой версии (Ф6+; if — на случай env без сервиса).
+  echo "==> Restarting ${SERVICE}-extraction (if enabled)..."
+  $SSH_CMD "if systemctl list-unit-files ${SERVICE}-extraction.service --no-legend | grep -q .; then \
+    systemctl restart ${SERVICE}-extraction && sleep 2 && systemctl is-active ${SERVICE}-extraction; fi"
   echo "==> Backend deployed."
 }
 
