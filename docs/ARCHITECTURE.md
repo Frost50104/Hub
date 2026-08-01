@@ -9,8 +9,8 @@
 
 ## Backend
 
-- **FastAPI** async + lifespan: JWKS-warmup, Redis pool, deletion-sync worker, Sentry init (опц.)
-- **`tenant_scoped_session(tenant_id, *, bypass_rls)`** — async ctx manager (`app/db.py`), копия из `CentralAuthService/app/db.py:62-120`. Устанавливает `SET LOCAL app.tenant_id` или `SET app.bypass_rls = 'on'` для системных воркеров.
+- **FastAPI** async + lifespan: JWKS-warmup, Redis pool, фоновые воркеры deletion-sync и sid-sync (оба через `worker_supervisor.supervise` — рестарт с backoff + Redis leader-lock), Sentry init (опц.). In-memory store sid-sync блокирует `--workers > 1` (см. TECH_DEBT).
+- **`tenant_scoped_session(tenant_id, *, bypass_rls)`** — async ctx manager (`app/db.py`), паттерн CentralAuthService (post-`3cfb256`). Помечает сессию `session.info["rls_scope"]`; листенер `_apply_rls_on_begin` (`after_begin`) ставит `app.tenant_id`/`app.bypass_rls` через `SET LOCAL` на старте каждой транзакции (переживает mid-request commit + смену соединения в пуле — session-level вариант дал кросс-tenant утечку 2026-08-01, см. TECH_DEBT). Для lib-воркеров с сырой фабрикой — `bypass_session_factory()`.
 - **`require_auth = build_require_auth(verifier)`** — `signaris-auth-client.TokenVerifier` валидирует RS256-JWT по JWKS. Никакой собственной валидации.
 - **Shadow upsert middleware** — после `require_auth`: `upsert_shadow_tenant(db, principal)` + `upsert_shadow_user(db, principal)` + commit.
 
@@ -27,6 +27,7 @@
 - `Workspace = tenant_id` (из JWT, без своей таблицы)
 - `projects` (id, tenant_id, key, name, description, archived_at, created_by)
 - `project_members` (project_id, employee_id, role: `owner` | `editor` | `viewer`)
+  - Права фронту отдаёт сервер: `project_access.capabilities()` → `ProjectResponse.can_edit/can_manage` (hub-admin вне членства тоже правит); фронт роли не вычисляет.
 - `sections` (project_id, name, position)
 
 ### Задачи
@@ -48,14 +49,51 @@
 ### Уведомления
 - `push_subscriptions` (employee_id, endpoint UNIQUE, p256dh, auth, user_agent)
 - `notifications` (in-app Inbox)
-- `notification_preferences` (employee_id, prefs JSONB) — пользователь выключает типы
+- `notification_preferences` (employee_id, prefs JSONB) — per-kind, per-channel: `{kind: {push: bool, in_app: bool}}` (legacy `{kind: bool}` нормализуется на чтении)
 
 ### Служебное
 - `shadow_tenants`, `shadow_users`
 - `sync_state` (deletion-sync cursor)
 - `rate_limits` (DB-fallback для Redis)
 
-## Push-триггеры (MVP)
+## Learn-домен (LMS, миграции 0014-0030)
+
+Второе пространство Hub («Обучение», `/learn/*`) — LMS-замена ServiceGuru. Hot-инварианты — в `CLAUDE.md` §«Learn-домен»; здесь — каталог сущностей.
+
+### Таблицы по доменам (таблица → миграция)
+
+- **Оргструктура (0014):** `departments`, `positions`, `position_groups(+members)`, `stores`, `store_groups(+members)`, `franchisees`, `franchisee_groups(+members)`, `user_groups(+members)`, `employee_profiles` (employee_id NULL до первого входа, матчинг по lower(email)), `tu_store_assignments`.
+- **Аудитории (0015):** `audiences`, `audience_rules` (include/exclude, AND внутри строки / OR между), `audience_members` (материализация, granted_at).
+- **Журнал и настройки (0016):** `audit_log` (append-only), `learning_settings` (singleton per tenant, jsonb).
+- **Библиотека (0017):** `library_sections` (дерево), `library_materials` (lifecycle+audience, requires_acknowledgement), `material_versions`, `material_acknowledgements`.
+- **Поиск/индекс (0018):** `search_documents` (только published; вход для FTS и RAG), `text_extraction_jobs`, `view_history`.
+- **Новости (0019):** `news_posts` (TipTap JSONB), `news_comments`, `news_reactions`, `news_acknowledgements`.
+- **Опросы (0020):** `surveys`, `survey_questions`, `survey_participations` (факт), `survey_answer_sets` (анти-деанон: без timestamp/identity), `survey_answers`; все выходы ответов — только через `survey_stats` (k-anonymity).
+- **Избранное/лог поиска (0021):** `favorites`, `search_queries`.
+- **Курсы (0022-0023):** `courses`, `course_lessons` (content JSONB, unlock_rule), `lesson_templates`, `media_files` (подписанные URL); `course_assignments`, `lesson_progress` (block_state: gate-ответы, видео-интервалы), `course_progress`.
+- **Тесты (0024):** `quizzes` (владелец: урок ИЛИ кампания — CHECK), `quiz_questions` (5 типов), `quiz_attempts` (снапшот вопросов + seed, needs_review для open-вопросов).
+- **Рейтинг (0025):** `activity_events` (append-only, partial-unique «первое действие»), `certificates`.
+- **Ассортимент (0026):** `product_categories`, `product_cards` (lifecycle+audience), `product_card_links` (изучить по теме).
+- **Автосценарии (0027):** `automation_rules` (applies_from — без ретро), `automation_jobs` (UNIQUE rule+profile).
+- **AI (0028):** `ai_conversations`, `ai_messages`, `rag_chunks` (pgvector, embedding без typmod + embedding_model).
+- **Биржа смен (0029):** `shift_postings` (open→assigned→done|cancelled), `shift_applications` (UNIQUE posting+profile).
+- **Аттестации (0030):** `assessment_campaigns` (draft|active|closed, audience, окно дат; владеет квизом через `quizzes.campaign_id`).
+
+### Роутеры и воркеры
+
+Learn-роутеры в `app/api/`: org, employees, audit, library, news, surveys, favorites, courses, media, quizzes (включая рейтинг и review), products, learn_home, learn_search, learn_analytics, automations, ai, shifts, assessments. Всего в приложении 40 роутеров (см. `app/main.py`).
+
+Фоновая обработка: systemd-таймеры `course-due-soon`, `review-due`, `inactivity`, `automations` (джобы в `app/jobs/`) + long-running воркер `app/workers/extraction.py` (отдельный сервис `signaris-hub[-staging]-extraction.service`: извлечение текста pypdf/docx → search_documents.body_text → RAG-reconcile).
+
+### Frontend
+
+`web/src/pages/learn/` — 22 страницы: витрина (LearnHomePage), курсы/уроки/тесты (LearnCoursesPage, LearnCoursePage, LearnLessonPage, CourseBuilderPage, QuizBuilder), библиотека, новости, опросы, ассортимент, рейтинг, AI-ассистент, биржа смен, аттестации, админка (org, employees, review, analytics, automations, audit), сертификат. Пространство выбирается по URL (`spaceFromPath`), у learn свой Sidebar/набор мобильных табов.
+
+### Роли learn-домена
+
+JWT `hub:admin|member|viewer` + hub-side `org_role` (employee|tu|franchisee_owner|office — скоуп аналитики через `org_scope.resolve_scope`) + `content_role` (none|author|publisher — права на контент).
+
+## Push-триггеры (task-домен, 6 из 20 kinds)
 
 - `task.assigned_to_me` — мне назначили задачу
 - `task.mentioned` — упомянули в комментарии
@@ -64,7 +102,7 @@
 - `task.due_soon` — за 24ч до дедлайна (cron hourly)
 - `task.overdue` — просрочена (cron daily 09:00 MSK)
 
-Подробнее — `docs/PUSH.md`.
+Ещё 14 learn-kinds (library/news/survey/course/quiz/profile/shift/assessment) — полный список с триггерами в `docs/PUSH.md`; источник истины — `app/services/notification_prefs.py::NOTIFICATION_KINDS`.
 
 ## Темы
 

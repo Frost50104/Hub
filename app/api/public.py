@@ -68,8 +68,10 @@ async def get_public(token: UUID) -> PublicTaskView | PublicProjectView:
         scope = record.scope
         entity_id = record.entity_id
 
-    # Stage 2 — read the entity scoped to the token's tenant.
-    async with tenant_scoped_session(tenant_id, bypass_rls=True) as session:
+    # Stage 2 — read the entity scoped to the token's tenant. Tenant-скоуп
+    # (НЕ bypass): все чтения builders — внутри tenant'а токена, а bypass
+    # раскрывал _mention_names словарь имён/email ЧУЖИХ tenant'ов.
+    async with tenant_scoped_session(tenant_id) as session:
         if scope == "task":
             return await _build_task_view(session, entity_id)
         if scope == "project":

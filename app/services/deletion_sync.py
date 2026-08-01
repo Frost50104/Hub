@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.db import get_session_factory, tenant_scoped_session
+from app.db import bypass_session_factory, tenant_scoped_session
 
 log = structlog.get_logger("deletion_sync")
 _CURSOR_KEY = "deletion_sync"
@@ -108,8 +108,10 @@ async def start_worker() -> None:
     if not settings.signaris_service_key:
         log.warning("deletion_sync.no_service_key")
         return
+    # bypass-фабрика: воркер lib'ы пишет в FORCE-RLS shadow_users сам —
+    # сырая фабрика без RLS-маркера молча обновляла бы 0 строк.
     await run_deletion_sync_worker(
-        get_session_factory(),
+        bypass_session_factory(),
         base_url=settings.signaris_auth_base_url,
         service_key=settings.signaris_service_key,
         on_event=_on_event,

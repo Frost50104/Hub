@@ -2,12 +2,23 @@
 
 Открытые вопросы, упрощения и known-issues. Заполняется по мере накопления.
 
+## Инцидент 2026-08-01 — кросс-tenant RLS-утечка через пул соединений (ИСПРАВЛЕНО)
+
+Пётр (tenant `signaris`) на проде видел проекты/задачи tenant'а `uppetit`: флаппинг 404/200 одного URL, сайдбар с чужими проектами, `/api/me` 500 (`InsufficientPrivilegeError` на INSERT `employee_profiles`).
+
+**Корень:** `tenant_scoped_session` ставил GUC **session-level** один раз при открытии сессии, а `get_db` коммитит shadow-upsert'ы ДО yield → соединение возвращалось в пул (FIFO), и бизнес-запросы роутов исполнялись на другом соединении со stale-GUC чужого tenant'а (или `bypass_rls=on` от воркеров sid-sync/deletion-sync в том же пуле). Пока активен один tenant — не проявлялось; накануне последним в проде был UPPETIT → пул «покрашен» в чужой tenant.
+
+**Фикс:** листенер `app/db.py::_apply_rls_on_begin` (`after_begin` + `SET LOCAL`, порт эталона `CentralAuthService/app/db.py` post-`3cfb256`) перепроставляет оба GUC на старте каждой транзакции. Сопутствующее: `bypass_session_factory()` для lib-воркера deletion-sync (сырая фабрика работала только благодаря утечке — иначе `mark_shadow_deleted` молча обновлял 0 строк); `public.py` stage 2 переведён с bypass на tenant-скоуп (`_mention_names` раскрывал имена/email чужих tenant'ов). Регресс — `tests/integration/test_rls_mid_session_commit.py` (фикстура `rls_enforced`: non-superuser роль, RLS реально enforced; до-фиксовый код валит 2 из 4 тестов).
+
+**Тот же пре-фиксовый `db.py` несёт Listen** (`Listen/app/db.py` + pre-yield commit в `deps.py`; хуже — `device_auth.py` коммитит bypass-сессии → наследник получает полный bypass). Чинить отдельной сессией.
+
 ## Открытое
 
 - **`--workers > 1` заблокирован sid-sync'ом.** Deletion-sync к мульти-воркеру готов (супервизор + Redis leader-lock в `app/services/worker_supervisor.py`, этап 4), но revoked-sid store у sid-sync живёт в памяти процесса: не-лидер не узнаёт о ревокациях, а per-process запуск гоняет общий DB-курсор. Для масштабирования нужен Redis-backed revoked-store. Пока `--workers 1`.
 - **VAPID-ключ единый для prod+staging.** Удобно (как у Desk), но если staging-баг утечёт public key, теоретически prod-подписки можно подделать. Низкая вероятность. Раздельные ключи — future work.
 - **LexoRank-style `tasks.position NUMERIC`** может «насыщаться» при многих DnD-миграциях карточек. Фоновый rebalance колонки так и НЕ реализован (заглушка в `app/api/tasks.py`); при дельте <0.001 порядок может «слипнуться».
 - **Подзадачи только 1 уровень** (`parent_task_id` CHECK depth=1). Глубже потребует tree-CTE в запросах и отдельной миграции.
+- **Интеграционные тесты бегут от superuser'а testcontainers** → RLS в них НЕ enforced (superuser обходит политики безусловно, FORCE не помогает) — «ловушка testcontainers-superuser». Opt-in фикстура `rls_enforced` (non-superuser роль `hub_app_test`) есть в `tests/integration/conftest.py` и используется в `test_rls_mid_session_commit.py`; перевод всей сьюты на неё — отдельная задача (ре-аудит ассертов 13 файлов, часть намеренно ослаблена под superuser-мир).
 - **Email-коллизии между tenant'ами в `shadow_users`** — для пустого старта Hub проблемы нет; если когда-то будем мигрировать данные, нужен pre-migration report (см. `INTEGRATION.md` шаг 12).
 - **Sentry не подключён (DSN нет), проводка полностью готова.** Backend инициализируется при `SIGNARIS_HUB_SENTRY_DSN` в `.env` (deploy.sh с этапа 4 ставит extras `[sentry]`), frontend вызывает `initSentry` при DSN из `/api/env`. Включение = прописать DSN в оба `/opt/*/.env` + restart. Варианты на нашем VPS (2 CPU / 2 GB RAM): (a) Sentry.io free tier — 5k events/мес; (b) GlitchTip self-hosted (~500-800 MB RAM); (c) апгрейд VPS под официальный Sentry. По умолчанию приоритет — GlitchTip на `sentry.signaris.ru`.
 - **Healthcheck email-канал требует MTA на VPS** (`mail(1)` не установлен: `apt install mailutils` + postfix/ssmtp). Основной канал — Telegram (`@signaris_bot`, креды в `/etc/default/signaris-hub-healthcheck`, mode 600) — **настроен и проверен вживую 2026-07-03** (DOWN + RECOVERED). Email — опциональный резерв.
@@ -25,7 +36,7 @@
 
 **Закрыто в Phase 4.1..4.9** (вынесено из backlog): Timeline/Gantt + task dependencies (4.3); Reports/Dashboard на recharts (4.6); FTS по комментам + `ts_headline` highlight + Cmd+K + comment-section в project public view (4.1.2); viewConfig + custom-fields-колонки в List view + UI rename + drag-to-reorder definitions (4.1.1); server-side `Referrer-Policy: no-referrer` для `/p/` (3.6.12, nginx per-route — см. `ops/nginx/hub.signaris.ru.conf`).
 
-**Закрыто в этапах 1-2 плана коммерциализации (2026-07-03, staging):** assignee-пикер + null-семантика PATCH; управление участниками в UI; фильтры (assignee/status/priority/label/due) + сортировка в List/Board/Calendar с состоянием в URL; подзадачи в UI; labels end-to-end (+RLS-фикс `task_label_assignments`, миграция 0011); избранные проекты (0012); rename секций; глобальный onError мутаций + QueryError; optimistic updates + undo; markdown в описании/комментах; скелетоны; My Tasks группы по срокам; route code-splitting (бандл 961→688 KB); Telegram-канал healthcheck; аватары-фото отложены (auth не отдаёт avatar_url).
+**Закрыто в этапах 1-2 плана коммерциализации (2026-07-03, staging):** assignee-пикер + null-семантика PATCH; управление участниками в UI; фильтры (assignee/status/priority/label/due) + сортировка в List/Board/Calendar с состоянием в URL; подзадачи в UI; labels end-to-end (+RLS-фикс `task_label_assignments`, миграция 0011); избранные проекты (0012); rename секций; глобальный onError мутаций + QueryError; optimistic updates + undo; markdown в описании/комментах; скелетоны; My Tasks группы по срокам; route code-splitting (бандл 961→688 KB); Telegram-канал healthcheck; ~~аватары-фото отложены~~ — подключены в LMS Ф4 (learn_home/learn_profile отдают `avatar_url` на публичный `auth.signaris.ru/api/avatars/{employee_id}`, CSP img-src расширен, фронт с onError-фолбэком на инициалы).
 
 Осталось открытым:
 

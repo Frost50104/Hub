@@ -27,7 +27,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_session_factory, tenant_scoped_session
+from app.db import tenant_scoped_session
 from app.models.notification import Notification, NotificationPreferences
 from app.services.notification_prefs import (
     KindPref,
@@ -160,7 +160,3 @@ async def dispatch(
                 "kind": kind,
             },
         )
-
-
-# Re-export for tests / explicit usage.
-_ = get_session_factory

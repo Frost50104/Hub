@@ -1,36 +1,88 @@
 """SQLAlchemy async engine + tenant-scoped session with Postgres RLS.
 
-`tenant_scoped_session` ставит `app.tenant_id` (или `app.bypass_rls=on` для
-системных воркеров) в Postgres GUC — RLS-policies на доменных таблицах
-читают эти переменные через `current_setting()`.
+`tenant_scoped_session` фиксирует желаемый RLS-скоуп (`app.tenant_id` или
+`app.bypass_rls=on` для системных воркеров) в `session.info`; листенер
+`_apply_rls_on_begin` проставляет GUC через `SET LOCAL` на старте КАЖДОЙ
+транзакции — RLS-policies доменных таблиц читают их через `current_setting()`.
 
-Скопировано 1:1 с CentralAuthService/app/db.py:62-120 — единый паттерн для
-всех продуктов экосистемы.
+Паттерн after_begin — как в CentralAuthService/app/db.py (post-3cfb256,
+фикс RLS-утечки через пул соединений 2026-05-31) — единый для всех
+продуктов экосистемы.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from uuid import UUID
 
 import structlog
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, Session
 
 from app.config import get_settings
 
 _log = structlog.get_logger("db")
 
+# Ключ в session.info, по которому листенер узнаёт желаемый RLS-скоуп
+# (см. комментарий у листенера). Сырые `factory()`-сессии без этого ключа
+# листенер игнорирует — для них GUC не ставятся вовсе (RLS fail-closed).
+_RLS_INFO_KEY = "rls_scope"
+
 
 class Base(DeclarativeBase):
     """Base for all ORM models."""
+
+
+@event.listens_for(Session, "after_begin")
+def _apply_rls_on_begin(session: Session, transaction, connection) -> None:  # noqa: ARG001
+    """Set `app.tenant_id` / `app.bypass_rls` at the start of every transaction.
+
+    ⚠ Почему именно так, а не «один раз при открытии сессии»:
+
+    Engine использует пул (`pool_size=10` + overflow). SQLAlchemy-сессия НЕ
+    закреплена за одним физическим соединением на всю жизнь — после каждого
+    `commit()`/`rollback()` соединение возвращается в пул, а следующая
+    транзакция той же сессии может взять ДРУГОЕ соединение. Если RLS-GUC
+    выставлены session-level (`set_config(..., is_local=false)`) только при
+    открытии сессии, то post-commit запросы (а `get_db` коммитит shadow-upsert
+    ДО yield — то есть ВСЕ бизнес-запросы роутов) рискуют попасть на соединение
+    со «stale» значением другого tenant'а или `bypass_rls='on'` от воркер-сессий
+    (sid-sync/deletion-sync живут в том же пуле). Ровно это дало кросс-tenant
+    утечку в проде 2026-08-01 (см. docs/TECH_DEBT.md).
+
+    `after_begin` срабатывает в начале КАЖДОЙ транзакции и даёт нам нужное
+    соединение → ставим оба GUC через `SET LOCAL` (is_local=true,
+    транзакционно-скоупно). Это идемпотентно перезатирает любое унаследованное
+    из пула значение и не протекает обратно в пул.
+
+    Действуем только для сессий, помеченных `tenant_scoped_session` /
+    `bypass_session_factory` (`session.info[_RLS_INFO_KEY]`); сырые
+    `factory()`-сессии не трогаем.
+
+    NB: `Session` здесь — sync-класс SQLAlchemy, AsyncSession проксирует его;
+    листенер sync, `connection.execute(...)` синхронно отрабатывает в
+    sync-секции async-стэка перед отправкой statement'а в asyncpg.
+    """
+    scope = session.info.get(_RLS_INFO_KEY)
+    if scope is None:
+        return
+    tenant_id, bypass_rls = scope
+    if bypass_rls:
+        connection.execute(text("SELECT set_config('app.bypass_rls', 'on', true)"))
+        connection.execute(text("SELECT set_config('app.tenant_id', '', true)"))
+    else:
+        connection.execute(text("SELECT set_config('app.bypass_rls', '', true)"))
+        connection.execute(
+            text("SELECT set_config('app.tenant_id', :tid, true)"),
+            {"tid": str(tenant_id) if tenant_id else ""},
+        )
 
 
 _engine: AsyncEngine | None = None
@@ -72,6 +124,23 @@ async def reset_engine() -> None:
     _session_factory = None
 
 
+def bypass_session_factory() -> Callable[[], AsyncSession]:
+    """Фабрика bypass-RLS сессий для внешних воркеров (deletion-sync из lib).
+
+    Библиотечный `run_deletion_sync_worker` открывает сессии сам
+    (`async with session_factory() as session`) и пишет в FORCE-RLS
+    `shadow_users` — сырой фабрике без `session.info[_RLS_INFO_KEY]` листенер
+    GUC не поставит, и `mark_shadow_deleted` молча обновлял бы 0 строк.
+    Возвращаем callable, который помечает каждую сессию как bypass-RLS.
+    """
+    factory = get_session_factory()
+
+    def _make() -> AsyncSession:
+        return factory(info={_RLS_INFO_KEY: (None, True)})
+
+    return _make
+
+
 @asynccontextmanager
 async def tenant_scoped_session(
     tenant_id: UUID | None,
@@ -89,18 +158,12 @@ async def tenant_scoped_session(
 
     factory = get_session_factory()
     async with factory() as session:
-        # Connection may be reused — always reset both vars first.
-        await session.execute(text("SELECT set_config('app.bypass_rls', '', false)"))
-        await session.execute(text("SELECT set_config('app.tenant_id', '', false)"))
-        if bypass_rls:
-            await session.execute(
-                text("SELECT set_config('app.bypass_rls', 'on', false)")
-            )
-        else:
-            await session.execute(
-                text("SELECT set_config('app.tenant_id', :tid, false)"),
-                {"tid": str(tenant_id)},
-            )
+        # GUC (`app.tenant_id` / `app.bypass_rls`) проставляются листенером
+        # `_apply_rls_on_begin` через `SET LOCAL` на старте КАЖДОЙ транзакции —
+        # это переживает mid-request commit'ы и смену соединения в пуле (без
+        # этого session-level set_config терялся после первого commit'а, и RLS
+        # подставлял чужой tenant). Здесь только фиксируем желаемый скоуп.
+        session.info[_RLS_INFO_KEY] = (tenant_id, bypass_rls)
 
         if get_settings().debug_rls:
             row = (
