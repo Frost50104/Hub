@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from signaris_auth import Principal
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.learn_home import AUTH_AVATAR_BASE
 from app.deps import get_db, require_auth_any
 from app.services.employee_profiles import ensure_profile_for_principal
 
@@ -38,6 +39,9 @@ class MeResponse(BaseModel):
     tenant_id: UUID
     tenant_slug: str
     hub_role: str | None
+    # Публичный аватар из auth; фронт делает <img> с фолбэком на инициалы
+    # (у аккаунтов без фото auth отдаёт 404).
+    avatar_url: str
     # Learn-профиль: None у юзеров без hub-роли; needs_restore=True — карточка
     # с этим email в архиве, требуется восстановление админом (повторный найм).
     profile: MeProfile | None = None
@@ -79,6 +83,7 @@ async def get_me(
         tenant_id=principal.tenant_id,
         tenant_slug=principal.tenant_slug,
         hub_role=hub_role,
+        avatar_url=f"{AUTH_AVATAR_BASE}/{principal.employee_id}",
         profile=profile_payload,
         profile_needs_restore=needs_restore,
     )

@@ -327,6 +327,7 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
           <Avatar
             name={me.data?.full_name}
             email={me.data?.email}
+            src={me.data?.avatar_url}
             className="h-7 w-7 text-[10px]"
           />
           <div className="min-w-0">

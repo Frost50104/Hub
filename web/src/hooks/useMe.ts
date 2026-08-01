@@ -21,6 +21,8 @@ export interface Me {
   tenant_id: string
   tenant_slug: string
   hub_role: 'admin' | 'member' | 'viewer' | null
+  /** Публичный аватар из auth; 404 у аккаунтов без фото — фолбэк на инициалы. */
+  avatar_url: string
   /** Learn-профиль (HR-карточка); null у юзеров без hub-роли. */
   profile: MeProfile | null
   /** Карточка с этим email в архиве — требуется восстановление админом. */
