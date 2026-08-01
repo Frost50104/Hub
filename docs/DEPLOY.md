@@ -127,9 +127,19 @@ INTEGRATED_PRODUCTS: frozenset[str] = frozenset({"net", "sonar", "hub"})
 3. Получить service-key для deletion-sync → `SIGNARIS_HUB_SIGNARIS_SERVICE_KEY` в `/opt/signaris-hub/.env`
 4. `systemctl restart signaris-hub`
 
-## Обязательный env staging: SIGNARIS_HUB_PUBLIC_BASE_URL
+## Ключевые env-переменные (`SIGNARIS_HUB_*`, полный список — `app/config.py`, 35 полей)
 
-Дефолт `public_base_url` в `app/config.py` — прод-домен. На staging обязана
-стоять переменная `SIGNARIS_HUB_PUBLIC_BASE_URL=https://hub-staging.signaris.ru`
-в `/opt/signaris-hub-staging/.env` — иначе публичные ссылки (/p/<token>)
-генерируются с прод-доменом и не открываются (QA-находка 2026-07-20).
+Значения живут ТОЛЬКО в `/opt/signaris-hub[-staging]/.env` на VPS (+ секреты в локальном CLAUDE.md → СЕКРЕТЫ). Операционно-значимые:
+
+| Переменная | Зачем |
+|---|---|
+| `PUBLIC_BASE_URL` | база для публичных ссылок `/p/<token>`. **На staging ОБЯЗАТЕЛЬНА** (`https://hub-staging.signaris.ru`) — дефолт прод-домен, иначе staging-ссылки битые (QA-находка 2026-07-20) |
+| `MEDIA_URL_SECRET` | HMAC-секрет подписи learn-медиа URL; если не задан — деривится из database_url. Смена = все выданные ссылки протухают |
+| `MEDIA_ACCEL_ENABLED` / `MEDIA_URL_TTL_SEC` / `MEDIA_MIN_FREE_BYTES` | X-Accel-отдача, TTL подписи (6ч), statvfs-порог upload'а |
+| `AI_PROVIDER` / `AI_API_KEY` / `AI_BASE_URL` / `AI_CHAT_MODEL` / `AI_EMBED_MODEL` / `AI_FOLDER_ID` | LLM-провайдер Ф6 (yandex\|gigachat\|openai-compatible). Без ключа `/api/ai/ask` → 503, extraction-воркер пропускает RAG-шаг |
+| `SID_SYNC_ENABLED` / `SID_SYNC_POLL_SEC` | воркер ревокаций SSO-сессий (блокирует `--workers > 1`) |
+| `DELETION_SYNC_ENABLED` / `SIGNARIS_SERVICE_KEY` | deletion-sync из auth |
+| `ATTACHMENTS_ROOT` / `ATTACHMENT_MAX_BYTES` | корень файлов (вложения задач + learn-медиа), лимит вложений задач |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY_PATH` / `VAPID_SUBJECT` | Web Push |
+| `SENTRY_DSN` | включает Sentry backend (+frontend через /api/env); пока не задан |
+| `PUBLIC_LINKS_ENABLED` | feature-flag публичных ссылок (default true) |
