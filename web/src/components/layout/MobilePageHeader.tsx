@@ -4,6 +4,8 @@ import { type ReactNode } from 'react'
 import { cn } from '@/lib/cn'
 
 interface MobilePageHeaderProps {
+  /** Slot above the eyebrow/title — e.g. the SpaceSwitcher on home pages. */
+  topSlot?: ReactNode
   /** Pre-title sub-line — typically the date or a small label. */
   eyebrow?: string
   /** Big page title (rendered as `<h1>`). */
@@ -22,6 +24,7 @@ interface MobilePageHeaderProps {
  * Sticks below the iOS status bar via `pt-safe`.
  */
 export function MobilePageHeader({
+  topSlot,
   eyebrow,
   title,
   trailing,
@@ -34,6 +37,7 @@ export function MobilePageHeader({
       className={cn('px-4 pb-3 pt-3', className)}
       style={{ paddingTop: 'calc(env(safe-area-inset-top, 0) + 0.75rem)' }}
     >
+      {topSlot && <div className="mb-3">{topSlot}</div>}
       {eyebrow && (
         <p className="mb-1 text-xs text-text2 capitalize">{eyebrow}</p>
       )}

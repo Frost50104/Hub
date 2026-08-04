@@ -1,25 +1,7 @@
-import {
-  BadgeCheck,
-  BarChart3,
-  BookOpen,
-  Bot,
-  ClipboardList,
-  Building2,
-  GraduationCap,
-  Handshake,
-  Inbox,
-  LogOut,
-  Newspaper,
-  ScrollText,
-  Settings,
-  ShoppingBag,
-  Sparkles,
-  Trophy,
-  Users,
-  Workflow,
-} from 'lucide-react'
+import { LogOut, Settings } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 
+import { ADMIN_NAV, LEARN_NAV, type LearnNavItem } from './learnNav'
 import { SpaceSwitcher } from './SpaceSwitcher'
 import { Avatar } from '@/components/ui/Avatar'
 import { useMe } from '@/hooks/useMe'
@@ -28,39 +10,6 @@ import { authClient } from '@/lib/auth'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/cn'
 import { HUB_ROLE_BADGE } from '@/lib/learn'
-
-interface LearnNavItem {
-  to: string
-  label: string
-  icon: typeof GraduationCap
-  end?: boolean
-  badge?: boolean
-  soon?: boolean
-}
-
-// Разделы включаются по мере этапов Ф1–Ф4; до готовности — «скоро» (disabled).
-const LEARN_NAV: LearnNavItem[] = [
-  { to: '/learn', label: 'Витрина', icon: Sparkles, end: true },
-  { to: '/learn/courses', label: 'Моё обучение', icon: GraduationCap },
-  { to: '/learn/library', label: 'Библиотека', icon: BookOpen },
-  { to: '/learn/news', label: 'Новости', icon: Newspaper },
-  { to: '/learn/surveys', label: 'Опросы', icon: ClipboardList },
-  { to: '/learn/products', label: 'Ассортимент', icon: ShoppingBag },
-  { to: '/learn/rating', label: 'Рейтинг', icon: Trophy },
-  { to: '/learn/assistant', label: 'AI-помощник', icon: Bot },
-  { to: '/learn/shifts', label: 'Биржа смен', icon: Handshake },
-  { to: '/learn/assessments', label: 'Аттестации', icon: BadgeCheck },
-  { to: '/inbox', label: 'Входящие', icon: Inbox, badge: true },
-]
-
-const ADMIN_NAV: LearnNavItem[] = [
-  { to: '/learn/admin/org', label: 'Оргструктура', icon: Building2 },
-  { to: '/learn/admin/employees', label: 'Сотрудники', icon: Users },
-  { to: '/learn/admin/review', label: 'Проверка тестов', icon: ClipboardList },
-  { to: '/learn/admin/analytics', label: 'Аналитика', icon: BarChart3 },
-  { to: '/learn/admin/automations', label: 'Автосценарии', icon: Workflow },
-  { to: '/learn/admin/audit', label: 'Журнал', icon: ScrollText },
-]
 
 function NavEntry({
   item,

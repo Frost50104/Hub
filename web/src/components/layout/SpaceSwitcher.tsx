@@ -2,7 +2,7 @@ import { CheckSquare, GraduationCap } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { cn } from '@/lib/cn'
-import { spaceFromPath, useWorkspace, type Space } from '@/lib/workspace'
+import { useResolvedSpace, useWorkspace, type Space } from '@/lib/workspace'
 
 const SPACES: { key: Space; label: string; icon: typeof CheckSquare; to: string }[] = [
   { key: 'tasks', label: 'Задачи', icon: CheckSquare, to: '/' },
@@ -18,7 +18,9 @@ export function SpaceSwitcher({ className }: { className?: string }) {
   const location = useLocation()
   const navigate = useNavigate()
   const rememberSpace = useWorkspace((s) => s.rememberSpace)
-  const active = spaceFromPath(location.pathname)
+  // Резолвер, а не spaceFromPath: на нейтральных роутах (/inbox, /settings/*)
+  // подсвечивается унаследованное пространство, а не «Задачи».
+  const active = useResolvedSpace()
 
   return (
     <div
@@ -35,7 +37,10 @@ export function SpaceSwitcher({ className }: { className?: string }) {
           role="tab"
           aria-selected={active === key}
           onClick={() => {
-            if (active !== key) {
+            // Гейт по pathname, не по active: на нейтральном роуте (/inbox при
+            // lastSpace='learn') сегмент «Обучение» уже active, но клик по нему
+            // обязан вести на витрину, а не быть no-op'ом.
+            if (location.pathname !== to) {
               rememberSpace(key)
               navigate(to)
             }

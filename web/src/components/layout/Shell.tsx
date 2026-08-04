@@ -1,13 +1,19 @@
 import { LogOut, ShieldOff } from 'lucide-react'
 import { Suspense, useEffect } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/Button'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMe } from '@/hooks/useMe'
 import { authClient } from '@/lib/auth'
-import { spaceFromPath, useWorkspace } from '@/lib/workspace'
+import {
+  consumeBootSpaceRedirect,
+  isNeutralPath,
+  resolveSpace,
+  spaceFromPath,
+  useWorkspace,
+} from '@/lib/workspace'
 
 import { LearnSidebar } from './LearnSidebar'
 import { MobileBottomTabBar } from './MobileBottomTabBar'
@@ -41,8 +47,11 @@ function NoAccessScreen() {
  * the desktop sidebar.
  *
  * Два пространства (Ф0 LMS): «Задачи» и «Обучение» (/learn/*). Пространство
- * выводится из URL; Shell лишь выбирает нужный Sidebar/набор табов и
- * запоминает последний выбор для будущих сессий.
+ * выводится из URL через `resolveSpace`: нейтральные роуты (/inbox, /search,
+ * /profile, /settings) наследуют последнее посещённое, чтобы из «Обучения»
+ * поход во Входящие не подменял таб-бар/сайдбар на задачные. Shell выбирает
+ * нужный Sidebar/набор табов, запоминает последний выбор и один раз за
+ * загрузку возвращает пользователя в learn при холодном старте на "/".
  *
  * `pb-20` on mobile main reserves space for the fixed bottom bar. On
  * desktop the sidebar handles spacing itself.
@@ -55,13 +64,29 @@ function NoAccessScreen() {
 export function Shell() {
   const isDesktop = useIsDesktop()
   const location = useLocation()
-  const space = spaceFromPath(location.pathname)
+  const navigate = useNavigate()
+  const lastSpace = useWorkspace((s) => s.lastSpace)
   const rememberSpace = useWorkspace((s) => s.rememberSpace)
   const me = useMe()
+  const space = resolveSpace(location.pathname, lastSpace)
 
+  // ЕДИНЫЙ эффект, boot-redirect строго ПЕРЕД remember: раздельные эффекты —
+  // баг (remember успел бы перезаписать lastSpace='tasks' на первом маунте
+  // на "/", и восстановление learn никогда бы не сработало).
   useEffect(() => {
-    rememberSpace(space)
-  }, [space, rememberSpace])
+    if (
+      consumeBootSpaceRedirect() &&
+      location.pathname === '/' &&
+      useWorkspace.getState().lastSpace === 'learn'
+    ) {
+      navigate('/learn', { replace: true })
+      return // промежуточное "/" не должно запомниться как 'tasks'
+    }
+    // Запоминаем только «окрашенные» роуты — /inbox и т.п. не перетирают выбор.
+    if (!isNeutralPath(location.pathname)) {
+      rememberSpace(spaceFromPath(location.pathname))
+    }
+  }, [location.pathname, navigate, rememberSpace])
 
   // Только при ЗАГРУЖЕННОМ /api/me — иначе экран мигал бы у всех на старте.
   if (me.data && me.data.hub_role === null) return <NoAccessScreen />

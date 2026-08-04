@@ -15,6 +15,7 @@ import {
 import { Link } from 'react-router-dom'
 
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
+import { SpaceSwitcher } from '@/components/layout/SpaceSwitcher'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useLearnHome, useRecent } from '@/hooks/useLearn'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
@@ -83,7 +84,13 @@ export function LearnHomePage() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      {!isDesktop && <MobilePageHeader eyebrow="Обучение" title="Витрина" />}
+      {!isDesktop && (
+        <MobilePageHeader
+          topSlot={<SpaceSwitcher />}
+          eyebrow="Обучение"
+          title="Витрина"
+        />
+      )}
       <div className="space-y-6 p-4 lg:p-8">
         <div className="flex flex-wrap items-start justify-between gap-3">
           {isDesktop && (

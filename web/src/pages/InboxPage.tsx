@@ -22,6 +22,7 @@ import {
 } from '@/hooks/useNotifications'
 import { cn } from '@/lib/cn'
 import { type Notification } from '@/lib/notifications'
+import { useResolvedSpace } from '@/lib/workspace'
 
 const KIND_ICON: Record<string, typeof Bell> = {
   'task.assigned_to_me': CheckSquare,
@@ -52,6 +53,7 @@ function MobileInbox() {
   const notifications = useNotifications()
   const markAll = useMarkAllRead()
   const markOne = useMarkRead()
+  const space = useResolvedSpace()
 
   const groups = useMemo(() => bucketByAge(notifications.data ?? []), [
     notifications.data,
@@ -113,7 +115,8 @@ function MobileInbox() {
         )}
       </div>
 
-      <FloatingActionButton />
+      {/* FAB «Создать» — задачный; из learn-пространства его не показываем. */}
+      {space === 'tasks' && <FloatingActionButton />}
     </>
   )
 }

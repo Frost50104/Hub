@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
+import { SpaceSwitcher } from '@/components/layout/SpaceSwitcher'
 import { PushPermissionPrompt } from '@/components/PushPermissionPrompt'
 import { QueryError } from '@/components/QueryError'
 import { SkeletonRows } from '@/components/ui/Skeleton'
@@ -78,6 +79,7 @@ function MobileHome() {
   return (
     <>
       <MobilePageHeader
+        topSlot={<SpaceSwitcher />}
         eyebrow={todayLabel()}
         title={`${greeting()}, ${firstName || 'друг'}`}
         trailing={
