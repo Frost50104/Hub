@@ -56,18 +56,13 @@ const MENU_DESTINATIONS = [
   ...ADMIN_NAV.map((i) => i.to),
 ]
 
-function tabInner(Icon: typeof Home, label: string, active: boolean, dot: boolean) {
+function tabInner(Icon: typeof Home, label: string, dot: boolean) {
   return (
     <>
-      <span
-        className={cn(
-          'relative flex h-9 w-9 items-center justify-center rounded-full transition-colors',
-          active ? 'bg-surface text-amber' : 'bg-transparent',
-        )}
-      >
-        <Icon className="h-5 w-5" strokeWidth={active ? 2.2 : 1.8} />
+      <span className="relative">
+        <Icon className="h-6 w-6" strokeWidth={1.6} />
         {dot && (
-          <span className="absolute right-1 top-1 inline-block h-1.5 w-1.5 rounded-full bg-red" />
+          <span className="absolute -right-0.5 -top-0.5 inline-block h-1.5 w-1.5 rounded-full bg-red" />
         )}
       </span>
       <span className="leading-none">{label}</span>
@@ -76,9 +71,10 @@ function tabInner(Icon: typeof Home, label: string, active: boolean, dot: boolea
 }
 
 /**
- * Asana-style bottom tab bar (5 entries). Active tab fills a circle around
- * the icon (theme-aware). Inactive tabs render the outline icon + label.
- * In the learn space the fifth tab is a button opening `LearnMenuSheet`.
+ * Bottom tab bar (5 entries) — flat Desk-style (see Layout.jsx в AXO_bot_web):
+ * компактные 50px, без подложки под активной иконкой, актив — только цвет
+ * (amber) + вес подписи. In the learn space the fifth tab is a button
+ * opening `LearnMenuSheet`.
  *
  * Sits fixed at the bottom of the viewport. Adds `safe-area-inset-bottom`
  * padding so it stays clear of the iOS home indicator without doubling the
@@ -97,18 +93,18 @@ export function MobileBottomTabBar({ space = 'tasks' }: { space?: Space }) {
 
   const itemClass = (active: boolean) =>
     cn(
-      'group flex flex-col items-center gap-1 rounded-md py-1 text-[10px] font-medium transition-colors',
-      active ? 'text-amber' : 'text-text3 hover:text-text2',
+      'flex h-[50px] w-full flex-col items-center gap-0.5 pt-2.5 text-[10px] transition-colors',
+      active ? 'font-medium text-amber' : 'font-light text-text3 hover:text-text2',
     )
 
   return (
     <>
       <nav
         aria-label="Главное меню"
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-glass-border bg-bg-alt/95 backdrop-blur"
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-glass-border bg-bg-alt"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0)' }}
       >
-        <ul className="flex items-end justify-around px-1 pb-1 pt-2">
+        <ul className="flex">
           {tabs.map((tab) => (
             <li key={tab.label} className="flex-1">
               {tab.kind === 'link' ? (
@@ -117,24 +113,21 @@ export function MobileBottomTabBar({ space = 'tasks' }: { space?: Space }) {
                   end={tab.end}
                   className={({ isActive }) => itemClass(isActive)}
                 >
-                  {({ isActive }) =>
-                    tabInner(
-                      tab.icon,
-                      tab.label,
-                      isActive,
-                      Boolean(tab.showUnreadDot) && unreadCount > 0,
-                    )
-                  }
+                  {tabInner(
+                    tab.icon,
+                    tab.label,
+                    Boolean(tab.showUnreadDot) && unreadCount > 0,
+                  )}
                 </NavLink>
               ) : (
                 <button
                   type="button"
                   onClick={() => setMenuOpen(true)}
-                  className={cn('w-full', itemClass(menuActive))}
+                  className={itemClass(menuActive)}
                   aria-haspopup="dialog"
                   aria-expanded={menuOpen}
                 >
-                  {tabInner(tab.icon, tab.label, menuActive, false)}
+                  {tabInner(tab.icon, tab.label, false)}
                 </button>
               )}
             </li>

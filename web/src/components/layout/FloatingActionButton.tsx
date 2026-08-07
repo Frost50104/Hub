@@ -36,7 +36,7 @@ interface FloatingActionButtonProps {
  * desktop uses the sidebar "Создать" dropdown instead.
  */
 export function FloatingActionButton({
-  bottomOffset = 5.5,
+  bottomOffset = 4.5,
   className,
 }: FloatingActionButtonProps) {
   const [sheetOpen, setSheetOpen] = useState(false)

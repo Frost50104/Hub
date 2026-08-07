@@ -98,7 +98,7 @@ export function Shell() {
         className="min-w-0 flex-1 overflow-y-auto pb-20 lg:pb-0 lg:overflow-y-auto"
         style={
           !isDesktop
-            ? { paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 5rem)' }
+            ? { paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 4rem)' }
             : undefined
         }
       >
