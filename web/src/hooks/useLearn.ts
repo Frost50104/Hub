@@ -8,6 +8,7 @@ import {
 import {
   learnApi,
   type AudienceDryRun,
+  type AudienceRules,
   type AudienceRuleDraft,
   type AuditList,
   type CertificateInfo,
@@ -108,6 +109,18 @@ export function useAudienceDryRun(
     queryFn: () => learnApi.audienceDryRun(body!),
     enabled: body !== null,
     placeholderData: (prev) => prev,
+    meta: { suppressGlobalError: true },
+  })
+}
+
+/** Правила существующей аудитории — предзаполнение диалогов (null = «всем»). */
+export function useAudienceRules(
+  audienceId: string | null,
+): UseQueryResult<AudienceRules> {
+  return useQuery({
+    queryKey: ['learn-audience-rules', audienceId],
+    queryFn: () => learnApi.audienceRules(audienceId!),
+    enabled: audienceId !== null,
     meta: { suppressGlobalError: true },
   })
 }

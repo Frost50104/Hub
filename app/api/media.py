@@ -156,7 +156,14 @@ async def serve_media(
     if not settings.media_accel_enabled:
         if not path.is_file():
             raise HTTPException(status_code=410, detail="Файл отсутствует в хранилище")
-        return FileResponse(path, media_type=media.mime, filename=media.file_name)
+        # inline, не attachment: PDF/картинки рендерятся в <iframe>/<img>
+        # (filename= без content_disposition_type даёт attachment).
+        return FileResponse(
+            path,
+            media_type=media.mime,
+            filename=media.file_name,
+            content_disposition_type="inline",
+        )
 
     # nginx сам отдаст файл (Range/206, sendfile) по internal-локации.
     return Response(

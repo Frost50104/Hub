@@ -3,7 +3,8 @@
 Permissions:
 - GET /learn/org (снапшот справочников) → любой hub-юзер (нужен пикерам);
 - мутации справочников/групп → hub:admin;
-- POST /learn/audiences/dry-run, /learn/audiences/rebuild → hub:admin.
+- POST /learn/audiences/dry-run, GET /learn/audiences/{id} → content-role
+  publisher+ (симметрично PUT .../audience); /learn/audiences/rebuild → hub:admin.
 
 Мутации, влияющие на членство аудиторий (составы групп, франчайзи магазина,
 родитель отдела), заканчиваются `rebuild_tenant` — «наследование по
@@ -16,6 +17,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from signaris_auth import Principal
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
@@ -40,6 +42,7 @@ from app.models.org import (
 from app.schemas.org import (
     AudienceDryRunBody,
     AudienceDryRunResponse,
+    AudienceRuleBody,
     DepartmentCreate,
     DepartmentResponse,
     DepartmentUpdate,
@@ -56,11 +59,12 @@ from app.schemas.org import (
 )
 from app.services import audit
 from app.services.audience_resolver import (
-    RuleSpec,
     dry_run,
+    load_audience_rules,
     rebuild_tenant,
     validate_rules,
 )
+from app.services.content_access import require_content_role
 from app.services.learn_notify import notify_new_audience_members
 
 router = APIRouter(tags=["learn-org"])
@@ -637,32 +641,19 @@ async def delete_group(
 # --- Audience dry-run + пересчёт ----------------------------------------------
 
 
-def _rule_specs(body: AudienceDryRunBody) -> list[RuleSpec]:
-    return [
-        RuleSpec(
-            mode=r.mode,
-            profile_ids=frozenset(r.profile_ids),
-            position_ids=frozenset(r.position_ids),
-            position_group_ids=frozenset(r.position_group_ids),
-            store_ids=frozenset(r.store_ids),
-            store_group_ids=frozenset(r.store_group_ids),
-            franchisee_ids=frozenset(r.franchisee_ids),
-            franchisee_group_ids=frozenset(r.franchisee_group_ids),
-            department_ids=frozenset(r.department_ids),
-            user_group_ids=frozenset(r.user_group_ids),
-        )
-        for r in body.rules
-    ]
 
 
 @router.post("/learn/audiences/dry-run", response_model=AudienceDryRunResponse)
 async def audience_dry_run(
     body: AudienceDryRunBody,
-    principal: Principal = Depends(_ADMIN),
+    principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> AudienceDryRunResponse:
+    # publisher, не _ADMIN: пикер зовёт dry-run из диалогов аудитории, куда
+    # publisher попадает легально (симметрично гвардам PUT .../audience).
+    await require_content_role(db, principal, "publisher")
     try:
-        specs = _rule_specs(body)
+        specs = [r.to_spec() for r in body.rules]
         validate_rules(specs)
         count, sample_ids = await dry_run(db, is_all=body.is_all, rules=specs)
     except ValueError as e:
@@ -683,6 +674,54 @@ async def audience_dry_run(
             DryRunProfile(id=pid, full_name=names.get(pid, "?")) for pid in sample_ids
         ],
     )
+
+
+class AudienceRulesResponse(BaseModel):
+    is_all: bool
+    rules: list[AudienceRuleBody]
+    # Имена для чипов «Сотрудник»: пикер грузит max 100 активных, правило
+    # может ссылаться на кого угодно (включая архивных).
+    profile_labels: dict[UUID, str]
+
+
+@router.get("/learn/audiences/{audience_id}", response_model=AudienceRulesResponse)
+async def get_audience_rules(
+    audience_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> AudienceRulesResponse:
+    """Правила аудитории для предзаполнения пикера (ОС 2026-08-10: диалоги
+    открывались пустыми — казалось, что группы «не сохраняются»)."""
+    await require_content_role(db, principal, "publisher")
+    is_all, rows = await load_audience_rules(db, audience_id)
+    rules = [
+        AudienceRuleBody(
+            mode=r.mode,
+            profile_ids=r.profile_ids or [],
+            position_ids=r.position_ids or [],
+            position_group_ids=r.position_group_ids or [],
+            store_ids=r.store_ids or [],
+            store_group_ids=r.store_group_ids or [],
+            franchisee_ids=r.franchisee_ids or [],
+            franchisee_group_ids=r.franchisee_group_ids or [],
+            department_ids=r.department_ids or [],
+            user_group_ids=r.user_group_ids or [],
+            org_roles=r.org_roles or [],  # type: ignore[arg-type]
+        )
+        for r in rows
+    ]
+    pids = {pid for r in rows for pid in (r.profile_ids or [])}
+    labels: dict[UUID, str] = {}
+    if pids:
+        labels = {
+            row[0]: row[1]
+            for row in await db.execute(
+                select(EmployeeProfile.id, EmployeeProfile.full_name).where(
+                    EmployeeProfile.id.in_(pids)
+                )
+            )
+        }
+    return AudienceRulesResponse(is_all=is_all, rules=rules, profile_labels=labels)
 
 
 @router.post("/learn/audiences/rebuild")

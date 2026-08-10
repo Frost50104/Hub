@@ -14,7 +14,7 @@ import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { AudiencePicker, type AudienceValue } from '@/components/learn/AudiencePicker'
+import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
@@ -606,10 +606,8 @@ function ProductAudienceDialog({
   card: ProductCard
   onClose: () => void
 }) {
-  const [value, setValue] = useState<AudienceValue>({
-    is_all: card.audience_id === null,
-    rules: [],
-  })
+  const audience = useAudienceDraft(card.audience_id)
+  const { value, setValue } = audience
   const save = useProductMutation(() => learnApi.setProductAudience(card.id, value))
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
@@ -617,13 +615,28 @@ function ProductAudienceDialog({
         <DialogHeader>
           <DialogTitle>Кому виден «{card.title}»</DialogTitle>
         </DialogHeader>
-        <AudiencePicker value={value} onChange={setValue} />
+        {audience.loading ? (
+          <SkeletonRows rows={3} />
+        ) : (
+          <>
+            {audience.failed && (
+              <p className="text-sm text-red">
+                Не удалось загрузить текущие правила — сохранение перезапишет их.
+              </p>
+            )}
+            <AudiencePicker
+              value={value}
+              onChange={setValue}
+              extraLabels={audience.extraLabels}
+            />
+          </>
+        )}
         <DialogFooter>
           <Button variant="secondary" onClick={onClose} disabled={save.isPending}>
             Отмена
           </Button>
           <Button
-            disabled={save.isPending}
+            disabled={save.isPending || !audience.ready}
             onClick={() =>
               void save.mutateAsync(undefined as never).then(() => {
                 toast.success('Аудитория обновлена')

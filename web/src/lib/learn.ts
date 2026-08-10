@@ -143,6 +143,8 @@ export interface AudienceRuleDraft {
   franchisee_group_ids: string[]
   department_ids: string[]
   user_group_ids: string[]
+  /** «Контур» (org_role): employee | tu | franchisee_owner | office. */
+  org_roles: string[]
 }
 
 export function emptyRule(mode: 'include' | 'exclude'): AudienceRuleDraft {
@@ -157,12 +159,21 @@ export function emptyRule(mode: 'include' | 'exclude'): AudienceRuleDraft {
     franchisee_group_ids: [],
     department_ids: [],
     user_group_ids: [],
+    org_roles: [],
   }
 }
 
 export interface AudienceDryRun {
   count: number
   sample: { id: string; full_name: string }[]
+}
+
+/** Ответ GET /learn/audiences/{id} — предзаполнение пикера аудитории. */
+export interface AudienceRules {
+  is_all: boolean
+  rules: AudienceRuleDraft[]
+  /** Имена по profile_ids правил (включая архивных) — для чипов. */
+  profile_labels: Record<string, string>
 }
 
 // ─── Аудит ───────────────────────────────────────────────────────────────────
@@ -1075,6 +1086,8 @@ export const learnApi = {
     api.post<AudienceDryRun>('/learn/audiences/dry-run', body).then((r) => r.data),
   audienceRebuild: (): Promise<{ audiences_changed: number }> =>
     api.post<{ audiences_changed: number }>('/learn/audiences/rebuild').then((r) => r.data),
+  audienceRules: (audienceId: string): Promise<AudienceRules> =>
+    api.get<AudienceRules>(`/learn/audiences/${audienceId}`).then((r) => r.data),
 
   audit: (params: {
     object_type?: string

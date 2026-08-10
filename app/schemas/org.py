@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.services.audience_resolver import RuleSpec
 
 
 def _strip_required(v: str) -> str:
@@ -151,6 +154,26 @@ class AudienceRuleBody(BaseModel):
     franchisee_group_ids: list[UUID] = Field(default_factory=list)
     department_ids: list[UUID] = Field(default_factory=list)
     user_group_ids: list[UUID] = Field(default_factory=list)
+    # «Контур» (ОС 2026-08-10): значения = ORG_ROLES employee_profiles.
+    org_roles: list[Literal["employee", "tu", "franchisee_owner", "office"]] = Field(
+        default_factory=list
+    )
+
+    def to_spec(self) -> RuleSpec:
+        """Единственный конвертер body→RuleSpec — 7 копий _rule_specs снесены."""
+        return RuleSpec(
+            mode=self.mode,
+            profile_ids=frozenset(self.profile_ids),
+            position_ids=frozenset(self.position_ids),
+            position_group_ids=frozenset(self.position_group_ids),
+            store_ids=frozenset(self.store_ids),
+            store_group_ids=frozenset(self.store_group_ids),
+            franchisee_ids=frozenset(self.franchisee_ids),
+            franchisee_group_ids=frozenset(self.franchisee_group_ids),
+            department_ids=frozenset(self.department_ids),
+            user_group_ids=frozenset(self.user_group_ids),
+            org_roles=frozenset(self.org_roles),
+        )
 
 
 class AudienceDryRunBody(BaseModel):

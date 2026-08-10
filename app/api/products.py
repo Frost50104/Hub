@@ -30,7 +30,7 @@ from app.schemas.product import (
     ProductUpsert,
 )
 from app.services import audit, lifecycle
-from app.services.audience_resolver import RuleSpec, set_object_audience, visible_filter
+from app.services.audience_resolver import set_object_audience, visible_filter
 from app.services.content_access import require_content_role, resolve_content_role
 from app.services.learn_media import sign_media_path
 from app.services.org_scope import get_profile
@@ -42,22 +42,6 @@ router = APIRouter(tags=["learn-products"])
 _OBJECT_TYPE = "product"
 
 
-def _rule_specs(body: AudienceBody) -> list[RuleSpec]:
-    return [
-        RuleSpec(
-            mode=r.mode,
-            profile_ids=frozenset(r.profile_ids),
-            position_ids=frozenset(r.position_ids),
-            position_group_ids=frozenset(r.position_group_ids),
-            store_ids=frozenset(r.store_ids),
-            store_group_ids=frozenset(r.store_group_ids),
-            franchisee_ids=frozenset(r.franchisee_ids),
-            franchisee_group_ids=frozenset(r.franchisee_group_ids),
-            department_ids=frozenset(r.department_ids),
-            user_group_ids=frozenset(r.user_group_ids),
-        )
-        for r in body.rules
-    ]
 
 
 async def _get_card_or_404(db: AsyncSession, product_id: UUID) -> ProductCard:
@@ -469,7 +453,7 @@ async def set_product_audience(
             tenant_id=principal.tenant_id,
             current_audience_id=card.audience_id,
             is_all=body.is_all,
-            rules=_rule_specs(body),
+            rules=[r.to_spec() for r in body.rules],
             object_hint=f"{_OBJECT_TYPE}:{card.id}",
         )
     except ValueError as e:

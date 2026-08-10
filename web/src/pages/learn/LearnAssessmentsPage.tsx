@@ -16,7 +16,7 @@ import {
 import { useEffect, useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 
-import { AudiencePicker, type AudienceValue } from '@/components/learn/AudiencePicker'
+import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
 import { AttemptView, ResultView } from '@/components/learn/lesson/QuizRunner'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
@@ -33,6 +33,7 @@ import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
+import { useMe } from '@/hooks/useMe'
 import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
 import {
@@ -48,8 +49,9 @@ import { QuestionDialog } from './QuizBuilder'
 
 /**
  * Аттестации (Ф8): сотрудник проходит назначенные кампании (движок тестов
- * Ф3b — попытки/снапшоты/ревью); publisher управляет кампаниями, вопросами
- * (в т.ч. импорт из тестов уроков) и смотрит отчёт.
+ * Ф3b — попытки/снапшоты/ревью); hub-admin управляет кампаниями, вопросами
+ * (в т.ч. импорт из тестов уроков) и смотрит отчёт (ОС 2026-08-10:
+ * управление закрыто с publisher до admin; review остаётся publisher'ам).
  */
 
 const REPORT_STATUS_LABEL: Record<string, string> = {
@@ -525,10 +527,8 @@ function CampaignAudienceDialog({
   campaign: AssessmentCampaign
   onClose: () => void
 }) {
-  const [value, setValue] = useState<AudienceValue>({
-    is_all: campaign.audience_id === null,
-    rules: [],
-  })
+  const audience = useAudienceDraft(campaign.audience_id)
+  const { value, setValue } = audience
   const save = useCampaignMutation(() =>
     learnApi.setAssessmentAudience(campaign.id, value),
   )
@@ -538,13 +538,28 @@ function CampaignAudienceDialog({
         <DialogHeader>
           <DialogTitle>Кто проходит «{campaign.title}»</DialogTitle>
         </DialogHeader>
-        <AudiencePicker value={value} onChange={setValue} />
+        {audience.loading ? (
+          <SkeletonRows rows={3} />
+        ) : (
+          <>
+            {audience.failed && (
+              <p className="text-sm text-red">
+                Не удалось загрузить текущие правила — сохранение перезапишет их.
+              </p>
+            )}
+            <AudiencePicker
+              value={value}
+              onChange={setValue}
+              extraLabels={audience.extraLabels}
+            />
+          </>
+        )}
         <DialogFooter>
           <Button variant="secondary" onClick={onClose} disabled={save.isPending}>
             Отмена
           </Button>
           <Button
-            disabled={save.isPending}
+            disabled={save.isPending || !audience.ready}
             onClick={() =>
               void save.mutateAsync(undefined as never).then(() => {
                 toast.success('Аудитория обновлена')
@@ -665,12 +680,11 @@ export function LearnAssessmentsPage() {
 }
 
 function CreateButton({ onOpen }: { onOpen: () => void }) {
-  // Кнопка видна только тем, кому сервер отдаёт менеджерский список
-  // (сотрудникам создание вернёт 403 — кнопку не показываем на всякий).
-  const me = useQuery({ queryKey: ['learn-assessments'], queryFn: learnApi.assessments })
-  const isManager = (me.data ?? []).some((c) => c.my_state === null)
-  const empty = (me.data ?? []).length === 0
-  if (!isManager && !empty) return null
+  // Управление кампаниями — только hub-admin (сервер: require_content_role
+  // "admin" ровно совпадает с hub_role === 'admin'). Старая эвристика по
+  // форме списка показывала кнопку всем при пустом списке.
+  const me = useMe()
+  if (me.data?.hub_role !== 'admin') return null
   return (
     <Button onClick={onOpen}>
       <Plus className="h-4 w-4" /> Аттестация

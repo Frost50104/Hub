@@ -18,8 +18,9 @@ import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Button } from '@/components/ui/Button'
 import { SkeletonRows } from '@/components/ui/Skeleton'
-import { useLesson } from '@/hooks/useLearn'
+import { useCourse, useLesson } from '@/hooks/useLearn'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
+import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
 import { learnApi, type LessonContent } from '@/lib/learn'
 
@@ -102,6 +103,13 @@ export function LearnLessonPage() {
 
   const data = lesson.data
 
+  // Курс нужен только на ПОСЛЕДНЕМ уроке (кнопка «Завершить курс» честна
+  // лишь при course.completed — free-прогрессия могла оставить пропуски);
+  // на остальных уроках запрос не делаем.
+  const course = useCourse(
+    data && data.next_lesson_id === null ? data.course_id : undefined,
+  )
+
   // Начальное состояние гейтов — из block_state сервера; live-ответы поверх.
   const answeredGates = useMemo(() => {
     const set = new Set(answeredExtra)
@@ -126,7 +134,11 @@ export function LearnLessonPage() {
       qc.setQueryData(['learn-lesson', lessonId], fresh)
       void qc.invalidateQueries({ queryKey: ['learn-course'] })
       void qc.invalidateQueries({ queryKey: ['learn-courses'] })
-      toast.success('Урок пройден')
+      toast.success(
+        fresh.next_lesson_id === null
+          ? 'Урок пройден — это был последний урок курса'
+          : 'Урок пройден',
+      )
     },
     onError: (err) => {
       toast.error('Урок ещё не завершён', { description: extractErrorDetail(err) })
@@ -222,7 +234,7 @@ export function LearnLessonPage() {
                   <Button
                     onClick={() => complete.mutate()}
                     disabled={complete.isPending}
-                    className={!localReady ? 'opacity-60' : undefined}
+                    className={cn('w-full sm:w-auto', !localReady && 'opacity-60')}
                   >
                     <CheckCircle2 className="h-4 w-4" />
                     Завершить урок
@@ -241,7 +253,7 @@ export function LearnLessonPage() {
                 ) : (
                   <span />
                 )}
-                {data.next_lesson_id && (
+                {data.next_lesson_id ? (
                   <Button
                     variant={data.completed ? 'default' : 'ghost'}
                     disabled={data.next_locked}
@@ -250,6 +262,18 @@ export function LearnLessonPage() {
                   >
                     Следующий <ArrowRight className="h-4 w-4" />
                   </Button>
+                ) : data.completed ? (
+                  // Последний урок: курс завершён целиком → «Завершить курс»,
+                  // иначе (free-прогрессия с пропусками) — честное «К курсу».
+                  <Button
+                    variant={course.data?.completed ? 'default' : 'ghost'}
+                    onClick={() => navigate(`/learn/courses/${data.course_id}`)}
+                  >
+                    {course.data?.completed ? 'Завершить курс' : 'К курсу'}
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                ) : (
+                  <span />
                 )}
               </div>
             </div>

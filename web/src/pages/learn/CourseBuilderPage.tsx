@@ -28,7 +28,7 @@ import { useState, type CSSProperties, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { AudiencePicker, type AudienceValue } from '@/components/learn/AudiencePicker'
+import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
@@ -499,30 +499,38 @@ function CourseAudienceDialog({
   course: CourseDetail
   onClose: () => void
 }) {
-  const [value, setValue] = useState<AudienceValue>({
-    is_all: course.audience_id === null,
-    rules: [],
-  })
+  const audience = useAudienceDraft(course.audience_id)
+  const { value, setValue } = audience
   const save = useCourseMutation(() => learnApi.setCourseAudience(course.id, value))
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Кому виден «{course.title}»</DialogTitle>
-          {course.audience_id !== null && (
-            <DialogDescription>
-              У курса настроена аудитория. Правила ниже ЗАМЕНЯТ текущие.
-            </DialogDescription>
-          )}
         </DialogHeader>
-        <AudiencePicker value={value} onChange={setValue} />
+        {audience.loading ? (
+          <SkeletonRows rows={3} />
+        ) : (
+          <>
+            {audience.failed && (
+              <p className="text-sm text-red">
+                Не удалось загрузить текущие правила — сохранение перезапишет их.
+              </p>
+            )}
+            <AudiencePicker
+              value={value}
+              onChange={setValue}
+              extraLabels={audience.extraLabels}
+            />
+          </>
+        )}
         <DialogFooter>
           <Button type="button" variant="secondary" onClick={onClose} disabled={save.isPending}>
             Отмена
           </Button>
           <Button
             type="button"
-            disabled={save.isPending}
+            disabled={save.isPending || !audience.ready}
             onClick={() =>
               void save.mutateAsync(undefined as never).then(() => {
                 toast.success('Аудитория обновлена')

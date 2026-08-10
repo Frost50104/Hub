@@ -251,6 +251,61 @@ def test_department_cycle_does_not_hang():
     assert attrs.department_ids == frozenset({a, b})
 
 
+# --- org_roles («Контур», ОС 2026-08-10) -------------------------------------
+
+
+def test_org_roles_include_matches_office_only():
+    office = EmployeeAttrs(profile_id=uuid4(), org_role="office")
+    seller = EmployeeAttrs(profile_id=uuid4(), org_role="employee")
+    rule = RuleSpec(mode="include", org_roles=frozenset({"office"}))
+    assert rule_matches(rule, office) is True
+    assert rule_matches(rule, seller) is False
+
+
+def test_org_roles_and_with_store():
+    store = uuid4()
+    tu_in_store = EmployeeAttrs(
+        profile_id=uuid4(), org_role="tu", store_ids=frozenset({store})
+    )
+    tu_elsewhere = EmployeeAttrs(
+        profile_id=uuid4(), org_role="tu", store_ids=frozenset({uuid4()})
+    )
+    rule = RuleSpec(
+        mode="include", org_roles=frozenset({"tu"}), store_ids=frozenset({store})
+    )
+    assert rule_matches(rule, tu_in_store) is True
+    assert rule_matches(rule, tu_elsewhere) is False
+
+
+def test_org_roles_exclude_subtracts_employees():
+    seller = EmployeeAttrs(profile_id=uuid4(), org_role="employee")
+    office = EmployeeAttrs(profile_id=uuid4(), org_role="office")
+    rules = [RuleSpec(mode="exclude", org_roles=frozenset({"employee"}))]
+    assert audience_matches(True, rules, seller) is False
+    assert audience_matches(True, rules, office) is True
+
+
+def test_org_roles_only_include_row_is_not_empty():
+    # «Весь офис» — валидная include-строка (org_roles участвует в is_empty).
+    rule = RuleSpec(mode="include", org_roles=frozenset({"office"}))
+    assert rule.is_empty() is False
+    validate_rules([rule])  # не бросает
+
+
+def test_build_attrs_carries_org_role():
+    maps = _base_maps()
+    attrs = build_attrs(
+        profile_id=uuid4(),
+        org_role="franchisee_owner",
+        position_id=None,
+        store_id=None,
+        department_id=None,
+        profile_franchisee_id=None,
+        **maps,
+    )
+    assert attrs.org_role == "franchisee_owner"
+
+
 # --- normalize_email ---------------------------------------------------------
 
 

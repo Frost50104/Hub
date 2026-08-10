@@ -184,3 +184,79 @@ async def test_archive_cascade_removes_membership(db: AsyncSession, tenant_id: u
 
     await restore_profile(db, employee, actor_id=None)
     assert employee.id in set(await _members(db, audience.id))
+
+
+# --- org_roles («Контур») + GET rules (ОС 2026-08-10) ------------------------
+
+
+async def test_org_roles_rule_recalc(db: AsyncSession, tenant_id: uuid.UUID):
+    office = await _mk_profile(db, tenant_id, email="ofc@t.ru")
+    office.org_role = "office"
+    seller = await _mk_profile(db, tenant_id, email="sel@t.ru")  # employee по умолчанию
+    await db.flush()
+
+    audience = Audience(tenant_id=tenant_id)
+    db.add(audience)
+    await db.flush()
+    db.add(
+        AudienceRule(
+            tenant_id=tenant_id,
+            audience_id=audience.id,
+            mode="include",
+            org_roles=["office"],
+        )
+    )
+    await db.flush()
+
+    await recalc_audience(db, audience)
+    members = set(await _members(db, audience.id))
+    assert office.id in members
+    assert seller.id not in members
+
+
+async def test_get_audience_rules_roundtrip(db: AsyncSession, tenant_id: uuid.UUID):
+    from fastapi import HTTPException
+
+    from app.api.org import get_audience_rules
+
+    target = await _mk_profile(db, tenant_id, email="tgt@t.ru")
+    hr = await _mk_profile(db, tenant_id, email="hr2@t.ru")
+    hr.content_role = "publisher"
+    await db.flush()
+
+    audience = Audience(tenant_id=tenant_id)
+    db.add(audience)
+    await db.flush()
+    db.add(
+        AudienceRule(
+            tenant_id=tenant_id,
+            audience_id=audience.id,
+            mode="include",
+            profile_ids=[target.id],
+            org_roles=["office", "tu"],
+        )
+    )
+    await db.flush()
+
+    slug = f"t-{tenant_id.hex[:12]}"
+    hr_principal = make_principal(tenant_id, email="hr2@t.ru", tenant_slug=slug)
+    await upsert_shadow_tenant(db, hr_principal, table="shadow_tenants")
+    await upsert_shadow_user(db, hr_principal, table="shadow_users")
+    hr.employee_id = hr_principal.employee_id
+    await db.flush()
+
+    resp = await get_audience_rules(audience.id, hr_principal, db)
+    assert resp.is_all is False
+    assert len(resp.rules) == 1
+    rule = resp.rules[0]
+    assert rule.profile_ids == [target.id]
+    assert sorted(rule.org_roles) == ["office", "tu"]
+    # Имена для чипов — по всем profile_ids правила.
+    assert resp.profile_labels[target.id] == target.full_name
+
+    # Обычный member (без content_role) — 403.
+    member_principal = make_principal(tenant_id, email="mm@t.ru", tenant_slug=slug)
+    await upsert_shadow_user(db, member_principal, table="shadow_users")
+    with pytest.raises(HTTPException) as exc:
+        await get_audience_rules(audience.id, member_principal, db)
+    assert exc.value.status_code == 403

@@ -1,4 +1,5 @@
 import { ClipboardList, ExternalLink, FileText } from 'lucide-react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import {
@@ -9,12 +10,16 @@ import {
 import { type LessonContent } from '@/lib/learn'
 
 import { CheckQuestion } from './CheckQuestion'
+import { ImageLightbox, type LightboxImage } from './ImageLightbox'
 import { VideoPlayer } from './VideoPlayer'
 
 /**
  * Рендер контента урока (Ф3a) = RichRenderer + доменные ноды. БЕЗ ProseMirror.
  * media-ноды приходят с сервера уже с подписанным attrs.src; correct у
  * checkQuestion вырезан (проверка ответа — только на сервере).
+ *
+ * Все картинки кликабельны по умолчанию → ImageLightbox (attr `lightbox`
+ * у figure-ноды остаётся неиспользуемым — кликабельность не опциональна).
  */
 
 function str(v: unknown): string {
@@ -34,6 +39,10 @@ export function LessonRenderer({
 }) {
   const answers = lesson.block_state.answers ?? {}
   const videoState = lesson.block_state.video ?? {}
+  const [lightbox, setLightbox] = useState<{
+    images: LightboxImage[]
+    index: number
+  } | null>(null)
 
   const extraNodes: ExtraNodeRenderers = {
     figure: (node: RichNode, index: number) => {
@@ -42,12 +51,19 @@ export function LessonRenderer({
       if (!src) return null
       return (
         <figure key={index} className="my-3">
-          <img
-            src={src}
-            alt={caption || 'Иллюстрация'}
-            loading="lazy"
-            className="max-h-[480px] w-auto max-w-full rounded-lg border border-glass-border"
-          />
+          <button
+            type="button"
+            onClick={() => setLightbox({ images: [{ src, caption }], index: 0 })}
+            className="block cursor-zoom-in rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+            aria-label="Открыть изображение на весь экран"
+          >
+            <img
+              src={src}
+              alt={caption || 'Иллюстрация'}
+              loading="lazy"
+              className="max-h-[480px] w-auto max-w-full rounded-lg border border-glass-border"
+            />
+          </button>
           {caption && (
             <figcaption className="mt-1 text-xs text-text3">{caption}</figcaption>
           )}
@@ -61,16 +77,27 @@ export function LessonRenderer({
         : []
       const visible = items.filter((it) => it.src)
       if (!visible.length) return null
+      const lightboxImages: LightboxImage[] = visible.map((it, i) => ({
+        src: it.src as string,
+        caption: it.caption || `Шаг ${i + 1}`,
+      }))
       return (
         <div key={index} className="my-3 flex gap-2 overflow-x-auto pb-1">
           {visible.map((item, i) => (
             <figure key={i} className="w-44 shrink-0 sm:w-56">
-              <img
-                src={item.src}
-                alt={item.caption || `Шаг ${i + 1}`}
-                loading="lazy"
-                className="h-32 w-full rounded-lg border border-glass-border object-cover sm:h-40"
-              />
+              <button
+                type="button"
+                onClick={() => setLightbox({ images: lightboxImages, index: i })}
+                className="block w-full cursor-zoom-in rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                aria-label={`Открыть изображение ${i + 1} на весь экран`}
+              >
+                <img
+                  src={item.src}
+                  alt={item.caption || `Шаг ${i + 1}`}
+                  loading="lazy"
+                  className="h-32 w-full rounded-lg border border-glass-border object-cover sm:h-40"
+                />
+              </button>
               <figcaption className="mt-1 text-xs text-text3">
                 {item.caption || `Шаг ${i + 1}`}
               </figcaption>
@@ -104,19 +131,30 @@ export function LessonRenderer({
     pdfEmbed: (node: RichNode, index: number) => {
       const src = str(node.attrs?.src)
       if (!src) return null
-      // Подписанный URL работает без Bearer — обычная ссылка открывается.
+      const forbidDownload = Boolean(node.attrs?.forbidDownload)
+      // Инлайн-рендер: подписанный URL работает без Bearer, nginx отдаёт
+      // media-ответы с frame-ancestors 'self'. iOS WebKit показывает в
+      // iframe только первую страницу — ссылка ниже решает чтение целиком.
       return (
-        <a
-          key={index}
-          href={src}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="my-3 flex items-center gap-2.5 rounded-lg border border-glass-border bg-surface px-3 py-2.5 text-sm text-text transition-colors hover:border-amber/50"
-        >
-          <FileText className="h-5 w-5 shrink-0 text-amber" />
-          <span className="min-w-0 flex-1 truncate">Открыть документ PDF</span>
-          <ExternalLink className="h-4 w-4 shrink-0 text-text3" />
-        </a>
+        <div key={index} className="my-3 space-y-2">
+          <iframe
+            src={src}
+            title="Документ PDF"
+            className="h-[70vh] w-full rounded-lg border border-glass-border bg-white"
+          />
+          {!forbidDownload && (
+            <a
+              href={src}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm text-amber transition-opacity hover:opacity-80"
+            >
+              <FileText className="h-4 w-4" />
+              Открыть в новой вкладке
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          )}
+        </div>
       )
     },
 
@@ -159,5 +197,20 @@ export function LessonRenderer({
     },
   }
 
-  return <RichRenderer value={lesson.content} extraNodes={extraNodes} className={className} />
+  return (
+    <>
+      <RichRenderer value={lesson.content} extraNodes={extraNodes} className={className} />
+      {lightbox && (
+        <ImageLightbox
+          images={lightbox.images}
+          index={lightbox.index}
+          onIndexChange={(i) => setLightbox({ ...lightbox, index: i })}
+          open
+          onOpenChange={(open) => {
+            if (!open) setLightbox(null)
+          }}
+        />
+      )}
+    </>
+  )
 }

@@ -40,6 +40,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 
 # Измерения audience-правил (колонки uuid[] в audience_rules).
+# Плюс отдельное текстовое измерение org_roles («контур»: employee | tu |
+# franchisee_owner | office, значения ORG_ROLES) — добавлено ОС 2026-08-10
+# для «весь офис» / «все франчайзи» без перечисления отделов.
 RULE_DIMENSIONS = (
     "profile_ids",
     "position_ids",
@@ -116,6 +119,8 @@ class AudienceRule(Base):
     user_group_ids: Mapped[list[UUID] | None] = mapped_column(
         ARRAY(PGUUID(as_uuid=True)), nullable=True
     )
+    # «Контур» (org_role профиля) — text[], не uuid[] (миграция 0031).
+    org_roles: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), nullable=False

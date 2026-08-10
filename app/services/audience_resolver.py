@@ -55,6 +55,9 @@ log = structlog.get_logger("audience")
 @dataclass(frozen=True)
 class EmployeeAttrs:
     profile_id: UUID
+    # «Контур» профиля (employee|tu|franchisee_owner|office) — скаляр,
+    # матчится membership'ом в RuleSpec.org_roles (ОС 2026-08-10).
+    org_role: str = ""
     position_ids: frozenset[UUID] = frozenset()
     position_group_ids: frozenset[UUID] = frozenset()
     store_ids: frozenset[UUID] = frozenset()
@@ -77,8 +80,10 @@ class RuleSpec:
     franchisee_group_ids: frozenset[UUID] = frozenset()
     department_ids: frozenset[UUID] = frozenset()
     user_group_ids: frozenset[UUID] = frozenset()
+    org_roles: frozenset[str] = frozenset()
 
     def is_empty(self) -> bool:
+        # org_roles обязан участвовать: include-строка «весь офис» непуста.
         return not (
             self.profile_ids
             or self.position_ids
@@ -89,10 +94,13 @@ class RuleSpec:
             or self.franchisee_group_ids
             or self.department_ids
             or self.user_group_ids
+            or self.org_roles
         )
 
 
-# (имя измерения в RuleSpec, имя набора в EmployeeAttrs)
+# (имя измерения в RuleSpec, имя атрибута в EmployeeAttrs). Скалярные
+# атрибуты (profile_id, org_role) матчатся membership'ом, наборы —
+# пересечением.
 _DIMENSIONS: tuple[tuple[str, str], ...] = (
     ("profile_ids", "profile_id"),
     ("position_ids", "position_ids"),
@@ -103,7 +111,10 @@ _DIMENSIONS: tuple[tuple[str, str], ...] = (
     ("franchisee_group_ids", "franchisee_group_ids"),
     ("department_ids", "department_ids"),
     ("user_group_ids", "user_group_ids"),
+    ("org_roles", "org_role"),
 )
+
+_SCALAR_ATTRS = ("profile_id", "org_role")
 
 
 def rule_matches(rule: RuleSpec, attrs: EmployeeAttrs) -> bool:
@@ -111,11 +122,11 @@ def rule_matches(rule: RuleSpec, attrs: EmployeeAttrs) -> bool:
     if rule.is_empty():
         return False
     for rule_field, attr_field in _DIMENSIONS:
-        wanted: frozenset[UUID] = getattr(rule, rule_field)
+        wanted: frozenset[UUID] | frozenset[str] = getattr(rule, rule_field)
         if not wanted:
             continue
-        if attr_field == "profile_id":
-            if attrs.profile_id not in wanted:
+        if attr_field in _SCALAR_ATTRS:
+            if getattr(attrs, attr_field) not in wanted:
                 return False
         elif not (getattr(attrs, attr_field) & wanted):
             return False
@@ -156,6 +167,7 @@ def rule_spec_from_row(rule: AudienceRule) -> RuleSpec:
         franchisee_group_ids=frozenset(rule.franchisee_group_ids or ()),
         department_ids=frozenset(rule.department_ids or ()),
         user_group_ids=frozenset(rule.user_group_ids or ()),
+        org_roles=frozenset(rule.org_roles or ()),
     )
 
 
@@ -209,6 +221,7 @@ def build_attrs(
 
     return EmployeeAttrs(
         profile_id=profile_id,
+        org_role=org_role,
         position_ids=frozenset({position_id} if position_id else ()),
         position_group_ids=frozenset(
             position_to_groups.get(position_id, set()) if position_id else ()
@@ -525,6 +538,7 @@ async def set_object_audience(
                 franchisee_group_ids=list(spec.franchisee_group_ids) or None,
                 department_ids=list(spec.department_ids) or None,
                 user_group_ids=list(spec.user_group_ids) or None,
+                org_roles=sorted(spec.org_roles) or None,
             )
         )
     await db.flush()

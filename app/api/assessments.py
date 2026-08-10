@@ -29,7 +29,7 @@ from app.schemas.quiz import (
     QuizUpsert,
 )
 from app.services import audit, lifecycle
-from app.services.audience_resolver import RuleSpec, set_object_audience
+from app.services.audience_resolver import set_object_audience
 from app.services.content_access import require_content_role, resolve_content_role
 from app.services.learn_notify import _employee_ids
 from app.services.notify_batch import notify_many
@@ -81,22 +81,6 @@ class ReportResponse(BaseModel):
     rows: list[ReportRow]
 
 
-def _rule_specs(body: AudienceBody) -> list[RuleSpec]:
-    return [
-        RuleSpec(
-            mode=r.mode,
-            profile_ids=frozenset(r.profile_ids),
-            position_ids=frozenset(r.position_ids),
-            position_group_ids=frozenset(r.position_group_ids),
-            store_ids=frozenset(r.store_ids),
-            store_group_ids=frozenset(r.store_group_ids),
-            franchisee_ids=frozenset(r.franchisee_ids),
-            franchisee_group_ids=frozenset(r.franchisee_group_ids),
-            department_ids=frozenset(r.department_ids),
-            user_group_ids=frozenset(r.user_group_ids),
-        )
-        for r in body.rules
-    ]
 
 
 async def _campaign_or_404(db: AsyncSession, campaign_id: UUID) -> AssessmentCampaign:
@@ -144,7 +128,7 @@ async def list_campaigns(
 ) -> list[CampaignView]:
     role = await resolve_content_role(db, principal)
     profile = await get_profile(db, principal)
-    is_manager = lifecycle.can(role, "publisher")
+    is_manager = lifecycle.can(role, "admin")
     now = datetime.now(UTC)
 
     if is_manager:
@@ -238,7 +222,7 @@ async def create_campaign(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> CampaignView:
-    await require_content_role(db, principal, "publisher")
+    await require_content_role(db, principal, "admin")
     campaign = AssessmentCampaign(
         tenant_id=principal.tenant_id,
         title=body.title,
@@ -290,7 +274,7 @@ async def update_campaign(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> CampaignView:
-    await require_content_role(db, principal, "publisher")
+    await require_content_role(db, principal, "admin")
     campaign = await _campaign_or_404(db, campaign_id)
     campaign.title = body.title
     campaign.description = body.description
@@ -319,7 +303,7 @@ async def set_campaign_audience(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    await require_content_role(db, principal, "publisher")
+    await require_content_role(db, principal, "admin")
     campaign = await _campaign_or_404(db, campaign_id)
     try:
         audience_id, _diff = await set_object_audience(
@@ -327,7 +311,7 @@ async def set_campaign_audience(
             tenant_id=principal.tenant_id,
             current_audience_id=campaign.audience_id,
             is_all=body.is_all,
-            rules=_rule_specs(body),
+            rules=[r.to_spec() for r in body.rules],
             object_hint=f"assessment:{campaign.id}",
         )
     except ValueError as e:
@@ -342,7 +326,7 @@ async def get_campaign_quiz(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> QuizManageResponse:
-    await require_content_role(db, principal, "publisher")
+    await require_content_role(db, principal, "admin")
     await _campaign_or_404(db, campaign_id)
     quiz = await _campaign_quiz(db, campaign_id)
     if quiz is None:
@@ -360,7 +344,7 @@ async def upsert_campaign_quiz(
     """Настройки и вопросы квиза кампании (replace, как у тестов уроков)."""
     from sqlalchemy import delete
 
-    await require_content_role(db, principal, "publisher")
+    await require_content_role(db, principal, "admin")
     await _campaign_or_404(db, campaign_id)
     quiz = await _campaign_quiz(db, campaign_id)
     if quiz is None:
@@ -405,7 +389,7 @@ async def import_questions(
     db: AsyncSession = Depends(get_db),
 ) -> QuizManageResponse:
     """Импорт вопросов из теста урока (копия в конец квиза кампании)."""
-    await require_content_role(db, principal, "publisher")
+    await require_content_role(db, principal, "admin")
     await _campaign_or_404(db, campaign_id)
     quiz = await _campaign_quiz(db, campaign_id)
     if quiz is None:
@@ -459,7 +443,7 @@ async def activate_campaign(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    await require_content_role(db, principal, "publisher")
+    await require_content_role(db, principal, "admin")
     campaign = await _campaign_or_404(db, campaign_id)
     quiz = await _campaign_quiz(db, campaign_id)
     if quiz is None:
@@ -509,7 +493,7 @@ async def close_campaign(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    await require_content_role(db, principal, "publisher")
+    await require_content_role(db, principal, "admin")
     campaign = await _campaign_or_404(db, campaign_id)
     campaign.status = "closed"
     audit.record(
@@ -530,7 +514,7 @@ async def delete_campaign(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    await require_content_role(db, principal, "publisher")
+    await require_content_role(db, principal, "admin")
     campaign = await _campaign_or_404(db, campaign_id)
     if campaign.status != "draft":
         raise HTTPException(

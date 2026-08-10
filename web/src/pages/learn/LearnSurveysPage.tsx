@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { AudiencePicker, type AudienceValue } from '@/components/learn/AudiencePicker'
+import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Button } from '@/components/ui/Button'
@@ -734,10 +734,8 @@ function SurveyBuilderDialog({
 }
 
 function SurveyAudienceDialog({ survey, onClose }: { survey: Survey; onClose: () => void }) {
-  const [value, setValue] = useState<AudienceValue>({
-    is_all: survey.audience_id === null,
-    rules: [],
-  })
+  const audience = useAudienceDraft(survey.audience_id)
+  const { value, setValue } = audience
   const save = useSurveyMutation(() => learnApi.setSurveyAudience(survey.id, value))
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
@@ -745,14 +743,29 @@ function SurveyAudienceDialog({ survey, onClose }: { survey: Survey; onClose: ()
         <DialogHeader>
           <DialogTitle>Кому виден «{survey.title}»</DialogTitle>
         </DialogHeader>
-        <AudiencePicker value={value} onChange={setValue} />
+        {audience.loading ? (
+          <SkeletonRows rows={3} />
+        ) : (
+          <>
+            {audience.failed && (
+              <p className="text-sm text-red">
+                Не удалось загрузить текущие правила — сохранение перезапишет их.
+              </p>
+            )}
+            <AudiencePicker
+              value={value}
+              onChange={setValue}
+              extraLabels={audience.extraLabels}
+            />
+          </>
+        )}
         <DialogFooter>
           <Button type="button" variant="secondary" onClick={onClose} disabled={save.isPending}>
             Отмена
           </Button>
           <Button
             type="button"
-            disabled={save.isPending}
+            disabled={save.isPending || !audience.ready}
             onClick={() =>
               void save.mutateAsync(undefined as never).then(() => {
                 toast.success('Аудитория обновлена')

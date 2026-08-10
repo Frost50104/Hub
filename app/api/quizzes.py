@@ -88,7 +88,9 @@ async def _consumer_quiz_access(
         campaign = await db.get(AssessmentCampaign, quiz.campaign_id)
         if campaign is None:
             return False
-        if lifecycle.can(role, "publisher"):
+        # Кампании управляются только hub-admin (ОС 2026-08-10): publisher —
+        # обычный участник, проходит по audience+окну, без обхода.
+        if lifecycle.can(role, "admin"):
             return True
         now = datetime.now(UTC)
         if campaign.status != "active":
@@ -177,8 +179,9 @@ async def _quiz_manager(
     db: AsyncSession, principal: Principal, quiz: Quiz
 ) -> lifecycle.ContentRole:
     if quiz.campaign_id is not None:
-        # Квиз кампании аттестации управляется publisher'ом (Ф8).
-        return await require_content_role(db, principal, "publisher")
+        # Квиз кампании аттестации управляется только hub-admin (ОС 2026-08-10);
+        # review открытых ответов при этом остаётся publisher'ам (HR).
+        return await require_content_role(db, principal, "admin")
     role = await require_content_role(db, principal, "author")
     course = await _get_course_or_404(db, quiz.course_id)
     _require_manage(course, principal, role)

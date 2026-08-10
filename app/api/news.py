@@ -39,7 +39,7 @@ from app.schemas.news import (
     ReactionBody,
 )
 from app.services import audit, lifecycle
-from app.services.audience_resolver import RuleSpec, set_object_audience, visible_filter
+from app.services.audience_resolver import set_object_audience, visible_filter
 from app.services.content_access import require_content_role, resolve_content_role
 from app.services.learn_notify import _employee_ids
 from app.services.notify_batch import notify_many
@@ -58,22 +58,6 @@ router = APIRouter(tags=["learn-news"])
 _OBJECT_TYPE = "news_post"
 
 
-def _rule_specs(body: AudienceBody) -> list[RuleSpec]:
-    return [
-        RuleSpec(
-            mode=r.mode,
-            profile_ids=frozenset(r.profile_ids),
-            position_ids=frozenset(r.position_ids),
-            position_group_ids=frozenset(r.position_group_ids),
-            store_ids=frozenset(r.store_ids),
-            store_group_ids=frozenset(r.store_group_ids),
-            franchisee_ids=frozenset(r.franchisee_ids),
-            franchisee_group_ids=frozenset(r.franchisee_group_ids),
-            department_ids=frozenset(r.department_ids),
-            user_group_ids=frozenset(r.user_group_ids),
-        )
-        for r in body.rules
-    ]
 
 
 def _validate_body(payload: dict) -> dict:
@@ -442,7 +426,7 @@ async def set_news_audience(
             tenant_id=principal.tenant_id,
             current_audience_id=post.audience_id,
             is_all=body.is_all,
-            rules=_rule_specs(body),
+            rules=[r.to_spec() for r in body.rules],
             object_hint=f"{_OBJECT_TYPE}:{post.id}",
         )
     except ValueError as e:

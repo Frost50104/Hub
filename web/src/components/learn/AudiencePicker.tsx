@@ -1,12 +1,18 @@
 import { Minus, Plus, Users, X } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
-import { useAudienceDryRun, useEmployees, useOrgSnapshot } from '@/hooks/useLearn'
+import {
+  useAudienceDryRun,
+  useAudienceRules,
+  useEmployees,
+  useOrgSnapshot,
+} from '@/hooks/useLearn'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { cn } from '@/lib/cn'
-import { emptyRule, type AudienceRuleDraft } from '@/lib/learn'
+import { emptyRule, ORG_ROLE_LABEL, type AudienceRuleDraft } from '@/lib/learn'
 
 export interface AudienceValue {
   is_all: boolean
@@ -15,9 +21,52 @@ export interface AudienceValue {
 
 export const AUDIENCE_ALL: AudienceValue = { is_all: true, rules: [] }
 
+/**
+ * Черновик аудитории для диалогов контента: подтягивает СУЩЕСТВУЮЩИЕ правила
+ * (ОС 2026-08-10 — раньше диалоги открывались пустыми и «затирали» настройку)
+ * и сеет их в state ровно один раз. Пока `loading` — пикер не рендерить и
+ * сохранение блокировать (`ready`), иначе можно записать пустую аудиторию,
+ * которую не увидит никто. При ошибке загрузки `failed` — предупредить, что
+ * сохранение перезапишет текущие правила.
+ */
+export function useAudienceDraft(audienceId: string | null): {
+  value: AudienceValue
+  setValue: (v: AudienceValue) => void
+  loading: boolean
+  failed: boolean
+  ready: boolean
+  extraLabels?: Record<string, string>
+} {
+  const rulesQ = useAudienceRules(audienceId)
+  const [value, setValue] = useState<AudienceValue>({
+    is_all: audienceId === null,
+    rules: [],
+  })
+  const [seeded, setSeeded] = useState(false)
+
+  useEffect(() => {
+    if (!seeded && rulesQ.data) {
+      setValue({ is_all: rulesQ.data.is_all, rules: rulesQ.data.rules })
+      setSeeded(true)
+    }
+  }, [seeded, rulesQ.data])
+
+  const loading = audienceId !== null && rulesQ.isLoading
+  const failed = audienceId !== null && rulesQ.isError
+  return {
+    value,
+    setValue,
+    loading,
+    failed,
+    ready: audienceId === null || seeded || failed,
+    extraLabels: rulesQ.data?.profile_labels,
+  }
+}
+
 type DimensionKey = Exclude<keyof AudienceRuleDraft, 'mode'>
 
 const DIMENSIONS: { key: DimensionKey; label: string }[] = [
+  { key: 'org_roles', label: 'Контур' },
   { key: 'position_ids', label: 'Должность' },
   { key: 'position_group_ids', label: 'Группа должностей' },
   { key: 'store_ids', label: 'Магазин' },
@@ -40,10 +89,13 @@ const DIMENSIONS: { key: DimensionKey; label: string }[] = [
 export function AudiencePicker({
   value,
   onChange,
+  extraLabels,
   className,
 }: {
   value?: AudienceValue
   onChange?: (v: AudienceValue) => void
+  /** Имена для чипов сверх загруженной сотни сотрудников (см. GET rules). */
+  extraLabels?: Record<string, string>
   className?: string
 }) {
   // Uncontrolled-режим для песочницы в админке.
@@ -55,7 +107,11 @@ export function AudiencePicker({
   }
 
   const org = useOrgSnapshot()
-  const employees = useEmployees({ status: 'active' })
+  // Поиск в измерении «Сотрудник»: без него дропдаун молча показывал бы
+  // только первую сотню активных (limit 100 в useEmployees).
+  const [employeeQ, setEmployeeQ] = useState('')
+  const debouncedQ = useDebouncedValue(employeeQ, 300)
+  const employees = useEmployees({ status: 'active', q: debouncedQ || undefined })
 
   const hasEmptyInclude = val.rules.some(
     (r) => r.mode === 'include' && DIMENSIONS.every((d) => r[d.key].length === 0),
@@ -68,6 +124,10 @@ export function AudiencePicker({
   const dryRun = useAudienceDryRun(dryRunBody)
 
   const optionsFor = (key: DimensionKey): { id: string; label: string }[] => {
+    // Контуры — статичный словарь, не зависят от загрузки справочников.
+    if (key === 'org_roles') {
+      return Object.entries(ORG_ROLE_LABEL).map(([id, label]) => ({ id, label }))
+    }
     if (!org.data) return []
     switch (key) {
       case 'position_ids':
@@ -92,7 +152,7 @@ export function AudiencePicker({
   }
 
   const labelFor = (key: DimensionKey, id: string): string =>
-    optionsFor(key).find((o) => o.id === id)?.label ?? '…'
+    optionsFor(key).find((o) => o.id === id)?.label ?? extraLabels?.[id] ?? '…'
 
   const updateRule = (index: number, next: AudienceRuleDraft) => {
     const rules = val.rules.map((r, i) => (i === index ? next : r))
@@ -127,6 +187,8 @@ export function AudiencePicker({
               rule={rule}
               optionsFor={optionsFor}
               labelFor={labelFor}
+              employeeQ={employeeQ}
+              onEmployeeQ={setEmployeeQ}
               onChange={(r) => updateRule(i, r)}
               onRemove={() => removeRule(i)}
             />
@@ -185,12 +247,16 @@ function RuleRow({
   rule,
   optionsFor,
   labelFor,
+  employeeQ,
+  onEmployeeQ,
   onChange,
   onRemove,
 }: {
   rule: AudienceRuleDraft
   optionsFor: (key: DimensionKey) => { id: string; label: string }[]
   labelFor: (key: DimensionKey, id: string) => string
+  employeeQ: string
+  onEmployeeQ: (q: string) => void
   onChange: (r: AudienceRuleDraft) => void
   onRemove: () => void
 }) {
@@ -244,7 +310,13 @@ function RuleRow({
         <div className="flex flex-wrap items-center gap-1.5">
           {chips.map(({ key, id }, i) => (
             <span key={key + id} className="flex items-center gap-1.5">
-              {i > 0 && <span className="text-[10px] font-bold text-text3">И</span>}
+              {/* Внутри одного измерения значения — ИЛИ (пересечение множеств),
+                  «И» — только между измерениями. */}
+              {i > 0 && (
+                <span className="text-[10px] font-bold text-text3">
+                  {chips[i - 1]?.key === key ? 'или' : 'И'}
+                </span>
+              )}
               <span className="flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-xs text-text">
                 <span className="text-text3">
                   {DIMENSIONS.find((d) => d.key === key)?.label}:
@@ -279,6 +351,15 @@ function RuleRow({
             </option>
           ))}
         </Select>
+        {dimKey === 'profile_ids' && (
+          <Input
+            type="search"
+            value={employeeQ}
+            onChange={(e) => onEmployeeQ(e.target.value)}
+            placeholder="Поиск сотрудника…"
+            className="w-44"
+          />
+        )}
         <Select
           className="min-w-[160px] flex-1"
           value={pickId}

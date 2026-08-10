@@ -46,7 +46,7 @@ from app.schemas.course import (
 )
 from app.schemas.library import AudienceBody, StatusBody
 from app.services import audit, lifecycle
-from app.services.audience_resolver import RuleSpec, set_object_audience, visible_filter
+from app.services.audience_resolver import set_object_audience, visible_filter
 from app.services.certificate import issue_if_earned
 from app.services.content_access import require_content_role, resolve_content_role
 from app.services.learn_media import sign_media_path
@@ -72,22 +72,6 @@ router = APIRouter(tags=["learn-courses"])
 _OBJECT_TYPE = "course"
 
 
-def _rule_specs(body: AudienceBody) -> list[RuleSpec]:
-    return [
-        RuleSpec(
-            mode=r.mode,
-            profile_ids=frozenset(r.profile_ids),
-            position_ids=frozenset(r.position_ids),
-            position_group_ids=frozenset(r.position_group_ids),
-            store_ids=frozenset(r.store_ids),
-            store_group_ids=frozenset(r.store_group_ids),
-            franchisee_ids=frozenset(r.franchisee_ids),
-            franchisee_group_ids=frozenset(r.franchisee_group_ids),
-            department_ids=frozenset(r.department_ids),
-            user_group_ids=frozenset(r.user_group_ids),
-        )
-        for r in body.rules
-    ]
 
 
 async def _get_course_or_404(db: AsyncSession, course_id: UUID) -> Course:
@@ -654,7 +638,7 @@ async def set_course_audience(
             tenant_id=principal.tenant_id,
             current_audience_id=course.audience_id,
             is_all=body.is_all,
-            rules=_rule_specs(body),
+            rules=[r.to_spec() for r in body.rules],
             object_hint=f"{_OBJECT_TYPE}:{course.id}",
         )
     except ValueError as e:
