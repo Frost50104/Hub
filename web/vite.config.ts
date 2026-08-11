@@ -29,6 +29,10 @@ export default defineConfig(({ mode }) => ({
       '@': resolve(__dirname, './src'),
     },
   },
+  // pdf.worker — ES-модуль (import.meta): дефолтный iife-формат не годится.
+  worker: {
+    format: 'es',
+  },
   server: {
     port: 5174,
     proxy: {
@@ -55,6 +59,10 @@ export default defineConfig(({ mode }) => ({
         // сотруднику при каждом деплое — докачаются on-demand у авторов
         // (adversarial-ревью плана: precache тянул TipTap всем).
         globIgnores: [
+          // pdf.js: чанк вьювера (~450KB) и worker (1.26MB) — on-demand,
+          // не прекешируем каждому сотруднику при каждом деплое.
+          '**/PdfViewer-*.js',
+          '**/pdf.worker*.js',
           '**/RichEditor-*.js',
           '**/LearnOrgPage-*.js',
           '**/LearnEmployeesPage-*.js',

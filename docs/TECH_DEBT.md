@@ -56,7 +56,7 @@
 Полный ручной прогон браузером дал 5 критичных + 9 средних + 13 мелких находок — все закрыты (`cc3fe07..ec42e17`, оба env). Ключевые регрессии и их страховки:
 
 - **Поиск задач 500** (func-объект в bindparams) и **дашборд 500** (NullType-cast) — регрессии обновления SQLAlchemy dependabot'ом; закрыты + регресс-тесты `tests/integration/test_stats_search.py`, которые ловят этот класс при будущих апгрейдах.
-- **Learn-картинки 404**: nginx regex-локация статики перехватывала internal redirect `X-Accel-Redirect` (видео работало — `.mp4` не в regex). Фикс: `^~` на `/api/*` и `/_protected_media/` — НЕ убирать модификаторы при правках конфигов.
+- **Learn-картинки 404**: nginx regex-локация статики перехватывала internal redirect `X-Accel-Redirect` (видео работало — `.mp4` не в regex). Фикс: `^~` на `/api/*` и `/_protected_media/` — НЕ убирать модификаторы при правках конфигов. **С 2026-08-10 второй инвариант тех же локаций** (`/api/media/` + `/_protected_media/` — заголовки финального ответа X-Accel берёт internal-локация): переиздают ПОЛНЫЙ security-набор с `X-Frame-Options SAMEORIGIN` + CSP `frame-ancestors 'self'` — server-level DENY блокировал same-origin iframe и PDF-уроки были пустыми; первый же `add_header` в локации сбрасывает родительский набор (HSTS живёт только в сниппете!), `sandbox` в CSP media-ответов не добавлять — ломает встроенный PDF-viewer Chrome.
 - **Шрифты Unbounded/Onest** теперь self-hosted (`web/src/assets/fonts/`, субсеты latin+cyrillic) — CSP блокировал Google Fonts с 3.6.8, весь продукт рендерился системным шрифтом. Внешние `<link>` шрифтов в index.html запрещены CSP.
 - **CSP-хэш inline-скрипта темы**: любая правка анти-FOUC скрипта в `web/index.html` требует пересчёта sha256 в `ops/nginx/hub-security-headers.conf` (+2 CSP в `/p/`-локациях) — команда в комментарии сниппета.
 - **`SIGNARIS_HUB_PUBLIC_BASE_URL` обязателен на staging** — иначе публичные ссылки с прод-доменом (docs/DEPLOY.md).
@@ -65,6 +65,7 @@
 - **Mention-имена на фронте** берутся из `/tenant/members` (limit 10) — при штате >10 часть чипов останется `@handle` (fallback предусмотрен). При росте tenant'а поднять лимит или отдельную ручку-словарь.
 - **Timeline day-зум** подписывает каждый 2-й день (32px/день уже текста даты); label узкого бара (<120px) рисуется справа от бара.
 - **CF-колонки и метки в List скрыты на <lg** — мобильный список показывает только название/приоритет/подзадачи/аватар/срок.
+- **PDF в уроках рендерится pdf.js** (canvas, `web/src/components/learn/lesson/PdfViewer.tsx`, 2026-08-11) — iframe-подход умер на Android Chrome («контент заблокирован»: телефонный Chrome не рендерит PDF во встраиваниях), iOS показывал первую страницу. Ограничения v1: без текстового слоя (нет выделения/поиска по тексту); cmaps/standard_fonts/wasm НЕ хостим (JS-fallback'и pdfjs; при жалобах на выпавшие шрифты/картинки — скопировать в `web/public/pdfjs/` и передать trailing-slash URL'ы в getDocument); floor pdfjs v6 — Chrome 119+/Safari 17.4+ (ниже — fallback-карточка со ссылкой). Worker подключён `?worker&url` + `worker.format: 'es'` — НЕ менять на голый `?url`: `.mjs`-asset nginx 1.24 отдаёт `application/octet-stream`, а module-worker'ы жёстко требуют JS-MIME (падает только на проде). Чанки `PdfViewer-*.js` и `pdf.worker*.js` — в globIgnores PWA-precache.
 
 ## Решённое в MVP
 

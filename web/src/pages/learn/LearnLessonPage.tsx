@@ -8,7 +8,7 @@ import {
   FileText,
   Lock,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -17,7 +17,7 @@ import { QuizRunner } from '@/components/learn/lesson/QuizRunner'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Button } from '@/components/ui/Button'
-import { SkeletonRows } from '@/components/ui/Skeleton'
+import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { useCourse, useLesson } from '@/hooks/useLearn'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/cn'
@@ -31,6 +31,9 @@ import { learnApi, type LessonContent } from '@/lib/learn'
  */
 
 const WATCH_THRESHOLD = 0.9
+
+// pdf.js — тяжёлый lazy-чанк (вне PWA-precache, см. globIgnores vite.config).
+const PdfViewer = lazy(() => import('@/components/learn/lesson/PdfViewer'))
 
 function isLockedError(err: unknown): boolean {
   return (err as { response?: { status?: number } }).response?.status === 403
@@ -184,11 +187,15 @@ export function LearnLessonPage() {
 
             {data.content_format === 'pdf' && data.pdf_url && (
               <div className="space-y-2">
-                <iframe
-                  src={data.pdf_url}
-                  title={data.title}
-                  className="h-[70vh] w-full rounded-lg border border-glass-border bg-white"
-                />
+                {/* pdf.js вместо iframe: Android Chrome не рендерит PDF во
+                    встраиваниях, iOS показывал только первую страницу. */}
+                <Suspense fallback={<Skeleton className="h-[70vh] w-full rounded-lg" />}>
+                  <PdfViewer
+                    src={data.pdf_url}
+                    title={data.title}
+                    fallbackHref={!data.forbid_download ? data.pdf_url : undefined}
+                  />
+                </Suspense>
                 {!data.forbid_download && (
                   <a
                     href={data.pdf_url}

@@ -56,14 +56,14 @@
 - `sync_state` (deletion-sync cursor)
 - `rate_limits` (DB-fallback для Redis)
 
-## Learn-домен (LMS, миграции 0014-0030)
+## Learn-домен (LMS, миграции 0014-0031)
 
 Второе пространство Hub («Обучение», `/learn/*`) — LMS-замена ServiceGuru. Hot-инварианты — в `CLAUDE.md` §«Learn-домен»; здесь — каталог сущностей.
 
 ### Таблицы по доменам (таблица → миграция)
 
 - **Оргструктура (0014):** `departments`, `positions`, `position_groups(+members)`, `stores`, `store_groups(+members)`, `franchisees`, `franchisee_groups(+members)`, `user_groups(+members)`, `employee_profiles` (employee_id NULL до первого входа, матчинг по lower(email)), `tu_store_assignments`.
-- **Аудитории (0015):** `audiences`, `audience_rules` (include/exclude, AND внутри строки / OR между), `audience_members` (материализация, granted_at).
+- **Аудитории (0015):** `audiences`, `audience_rules` (include/exclude, AND внутри строки / OR между; 9 uuid[]-измерений + `org_roles text[]` — измерение «контур», 0031), `audience_members` (материализация, granted_at). Read-back правил для пикера — `GET /learn/audiences/{id}`.
 - **Журнал и настройки (0016):** `audit_log` (append-only), `learning_settings` (singleton per tenant, jsonb).
 - **Библиотека (0017):** `library_sections` (дерево), `library_materials` (lifecycle+audience, requires_acknowledgement), `material_versions`, `material_acknowledgements`.
 - **Поиск/индекс (0018):** `search_documents` (только published; вход для FTS и RAG), `text_extraction_jobs`, `view_history`.
@@ -87,7 +87,9 @@ Learn-роутеры в `app/api/`: org, employees, audit, library, news, survey
 
 ### Frontend
 
-`web/src/pages/learn/` — 22 страницы: витрина (LearnHomePage), курсы/уроки/тесты (LearnCoursesPage, LearnCoursePage, LearnLessonPage, CourseBuilderPage, QuizBuilder), библиотека, новости, опросы, ассортимент, рейтинг, AI-ассистент, биржа смен, аттестации, админка (org, employees, review, analytics, automations, audit), сертификат. Пространство выбирается по URL (`spaceFromPath`), у learn свой Sidebar/набор мобильных табов.
+`web/src/pages/learn/` — 22 страницы: витрина (LearnHomePage), курсы/уроки/тесты (LearnCoursesPage, LearnCoursePage, LearnLessonPage, CourseBuilderPage, QuizBuilder), библиотека, новости, опросы, ассортимент, рейтинг, AI-ассистент, биржа смен, аттестации, админка (org, employees, review, analytics, automations, audit), сертификат.
+
+Активное пространство — `resolveSpace` (`web/src/lib/workspace.ts`): `/learn*` → learn, нейтральные `/inbox|/search|/profile|/settings` наследуют последнее посещённое (`lastSpace`), cold-start на `/` возвращает в learn (one-shot флаг; boot-redirect и remember живут в ОДНОМ эффекте Shell — порядок критичен, иначе remember перетирает lastSpace до чтения). У learn свой Sidebar; мобильный таб-бар — Desk-стиль (плоские 50px), 5-я вкладка learn — «Меню» (BottomSheet, списки из `learnNav.ts` — единый источник с сайдбаром). Уроки: картинки открываются в `ImageLightbox` (fullscreen, листание галерей), PDF (уроки-документы и `pdfEmbed`-блоки) рендерится `PdfViewer` (pdfjs-dist, canvas, lazy-чанк вне precache — инварианты worker/MIME в TECH_DEBT), на последнем завершённом уроке — кнопка «Завершить курс».
 
 ### Роли learn-домена
 

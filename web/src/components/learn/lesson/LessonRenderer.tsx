@@ -1,5 +1,5 @@
 import { ClipboardList, ExternalLink, FileText } from 'lucide-react'
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import {
@@ -11,7 +11,13 @@ import { type LessonContent } from '@/lib/learn'
 
 import { CheckQuestion } from './CheckQuestion'
 import { ImageLightbox, type LightboxImage } from './ImageLightbox'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { VideoPlayer } from './VideoPlayer'
+
+// LessonRenderer грузится НЕ-lazy из LearnLessonPage — pdf.js обязан
+// оставаться отдельным lazy-чанком (вне PWA-precache), иначе вклеится
+// в чанк страницы урока и прекешится каждому сотруднику.
+const PdfViewer = lazy(() => import('./PdfViewer'))
 
 /**
  * Рендер контента урока (Ф3a) = RichRenderer + доменные ноды. БЕЗ ProseMirror.
@@ -132,16 +138,17 @@ export function LessonRenderer({
       const src = str(node.attrs?.src)
       if (!src) return null
       const forbidDownload = Boolean(node.attrs?.forbidDownload)
-      // Инлайн-рендер: подписанный URL работает без Bearer, nginx отдаёт
-      // media-ответы с frame-ancestors 'self'. iOS WebKit показывает в
-      // iframe только первую страницу — ссылка ниже решает чтение целиком.
+      // pdf.js вместо iframe (Android Chrome не рендерит PDF во
+      // встраиваниях); подписанный URL работает без Bearer.
       return (
         <div key={index} className="my-3 space-y-2">
-          <iframe
-            src={src}
-            title="Документ PDF"
-            className="h-[70vh] w-full rounded-lg border border-glass-border bg-white"
-          />
+          <Suspense fallback={<Skeleton className="h-[70vh] w-full rounded-lg" />}>
+            <PdfViewer
+              src={src}
+              title="Документ PDF"
+              fallbackHref={!forbidDownload ? src : undefined}
+            />
+          </Suspense>
           {!forbidDownload && (
             <a
               href={src}
