@@ -67,6 +67,18 @@
 - **CF-колонки и метки в List скрыты на <lg** — мобильный список показывает только название/приоритет/подзадачи/аватар/срок.
 - **PDF в уроках рендерится pdf.js** (canvas, `web/src/components/learn/lesson/PdfViewer.tsx`, 2026-08-11) — iframe-подход умер на Android Chrome («контент заблокирован»: телефонный Chrome не рендерит PDF во встраиваниях), iOS показывал первую страницу. Ограничения v1: без текстового слоя (нет выделения/поиска по тексту); cmaps/standard_fonts/wasm НЕ хостим (JS-fallback'и pdfjs; при жалобах на выпавшие шрифты/картинки — скопировать в `web/public/pdfjs/` и передать trailing-slash URL'ы в getDocument); floor pdfjs v6 — Chrome 119+/Safari 17.4+ (ниже — fallback-карточка со ссылкой). Worker подключён `?worker&url` + `worker.format: 'es'` — НЕ менять на голый `?url`: `.mjs`-asset nginx 1.24 отдаёт `application/octet-stream`, а module-worker'ы жёстко требуют JS-MIME (падает только на проде). Чанки `PdfViewer-*.js` и `pdf.worker*.js` — в globIgnores PWA-precache.
 
+## ОС 12.08 — санитайзер rich-контента и авторский UX (2026-08-12)
+
+Блок правок редактора уроков по второй волне ОС тестировщиков (нумерованный список 422, паста с форматированием, таблицы, размеры текста, публикация из редактора, удаление курса из списка, опрос из урока).
+
+**ИНВАРИАНТ: клиентский санитайзер зеркалит серверный whitelist — менять ПАРОЙ.** `web/src/components/learn/rich/sanitizeRichDoc.ts` (`NODE_ATTRS`/`MARK_ATTRS`) — зеркало `app/services/rich_content.py`; правишь один — правь второй и оба набора тестов (`sanitizeRichDoc.test.ts` + `tests/unit/test_rich_content.py`) на ОДНИХ фикстурах реального вывода TipTap 3.28. Первопричина всего класса багов: TipTap сериализует ВСЕ schema-attrs включая дефолты (`orderedList.type: null`, `tableCell.align`), а fail-closed валидатор отвечал 422 на весь PATCH. Второй подвид того же класса (пойман браузерной проверкой на staging): parseHTML пасты даёт **пустые строки** — `<span style="color:…">` без font-size получает `fontSize: ''` → санитайзер дропает и null, и `''`; сервер трактует `''` как отсутствие (textStyle.color/fontSize, highlight.color). Санитайзер вызывается на выходе редактора (getJSON→sanitize→onChange), editor-state не мутируется (undo цел); lesson-ноды (`LESSON_NODE_TYPES`) проходят НЕТРОНУТЫМИ — иначе развернулись бы в параграфы и `checkQuestion.attrs.correct` потерялся бы.
+
+Остаточные упрощения v1:
+- **Таблицы без merge/split UI** (`resizable: false`, только +/− строк/колонок и шапка) — но рендер colspan/rowspan/align в `RichRenderer` есть (шаблоны с merge-ячейками не едут).
+- **Word-списки `type='a'`** деградируют в цифровую нумерацию (клиент дропает `type`; сервер атрибут допускает, рендер игнорирует).
+- **Опрос-черновик, встроенный автором в урок**, до публикации publisher'ом не открывается сотруднику — автору показывается тост-предупреждение; инлайн-статус опроса в рендере урока не делали.
+- **fontSize** — только px из фиксированного набора 12..32 (сервер допускает `^\d{2}px$`, 10..48).
+
 ## Решённое в MVP
 
 - Single-flight refresh — реализуется через `attachAxiosAuth` из `@signaris/auth-client/browser` (не пишем вручную).

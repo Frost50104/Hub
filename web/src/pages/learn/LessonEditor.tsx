@@ -2,6 +2,8 @@ import { type Editor } from '@tiptap/core'
 import {
   CircleHelp,
   ClipboardList,
+  Eye,
+  EyeOff,
   FileText,
   FileUp,
   Film,
@@ -21,7 +23,12 @@ import {
 } from 'react'
 import { toast } from 'sonner'
 
-import { LESSON_NODE_EXTENSIONS } from '@/components/learn/rich/lessonNodes'
+import { LESSON_NODE_EXTENSIONS, LESSON_NODE_TYPES } from '@/components/learn/rich/lessonNodes'
+import {
+  SurveyQuestionsEditor,
+  validateQuestions,
+} from '@/components/learn/SurveyQuestionsEditor'
+import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import {
   Dialog,
@@ -43,11 +50,13 @@ import {
 } from '@/hooks/useLearn'
 
 import { QuizBuilder } from './QuizBuilder'
+import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
 import {
   learnApi,
   type LessonMeta,
   type LessonUnlockRule,
+  type QuestionDraft,
   type RichDoc,
 } from '@/lib/learn'
 
@@ -146,15 +155,23 @@ function LessonEditorInner({
   const [uploading, setUploading] = useState(false)
   const editorRef = useRef<Editor | null>(null)
 
-  const save = useCourseMutation(() =>
-    learnApi.updateLesson(lesson.id, {
-      title: title.trim(),
-      unlock_rule: unlockRule,
-      content_format: format,
-      forbid_download: forbidDownload,
-      ...(format === 'blocks' && content ? { content } : {}),
-      ...(pdfMediaId ? { pdf_media_id: pdfMediaId } : {}),
-    }),
+  const [status, setStatus] = useState(lesson.status)
+
+  const buildPayload = () => ({
+    title: title.trim(),
+    unlock_rule: unlockRule,
+    content_format: format,
+    forbid_download: forbidDownload,
+    ...(format === 'blocks' && content ? { content } : {}),
+    ...(pdfMediaId ? { pdf_media_id: pdfMediaId } : {}),
+  })
+
+  const save = useCourseMutation(() => learnApi.updateLesson(lesson.id, buildPayload()))
+
+  // «Сохранить и опубликовать» / «Скрыть» — тот же PATCH одним вызовом
+  // со status (ОС 12.08: публикация была только «глазиком» в списке уроков).
+  const saveWithStatus = useCourseMutation((next: 'draft' | 'published') =>
+    learnApi.updateLesson(lesson.id, { ...buildPayload(), status: next }),
   )
 
   const upload = async (file: File) => {
@@ -331,6 +348,7 @@ function LessonEditorInner({
             onChange={setContent}
             placeholder="Содержимое урока…"
             extraExtensions={LESSON_NODE_EXTENSIONS}
+            extraNodeTypes={LESSON_NODE_TYPES}
             extraToolbar={lessonToolbar}
           />
         </Suspense>
@@ -344,10 +362,49 @@ function LessonEditorInner({
             void save
               .mutateAsync(undefined as never)
               .then(() => toast.success('Урок сохранён'))
+              .catch(() => undefined)
           }
         >
           <Save className="h-4 w-4" /> Сохранить урок
         </Button>
+        {status === 'draft' ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!title.trim() || saveWithStatus.isPending || (format === 'pdf' && !pdfUrl)}
+            onClick={() =>
+              void saveWithStatus
+                .mutateAsync('published')
+                .then(() => {
+                  setStatus('published')
+                  toast.success('Урок опубликован')
+                })
+                .catch(() => undefined)
+            }
+          >
+            <Eye className="h-4 w-4" /> Сохранить и опубликовать
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={saveWithStatus.isPending}
+            onClick={() =>
+              void saveWithStatus
+                .mutateAsync('draft')
+                .then(() => {
+                  setStatus('draft')
+                  toast.success('Урок скрыт (черновик)')
+                })
+                .catch(() => undefined)
+            }
+          >
+            <EyeOff className="h-4 w-4" /> Скрыть (в черновик)
+          </Button>
+        )}
+        <Badge variant={status === 'published' ? 'default' : 'secondary'}>
+          {status === 'published' ? 'Опубликован' : 'Черновик'}
+        </Badge>
         {format === 'blocks' && (
           <>
             <Button size="sm" variant="ghost" onClick={() => setTemplatesOpen(true)}>
@@ -384,7 +441,7 @@ function LessonEditorInner({
         />
       )}
       {surveyOpen && (
-        <SurveyPickDialog
+        <SurveyEmbedDialog
           onClose={() => setSurveyOpen(false)}
           onPick={(surveyId) => {
             editorRef.current?.chain().focus().insertSurveyEmbed(surveyId).run()
@@ -532,39 +589,143 @@ function CheckQuestionDialog({
   )
 }
 
-function SurveyPickDialog({
+/** Встраивание опроса в урок (ОС 12.08): вкладка «Существующий» — manage-
+ * список (author видит свои + видимые published, раньше consumer-список
+ * прятал чужие аудитории), вкладка «Создать» — точечный опрос на месте.
+ * Против сирот: созданный surveyId живёт в state — ретрай после ошибки
+ * questions/status доделывает ТОТ ЖЕ опрос, а не плодит копии. */
+function SurveyEmbedDialog({
   onClose,
   onPick,
 }: {
   onClose: () => void
   onPick: (surveyId: string) => void
 }) {
-  const surveys = useSurveys(false)
+  const [tab, setTab] = useState<'pick' | 'create'>('pick')
+  const surveys = useSurveys(true)
   const published = (surveys.data?.items ?? []).filter((s) => s.status === 'published')
+  const canPublish = ['admin', 'publisher'].includes(surveys.data?.content_role ?? '')
+
+  const [title, setTitle] = useState('')
+  const [anonymous, setAnonymous] = useState(false)
+  const [questions, setQuestions] = useState<QuestionDraft[]>([
+    { qtype: 'single', prompt: '', options: { options: ['', ''] }, required: true },
+  ])
+  const [createdId, setCreatedId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+
+  const createAndInsert = async () => {
+    const problem = validateQuestions(questions)
+    if (!title.trim()) return toast.error('Укажите название опроса')
+    if (problem) return toast.error(problem)
+    setCreating(true)
+    try {
+      let id = createdId
+      if (!id) {
+        const created = await learnApi.createSurvey({
+          title: title.trim(),
+          description: null,
+          kind: 'standard',
+          is_anonymous: anonymous,
+        })
+        id = created.id
+        setCreatedId(id)
+      }
+      await learnApi.replaceQuestions(id, questions)
+      if (canPublish) {
+        await learnApi.setSurveyStatus(id, 'published')
+        toast.success('Опрос создан и опубликован')
+      } else {
+        toast.warning('Опрос создан черновиком — опубликовать сможет publisher в разделе Опросы')
+      }
+      onPick(id)
+    } catch (e) {
+      toast.error('Не удалось создать опрос', { description: extractErrorDetail(e) })
+    } finally {
+      setCreating(false)
+    }
+  }
+
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent>
+      <DialogContent className="max-h-[85vh] max-w-xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Встроить опрос</DialogTitle>
         </DialogHeader>
-        <div className="max-h-72 space-y-1 overflow-y-auto">
-          {published.map((s) => (
+        <div className="flex gap-1 rounded-lg bg-surface/60 p-0.5">
+          {(
+            [
+              ['pick', 'Существующий'],
+              ['create', 'Создать новый'],
+            ] as const
+          ).map(([key, label]) => (
             <button
-              key={s.id}
+              key={key}
               type="button"
-              onClick={() => onPick(s.id)}
-              className="flex w-full items-center gap-2 rounded-lg border border-glass-border px-3 py-2 text-left text-sm text-text hover:border-amber/50"
+              onClick={() => setTab(key)}
+              className={cn(
+                'flex-1 rounded-md px-2 py-1.5 text-xs font-semibold transition-colors',
+                tab === key ? 'bg-bg-alt text-amber' : 'text-text3 hover:text-text2',
+              )}
             >
-              <ClipboardList className="h-4 w-4 shrink-0 text-amber" />
-              <span className="min-w-0 flex-1 truncate">{s.title}</span>
+              {label}
             </button>
           ))}
-          {surveys.data && published.length === 0 && (
-            <p className="py-4 text-center text-sm text-text3">
-              Нет опубликованных опросов.
-            </p>
-          )}
         </div>
+
+        {tab === 'pick' && (
+          <div className="max-h-72 space-y-1 overflow-y-auto">
+            {published.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => onPick(s.id)}
+                className="flex w-full items-center gap-2 rounded-lg border border-glass-border px-3 py-2 text-left text-sm text-text hover:border-amber/50"
+              >
+                <ClipboardList className="h-4 w-4 shrink-0 text-amber" />
+                <span className="min-w-0 flex-1 truncate">{s.title}</span>
+              </button>
+            ))}
+            {surveys.data && published.length === 0 && (
+              <p className="py-4 text-center text-sm text-text3">
+                Нет опубликованных опросов — создайте на соседней вкладке.
+              </p>
+            )}
+          </div>
+        )}
+
+        {tab === 'create' && (
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="embed-survey-title">Название</Label>
+              <Input
+                id="embed-survey-title"
+                value={title}
+                autoFocus
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Например: Насколько понятен урок?"
+              />
+            </div>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
+              <input
+                type="checkbox"
+                checked={anonymous}
+                onChange={(e) => setAnonymous(e.target.checked)}
+                className="h-4 w-4 accent-[#FFB200]"
+              />
+              Анонимный
+            </label>
+            <SurveyQuestionsEditor questions={questions} onChange={setQuestions} />
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={onClose} disabled={creating}>
+                Отмена
+              </Button>
+              <Button type="button" disabled={creating} onClick={() => void createAndInsert()}>
+                {canPublish ? 'Создать и вставить' : 'Создать черновик и вставить'}
+              </Button>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   )

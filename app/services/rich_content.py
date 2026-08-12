@@ -27,6 +27,7 @@ MAX_DEPTH = 30
 
 _SAFE_URL = re.compile(r"^(https?://|mailto:|tel:)", re.IGNORECASE)
 _COLOR = re.compile(r"^(#[0-9a-fA-F]{3,8}|rgba?\([\d\s.,%]+\)|[a-z-]{1,30})$")
+_FONT_SIZE = re.compile(r"^\d{2}px$")
 
 CALLOUT_KINDS = frozenset(
     {"important", "warning", "tip", "mistake", "example", "recommendation"}
@@ -77,10 +78,15 @@ def _check_attrs(node_type: str, attrs: dict[str, Any] | None) -> None:
         start = attrs.get("start", 1)
         if not isinstance(start, int) or start < 0 or start > 10_000:
             raise RichContentError("orderedList: некорректный start")
-        _no_extra(attrs, {"start"})
+        # `type` — атрибут-дефолт TipTap 3.28 (нумерация 1/a/A/i/I): клиент
+        # его вычищает (sanitizeRichDoc), сервер толерантен как страховка —
+        # без этого 422 «лишние атрибуты: ['type']» (ОС 12.08).
+        if attrs.get("type") not in (None, "1", "a", "A", "i", "I"):
+            raise RichContentError("orderedList: некорректный type")
+        _no_extra(attrs, {"start", "type"})
     elif kind == "tableCell":
         for key in attrs:
-            if key not in ("colspan", "rowspan", "colwidth"):
+            if key not in ("colspan", "rowspan", "colwidth", "align"):
                 raise RichContentError(f"table-ячейка: атрибут {key!r} запрещён")
             value = attrs[key]
             if key == "colwidth":
@@ -88,6 +94,11 @@ def _check_attrs(node_type: str, attrs: dict[str, Any] | None) -> None:
                     isinstance(value, list) and all(isinstance(x, int) for x in value)
                 ):
                     raise RichContentError("colwidth: ожидается список чисел")
+            elif key == "align":
+                # Атрибут-дефолт TipTap 3.28 — та же страховка, что и
+                # orderedList.type выше.
+                if value not in (None, "left", "center", "right", "justify"):
+                    raise RichContentError("table-ячейка: некорректный align")
             elif not isinstance(value, int) or not 1 <= value <= 50:
                 raise RichContentError(f"{key}: 1..50")
     elif attrs:
@@ -110,12 +121,21 @@ def _check_mark(mark: dict[str, Any]) -> None:
         if not isinstance(href, str) or not _SAFE_URL.match(href) or len(href) > 2000:
             raise RichContentError("link: разрешены только https/mailto/tel")
     elif mtype == "textStyle":
+        # '' — артефакт parseHTML TipTap (span с color, но без font-size,
+        # даёт fontSize: ''): трактуем как отсутствие, как null.
         color = attrs.get("color")
-        if color is not None and (not isinstance(color, str) or not _COLOR.match(color)):
+        if color not in (None, "") and (not isinstance(color, str) or not _COLOR.match(color)):
             raise RichContentError("textStyle: некорректный цвет")
+        # Размер текста (ОС 12.08 «как в Ворде»): строго NNpx, 10..48.
+        font_size = attrs.get("fontSize")
+        if font_size not in (None, ""):
+            if not isinstance(font_size, str) or not _FONT_SIZE.match(font_size):
+                raise RichContentError("textStyle: некорректный fontSize")
+            if not 10 <= int(font_size[:-2]) <= 48:
+                raise RichContentError("textStyle: fontSize 10..48px")
     elif mtype == "highlight":
         color = attrs.get("color")
-        if color is not None and (not isinstance(color, str) or not _COLOR.match(color)):
+        if color not in (None, "") and (not isinstance(color, str) or not _COLOR.match(color)):
             raise RichContentError("highlight: некорректный цвет")
     elif attrs:
         raise RichContentError(f"{mtype}: атрибуты запрещены")

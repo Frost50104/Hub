@@ -1,4 +1,4 @@
-import { CalendarClock, Check, GraduationCap, Pencil, Plus } from 'lucide-react'
+import { Archive, CalendarClock, Check, GraduationCap, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
@@ -44,6 +44,48 @@ function dueLabel(iso: string): { text: string; overdue: boolean } {
   }
 }
 
+/** Удаление/архив курса прямо из списка (ОС 12.08 — «не проваливаясь в
+ * курс»): сервер разрешает hard-delete только никогда не публиковавшимся
+ * (иначе 409), публиковавшиеся — в архив. */
+function CourseRowActions({ course }: { course: Course }) {
+  const remove = useCourseMutation(() => learnApi.deleteCourse(course.id))
+  const archive = useCourseMutation(() => learnApi.setCourseStatus(course.id, 'archived'))
+
+  if (course.published_at === null) {
+    return (
+      <button
+        type="button"
+        title="Удалить курс"
+        disabled={remove.isPending}
+        onClick={(e) => {
+          e.preventDefault()
+          if (!window.confirm(`Удалить курс «${course.title}»? Действие необратимо.`)) return
+          void remove.mutateAsync(undefined as never).catch(() => undefined)
+        }}
+        className="rounded p-1.5 text-text3 hover:bg-surface hover:text-red"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    )
+  }
+  if (course.status === 'archived') return null
+  return (
+    <button
+      type="button"
+      title="В архив (публиковавшийся курс удалить нельзя)"
+      disabled={archive.isPending}
+      onClick={(e) => {
+        e.preventDefault()
+        if (!window.confirm(`Отправить курс «${course.title}» в архив?`)) return
+        void archive.mutateAsync(undefined as never).catch(() => undefined)
+      }}
+      className="rounded p-1.5 text-text3 hover:bg-surface hover:text-text"
+    >
+      <Archive className="h-4 w-4" />
+    </button>
+  )
+}
+
 function CourseCard({ course, manage }: { course: Course; manage?: boolean }) {
   const navigate = useNavigate()
   const pct =
@@ -84,17 +126,20 @@ function CourseCard({ course, manage }: { course: Course; manage?: boolean }) {
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {manage && (
-            <button
-              type="button"
-              title="Редактировать курс"
-              onClick={(e) => {
-                e.preventDefault()
-                navigate(`/learn/courses/${course.id}/edit`)
-              }}
-              className="rounded p-1.5 text-text3 hover:bg-surface hover:text-text"
-            >
-              <Pencil className="h-4 w-4" />
-            </button>
+            <>
+              <button
+                type="button"
+                title="Редактировать курс"
+                onClick={(e) => {
+                  e.preventDefault()
+                  navigate(`/learn/courses/${course.id}/edit`)
+                }}
+                className="rounded p-1.5 text-text3 hover:bg-surface hover:text-text"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+              <CourseRowActions course={course} />
+            </>
           )}
           {course.completed && (
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-green/15">
@@ -198,6 +243,7 @@ export function LearnCoursesPage() {
                 <span className="min-w-0 flex-1 truncate">{c.title}</span>
                 <Badge variant="secondary">{CONTENT_STATUS_LABEL[c.status]}</Badge>
                 <Pencil className="h-4 w-4 shrink-0 text-text3" />
+                <CourseRowActions course={c} />
               </Link>
             ))}
           </div>

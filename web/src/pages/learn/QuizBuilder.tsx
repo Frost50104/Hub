@@ -132,6 +132,7 @@ export function QuizBuilder({ lessonId }: { lessonId: string }) {
                 setSettings(DEFAULT_SETTINGS)
                 setQuestions([])
               })
+              .catch(() => undefined)
             }}
             className="rounded p-1.5 text-text3 hover:text-red"
           >

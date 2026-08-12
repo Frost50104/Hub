@@ -79,10 +79,13 @@ function renderText(node: RichNode, key: number): ReactNode {
         break
       }
       case 'textStyle': {
-        const color = mark.attrs?.color
-        if (typeof color === 'string') {
+        // color и fontSize живут в ОДНОЙ марке — применяем оба.
+        const style: CSSProperties = {}
+        if (typeof mark.attrs?.color === 'string') style.color = mark.attrs.color
+        if (typeof mark.attrs?.fontSize === 'string') style.fontSize = mark.attrs.fontSize
+        if (Object.keys(style).length > 0) {
           el = (
-            <span key={key} style={{ color } as CSSProperties}>
+            <span key={key} style={style}>
               {el}
             </span>
           )
@@ -174,17 +177,31 @@ function RenderNode({ node, index }: { node: RichNode; index: number }): ReactNo
     case 'tableRow':
       return <tr>{renderChildren(node)}</tr>
     case 'tableHeader':
+    case 'tableCell': {
+      // colspan/rowspan/align обязаны доехать до потребителя — иначе
+      // объединённые ячейки «едут» (ОС 12.08).
+      const Cell = node.type === 'tableHeader' ? 'th' : 'td'
+      const colSpan = Number(node.attrs?.colspan) || undefined
+      const rowSpan = Number(node.attrs?.rowspan) || undefined
+      const align = node.attrs?.align
       return (
-        <th className="border border-glass-border bg-surface px-2 py-1 text-left font-semibold">
+        <Cell
+          colSpan={colSpan === 1 ? undefined : colSpan}
+          rowSpan={rowSpan === 1 ? undefined : rowSpan}
+          style={
+            typeof align === 'string' ? ({ textAlign: align } as CSSProperties) : undefined
+          }
+          className={cn(
+            'border border-glass-border px-2 py-1',
+            node.type === 'tableHeader'
+              ? 'bg-surface text-left font-semibold'
+              : 'align-top',
+          )}
+        >
           {renderChildren(node)}
-        </th>
+        </Cell>
       )
-    case 'tableCell':
-      return (
-        <td className="border border-glass-border px-2 py-1 align-top">
-          {renderChildren(node)}
-        </td>
-      )
+    }
     default: {
       const renderExtra = node.type ? extraNodes[node.type] : undefined
       if (renderExtra) return renderExtra(node, index)

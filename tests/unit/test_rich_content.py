@@ -119,3 +119,144 @@ def test_extract_text():
 
 def test_empty_doc_is_valid():
     validate_rich_content(empty_doc())
+
+
+# --- Реальный вывод TipTap 3.28 (ОС 12.08: списки/таблицы/паста/fontSize) ----
+
+
+def test_ordered_list_tiptap_default_type_attr_allowed():
+    # TipTap 3.28 сериализует дефолт attrs: {"start": 1, "type": None} —
+    # раньше валило 422 «лишние атрибуты: ['type']» (нумерованный список).
+    doc = _doc(
+        {
+            "type": "orderedList",
+            "attrs": {"start": 1, "type": None},
+            "content": [
+                {"type": "listItem", "content": [_p("раз")]},
+            ],
+        }
+    )
+    validate_rich_content(doc)
+
+
+def test_ordered_list_bad_type_rejected():
+    doc = _doc({"type": "orderedList", "attrs": {"start": 1, "type": "evil"}, "content": []})
+    with pytest.raises(RichContentError):
+        validate_rich_content(doc)
+
+
+def test_table_cell_align_allowed():
+    # tableCell/tableHeader в TipTap 3.28 несут attr align (дефолт None).
+    doc = _doc(
+        {
+            "type": "table",
+            "content": [
+                {
+                    "type": "tableRow",
+                    "content": [
+                        {
+                            "type": "tableHeader",
+                            "attrs": {"colspan": 1, "rowspan": 1, "colwidth": None, "align": None},
+                            "content": [_p("шапка")],
+                        },
+                        {
+                            "type": "tableCell",
+                            "attrs": {"colspan": 2, "rowspan": 1, "align": "center"},
+                            "content": [_p("ячейка")],
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+    validate_rich_content(doc)
+
+
+def test_table_cell_bad_align_rejected():
+    doc = _doc(
+        {
+            "type": "table",
+            "content": [
+                {
+                    "type": "tableRow",
+                    "content": [
+                        {"type": "tableCell", "attrs": {"align": "diagonal"}, "content": [_p("x")]}
+                    ],
+                }
+            ],
+        }
+    )
+    with pytest.raises(RichContentError):
+        validate_rich_content(doc)
+
+
+def test_text_style_font_size_bounds():
+    def styled(size: str) -> dict:
+        return _doc(
+            {
+                "type": "paragraph",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "x",
+                        "marks": [{"type": "textStyle", "attrs": {"fontSize": size}}],
+                    }
+                ],
+            }
+        )
+
+    validate_rich_content(styled("10px"))
+    validate_rich_content(styled("48px"))
+    for bad in ("9px", "49px", "150px", "24", "24em", "24 px"):
+        with pytest.raises(RichContentError):
+            validate_rich_content(styled(bad))
+
+
+def test_text_style_empty_string_attrs_tolerated():
+    # ''-артефакт parseHTML TipTap: паста <span style="color:..."> без
+    # font-size даёт fontSize: '' (и наоборот) — трактуем как отсутствие.
+    doc = _doc(
+        {
+            "type": "paragraph",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "красный",
+                    "marks": [
+                        {"type": "textStyle", "attrs": {"color": "rgb(255, 0, 0)", "fontSize": ""}}
+                    ],
+                },
+                {
+                    "type": "text",
+                    "text": "крупный",
+                    "marks": [{"type": "textStyle", "attrs": {"color": "", "fontSize": "24px"}}],
+                },
+                {
+                    "type": "text",
+                    "text": "фон",
+                    "marks": [{"type": "highlight", "attrs": {"color": ""}}],
+                },
+            ],
+        }
+    )
+    validate_rich_content(doc)
+
+
+def test_text_style_color_and_font_size_together():
+    # textStyle несёт color И fontSize в одной марке — старые doc с color
+    # обязаны проходить, комбинация тоже.
+    doc = _doc(
+        {
+            "type": "paragraph",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "x",
+                    "marks": [
+                        {"type": "textStyle", "attrs": {"color": "#FFB200", "fontSize": "24px"}}
+                    ],
+                }
+            ],
+        }
+    )
+    validate_rich_content(doc)

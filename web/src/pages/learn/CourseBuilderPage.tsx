@@ -257,6 +257,7 @@ function CourseSettingsCard({
             disabled={!title.trim() || save.isPending}
             onClick={() =>
               void save.mutateAsync(undefined as never).then(() => toast.success('Сохранено'))
+              .catch(() => undefined)
             }
           >
             Сохранить
@@ -272,6 +273,7 @@ function CourseSettingsCard({
               void setStatus
                 .mutateAsync(action.to)
                 .then(() => toast.success(CONTENT_STATUS_LABEL[action.to]))
+              .catch(() => undefined)
             }
           >
             {action.label}
@@ -294,10 +296,16 @@ function CourseSettingsCard({
               void remove
                 .mutateAsync(undefined as never)
                 .then(() => navigate('/learn/courses'))
+              .catch(() => undefined)
             }}
           >
             <Trash2 className="h-4 w-4" /> Удалить
           </Button>
+        )}
+        {course.published_at !== null && (
+          <span className="text-xs text-text3">
+            Публиковавшийся курс удалить нельзя — используйте «В архив».
+          </span>
         )}
       </div>
     </div>
@@ -346,6 +354,7 @@ function LessonsCard({
     void reorder.mutateAsync(next).then(() => {
       void qc.invalidateQueries({ queryKey: ['learn-course', course.id] })
     })
+              .catch(() => undefined)
   }
 
   const submitNew = (e: FormEvent) => {
@@ -357,6 +366,7 @@ function LessonsCard({
       setOrder(null)
       onEdit(lesson)
     })
+              .catch(() => undefined)
   }
 
   return (
@@ -536,6 +546,7 @@ function CourseAudienceDialog({
                 toast.success('Аудитория обновлена')
                 onClose()
               })
+              .catch(() => undefined)
             }
           >
             Сохранить
@@ -630,6 +641,7 @@ function AssignDialog({ course, onClose }: { course: CourseDetail; onClose: () =
                 toast.success(`Назначено: ${selected.size}`)
                 onClose()
               })
+              .catch(() => undefined)
             }
           >
             Назначить ({selected.size})

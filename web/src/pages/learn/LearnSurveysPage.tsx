@@ -6,7 +6,6 @@ import {
   Pencil,
   Plus,
   Send,
-  Trash2,
   Users,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -14,6 +13,7 @@ import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
+import { SurveyQuestionsEditor } from '@/components/learn/SurveyQuestionsEditor'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Button } from '@/components/ui/Button'
@@ -35,7 +35,6 @@ import { cn } from '@/lib/cn'
 import {
   CONTENT_STATUS_LABEL,
   learnApi,
-  QUESTION_TYPE_LABEL,
   type AnswerValue,
   type QuestionDraft,
   type QuestionType,
@@ -477,9 +476,6 @@ function SurveyBuilderDialog({
   )
   const remove = useSurveyMutation(() => learnApi.deleteSurvey(survey!.id))
 
-  const updateQuestion = (i: number, patch: Partial<QuestionDraft>) =>
-    setQuestions((prev) => prev.map((q, idx) => (idx === i ? { ...q, ...patch } : q)))
-
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
@@ -542,133 +538,11 @@ function SurveyBuilderDialog({
               </label>
             </div>
 
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wider text-text3">
-                Вопросы
-              </p>
-              {questions.map((q, i) => (
-                <div key={i} className="space-y-2 rounded-lg border border-glass-border p-3">
-                  <div className="flex gap-2">
-                    <Select
-                      className="w-44"
-                      value={q.qtype}
-                      disabled={published}
-                      onChange={(e) => {
-                        const qtype = e.target.value as QuestionType
-                        updateQuestion(i, {
-                          qtype,
-                          options:
-                            qtype === 'single' || qtype === 'multi'
-                              ? { options: q.options?.options ?? ['', ''] }
-                              : qtype === 'scale'
-                                ? { min: 1, max: 5 }
-                                : null,
-                        })
-                      }}
-                    >
-                      {Object.entries(QUESTION_TYPE_LABEL).map(([k, v]) => (
-                        <option key={k} value={k}>
-                          {v}
-                        </option>
-                      ))}
-                    </Select>
-                    <Input
-                      className="flex-1"
-                      value={q.prompt}
-                      disabled={published}
-                      onChange={(e) => updateQuestion(i, { prompt: e.target.value })}
-                      placeholder="Текст вопроса…"
-                    />
-                    {!published && (
-                      <button
-                        type="button"
-                        title="Удалить вопрос"
-                        className="rounded p-1.5 text-text3 hover:text-red"
-                        onClick={() =>
-                          setQuestions((prev) => prev.filter((_, idx) => idx !== i))
-                        }
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                  {(q.qtype === 'single' || q.qtype === 'multi') && (
-                    <div className="space-y-1 pl-2">
-                      {(q.options?.options ?? []).map((opt, oi) => (
-                        <div key={oi} className="flex items-center gap-2">
-                          <Input
-                            className="h-8"
-                            value={opt}
-                            disabled={published}
-                            onChange={(e) => {
-                              const options = [...(q.options?.options ?? [])]
-                              options[oi] = e.target.value
-                              updateQuestion(i, { options: { options } })
-                            }}
-                            placeholder={`Вариант ${oi + 1}`}
-                          />
-                          {!published && (q.options?.options?.length ?? 0) > 2 && (
-                            <button
-                              type="button"
-                              className="text-text3 hover:text-red"
-                              onClick={() =>
-                                updateQuestion(i, {
-                                  options: {
-                                    options: (q.options?.options ?? []).filter(
-                                      (_, x) => x !== oi,
-                                    ),
-                                  },
-                                })
-                              }
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                      {!published && (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="h-7 text-xs"
-                          onClick={() =>
-                            updateQuestion(i, {
-                              options: { options: [...(q.options?.options ?? []), ''] },
-                            })
-                          }
-                        >
-                          <Plus className="h-3 w-3" /> Вариант
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                  <label className="flex cursor-pointer items-center gap-2 text-xs text-text2">
-                    <input
-                      type="checkbox"
-                      checked={q.required}
-                      disabled={published}
-                      onChange={(e) => updateQuestion(i, { required: e.target.checked })}
-                      className="h-3.5 w-3.5 accent-[#FFB200]"
-                    />
-                    Обязательный
-                  </label>
-                </div>
-              ))}
-              {!published && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() =>
-                    setQuestions((prev) => [
-                      ...prev,
-                      { qtype: 'single', prompt: '', options: { options: ['', ''] }, required: true },
-                    ])
-                  }
-                >
-                  <Plus className="h-4 w-4" /> Вопрос
-                </Button>
-              )}
-            </div>
+            <SurveyQuestionsEditor
+              questions={questions}
+              onChange={setQuestions}
+              disabled={published}
+            />
           </div>
 
           <DialogFooter className="flex-wrap">

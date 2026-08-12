@@ -342,3 +342,13 @@ export const LESSON_NODE_EXTENSIONS = [
   LessonSurveyEmbed,
   LessonCheckQuestion,
 ]
+
+/** Типы доменных нод — для sanitizeRichDoc (пропускать нетронутыми). */
+export const LESSON_NODE_TYPES: ReadonlySet<string> = new Set([
+  'figure',
+  'gallery',
+  'video',
+  'pdfEmbed',
+  'surveyEmbed',
+  'checkQuestion',
+])
