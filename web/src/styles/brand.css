@@ -83,6 +83,36 @@ select option {
   color: rgb(var(--text));
 }
 
+/* Минималистичные скроллбары (ОС 13.08): тонкий ползунок, прозрачный трек.
+   Стандартные свойства — Chrome 121+/Firefox (при них Chrome игнорирует
+   -webkit-псевдо); -webkit-ветка — фолбэк для старых Safari/WebKit. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--text3) / 0.55) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--text3) / 0.55);
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(var(--text3) / 0.8);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 body {
   background: rgb(var(--bg));
   color: rgb(var(--text));
