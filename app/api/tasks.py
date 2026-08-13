@@ -12,11 +12,12 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from signaris_auth import Principal
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import enforce_rate_limit, get_db, require_auth
+from app.models.project import Project
 from app.models.section import Section
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskLabelAssignment, TaskWatcher
@@ -30,7 +31,11 @@ from app.schemas.task import (
 )
 from app.services.activity_writer import record_activity
 from app.services.notify import notify_assigned, notify_status_changed
-from app.services.project_access import is_hub_admin, require_project_role
+from app.services.project_access import (
+    ensure_project_member,
+    is_hub_admin,
+    require_project_role,
+)
 
 router = APIRouter(tags=["tasks"])
 
@@ -73,6 +78,23 @@ async def _next_position(db: AsyncSession, project_id: UUID, status_: str) -> De
         )
     )
     return Decimal(row.scalar_one())
+
+
+async def _allocate_task_seq(db: AsyncSession, project_id: UUID) -> int:
+    """Атомарная выдача номера задачи («KEY-42»).
+
+    Row-lock строки проекта живёт до конца транзакции и сериализует
+    конкурентные создания — retry не нужен, UNIQUE(project_id, seq) остаётся
+    страховочной сеткой. Дыры в нумерации при rollback допустимы (как в Jira).
+    Звать ПОСЛЕДНИМ перед Task(...), чтобы не держать лок при 400/404.
+    """
+    row = await db.execute(
+        update(Project)
+        .where(Project.id == project_id)
+        .values(next_task_seq=Project.next_task_seq + 1)
+        .returning(Project.next_task_seq - 1)
+    )
+    return row.scalar_one()
 
 
 async def _fetch_assignee(
@@ -257,6 +279,7 @@ async def create_task(
         start_at=body.start_at,
         due_at=body.due_at,
         position=await _next_position(db, project_id, body.status),
+        seq=await _allocate_task_seq(db, project_id),
     )
     if body.status == "done":
         task.completed_at = datetime.now(UTC)
@@ -282,6 +305,16 @@ async def create_task(
             tenant_id=task.tenant_id,
             employee_id=body.assignee_id,
             reason="assignee",
+        )
+    if body.assignee_id is not None:
+        # Исполнитель без членства не может открыть проект из «Все задачи»
+        # (404) — авто-viewer чинит deep-link; существующая роль не трогается.
+        await ensure_project_member(
+            db,
+            project_id=project_id,
+            tenant_id=principal.tenant_id,
+            employee_id=body.assignee_id,
+            added_by=principal.employee_id,
         )
     await record_activity(
         db,
@@ -407,6 +440,14 @@ async def update_task(
                 tenant_id=task.tenant_id,
                 employee_id=body.assignee_id,
                 reason="assignee",
+            )
+            # Авто-viewer: deep-link из «Все задачи» должен открываться.
+            await ensure_project_member(
+                db,
+                project_id=task.project_id,
+                tenant_id=task.tenant_id,
+                employee_id=body.assignee_id,
+                added_by=principal.employee_id,
             )
         await record_activity(
             db,

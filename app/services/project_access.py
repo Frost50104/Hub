@@ -22,11 +22,12 @@ API:
 from __future__ import annotations
 
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 from signaris_auth import Principal
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project, ProjectMember
@@ -81,6 +82,36 @@ async def get_my_role(
         )
     )
     return row.scalar_one_or_none()  # type: ignore[return-value]
+
+
+async def ensure_project_member(
+    db: AsyncSession,
+    *,
+    project_id: UUID,
+    tenant_id: UUID,
+    employee_id: UUID,
+    role: ProjectRole = "viewer",
+    added_by: UUID | None = None,
+) -> None:
+    """Идемпотентное членство (авто-viewer при назначении исполнителем).
+
+    INSERT ... ON CONFLICT DO NOTHING по (project_id, employee_id) —
+    существующая роль НИКОГДА не понижается и не повышается; race-safe
+    (тот же паттерн, что _ensure_watcher в tasks.py). Снятие assignee
+    членство не удаляет — вызывающие просто не зовут ничего обратного.
+    """
+    await db.execute(
+        pg_insert(ProjectMember)
+        .values(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            project_id=project_id,
+            employee_id=employee_id,
+            role=role,
+            added_by=added_by,
+        )
+        .on_conflict_do_nothing(index_elements=["project_id", "employee_id"])
+    )
 
 
 async def require_project_role(

@@ -16,14 +16,23 @@ from uuid import UUID, uuid4
 from app.config import get_settings
 
 # A small but permissive MIME whitelist. Anything else → 415.
+# Зеркалится клиентом (web/src/lib/attachments.ts::ATTACHMENT_ACCEPT) —
+# менять ПАРОЙ, иначе accept-фильтр и сервер разъедутся.
 ALLOWED_MIME: frozenset[str] = frozenset(
     {
         # Images. SVG намеренно исключён: это XML с поддержкой <script> —
         # stored-XSS вектор при любом inline-рендере.
+        # HEIC/HEIF (фото iPhone) браузеры НЕ декодируют — сейчас вложения
+        # отдаются только как скачивание (Content-Disposition: attachment);
+        # появится inline-превью image/* — HEIC/HEIF из него исключить.
         "image/png",
         "image/jpeg",
         "image/webp",
         "image/gif",
+        "image/heic",
+        "image/heif",
+        "image/heic-sequence",
+        "image/heif-sequence",
         # Documents
         "application/pdf",
         "application/zip",
@@ -42,6 +51,31 @@ ALLOWED_MIME: frozenset[str] = frozenset(
         "application/json",
     }
 )
+
+
+# Восстановление MIME из расширения — ТОЛЬКО для явно перечисленных типов.
+# Никакого mimetypes.guess_type: общий маппинг «спас» бы и опасные типы
+# (octet-stream + .svg → image/svg+xml), ломая fail-closed whitelist.
+_EXT_FALLBACK_MIME: dict[str, str] = {
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+}
+
+
+def resolve_mime(content_type: str | None, filename: str) -> str:
+    """Нормализует заявленный клиентом MIME.
+
+    Десктопные браузеры шлют .heic как application/octet-stream или вовсе
+    без типа — для generic/пустого типа пытаемся восстановить MIME из
+    расширения (только _EXT_FALLBACK_MIME). Параметры вида `; charset=…`
+    отрезаются.
+    """
+    mime = (content_type or "").split(";")[0].strip().lower()
+    if mime in ("", "application/octet-stream"):
+        return _EXT_FALLBACK_MIME.get(
+            Path(filename).suffix.lower(), mime or "application/octet-stream"
+        )
+    return mime
 
 
 def _sanitize_filename(name: str) -> str:

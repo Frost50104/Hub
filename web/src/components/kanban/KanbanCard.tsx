@@ -5,11 +5,13 @@ import type { CSSProperties } from 'react'
 
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
+import { useProject } from '@/hooks/useProjects'
 import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
 import {
   PRIORITY_LABEL,
   STATUS_LABEL,
+  taskKey,
   type SubtaskStats,
   type Task,
   type TaskStatus,
@@ -58,6 +60,8 @@ export function KanbanCard({
     opacity: isDragging ? 0.4 : 1,
   }
   const StatusIcon = STATUS_ICON[task.status]
+  // Доска живёт только на странице проекта — query уже в кэше, N+1 нет.
+  const key = taskKey(useProject(task.project_id).data?.key, task.seq)
 
   return (
     <div
@@ -105,6 +109,11 @@ export function KanbanCard({
             task.status === 'done' && 'line-through',
           )}
         >
+          {key && (
+            <span className="mr-1.5 font-mono text-[10px] font-normal text-text3">
+              {key}
+            </span>
+          )}
           {task.title}
         </p>
       </div>

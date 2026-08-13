@@ -108,7 +108,14 @@ export function SidebarSearch() {
                   }
                   className="flex w-full flex-col rounded-md px-2 py-1.5 text-left hover:bg-surface"
                 >
-                  <span className="truncate text-sm text-text">{t.title}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    {t.project_key && t.seq != null && (
+                      <span className="shrink-0 font-mono text-[10px] text-text3">
+                        {t.project_key}-{t.seq}
+                      </span>
+                    )}
+                    <span className="truncate text-sm text-text">{t.title}</span>
+                  </span>
                   {t.subtitle && (
                     <span className="truncate text-xs text-text3">
                       {t.subtitle}

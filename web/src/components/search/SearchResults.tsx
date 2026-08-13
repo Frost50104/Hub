@@ -93,15 +93,20 @@ export function SearchResults({
                     className="flex flex-col gap-1 rounded-md border border-glass-border bg-surface px-3 py-2 text-sm hover:bg-glass focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <span
-                        className={cn(
-                          'truncate',
-                          t.status === 'done'
-                            ? 'text-text3 line-through'
-                            : 'text-text',
-                        )}
-                      >
-                        {t.title}
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="shrink-0 font-mono text-[10px] text-text3">
+                          {g.project_key}-{t.seq}
+                        </span>
+                        <span
+                          className={cn(
+                            'truncate',
+                            t.status === 'done'
+                              ? 'text-text3 line-through'
+                              : 'text-text',
+                          )}
+                        >
+                          {t.title}
+                        </span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
                         {t.due_at && (

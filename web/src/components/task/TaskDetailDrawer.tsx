@@ -24,6 +24,7 @@ import { cn } from '@/lib/cn'
 import {
   PRIORITY_LABEL,
   STATUS_LABEL,
+  taskKey,
   type TaskPriority,
   type TaskStatus,
 } from '@/lib/tasks'
@@ -149,7 +150,9 @@ export function TaskDetailDrawer({
           </DialogPrimitive.Title>
 
           <header className="sticky top-0 z-10 -mx-4 mb-4 flex items-center justify-between border-b border-glass-border bg-bg-alt/95 px-4 py-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none">
-            <Badge variant="secondary">Задача</Badge>
+            <Badge variant="secondary">
+              {taskKey(project.data?.key, taskQuery.data?.seq) ?? 'Задача'}
+            </Badge>
             <div className="flex items-center gap-1">
               {task && <WatchControl taskId={task.id} />}
               <DialogPrimitive.Close
@@ -379,9 +382,13 @@ export function TaskDetailDrawer({
 
               <TaskCustomFields taskId={task.id} projectId={projectId} />
 
-              <TaskDependencies taskId={task.id} projectId={projectId} />
+              <TaskDependencies
+                taskId={task.id}
+                projectId={projectId}
+                canEdit={!readOnly}
+              />
 
-              <TaskAttachments taskId={task.id} />
+              <TaskAttachments taskId={task.id} canEdit={!readOnly} />
 
               <TaskThread taskId={task.id} />
 

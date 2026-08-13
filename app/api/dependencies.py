@@ -35,6 +35,7 @@ class DependencyPeer(BaseModel):
     id: UUID
     title: str
     status: str
+    seq: int
 
 
 class TaskDependenciesResponse(BaseModel):
@@ -74,10 +75,10 @@ async def list_dependencies(
         return TaskDependenciesResponse(predecessors=[], successors=[])
 
     peer_rows = await db.execute(
-        select(Task.id, Task.title, Task.status).where(Task.id.in_(peer_ids))
+        select(Task.id, Task.title, Task.status, Task.seq).where(Task.id.in_(peer_ids))
     )
     peers = {
-        row.id: DependencyPeer(id=row.id, title=row.title, status=row.status)
+        row.id: DependencyPeer(id=row.id, title=row.title, status=row.status, seq=row.seq)
         for row in peer_rows.all()
     }
     predecessors = [

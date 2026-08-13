@@ -6,6 +6,9 @@ export interface SearchHit {
   title: string
   subtitle: string | null
   project_id?: string | null
+  /** «KEY-42» для task-хитов (у project-хитов отсутствуют). */
+  seq?: number | null
+  project_key?: string | null
 }
 
 export interface SearchResponseLegacy {
@@ -16,6 +19,7 @@ export interface SearchResponseLegacy {
 export interface SearchTaskHit {
   id: string
   title: string
+  seq: number
   status: 'todo' | 'in_progress' | 'in_review' | 'done'
   priority: 'low' | 'medium' | 'high' | 'urgent'
   due_at: string | null

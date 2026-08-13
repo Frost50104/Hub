@@ -5,6 +5,11 @@
 
 :root,
 [data-theme='dark'] {
+  /* Нативные попапы <select>, скроллбары и date-пикеры рисует UA по
+     color-scheme; без него documento считается светлым и option-список
+     был белым с белым текстом (баг-репорт 13.08). */
+  color-scheme: dark;
+
   /* Primary palette — RGB channels (space-separated) so Tailwind's `/<alpha>`
      opacity modifiers work via `rgb(var(--x) / <alpha-value>)` in the config. */
   --amber: 255 178 0;
@@ -48,6 +53,8 @@
 /* Light theme — palette TBD on Hub-MVP.1 контрольная точка.
    Placeholders below are agent's recommendation; replace after user approval. */
 [data-theme='light'] {
+  color-scheme: light;
+
   --amber: 255 178 0; /* Брендовый акцент не меняется */
   --green: 22 163 74;
   --red: 220 38 38;
@@ -68,6 +75,13 @@
 
 /* No system/auto mode: the app always sets an explicit data-theme on <html>
    (default dark via :root) through the inline boot script + initTheme(). */
+
+/* Страховка для Firefox/Linux: option наследует полупрозрачный --glass от
+   select — в выпадающем списке это даёт нечитаемую кашу. Непрозрачные токены. */
+select option {
+  background-color: rgb(var(--bg-alt));
+  color: rgb(var(--text));
+}
 
 body {
   background: rgb(var(--bg));

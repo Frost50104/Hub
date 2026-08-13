@@ -9,7 +9,13 @@ import {
   useDeleteAttachment,
   useUploadAttachment,
 } from '@/hooks/useAttachments'
-import { attachmentsApi, formatBytes, type Attachment } from '@/lib/attachments'
+import {
+  ATTACHMENT_ACCEPT,
+  attachmentsApi,
+  attachmentTypeError,
+  formatBytes,
+  type Attachment,
+} from '@/lib/attachments'
 import { cn } from '@/lib/cn'
 
 const MAX_BYTES = 20 * 1024 * 1024
@@ -66,9 +72,11 @@ function AttachmentRow({
 
 interface TaskAttachmentsProps {
   taskId: string
+  /** false → viewer: дропзоны нет (сервер требует owner/editor на POST). */
+  canEdit?: boolean
 }
 
-export function TaskAttachments({ taskId }: TaskAttachmentsProps) {
+export function TaskAttachments({ taskId, canEdit = true }: TaskAttachmentsProps) {
   const me = useMe()
   const list = useAttachments(taskId)
   const upload = useUploadAttachment(taskId)
@@ -77,6 +85,13 @@ export function TaskAttachments({ taskId }: TaskAttachmentsProps) {
   const [dragOver, setDragOver] = useState(false)
 
   const submitFile = async (file: File) => {
+    // Тип проверяем до запроса (accept обходится выбором «все файлы») —
+    // иначе сервер ответит голым 415 без списка допустимого.
+    const typeError = attachmentTypeError(file)
+    if (typeError) {
+      toast.error(typeError)
+      return
+    }
     if (file.size > MAX_BYTES) {
       toast.error(`«${file.name}» больше 20 МБ — не загрузится`)
       return
@@ -121,39 +136,44 @@ export function TaskAttachments({ taskId }: TaskAttachmentsProps) {
         ))}
       </div>
 
-      <div
-        onDragOver={(e) => {
-          e.preventDefault()
-          setDragOver(true)
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={onDrop}
-        onClick={onPick}
-        className={cn(
-          'flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed py-3 text-xs transition-colors',
-          dragOver
-            ? 'border-amber bg-amber/10 text-amber'
-            : 'border-glass-border text-text3 hover:border-amber/50 hover:text-text2',
-        )}
-      >
-        <Upload className="h-3.5 w-3.5" />
-        {upload.isPending ? 'Загружаем…' : 'Перетащите файл или нажмите'}
-        <span className="text-[10px] opacity-60">до 20 МБ</span>
-      </div>
-      <input
-        ref={inputRef}
-        type="file"
-        className="hidden"
-        onChange={async (e) => {
-          const files = Array.from(e.target.files ?? [])
-          e.target.value = ''
-          for (const f of files) await submitFile(f)
-        }}
-      />
+      {canEdit && (
+        <>
+          <div
+            onDragOver={(e) => {
+              e.preventDefault()
+              setDragOver(true)
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+            onClick={onPick}
+            className={cn(
+              'flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed py-3 text-xs transition-colors',
+              dragOver
+                ? 'border-amber bg-amber/10 text-amber'
+                : 'border-glass-border text-text3 hover:border-amber/50 hover:text-text2',
+            )}
+          >
+            <Upload className="h-3.5 w-3.5" />
+            {upload.isPending ? 'Загружаем…' : 'Перетащите файл или нажмите'}
+            <span className="text-[10px] opacity-60">до 20 МБ</span>
+          </div>
+          <input
+            ref={inputRef}
+            type="file"
+            accept={ATTACHMENT_ACCEPT}
+            className="hidden"
+            onChange={async (e) => {
+              const files = Array.from(e.target.files ?? [])
+              e.target.value = ''
+              for (const f of files) await submitFile(f)
+            }}
+          />
 
-      <Button variant="ghost" size="sm" className="sr-only" onClick={onPick}>
-        Загрузить
-      </Button>
+          <Button variant="ghost" size="sm" className="sr-only" onClick={onPick}>
+            Загрузить
+          </Button>
+        </>
+      )}
     </section>
   )
 }

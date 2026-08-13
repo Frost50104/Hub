@@ -23,6 +23,8 @@ export interface DependencyPeer {
   id: string
   title: string
   status: 'todo' | 'in_progress' | 'in_review' | 'done'
+  /** Номер в проекте — вместе с key проекта даёт бейдж «KEY-42». */
+  seq: number
 }
 
 export interface TaskDependencies {

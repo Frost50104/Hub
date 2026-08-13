@@ -1,6 +1,6 @@
 import { ChevronDown, LayoutGrid } from 'lucide-react'
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
@@ -214,6 +214,7 @@ function DesktopHome() {
   const [taskTab, setTaskTab] = useState<DueWindow>('upcoming')
   const myTasks = useMyTasks({ due_window: taskTab })
   const toggleDone = useToggleDone('')
+  const navigate = useNavigate()
 
   const firstName = me.data?.full_name?.split(/\s+/)[0] ?? ''
   const today = capitalizeFirst(
@@ -286,7 +287,12 @@ function DesktopHome() {
               </p>
             )}
             {myTasks.data?.slice(0, 6).map((t) => (
-              <TaskRow key={t.id} task={t} onToggleDone={() => toggleDone(t)} />
+              <TaskRow
+                key={t.id}
+                task={t}
+                onClick={() => navigate(`/projects/${t.project_id}?task=${t.id}`)}
+                onToggleDone={() => toggleDone(t)}
+              />
             ))}
           </div>
         </section>

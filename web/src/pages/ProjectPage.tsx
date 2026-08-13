@@ -303,6 +303,7 @@ function MobileViewControlBar({
 function SectionBlock({
   section,
   projectId,
+  projectKey,
   tasks,
   canEditFlag,
   canManageFlag,
@@ -314,6 +315,7 @@ function SectionBlock({
 }: {
   section: Section | null
   projectId: string
+  projectKey: string | null
   tasks: Task[]
   canEditFlag: boolean
   canManageFlag: boolean
@@ -425,6 +427,7 @@ function SectionBlock({
               <TaskRow
                 key={t.id}
                 task={t}
+                projectKey={projectKey}
                 subtasks={childrenByParent?.get(t.id)}
                 labels={labelsByTask?.get(t.id)}
                 onClick={() => onTaskClick(t.id)}
@@ -462,6 +465,8 @@ function ListTab({
   filters: TaskViewFilters
 }) {
   const sections = useProjectSections(projectId)
+  // Ключ проекта для бейджей «KEY-42» — query уже в кэше страницы.
+  const projectKey = useProject(projectId).data?.key ?? null
   const listFilters = useMemo(() => toListFilters(filters), [filters])
   const tasks = useTasks(projectId, listFilters)
   const defs = useCustomFieldDefinitions(projectId)
@@ -584,6 +589,7 @@ function ListTab({
         <SectionBlock
           section={null}
           projectId={projectId}
+          projectKey={projectKey}
           tasks={orphanTasks}
           canEditFlag={canEditFlag}
           canManageFlag={canManageFlag}
@@ -600,6 +606,7 @@ function ListTab({
           key={s.id}
           section={s}
           projectId={projectId}
+          projectKey={projectKey}
           tasks={tasksBySection.get(s.id) ?? []}
           canEditFlag={canEditFlag}
           canManageFlag={canManageFlag}

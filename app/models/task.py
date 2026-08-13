@@ -51,6 +51,9 @@ class Task(Base):
             "priority IN ('low', 'medium', 'high', 'urgent')",
             name="ck_tasks_priority",
         ),
+        # project_id иммутабелен (переноса задач между проектами нет) —
+        # иначе перевыдавать seq через _allocate_task_seq нового проекта.
+        UniqueConstraint("project_id", "seq", name="uq_tasks_project_seq"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -95,6 +98,9 @@ class Task(Base):
     )
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     position: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    # Человекочитаемый номер в проекте («KEY-42»): выдаётся _allocate_task_seq
+    # атомарным инкрементом projects.next_task_seq; дыры при rollback — норма.
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), nullable=False
@@ -226,6 +232,3 @@ class TaskActivity(Base):
         DateTime(timezone=True), server_default=text("now()"), nullable=False
     )
 
-
-# Keep Integer import alive (used in 0003 migration; some envs flag F401 here).
-_ = Integer

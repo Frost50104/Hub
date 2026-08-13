@@ -19,7 +19,12 @@ from app.models.shadow import ShadowUser
 from app.models.task import Task
 from app.schemas.attachment import AttachmentResponse
 from app.services.activity_writer import record_activity
-from app.services.attachments import ALLOWED_MIME, absolute_path, storage_key_for
+from app.services.attachments import (
+    ALLOWED_MIME,
+    absolute_path,
+    resolve_mime,
+    storage_key_for,
+)
 from app.services.project_access import is_hub_admin, require_project_role
 
 router = APIRouter(tags=["attachments"])
@@ -109,7 +114,7 @@ async def upload_attachment(
     )
 
     settings = get_settings()
-    mime = file.content_type or "application/octet-stream"
+    mime = resolve_mime(file.content_type, file.filename or "")
     if mime not in ALLOWED_MIME:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,

@@ -67,6 +67,18 @@
 - **CF-колонки и метки в List скрыты на <lg** — мобильный список показывает только название/приоритет/подзадачи/аватар/срок.
 - **PDF в уроках рендерится pdf.js** (canvas, `web/src/components/learn/lesson/PdfViewer.tsx`, 2026-08-11) — iframe-подход умер на Android Chrome («контент заблокирован»: телефонный Chrome не рендерит PDF во встраиваниях), iOS показывал первую страницу. Ограничения v1: без текстового слоя (нет выделения/поиска по тексту); cmaps/standard_fonts/wasm НЕ хостим (JS-fallback'и pdfjs; при жалобах на выпавшие шрифты/картинки — скопировать в `web/public/pdfjs/` и передать trailing-slash URL'ы в getDocument); floor pdfjs v6 — Chrome 119+/Safari 17.4+ (ниже — fallback-карточка со ссылкой). Worker подключён `?worker&url` + `worker.format: 'es'` — НЕ менять на голый `?url`: `.mjs`-asset nginx 1.24 отдаёт `application/octet-stream`, а module-worker'ы жёстко требуют JS-MIME (падает только на проде). Чанки `PdfViewer-*.js` и `pdf.worker*.js` — в globIgnores PWA-precache.
 
+## Баг-репорт 13.08 — таск-трекер: зависимости/тема/вложения + номера задач (2026-08-13)
+
+Три бага тестировщика + расширения по решению пользователя (alembic 0032+0033):
+
+- **`color-scheme` в `brand.css`** (dark/light по `data-theme`) — первопричина «белого-на-белом» в нативных попапах `<select>`: UA считал документ светлым. Чинит все ~44 селекта разом; побочно тёмными становятся скроллбары/date-пикеры (желаемо). Страховка `select option { background-color: rgb(var(--bg-alt)) }` — Firefox/Linux наследовал полупрозрачный `--glass`.
+- **Номера задач «KEY-42»**: `tasks.seq` + счётчик `projects.next_task_seq` (0032, backfill по created_at,id). Выдача ТОЛЬКО через `tasks.py::_allocate_task_seq` (атомарный UPDATE…RETURNING, row-lock сериализует, дыры при rollback — норма). **`project_id` задачи иммутабелен** — появится перенос между проектами → перевыдавать seq. Фронт: `taskKey()` в `lib/tasks.ts`; `Task.seq` в TS optional (optimistic-объекты его не знают — бейдж скрыт до ответа).
+- **Авто-членство viewer при назначении исполнителя** (`project_access.ensure_project_member`, вызовы в create/update task; backfill 0033 по незаархивированным задачам): deep-link из «Все задачи» больше не 404. ON CONFLICT DO NOTHING — роли не даунгрейдятся; unassign членство не удаляет; owner может удалить авто-viewer'а (вернётся при следующем назначении — осознанно).
+- **Вложения**: строки «Все задачи»/главной кликабельны (deep-link в проект); `TaskAttachments`/`TaskDependencies` получают `canEdit` (у viewer'а дропзона/«Добавить» скрыты — раньше давали голый 403); **`ATTACHMENT_ACCEPT`+`attachmentTypeError` в `web/src/lib/attachments.ts` зеркалят серверный `ALLOWED_MIME` — менять ПАРОЙ**; +HEIC/HEIF (`resolve_mime` восстанавливает MIME из расширения ТОЛЬКО для .heic/.heif — octet-stream+.svg НЕ спасается, тест в test_attachment_mime.py). Инлайн-превью вложений нет нигде — появится, HEIC из него исключить.
+- **Пикер зависимостей** — паттерн PeoplePicker (поиск в дропдауне, дебаунс 150мс), пункты с номером/статусом/секцией/метками, ≤50 видимых. Циклы по-прежнему ловятся только сервером (409-тост).
+
+Backlog волны: поиск по номеру KEY-42 в Cmd+K (FTS), KEY-42 в push-заголовках, «viewer-исполнитель не может менять статус своей задачи» (продуктовый вопрос о роли assignee).
+
 ## ОС 12.08 — санитайзер rich-контента и авторский UX (2026-08-12)
 
 Блок правок редактора уроков по второй волне ОС тестировщиков (нумерованный список 422, паста с форматированием, таблицы, размеры текста, публикация из редактора, удаление курса из списка, опрос из урока).

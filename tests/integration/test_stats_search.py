@@ -58,6 +58,7 @@ async def _seed_project(db, principal):
         assignee_id=principal.employee_id,
         created_by=principal.employee_id,
         position=Decimal(1),
+        seq=1,
     )
     db.add(task)
     await db.flush()

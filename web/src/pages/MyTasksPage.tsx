@@ -1,5 +1,6 @@
 import { Filter } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
@@ -16,7 +17,7 @@ import { useMyTasks, type DueWindow } from '@/hooks/useMyTasks'
 import { useProjects } from '@/hooks/useProjects'
 import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
-import { type Task } from '@/lib/tasks'
+import { taskKey, type Task } from '@/lib/tasks'
 
 const TABS: { key: DueWindow; label: string }[] = [
   { key: 'upcoming', label: 'Предстоит' },
@@ -151,7 +152,9 @@ function MobileMyTasks() {
                   key={t.id}
                   task={t}
                   subtitle={
-                    t.project_id ? projectsById.get(t.project_id)?.name : undefined
+                    [taskKey(t.project_key, t.seq), projectsById.get(t.project_id)?.name]
+                      .filter(Boolean)
+                      .join(' · ') || undefined
                   }
                   onToggleDone={() => toggleDone(t)}
                 />
@@ -163,7 +166,9 @@ function MobileMyTasks() {
                 key={t.id}
                 task={t}
                 subtitle={
-                  t.project_id ? projectsById.get(t.project_id)?.name : undefined
+                  [taskKey(t.project_key, t.seq), projectsById.get(t.project_id)?.name]
+                    .filter(Boolean)
+                    .join(' · ') || undefined
                 }
                 onToggleDone={() => toggleDone(t)}
               />
@@ -199,6 +204,11 @@ function DesktopMyTasks() {
   const [tab, setTab] = useState<DueWindow>('upcoming')
   const tasks = useMyTasks({ due_window: tab })
   const toggleDone = useToggleDone('')
+  const navigate = useNavigate()
+  // Карточка задачи живёт на странице проекта — deep-link, как на мобиле
+  // (ОС 13.08: строки были некликабельны, до вложений было не добраться).
+  const openTask = (t: Task) =>
+    navigate(`/projects/${t.project_id}?task=${t.id}`)
 
   return (
     <div className="mx-auto max-w-4xl space-y-4 p-6">
@@ -250,6 +260,7 @@ function DesktopMyTasks() {
                 <TaskRow
                   key={t.id}
                   task={t}
+                  onClick={() => openTask(t)}
                   onToggleDone={() => toggleDone(t)}
                 />
               )}
@@ -259,6 +270,7 @@ function DesktopMyTasks() {
               <TaskRow
                 key={t.id}
                 task={t}
+                onClick={() => openTask(t)}
                 onToggleDone={() => toggleDone(t)}
               />
             ))

@@ -24,10 +24,24 @@ export interface Task {
   start_at: string | null
   due_at: string | null
   position: string | number
+  /** Номер в проекте («KEY-42»). Optional: optimistic-объекты его не знают —
+   * бейдж просто не рендерится до ответа сервера. */
+  seq?: number
+  /** Ключ проекта — заполняют только кросс-проектные ручки (/me/tasks);
+   * в контексте страницы проекта фронт берёт key из project-запроса. */
+  project_key?: string | null
   created_at: string
   updated_at: string
   completed_at: string | null
   archived_at: string | null
+}
+
+/** «KEY-42» или null, если чего-то не хватает (optimistic-объект, нет key). */
+export function taskKey(
+  projectKey: string | null | undefined,
+  seq: number | null | undefined,
+): string | null {
+  return projectKey && seq != null ? `${projectKey}-${seq}` : null
 }
 
 export type TaskSortField = 'position' | 'due_at' | 'priority' | 'created_at' | 'title'

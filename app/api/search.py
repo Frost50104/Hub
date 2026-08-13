@@ -52,11 +52,15 @@ class SearchHit(BaseModel):
     title: str
     subtitle: str | None = None
     project_id: UUID | None = None
+    # Номер «KEY-42» для task-хитов (optional — back-compat и project-хиты).
+    seq: int | None = None
+    project_key: str | None = None
 
 
 class SearchTaskHit(BaseModel):
     id: UUID
     title: str
+    seq: int
     status: str
     priority: str
     due_at: datetime | None
@@ -176,13 +180,15 @@ def _headline_expr(source_col, text_query: str):
     )
 
 
-def _serialize_legacy_task(t: Task, project_name: str) -> SearchHit:
+def _serialize_legacy_task(t: Task, project_name: str, project_key: str) -> SearchHit:
     return SearchHit(
         kind="task",
         id=t.id,
         title=t.title,
         subtitle=project_name,
         project_id=t.project_id,
+        seq=t.seq,
+        project_key=project_key,
     )
 
 
@@ -259,8 +265,8 @@ async def search(
                 for p in project_rows
             ],
             tasks=[
-                _serialize_legacy_task(t, project_name)
-                for t, project_name, _, _ in task_rows
+                _serialize_legacy_task(t, project_name, project_key)
+                for t, project_name, project_key, _ in task_rows
             ],
         )
 
@@ -282,6 +288,7 @@ async def search(
             SearchTaskHit(
                 id=t.id,
                 title=t.title,
+                seq=t.seq,
                 status=t.status,
                 priority=t.priority,
                 due_at=t.due_at,

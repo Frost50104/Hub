@@ -68,6 +68,11 @@ class TaskResponse(BaseModel):
     start_at: datetime | None = None
     due_at: datetime | None
     position: Decimal
+    # Номер в проекте («KEY-42» = project.key + seq). project_key заполняют
+    # только кросс-проектные ручки (/me/tasks) — в контексте проекта фронт
+    # берёт key из project-запроса.
+    seq: int
+    project_key: str | None = None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None

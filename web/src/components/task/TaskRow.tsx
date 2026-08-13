@@ -9,6 +9,7 @@ import { type Label } from '@/lib/labels'
 import {
   PRIORITY_LABEL,
   STATUS_LABEL,
+  taskKey,
   type SubtaskStats,
   type Task,
   type TaskStatus,
@@ -30,6 +31,9 @@ const STATUS_TONE: Record<TaskStatus, string> = {
 
 interface TaskRowProps {
   task: Task
+  /** Ключ проекта для бейджа «KEY-42» — страница проекта передаёт его сама;
+   * кросс-проектные списки работают от task.project_key из API. */
+  projectKey?: string | null
   subtasks?: SubtaskStats
   labels?: Label[]
   onClick?: () => void
@@ -50,6 +54,7 @@ interface TaskRowProps {
  */
 export function TaskRow({
   task,
+  projectKey,
   subtasks,
   labels,
   onClick,
@@ -58,6 +63,7 @@ export function TaskRow({
   customValues,
 }: TaskRowProps) {
   const StatusIcon = STATUS_ICON[task.status]
+  const key = taskKey(projectKey ?? task.project_key, task.seq)
   const overdue =
     task.due_at &&
     task.status !== 'done' &&
@@ -89,6 +95,11 @@ export function TaskRow({
       </button>
 
       <div className="flex min-w-0 items-center gap-2">
+        {key && (
+          <span className="hidden shrink-0 font-mono text-[10px] text-text3 sm:inline">
+            {key}
+          </span>
+        )}
         <span
           className={cn(
             'truncate text-sm text-text',
