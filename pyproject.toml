@@ -32,6 +32,9 @@ dev = [
     "ruff>=0.6",
     "testcontainers[postgres]>=4.0",
     "mypy>=1.10",
+    # tools/import_lms — разовая миграция контента из ServiceGuru (локально).
+    "openpyxl>=3.1",
+    "lxml>=5.0",
 ]
 sentry = [
     "sentry-sdk[fastapi]>=2.0",
@@ -67,10 +70,14 @@ ignore = [
 "tests/**" = ["S", "T20", "C408"]
 "scripts/**" = ["T20"]
 "migrations/**" = ["E501", "S608"]
+# tools/import_lms — разовый локальный CLI миграции контента: печать отчёта
+# в stdout (T201), разбор СВОИХ же xlsx через stdlib-xml (S314), ffmpeg из
+# PATH (S607), краткий алиас модуля маппинга (N812).
+"tools/import_lms/*" = ["T201", "S314", "S607", "N812"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["tests", "tools/import_lms/tests"]
 filterwarnings = [
     "ignore::DeprecationWarning:passlib.*",
 ]

@@ -92,6 +92,8 @@ deploy_backend() {
     --exclude='deploy' \
     --exclude='attachments' \
     --exclude='uploads' \
+    --exclude='LMS' \
+    --exclude='import_bundle' \
     "$PROJECT_DIR/" \
     "${SERVER_USER}@${SERVER_HOST}:${REMOTE_BASE}/"
 
