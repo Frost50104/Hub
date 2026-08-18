@@ -82,6 +82,10 @@ class Task(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="todo")
     priority: Mapped[str] = mapped_column(String(16), nullable=False, server_default="medium")
 
+    # DEPRECATED (0034): зеркало первого исполнителя (position=0) из
+    # task_assignees — источник истины теперь там. Единственный писатель —
+    # app.services.task_assignees.set_task_assignees. Колонка удаляется
+    # ревизией 0035; до тех пор держит откат деплоя на предыдущий билд.
     assignee_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("shadow_users.employee_id", ondelete="SET NULL"),
@@ -116,6 +120,46 @@ class Task(Base):
     )
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+
+class TaskAssignee(Base):
+    """Исполнители задачи — источник истины (0034).
+
+    PK (task_id, employee_id) без суррогатного id — паттерн task_watchers /
+    task_label_assignments; даёт бесплатный ON CONFLICT для идемпотентного
+    upsert. `position` задаёт порядок отображения и НЕ уникален: уникальность
+    ломала бы перестановку внутри одной транзакции.
+    """
+
+    __tablename__ = "task_assignees"
+    __table_args__ = (
+        PrimaryKeyConstraint("task_id", "employee_id", name="pk_task_assignees"),
+    )
+
+    task_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("shadow_users.employee_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), nullable=False, index=True
+    )
+    position: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    assigned_by: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("shadow_users.employee_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    assigned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
     )
 
 

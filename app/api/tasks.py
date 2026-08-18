@@ -13,7 +13,6 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from signaris_auth import Principal
 from sqlalchemy import case, func, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import enforce_rate_limit, get_db, require_auth
@@ -22,20 +21,28 @@ from app.models.section import Section
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskLabelAssignment, TaskWatcher
 from app.schemas.task import (
-    AssigneeBrief,
+    TaskAssigneeAdd,
     TaskCreate,
     TaskPriority,
     TaskResponse,
     TaskStatus,
     TaskUpdate,
+    resolve_assignee_ids,
 )
 from app.services.activity_writer import record_activity
-from app.services.notify import notify_assigned, notify_status_changed
-from app.services.project_access import (
-    ensure_project_member,
-    is_hub_admin,
-    require_project_role,
+from app.services.notify import notify_status_changed
+from app.services.project_access import is_hub_admin, require_project_role
+from app.services.task_assignees import (
+    add_assignee,
+    apply_assignee_side_effects,
+    assert_assignees_in_tenant,
+    assignee_exists,
+    load_assignees,
+    remove_assignee,
+    serialize_with_assignees,
+    set_task_assignees,
 )
+from app.services.task_watchers import ensure_watcher
 
 router = APIRouter(tags=["tasks"])
 
@@ -43,31 +50,6 @@ router = APIRouter(tags=["tasks"])
 PRIORITY_ORDER: dict[str, int] = {"low": 1, "medium": 2, "high": 3, "urgent": 4}
 
 TaskSortField = Literal["position", "due_at", "priority", "created_at", "title"]
-
-
-async def _ensure_watcher(
-    db: AsyncSession,
-    *,
-    task_id: UUID,
-    tenant_id: UUID,
-    employee_id: UUID,
-    reason: str,
-) -> None:
-    """Idempotent watcher add — ON CONFLICT DO NOTHING.
-
-    Doesn't upgrade the reason (creator stays creator even if also assigned);
-    the original reason is more informative for activity rendering.
-    """
-    await db.execute(
-        pg_insert(TaskWatcher)
-        .values(
-            task_id=task_id,
-            employee_id=employee_id,
-            tenant_id=tenant_id,
-            added_reason=reason,
-        )
-        .on_conflict_do_nothing(index_elements=["task_id", "employee_id"])
-    )
 
 
 async def _next_position(db: AsyncSession, project_id: UUID, status_: str) -> Decimal:
@@ -97,26 +79,12 @@ async def _allocate_task_seq(db: AsyncSession, project_id: UUID) -> int:
     return row.scalar_one()
 
 
-async def _fetch_assignee(
-    db: AsyncSession, employee_id: UUID | None
-) -> AssigneeBrief | None:
-    if employee_id is None:
-        return None
-    row = await db.execute(
-        select(ShadowUser.employee_id, ShadowUser.email, ShadowUser.full_name).where(
-            ShadowUser.employee_id == employee_id, ShadowUser.deleted_at.is_(None)
-        )
-    )
-    rec = row.first()
-    if rec is None:
-        return None
-    return AssigneeBrief(employee_id=rec.employee_id, email=rec.email, full_name=rec.full_name)
+_serialize = serialize_with_assignees
 
 
-def _serialize(task: Task, assignee: AssigneeBrief | None) -> TaskResponse:
-    data = TaskResponse.model_validate(task)
-    data.assignee = assignee
-    return data
+async def _serialize_one(db: AsyncSession, task: Task) -> TaskResponse:
+    by_task = await load_assignees(db, [task.id])
+    return _serialize(task, by_task.get(task.id, []))
 
 
 async def _assert_section_in_project(
@@ -131,21 +99,6 @@ async def _assert_section_in_project(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Секция не принадлежит этому проекту",
-        )
-
-
-async def _assert_assignee_in_tenant(
-    db: AsyncSession, employee_id: UUID | None
-) -> None:
-    """Only employees that have logged into Hub (= present in shadow_users)
-    can be assignees. Filtering by tenant happens via RLS on shadow_users."""
-    if employee_id is None:
-        return
-    target = await db.get(ShadowUser, employee_id)
-    if target is None or target.deleted_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Исполнитель не найден в Hub. Попросите его зайти на hub.signaris.ru.",
         )
 
 
@@ -195,14 +148,11 @@ async def list_tasks(
     if sort == "due_at":
         sort_expr = sort_expr.nulls_last()
 
+    # БЕЗ JOIN на исполнителей: он размножил бы строку задачи по их числу
+    # (дубли карточек на доске, поехавшая сортировка). Исполнители едут
+    # отдельным батч-запросом ниже.
     stmt = (
-        select(Task, ShadowUser.email, ShadowUser.full_name)
-        .join(
-            ShadowUser,
-            (ShadowUser.employee_id == Task.assignee_id)
-            & (ShadowUser.deleted_at.is_(None)),
-            isouter=True,
-        )
+        select(Task)
         .where(Task.project_id == project_id)
         # Вторичный ключ position — стабильный порядок при равных значениях.
         .order_by(sort_expr, Task.position)
@@ -212,7 +162,8 @@ async def list_tasks(
     if status_ is not None:
         stmt = stmt.where(Task.status == status_)
     if assignee_id is not None:
-        stmt = stmt.where(Task.assignee_id == assignee_id)
+        # Семантика: «сотрудник СРЕДИ исполнителей».
+        stmt = stmt.where(assignee_exists(assignee_id))
     if section_id is not None:
         stmt = stmt.where(Task.section_id == section_id)
     if priority is not None:
@@ -231,15 +182,9 @@ async def list_tasks(
     if due_to is not None:
         stmt = stmt.where(Task.due_at <= due_to)
 
-    out: list[TaskResponse] = []
-    for task, email, full_name in (await db.execute(stmt)).all():
-        assignee = (
-            AssigneeBrief(employee_id=task.assignee_id, email=email, full_name=full_name)
-            if task.assignee_id
-            else None
-        )
-        out.append(_serialize(task, assignee))
-    return out
+    tasks = (await db.execute(stmt)).scalars().all()
+    by_task = await load_assignees(db, [t.id for t in tasks])
+    return [_serialize(t, by_task.get(t.id, [])) for t in tasks]
 
 
 @router.post(
@@ -261,7 +206,11 @@ async def create_task(
     )
     await require_project_role(db, project_id, principal, allow=("owner", "editor"))
     await _assert_section_in_project(db, project_id, body.section_id)
-    await _assert_assignee_in_tenant(db, body.assignee_id)
+    # Валидация ВСЕГО списка до любых записей и до _allocate_task_seq: тот
+    # держит row-lock проекта до конца транзакции, а 404 на третьем
+    # исполнителе не должен оставлять первых двух записанными.
+    assignee_ids = resolve_assignee_ids(body) or []
+    assignee_names = await assert_assignees_in_tenant(db, assignee_ids)
     await _assert_parent_one_level(db, body.parent_task_id)
 
     task = Task(
@@ -274,7 +223,6 @@ async def create_task(
         description=body.description,
         status=body.status,
         priority=body.priority,
-        assignee_id=body.assignee_id,
         created_by=principal.employee_id,
         start_at=body.start_at,
         due_at=body.due_at,
@@ -291,30 +239,33 @@ async def create_task(
     await db.flush()
     # Auto-watchers per INTEGRATION.md §14: creator + assignee subscribe on
     # task creation. Reason is the *first* edge they joined through.
-    await _ensure_watcher(
+    await ensure_watcher(
         db,
         task_id=task.id,
         tenant_id=task.tenant_id,
         employee_id=principal.employee_id,
         reason="creator",
     )
-    if body.assignee_id is not None and body.assignee_id != principal.employee_id:
-        await _ensure_watcher(
+    # Строго ПОСЛЕ flush(): FK task_assignees.task_id требует, чтобы строка
+    # задачи уже была в Postgres.
+    diff = await set_task_assignees(
+        db,
+        task=task,
+        employee_ids=assignee_ids,
+        actor_id=principal.employee_id,
+        validated_names=assignee_names,
+    )
+    if diff.changed:
+        # notify/record выключены: создание задачи с исполнителем и раньше не
+        # слало уведомлений, а лента начинается с «created».
+        await apply_assignee_side_effects(
             db,
-            task_id=task.id,
-            tenant_id=task.tenant_id,
-            employee_id=body.assignee_id,
-            reason="assignee",
-        )
-    if body.assignee_id is not None:
-        # Исполнитель без членства не может открыть проект из «Все задачи»
-        # (404) — авто-viewer чинит deep-link; существующая роль не трогается.
-        await ensure_project_member(
-            db,
-            project_id=project_id,
-            tenant_id=principal.tenant_id,
-            employee_id=body.assignee_id,
-            added_by=principal.employee_id,
+            task=task,
+            diff=diff,
+            actor_id=principal.employee_id,
+            actor_name="",
+            notify=False,
+            record=False,
         )
     await record_activity(
         db,
@@ -330,7 +281,7 @@ async def create_task(
     )
     await db.commit()
     await db.refresh(task)
-    return _serialize(task, await _fetch_assignee(db, task.assignee_id))
+    return await _serialize_one(db, task)
 
 
 # ─── Single task ────────────────────────────────────────────────────────────
@@ -354,7 +305,7 @@ async def get_task(
     db: AsyncSession = Depends(get_db),
 ) -> TaskResponse:
     task = await _fetch_task_visible(db, task_id, principal)
-    return _serialize(task, await _fetch_assignee(db, task.assignee_id))
+    return await _serialize_one(db, task)
 
 
 @router.patch("/tasks/{task_id}", response_model=TaskResponse)
@@ -426,46 +377,20 @@ async def update_task(
         actor_rec.email if actor_rec else "Кто-то"
     )
 
-    if "assignee_id" in body.model_fields_set and body.assignee_id != task.assignee_id:
-        old_assignee = task.assignee_id
-        if body.assignee_id is not None:
-            await _assert_assignee_in_tenant(db, body.assignee_id)
-        task.assignee_id = body.assignee_id
-        if body.assignee_id is not None:
-            # New assignee auto-subscribes (no-op if already a watcher).
-            # Снятие исполнителя подписку НЕ снимает — он остаётся watcher'ом.
-            await _ensure_watcher(
-                db,
-                task_id=task.id,
-                tenant_id=task.tenant_id,
-                employee_id=body.assignee_id,
-                reason="assignee",
-            )
-            # Авто-viewer: deep-link из «Все задачи» должен открываться.
-            await ensure_project_member(
-                db,
-                project_id=task.project_id,
-                tenant_id=task.tenant_id,
-                employee_id=body.assignee_id,
-                added_by=principal.employee_id,
-            )
-        await record_activity(
-            db,
-            tenant_id=principal.tenant_id,
-            task_id=task.id,
-            actor_id=principal.employee_id,
-            kind="assigned",
-            payload={
-                "old": str(old_assignee) if old_assignee else None,
-                "new": str(body.assignee_id) if body.assignee_id else None,
-            },
+    # Replace-семантика: набор становится ровно тем, что прислали. None —
+    # «исполнителей не трогать», [] — «снять всех» (в т.ч. легаси
+    # `assignee_id: null` от старого бандла снимает ВСЕХ, а не одного).
+    wanted = resolve_assignee_ids(body)
+    if wanted is not None:
+        diff = await set_task_assignees(
+            db, task=task, employee_ids=wanted, actor_id=principal.employee_id
         )
-        # Notify the new assignee (unless they assigned themselves).
-        if body.assignee_id is not None and body.assignee_id != principal.employee_id:
-            await notify_assigned(
+        if diff.changed:
+            await apply_assignee_side_effects(
                 db,
                 task=task,
-                assignee_id=body.assignee_id,
+                diff=diff,
+                actor_id=principal.employee_id,
                 actor_name=actor_name,
             )
 
@@ -518,7 +443,100 @@ async def update_task(
 
     await db.commit()
     await db.refresh(task)
-    return _serialize(task, await _fetch_assignee(db, task.assignee_id))
+    return await _serialize_one(db, task)
+
+
+# ─── Assignees (инкрементальный путь) ───────────────────────────────────────
+#
+# PATCH с полным списком — это last-writer-wins по всему набору: если двое
+# правят состав одновременно, добавленный одним молча исчезает. С одним
+# исполнителем такого класса ошибок не было, с набором он становится реальным,
+# поэтому UI ходит сюда, а PATCH остаётся для легаси-`assignee_id` и bulk.
+
+
+async def _task_for_edit(db: AsyncSession, task_id: UUID, principal: Principal) -> Task:
+    task = await db.get(Task, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
+    await require_project_role(db, task.project_id, principal, allow=("owner", "editor"))
+    return task
+
+
+async def _actor_name(db: AsyncSession, employee_id: UUID) -> str:
+    row = await db.execute(
+        select(ShadowUser.full_name, ShadowUser.email).where(
+            ShadowUser.employee_id == employee_id
+        )
+    )
+    rec = row.first()
+    if rec is None:
+        return "Кто-то"
+    return rec.full_name or rec.email or "Кто-то"
+
+
+@router.post("/tasks/{task_id}/assignees", response_model=TaskResponse)
+async def add_task_assignee(
+    task_id: UUID,
+    body: TaskAssigneeAdd,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> TaskResponse:
+    """Добавить одного исполнителя. Идемпотентно (повтор — не ошибка)."""
+    await enforce_rate_limit(
+        bucket="task:write",
+        employee_id=str(principal.employee_id),
+        limit=120,
+        window_sec=60,
+    )
+    task = await _task_for_edit(db, task_id, principal)
+    diff = await add_assignee(
+        db, task=task, employee_id=body.employee_id, actor_id=principal.employee_id
+    )
+    if diff.changed:
+        await apply_assignee_side_effects(
+            db,
+            task=task,
+            diff=diff,
+            actor_id=principal.employee_id,
+            actor_name=await _actor_name(db, principal.employee_id),
+        )
+        await db.commit()
+        await db.refresh(task)
+    return await _serialize_one(db, task)
+
+
+@router.delete("/tasks/{task_id}/assignees/{employee_id}", response_model=TaskResponse)
+async def remove_task_assignee(
+    task_id: UUID,
+    employee_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> TaskResponse:
+    """Снять одного исполнителя. Идемпотентно.
+
+    Подписку и членство в проекте НЕ снимает — сегодняшняя семантика.
+    """
+    await enforce_rate_limit(
+        bucket="task:write",
+        employee_id=str(principal.employee_id),
+        limit=120,
+        window_sec=60,
+    )
+    task = await _task_for_edit(db, task_id, principal)
+    diff = await remove_assignee(
+        db, task=task, employee_id=employee_id, actor_id=principal.employee_id
+    )
+    if diff.changed:
+        await apply_assignee_side_effects(
+            db,
+            task=task,
+            diff=diff,
+            actor_id=principal.employee_id,
+            actor_name=await _actor_name(db, principal.employee_id),
+        )
+        await db.commit()
+        await db.refresh(task)
+    return await _serialize_one(db, task)
 
 
 @router.post("/tasks/{task_id}/archive", response_model=TaskResponse)
@@ -544,7 +562,7 @@ async def archive_task(
         )
         await db.commit()
         await db.refresh(task)
-    return _serialize(task, await _fetch_assignee(db, task.assignee_id))
+    return await _serialize_one(db, task)
 
 
 @router.post("/tasks/{task_id}/unarchive", response_model=TaskResponse)
@@ -570,7 +588,7 @@ async def unarchive_task(
         )
         await db.commit()
         await db.refresh(task)
-    return _serialize(task, await _fetch_assignee(db, task.assignee_id))
+    return await _serialize_one(db, task)
 
 
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)

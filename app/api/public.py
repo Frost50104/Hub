@@ -42,6 +42,7 @@ from app.schemas.share import (
     PublicTaskView,
 )
 from app.services.public_token import initials, load_active_token, mask_mentions
+from app.services.task_assignees import load_assignee_ids
 
 router = APIRouter(tags=["public"])
 
@@ -96,6 +97,20 @@ async def _initials_for(session: AsyncSession, employee_id: UUID | None) -> str 
     return initials(rec.full_name, rec.email)
 
 
+async def _initials_for_many(
+    session: AsyncSession, employee_ids: set[UUID]
+) -> dict[UUID, str]:
+    """{employee_id: инициалы} одним запросом — анти-N+1 на больших досках."""
+    if not employee_ids:
+        return {}
+    rows = await session.execute(
+        select(ShadowUser.employee_id, ShadowUser.full_name, ShadowUser.email).where(
+            ShadowUser.employee_id.in_(employee_ids)
+        )
+    )
+    return {r.employee_id: initials(r.full_name, r.email) or "" for r in rows.all()}
+
+
 async def _mention_names(session: AsyncSession) -> dict[str, str]:
     """handle (email local-part, lower) → display name для mask_mentions.
 
@@ -116,7 +131,12 @@ async def _build_task_view(session: AsyncSession, task_id: UUID) -> PublicTaskVi
     if task is None or task.archived_at is not None:
         raise _NOT_FOUND
 
-    assignee_init = await _initials_for(session, task.assignee_id)
+    assignee_ids = (await load_assignee_ids(session, [task.id])).get(task.id, [])
+    assignee_inits_by_id = await _initials_for_many(session, set(assignee_ids))
+    assignee_inits = [
+        assignee_inits_by_id[e] for e in assignee_ids if assignee_inits_by_id.get(e)
+    ]
+    assignee_init = assignee_inits[0] if assignee_inits else None
     creator_init = await _initials_for(session, task.created_by)
 
     comment_rows = await session.execute(
@@ -168,6 +188,7 @@ async def _build_task_view(session: AsyncSession, task_id: UUID) -> PublicTaskVi
         start_at=task.start_at,
         due_at=task.due_at,
         assignee_initials=assignee_init,
+        assignees_initials=assignee_inits,
         created_by_initials=creator_init,
         created_at=task.created_at,
         comments=comments,
@@ -198,18 +219,16 @@ async def _build_project_view(
             Task.priority,
             Task.due_at,
             Task.section_id,
-            Task.assignee_id,
             Task.parent_task_id,
         )
         .where(Task.project_id == project_id, Task.archived_at.is_(None))
         .order_by(Task.position)
     )
     tasks_by_section: dict[UUID | None, list[tuple]] = {}
-    assignee_ids: set[UUID] = set()
+    all_task_ids: list[UUID] = []
     for row in task_rows.all():
         tasks_by_section.setdefault(row.section_id, []).append(row)
-        if row.assignee_id is not None:
-            assignee_ids.add(row.assignee_id)
+        all_task_ids.append(row.id)
 
     # Pre-fetch attachment counts in one query — avoids N+1 on large boards.
     has_att_rows = await session.execute(
@@ -217,18 +236,15 @@ async def _build_project_view(
     )
     has_attachments_set = {row[0] for row in has_att_rows.all()}
 
-    # Pre-fetch assignee initials in one query — avoids N+1 per task.
-    initials_by_id: dict[UUID, str | None] = {}
-    if assignee_ids:
-        au_rows = await session.execute(
-            select(
-                ShadowUser.employee_id,
-                ShadowUser.full_name,
-                ShadowUser.email,
-            ).where(ShadowUser.employee_id.in_(assignee_ids))
-        )
-        for au in au_rows.all():
-            initials_by_id[au.employee_id] = initials(au.full_name, au.email)
+    # Исполнители + инициалы — два запроса на всю доску (анти-N+1).
+    ids_by_task = await load_assignee_ids(session, all_task_ids)
+    initials_by_id = await _initials_for_many(
+        session, {e for ids in ids_by_task.values() for e in ids}
+    )
+    inits_by_task: dict[UUID, list[str]] = {
+        task_id: [initials_by_id[e] for e in ids if initials_by_id.get(e)]
+        for task_id, ids in ids_by_task.items()
+    }
 
     def _row_to_hit(row) -> PublicTaskHit:  # noqa: ANN001 — local helper
         return PublicTaskHit(
@@ -238,10 +254,11 @@ async def _build_project_view(
             priority=row.priority,
             due_at=row.due_at,
             assignee_initials=(
-                initials_by_id.get(row.assignee_id)
-                if row.assignee_id is not None
+                inits_by_task.get(row.id, [None])[0]
+                if inits_by_task.get(row.id)
                 else None
             ),
+            assignees_initials=inits_by_task.get(row.id, []),
             has_attachments=row.id in has_attachments_set,
             is_subtask=row.parent_task_id is not None,
         )

@@ -45,6 +45,14 @@ class Project(Base):
         Integer, nullable=False, server_default=text("1")
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Папка — ОБЩАЯ для тенанта раскладка (не персональная). SET NULL:
+    # удаление папки не удаляет проект, он переезжает в «Без папки».
+    folder_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("project_folders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),

@@ -31,8 +31,9 @@
 - `sections` (project_id, name, position)
 
 ### Задачи
-- `tasks` (project_id, section_id, parent_task_id, title, description markdown, status: `todo` | `in_progress` | `in_review` | `done`, priority: `low` | `medium` | `high` | `urgent`, assignee_id, start_at, due_at, position NUMERIC, search_vector tsvector)
+- `tasks` (project_id, section_id, parent_task_id, title, description markdown, status: `todo` | `in_progress` | `in_review` | `done`, priority: `low` | `medium` | `high` | `urgent`, ~~assignee_id~~ DEPRECATED, start_at, due_at, position NUMERIC, search_vector tsvector)
   - Подзадачи только 1 уровень — CHECK `parent_task_id IS NULL OR (SELECT parent_task_id FROM tasks t2 WHERE t2.id = parent_task_id) IS NULL`; UI — секция в карточке (SubtaskList), в топ-уровне List/Board не показываются
+- `task_assignees` (task_id, employee_id, position, assigned_by; PK составной, RLS с 0034) — **источник истины по исполнителям**; `tasks.assignee_id` остался deprecated-зеркалом первого (удаляется отдельной ревизией, см. docs/TECH_DEBT.md «ОС 17.08»). Пишет только `app/services/task_assignees.py`; в списках — EXISTS/батч, не JOIN
 - `task_watchers` — auto-добавление: assignee + creator + mentioned
 - `task_comments` (markdown, `mentioned_ids UUID[]`)
 - `task_labels` (name, color) + `task_label_assignments` (с tenant_id и RLS с миграции 0011); API `app/api/labels.py`, чипы в List/Board/drawer, фильтр
@@ -42,6 +43,7 @@
 - `custom_field_definitions` + `task_custom_field_values` (7 типов, миграция 0007) — колонки List, агрегаты Dashboard
 - `public_share_tokens` (scope task|project, БЕЗ RLS — cross-tenant lookup по токену, миграция 0009) — view-only `/p/{token}`
 - `project_members.is_favorite` (миграция 0012) — личное избранное, секция в Sidebar
+- `project_folders` (name, position) + `projects.folder_id` (0035) — общие для тенанта папки, ровно один уровень; удаление папки не удаляет проекты (ON DELETE SET NULL); API `app/api/project_folders.py` на префиксе `/project-folders`
 
 ### Представления проекта
 Список / Доска / Календарь (`app/api/calendar.py`) / Хронология (`app/api/timeline.py`) / Дашборд (`app/api/stats.py`, recharts lazy-chunk) / Участники. Фильтры (assignee/status/priority/label/due) + сортировка списка — состояние в URL searchParams; Board всегда в position-порядке. Полнотекстовый поиск: `app/api/search.py` + DSL `app/services/search_dsl.py` (0008: pg_trgm, tsvector). Мутации задач оптимистичные (rollback из снапшота, `useUpdateTask`), complete/archive — с undo-тостом.

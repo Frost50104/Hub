@@ -18,7 +18,13 @@ export interface Task {
   description: string | null
   status: TaskStatus
   priority: TaskPriority
+  /** Источник истины по исполнителям. Optional: объекта из кэша, пережившего
+   *  деплой (или из ответа откаченного бэка) поля не будет — читать ТОЛЬКО
+   *  через `taskAssignees()`, иначе `.map` упадёт в рантайме. */
+  assignees?: TaskAssigneeBrief[]
+  /** @deprecated Первый из `assignees`. Оставлено для старых PWA-бандлов. */
   assignee_id: string | null
+  /** @deprecated Первый из `assignees`. */
   assignee: TaskAssigneeBrief | null
   created_by: string
   start_at: string | null
@@ -82,6 +88,7 @@ export interface TaskCreateBody {
   status?: TaskStatus
   priority?: TaskPriority
   assignee_id?: string | null
+  assignee_ids?: string[]
   start_at?: string | null
   due_at?: string | null
 }
@@ -92,7 +99,10 @@ export interface TaskUpdateBody {
   section_id?: string | null
   status?: TaskStatus
   priority?: TaskPriority
+  /** @deprecated Прислать легаси-поле = заменить весь набор одним человеком. */
   assignee_id?: string | null
+  /** Полная замена набора. Для точечных правок — addAssignee/removeAssignee. */
+  assignee_ids?: string[]
   start_at?: string | null
   due_at?: string | null
   position?: string | number
@@ -119,6 +129,16 @@ export const tasksApi = {
     api.post<Task>(`/tasks/${id}/unarchive`).then((r) => r.data),
   remove: (id: string): Promise<void> =>
     api.delete(`/tasks/${id}`).then(() => undefined),
+  // Инкрементальные правки состава: PATCH с полным списком — это
+  // last-writer-wins, и параллельное добавление другим человеком терялось бы.
+  addAssignee: (taskId: string, employeeId: string): Promise<Task> =>
+    api
+      .post<Task>(`/tasks/${taskId}/assignees`, { employee_id: employeeId })
+      .then((r) => r.data),
+  removeAssignee: (taskId: string, employeeId: string): Promise<Task> =>
+    api
+      .delete<Task>(`/tasks/${taskId}/assignees/${employeeId}`)
+      .then((r) => r.data),
   calendar: (
     projectId: string,
     range: CalendarRange,

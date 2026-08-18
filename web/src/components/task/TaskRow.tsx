@@ -1,8 +1,9 @@
-import { CheckCircle2, Circle, ClipboardCheck, Clock, ListTree, MessageSquare } from 'lucide-react'
+import { CheckCircle2, Circle, ClipboardCheck, Clock, ListTree } from 'lucide-react'
 
-import { Avatar } from '@/components/ui/Avatar'
+import { AvatarStack } from '@/components/ui/AvatarStack'
 import { Badge } from '@/components/ui/Badge'
 import { cn } from '@/lib/cn'
+import { taskAssignees } from '@/lib/taskAssignees'
 import { type CustomFieldDefinition, type CustomFieldValue } from '@/lib/customFields'
 import { formatCustomFieldValue } from '@/lib/formatCustomField'
 import { type Label } from '@/lib/labels'
@@ -148,21 +149,20 @@ export function TaskRow({
         )}
       </div>
 
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center text-text3">
-        {task.assignee ? (
-          <Avatar
-            name={task.assignee.full_name}
-            email={task.assignee.email}
-            className="h-7 w-7 text-[10px]"
-          />
-        ) : (
-          <span
-            className="flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-glass-border opacity-50"
-            title="Не назначено"
-          >
-            <MessageSquare className="hidden h-3 w-3" />
-          </span>
-        )}
+      {/* w-auto: фиксированная ширина обрезала бы стек по одному аватару.
+          Колонка в сетке — auto, поэтому шапка списка не разъезжается. */}
+      <div className="flex h-7 w-auto min-w-[1.75rem] shrink-0 items-center justify-end text-text3">
+        <AvatarStack
+          people={taskAssignees(task)}
+          size="md"
+          max={3}
+          emptyPlaceholder={
+            <span
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-glass-border opacity-50"
+              title="Не назначено"
+            />
+          }
+        />
       </div>
 
       <div className="flex items-center gap-3 text-right text-xs">

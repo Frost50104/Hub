@@ -1,8 +1,10 @@
 import { CheckCircle2, Circle, ClipboardCheck, Clock } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
+import { AvatarStack } from '@/components/ui/AvatarStack'
 import { cn } from '@/lib/cn'
 import { type Task, type TaskStatus } from '@/lib/tasks'
+import { taskAssignees } from '@/lib/taskAssignees'
 
 const STATUS_ICON: Record<TaskStatus, typeof Circle> = {
   todo: Circle,
@@ -78,6 +80,8 @@ export function MobileTaskRow({
           <p className="truncate text-xs text-text3">{subtitle}</p>
         )}
       </div>
+
+      <AvatarStack people={taskAssignees(task)} size="xs" max={2} />
 
       {due && <DueChip due={due} done={task.status === 'done'} />}
     </Link>

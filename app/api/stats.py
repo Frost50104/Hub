@@ -34,8 +34,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps import get_db, require_auth
 from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
 from app.models.shadow import ShadowUser
-from app.models.task import Task
+from app.models.task import Task, TaskAssignee
 from app.services.project_access import require_project_role
+from app.services.task_assignees import has_no_assignees
 
 router = APIRouter(tags=["stats"])
 
@@ -152,38 +153,49 @@ async def _overdue_count(session: AsyncSession, project_id: UUID) -> int:
     return int(row.scalar_one())
 
 
+_ACTIVE_SUM = func.sum(
+    cast(and_(Task.archived_at.is_(None), Task.status != "done"), Integer)
+).label("active_count")
+_DONE_SUM = func.sum(cast(Task.status == "done", Integer)).label("done_count")
+
+
 async def _workload(
     session: AsyncSession, project_id: UUID
 ) -> list[WorkloadEntry]:
-    """Per-assignee counts. Tasks without an assignee fall into one
-    "unassigned" bucket (employee_id=None)."""
+    """Загрузка по исполнителям + бакет «без исполнителя» (employee_id=None).
+
+    С множественными исполнителями (0034) фан-аут JOIN'а здесь НАМЕРЕННЫЙ:
+    задача на двоих честно считается обоим — это семантика загрузки, а не
+    пересчёт задач. Следствие: сумма по строкам БОЛЬШЕ числа задач проекта.
+
+    INNER JOIN отбрасывает задачи без исполнителей, поэтому бакет «без
+    исполнителя» считается отдельным запросом и склеивается ПОСЛЕ, иначе
+    limit(_WORKLOAD_TOP) мог бы его отсечь.
+    """
     rows = await session.execute(
         select(
-            Task.assignee_id,
+            TaskAssignee.employee_id,
             ShadowUser.full_name,
             ShadowUser.email,
-            func.sum(
-                cast(
-                    and_(Task.archived_at.is_(None), Task.status != "done"),
-                    Integer,
-                )
-            ).label("active_count"),
-            func.sum(cast(Task.status == "done", Integer)).label("done_count"),
+            _ACTIVE_SUM,
+            _DONE_SUM,
         )
+        .select_from(Task)
+        .join(TaskAssignee, TaskAssignee.task_id == Task.id)
         .join(
             ShadowUser,
-            (ShadowUser.employee_id == Task.assignee_id)
+            (ShadowUser.employee_id == TaskAssignee.employee_id)
             & (ShadowUser.deleted_at.is_(None)),
             isouter=True,
         )
         .where(Task.project_id == project_id)
-        .group_by(Task.assignee_id, ShadowUser.full_name, ShadowUser.email)
+        .group_by(TaskAssignee.employee_id, ShadowUser.full_name, ShadowUser.email)
         .order_by(text("active_count DESC NULLS LAST"))
         .limit(_WORKLOAD_TOP)
     )
-    return [
+    out = [
         WorkloadEntry(
-            employee_id=row.assignee_id,
+            employee_id=row.employee_id,
             full_name=row.full_name,
             email=row.email,
             active_count=int(row.active_count or 0),
@@ -191,6 +203,27 @@ async def _workload(
         )
         for row in rows.all()
     ]
+
+    unassigned = (
+        await session.execute(
+            select(_ACTIVE_SUM, _DONE_SUM).where(
+                Task.project_id == project_id, has_no_assignees()
+            )
+        )
+    ).first()
+    if unassigned is not None and (unassigned.active_count or unassigned.done_count):
+        out.append(
+            WorkloadEntry(
+                employee_id=None,
+                full_name=None,
+                email=None,
+                active_count=int(unassigned.active_count or 0),
+                done_count=int(unassigned.done_count or 0),
+            )
+        )
+        out.sort(key=lambda e: e.active_count, reverse=True)
+        out = out[:_WORKLOAD_TOP]
+    return out
 
 
 async def _custom_field_stats(

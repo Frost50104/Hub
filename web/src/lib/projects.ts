@@ -14,6 +14,8 @@ export interface Project {
   name: string
   description: string | null
   archived_at: string | null
+  /** Общая для тенанта раскладка (не персональная); null — «Без папки». */
+  folder_id: string | null
   created_by: string
   created_at: string
   updated_at: string
@@ -73,6 +75,13 @@ export const projectsApi = {
     api.post<Project>(`/projects/${id}/archive`).then((r) => r.data),
   unarchive: (id: string): Promise<Project> =>
     api.post<Project>(`/projects/${id}/unarchive`).then((r) => r.data),
+  // Однополевая мутация со своим глаголом — зеркало setFavorite. В PATCH её
+  // не выразить: там идиома «if x is not None», а null обязан значить
+  // «вынуть из папки».
+  setFolder: (id: string, folderId: string | null): Promise<Project> =>
+    api
+      .put<Project>(`/projects/${id}/folder`, { folder_id: folderId })
+      .then((r) => r.data),
   setFavorite: (id: string, isFavorite: boolean): Promise<Project> =>
     api
       .put<Project>(`/projects/${id}/favorite`, { is_favorite: isFavorite })

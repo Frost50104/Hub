@@ -12,10 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
 from app.models.project import Project, ProjectMember
+from app.models.project_folder import ProjectFolder
 from app.models.shadow import ShadowUser
 from app.schemas.project import (
     ProjectCreate,
     ProjectFavoriteUpdate,
+    ProjectFolderAssign,
     ProjectMemberAdd,
     ProjectMemberResponse,
     ProjectMemberUpdate,
@@ -51,6 +53,7 @@ def _project_to_response(
         name=project.name,
         description=project.description,
         archived_at=project.archived_at,
+        folder_id=project.folder_id,
         created_by=project.created_by,
         created_at=project.created_at,
         updated_at=project.updated_at,
@@ -225,6 +228,41 @@ async def set_favorite(
     return _project_to_response(
         project, member.role, member.is_favorite, principal=principal
     )
+
+
+@router.put("/projects/{project_id}/folder", response_model=ProjectResponse)
+async def set_project_folder(
+    project_id: UUID,
+    body: ProjectFolderAssign,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> ProjectResponse:
+    """Переложить проект в папку (folder_id=null — вынуть из папки).
+
+    Гейт owner — как у переименования: папка общая, смена видна ВСЕМ
+    участникам в сайдбаре. Клиент гейтит контролы по уже существующему
+    `can_manage` в ProjectResponse, новых полей не нужно.
+    """
+    project, _ = await require_project_role(
+        db, project_id, principal, allow=("owner",)
+    )
+    # ИНВАРИАНТ: FK projects.folder_id НЕ проверяет совпадение тенантов —
+    # RI-триггеры Postgres всегда обходят RLS. Единственная защита от
+    # кросс-тенантной ссылки — это чтение через tenant-scoped сессию.
+    # Никогда не присваивать folder_id без предварительного db.get.
+    if body.folder_id is not None and await db.get(ProjectFolder, body.folder_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Папка не найдена"
+        )
+    project.folder_id = body.folder_id
+    await db.commit()
+    await db.refresh(project)
+    # Членство перечитываем (см. комментарий в update_project): иначе
+    # admin-owner теряет бейдж роли и флаг избранного сразу после переноса.
+    member_role, is_favorite = await _my_membership(
+        db, project_id, principal.employee_id
+    )
+    return _project_to_response(project, member_role, is_favorite, principal=principal)
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)

@@ -50,6 +50,20 @@ def can_create_project(principal: Principal) -> bool:
     return role in ("admin", "member")
 
 
+def can_manage_project_folders(principal: Principal) -> bool:
+    """Папки ОБЩИЕ для тенанта, поэтому гейт — тот же, что у создания проекта
+    (hub admin|member): равный blast-radius, hub:viewer остаётся read-only.
+
+    Не admin-only сознательно: ОС ровно про то, что в плоском списке тонут
+    обычные пользователи — если раскладывать может только админ, фича мертва
+    в тенанте с одним админом. Не project-owner: у папки нет владельца, гейт
+    по роли в конкретном проекте не выразим.
+
+    Сужение до is_hub_admin — правка ровно здесь, в одном месте.
+    """
+    return can_create_project(principal)
+
+
 def capabilities(
     principal: Principal, my_role: ProjectRole | None
 ) -> tuple[bool, bool]:

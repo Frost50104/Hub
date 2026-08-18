@@ -2,8 +2,10 @@ import { CheckCircle2, Circle } from 'lucide-react'
 import { useMemo } from 'react'
 
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
-import { cn } from '@/lib/cn'
+import { AvatarStack } from '@/components/ui/AvatarStack'
 import { useTasks, useToggleDone } from '@/hooks/useTasks'
+import { cn } from '@/lib/cn'
+import { taskAssignees } from '@/lib/taskAssignees'
 
 interface SubtaskListProps {
   /** Родительская задача. */
@@ -76,6 +78,7 @@ export function SubtaskList({ taskId, projectId, canEdit, onOpenTask }: SubtaskL
             >
               {t.title}
             </button>
+            <AvatarStack people={taskAssignees(t)} size="xs" max={2} />
           </div>
         ))}
       </div>

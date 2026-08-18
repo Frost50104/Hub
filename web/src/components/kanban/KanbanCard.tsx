@@ -3,10 +3,11 @@ import { CSS } from '@dnd-kit/utilities'
 import { CheckCircle2, Circle, ClipboardCheck, Clock, ListTree } from 'lucide-react'
 import type { CSSProperties } from 'react'
 
-import { Avatar } from '@/components/ui/Avatar'
+import { AvatarStack } from '@/components/ui/AvatarStack'
 import { Badge } from '@/components/ui/Badge'
 import { useProject } from '@/hooks/useProjects'
 import { cn } from '@/lib/cn'
+import { taskAssignees } from '@/lib/taskAssignees'
 import { type Label } from '@/lib/labels'
 import {
   PRIORITY_LABEL,
@@ -60,6 +61,7 @@ export function KanbanCard({
     opacity: isDragging ? 0.4 : 1,
   }
   const StatusIcon = STATUS_ICON[task.status]
+  const assignees = taskAssignees(task)
   // Доска живёт только на странице проекта — query уже в кэше, N+1 нет.
   const key = taskKey(useProject(task.project_id).data?.key, task.seq)
 
@@ -118,7 +120,10 @@ export function KanbanCard({
         </p>
       </div>
 
-      {(task.priority !== 'medium' || task.due_at || task.assignee || subtasks) && (
+      {(task.priority !== 'medium' ||
+        task.due_at ||
+        assignees.length > 0 ||
+        subtasks) && (
         <div className="flex items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1">
             {task.priority !== 'medium' && (
@@ -166,13 +171,7 @@ export function KanbanCard({
               </span>
             )}
           </div>
-          {task.assignee && (
-            <Avatar
-              name={task.assignee.full_name}
-              email={task.assignee.email}
-              className="h-6 w-6 text-[9px]"
-            />
-          )}
+          <AvatarStack people={assignees} size="sm" max={3} />
         </div>
       )}
     </div>

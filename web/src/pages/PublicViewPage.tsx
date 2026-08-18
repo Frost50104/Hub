@@ -52,6 +52,16 @@ function formatBytes(n: number): string {
   return `${Math.round((n / (1024 * 1024)) * 10) / 10} МБ`
 }
 
+/** Инициалы всех исполнителей с фолбэком на легаси-скаляр: публичную
+ *  страницу обслуживает тот же SPA-бандл, который у части посетителей старый. */
+function publicAssignees(t: {
+  assignees_initials?: string[]
+  assignee_initials: string | null
+}): string[] {
+  if (t.assignees_initials?.length) return t.assignees_initials
+  return t.assignee_initials ? [t.assignee_initials] : []
+}
+
 function Initials({ value }: { value: string | null }) {
   if (!value) {
     return (
@@ -180,10 +190,12 @@ function TaskView({ data }: { data: PublicTaskView }) {
           <span className="ml-auto flex items-center gap-1.5">
             <span className="text-text3">от</span>
             <Initials value={data.created_by_initials} />
-            {data.assignee_initials && (
+            {publicAssignees(data).length > 0 && (
               <>
                 <span className="text-text3">для</span>
-                <Initials value={data.assignee_initials} />
+                {publicAssignees(data).map((init) => (
+                  <Initials key={init} value={init} />
+                ))}
               </>
             )}
           </span>
@@ -302,7 +314,9 @@ function ProjectViewBlock({ data }: { data: PublicProjectView }) {
                   >
                     {PRIORITY_LABEL[t.priority] ?? t.priority}
                   </span>
-                  <Initials value={t.assignee_initials} />
+                  {publicAssignees(t).map((init) => (
+                    <Initials key={init} value={init} />
+                  ))}
                 </span>
               </li>
             ))}

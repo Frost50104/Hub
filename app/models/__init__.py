@@ -39,6 +39,7 @@ from app.models.org import (
 from app.models.product import ProductCard, ProductCardLink, ProductCategory
 from app.models.progress import CourseAssignment, CourseProgress, LessonProgress
 from app.models.project import Project, ProjectMember
+from app.models.project_folder import ProjectFolder
 from app.models.push_subscription import PushSubscription
 from app.models.quiz import Quiz, QuizAttempt, QuizQuestion
 from app.models.rate_limit import RateLimit
@@ -58,6 +59,7 @@ from app.models.sync_state import SyncState
 from app.models.task import (
     Task,
     TaskActivity,
+    TaskAssignee,
     TaskComment,
     TaskLabel,
     TaskLabelAssignment,
@@ -98,6 +100,7 @@ __all__ = [
     "PositionGroup",
     "PositionGroupMember",
     "Project",
+    "ProjectFolder",
     "ProjectMember",
     "PublicShareToken",
     "PushSubscription",
@@ -134,6 +137,7 @@ __all__ = [
     "SyncState",
     "Task",
     "TaskActivity",
+    "TaskAssignee",
     "TaskAttachment",
     "TaskComment",
     "TaskCustomFieldValue",

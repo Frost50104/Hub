@@ -24,10 +24,14 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
-from app.models.shadow import ShadowUser
 from app.models.task import Task
-from app.schemas.task import AssigneeBrief, TaskPriority, TaskResponse, TaskStatus
+from app.schemas.task import TaskPriority, TaskResponse, TaskStatus
 from app.services.project_access import require_project_role
+from app.services.task_assignees import (
+    assignee_exists,
+    load_assignees,
+    serialize_with_assignees,
+)
 
 router = APIRouter(tags=["calendar"])
 
@@ -79,13 +83,9 @@ async def list_calendar_tasks(
     to_dt = datetime.combine(to_date + timedelta(days=1), time(0, 0, 0), tzinfo=UTC)
 
     stmt = (
-        select(Task, ShadowUser.email, ShadowUser.full_name)
-        .join(
-            ShadowUser,
-            (ShadowUser.employee_id == Task.assignee_id)
-            & (ShadowUser.deleted_at.is_(None)),
-            isouter=True,
-        )
+        # Без JOIN на исполнителей — он размножил бы задачу по их числу
+        # (дубли событий в сетке). Исполнители едут батчем ниже.
+        select(Task)
         .where(
             Task.project_id == project_id,
             Task.archived_at.is_(None),
@@ -104,20 +104,10 @@ async def list_calendar_tasks(
     if status_ is not None:
         stmt = stmt.where(Task.status == status_)
     if assignee_id is not None:
-        stmt = stmt.where(Task.assignee_id == assignee_id)
+        stmt = stmt.where(assignee_exists(assignee_id))
     if priority is not None:
         stmt = stmt.where(Task.priority == priority)
 
-    out: list[TaskResponse] = []
-    for task, email, full_name in (await db.execute(stmt)).all():
-        assignee = (
-            AssigneeBrief(
-                employee_id=task.assignee_id, email=email, full_name=full_name
-            )
-            if task.assignee_id
-            else None
-        )
-        data = TaskResponse.model_validate(task)
-        data.assignee = assignee
-        out.append(data)
-    return out
+    tasks = (await db.execute(stmt)).scalars().all()
+    by_task = await load_assignees(db, [t.id for t in tasks])
+    return [serialize_with_assignees(t, by_task.get(t.id, [])) for t in tasks]

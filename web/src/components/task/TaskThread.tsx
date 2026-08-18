@@ -31,6 +31,30 @@ function renderActivity(a: Activity): string | null {
       return `${actor} перевёл в «${label}»`
     }
     case 'assigned': {
+      // Новый формат (0034) несёт added/removed со снапшотом имён. Старые
+      // записи в БД остаются на old/new — ветка ниже их и рендерит.
+      const added = Array.isArray(p['added']) ? (p['added'] as string[]) : null
+      const removed = Array.isArray(p['removed']) ? (p['removed'] as string[]) : null
+      if (added || removed) {
+        const addedNames = (p['added_names'] as string[] | undefined) ?? []
+        const removedNames = (p['removed_names'] as string[] | undefined) ?? []
+        const hasAdded = (added?.length ?? 0) > 0
+        const hasRemoved = (removed?.length ?? 0) > 0
+        if (hasAdded && hasRemoved) {
+          return `${actor} изменил исполнителей: +${addedNames.join(', ')}, −${removedNames.join(', ')}`
+        }
+        if (hasAdded) {
+          return addedNames.length === 1
+            ? `${actor} назначил исполнителем ${addedNames[0]}`
+            : `${actor} добавил исполнителей: ${addedNames.join(', ')}`
+        }
+        if (hasRemoved) {
+          return removedNames.length === 1
+            ? `${actor} снял исполнителя ${removedNames[0]}`
+            : `${actor} снял исполнителей: ${removedNames.join(', ')}`
+        }
+        return `${actor} изменил исполнителей`
+      }
       const isUnassign = !p['new']
       return isUnassign
         ? `${actor} снял исполнителя`

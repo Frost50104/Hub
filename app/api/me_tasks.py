@@ -16,9 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth_any
 from app.models.project import Project
-from app.models.shadow import ShadowUser
 from app.models.task import Task
-from app.schemas.task import AssigneeBrief, TaskResponse, TaskStatus
+from app.schemas.task import TaskResponse, TaskStatus
+from app.services.task_assignees import (
+    assignee_exists,
+    load_assignees,
+    serialize_with_assignees,
+)
 
 router = APIRouter(tags=["me-tasks"])
 
@@ -33,17 +37,13 @@ async def list_my_tasks(
     principal: Principal = Depends(require_auth_any()),
     db: AsyncSession = Depends(get_db),
 ) -> list[TaskResponse]:
+    # EXISTS, а не JOIN на task_assignees: JOIN размножил бы задачу по числу
+    # исполнителей и дал дубли в списке. Семантика — «я СРЕДИ исполнителей».
     stmt = (
-        select(Task, ShadowUser.email, ShadowUser.full_name, Project.key)
-        .join(
-            ShadowUser,
-            (ShadowUser.employee_id == Task.assignee_id)
-            & (ShadowUser.deleted_at.is_(None)),
-            isouter=True,
-        )
+        select(Task, Project.key)
         # key проекта — для бейджа «KEY-42» в кросс-проектном списке.
         .join(Project, Project.id == Task.project_id)
-        .where(Task.assignee_id == principal.employee_id)
+        .where(assignee_exists(principal.employee_id))
         .order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
     )
     if not include_archived:
@@ -62,15 +62,11 @@ async def list_my_tasks(
     elif due_window == "upcoming":
         stmt = stmt.where(Task.due_at >= now, Task.status != "done")
 
+    rows = (await db.execute(stmt)).all()
+    by_task = await load_assignees(db, [task.id for task, _ in rows])
     out: list[TaskResponse] = []
-    for task, email, full_name, project_key in (await db.execute(stmt)).all():
-        assignee = (
-            AssigneeBrief(employee_id=task.assignee_id, email=email, full_name=full_name)
-            if task.assignee_id
-            else None
-        )
-        data = TaskResponse.model_validate(task)
-        data.assignee = assignee
+    for task, project_key in rows:
+        data = serialize_with_assignees(task, by_task.get(task.id, []))
         data.project_key = project_key
         out.append(data)
     return out

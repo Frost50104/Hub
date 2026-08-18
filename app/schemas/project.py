@@ -35,6 +35,9 @@ class ProjectResponse(BaseModel):
     name: str
     description: str | None
     archived_at: datetime | None
+    # Общая для тенанта раскладка. Без дефолта — по образцу can_edit/can_manage:
+    # забытый call-site должен падать на валидации, а не молча отдавать None.
+    folder_id: UUID | None
     created_by: UUID
     created_at: datetime
     updated_at: datetime
@@ -50,6 +53,14 @@ class ProjectResponse(BaseModel):
 
 class ProjectFavoriteUpdate(BaseModel):
     is_favorite: bool
+
+
+class ProjectFolderAssign(BaseModel):
+    """Тело PUT /projects/{id}/folder. Отдельная ручка, а не поле в
+    ProjectUpdate: идиома того файла — `if body.x is not None`, а folder_id=None
+    обязан значить «убрать из папки». Прецедент рядом — ProjectFavoriteUpdate."""
+
+    folder_id: UUID | None
 
 
 class ProjectMemberAdd(BaseModel):

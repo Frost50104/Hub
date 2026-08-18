@@ -38,6 +38,7 @@ from app.services.project_access import is_hub_admin
 from app.services.public_token import initials
 from app.services.search_dsl import ParsedQuery
 from app.services.search_dsl import parse as parse_dsl
+from app.services.task_assignees import assignee_exists, load_assignees
 
 router = APIRouter(tags=["search"])
 
@@ -103,11 +104,13 @@ def _ilike_pattern(s: str) -> str:
 
 def _apply_dsl_filters(stmt, parsed: ParsedQuery, *, employee_id: UUID):
     """Append WHERE clauses from a ParsedQuery onto a tasks `select()`."""
+    # EXISTS, а не JOIN: JOIN размножил бы задачу по числу исполнителей и
+    # съел бы _GROUPED_LIMIT дублями. Семантика — «СРЕДИ исполнителей».
     if parsed.assignee == "me":
-        stmt = stmt.where(Task.assignee_id == employee_id)
+        stmt = stmt.where(assignee_exists(employee_id))
     elif parsed.assignee is not None:
         try:
-            stmt = stmt.where(Task.assignee_id == UUID(parsed.assignee))
+            stmt = stmt.where(assignee_exists(UUID(parsed.assignee)))
         except ValueError:
             # DSL parser already filtered out malformed UUIDs, but be safe.
             pass
@@ -272,6 +275,8 @@ async def search(
 
     # ─── Grouped response (advanced /search page) ───────────────────────────
     task_rows = (await db.execute(task_stmt.limit(_GROUPED_LIMIT))).all()
+    # Батч вместо N+1 и вместо JOIN'а: ≤ _GROUPED_LIMIT задач — один запрос.
+    assignees_by_task = await load_assignees(db, [t.id for t, *_ in task_rows])
     by_project: dict[UUID, SearchGroup] = {}
     for t, project_name, project_key, headline in task_rows:
         bucket = by_project.get(t.project_id)
@@ -292,7 +297,11 @@ async def search(
                 status=t.status,
                 priority=t.priority,
                 due_at=t.due_at,
-                assignee_id=t.assignee_id,
+                assignee_id=(
+                    assignees_by_task[t.id][0].employee_id
+                    if assignees_by_task.get(t.id)
+                    else None
+                ),
                 headline=headline if (headline and headline != t.description) else None,
             )
         )

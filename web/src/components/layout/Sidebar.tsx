@@ -1,6 +1,7 @@
 import {
   CheckSquare,
   ChevronDown,
+  ChevronRight,
   CircleCheck,
   Folder,
   FolderPlus,
@@ -39,12 +40,18 @@ import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { useMe } from '@/hooks/useMe'
 import { useUnreadCount } from '@/hooks/useNotifications'
-import { useCreateProject, useProjects } from '@/hooks/useProjects'
+import { useCreateProject, useProjectFolders, useProjects } from '@/hooks/useProjects'
 import { authClient } from '@/lib/auth'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/cn'
 import { HUB_ROLE_BADGE } from '@/lib/learn'
+import {
+  groupProjectsByFolder,
+  UNFILED,
+  type ProjectGroup,
+} from '@/lib/groupProjects'
 import { type Project } from '@/lib/projects'
+import { useFolderCollapse } from '@/stores/projectFolders'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Главная', icon: Home, end: true, badge: false },
@@ -66,8 +73,67 @@ function projectColorFor(p: Project): string {
   return palette[hash % palette.length] ?? palette[0]!
 }
 
+function FolderNavGroup({
+  group,
+  onItemClick,
+}: {
+  group: ProjectGroup
+  onItemClick?: () => void
+}) {
+  const folder = group.folder
+  const collapsed = useFolderCollapse((s) =>
+    folder ? (s.collapsed[folder.id] ?? false) : false,
+  )
+  const toggle = useFolderCollapse((s) => s.toggle)
+
+  // Пустые для пользователя папки в 260px-колонке — чистый шум; управление
+  // папками живёт на /projects, где пустая папка видна как drop-зона.
+  if (group.projects.length === 0) return null
+
+  // Проекты без папки — плоскими пунктами: фальшивый заголовок «Без папки»
+  // в узкой колонке читается хуже простого списка.
+  if (!folder) {
+    return (
+      <ul className="space-y-0.5">
+        {group.projects.map((p) => (
+          <ProjectLinkItem key={p.id} project={p} onItemClick={onItemClick} />
+        ))}
+      </ul>
+    )
+  }
+
+  return (
+    <div className="space-y-0.5">
+      <button
+        type="button"
+        onClick={() => toggle(folder.id)}
+        className="flex w-full items-center gap-1 px-2 py-0.5 text-left text-[11px] font-semibold uppercase tracking-wider text-text3 hover:text-text2"
+      >
+        {collapsed ? (
+          <ChevronRight className="h-3 w-3 shrink-0" />
+        ) : (
+          <ChevronDown className="h-3 w-3 shrink-0" />
+        )}
+        <span className="truncate">{folder.name}</span>
+        <span className="ml-auto font-normal normal-case">{group.projects.length}</span>
+      </button>
+      {!collapsed && (
+        <ul className="space-y-0.5 pl-3">
+          {group.projects.map((p) => (
+            <ProjectLinkItem key={p.id} project={p} onItemClick={onItemClick} />
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 function ProjectsList({ onItemClick }: { onItemClick?: () => void }) {
   const { data, isLoading, isError, refetch } = useProjects()
+  const foldersQuery = useProjectFolders()
+  const folders = foldersQuery.data?.folders ?? []
+  const groups = groupProjectsByFolder(data ?? [], folders)
+
   if (isLoading) return <SkeletonRows rows={4} rowClassName="h-7" className="px-2" />
   if (isError) {
     return (
@@ -88,6 +154,7 @@ function ProjectsList({ onItemClick }: { onItemClick?: () => void }) {
     <>
       {favorites.length > 0 && (
         <>
+          {/* Избранное — персональный сквозной срез, папки его не касаются. */}
           <p className="flex items-center gap-1 px-2 pb-0.5 text-[11px] font-semibold uppercase tracking-wider text-text3">
             <Star className="h-3 w-3 fill-amber text-amber" /> Избранное
           </p>
@@ -98,11 +165,15 @@ function ProjectsList({ onItemClick }: { onItemClick?: () => void }) {
           </ul>
         </>
       )}
-      <ul className="space-y-0.5">
-        {data.map((p) => (
-          <ProjectLinkItem key={p.id} project={p} onItemClick={onItemClick} />
+      <div className="space-y-1.5">
+        {groups.map((group) => (
+          <FolderNavGroup
+            key={group.folder?.id ?? UNFILED}
+            group={group}
+            onItemClick={onItemClick}
+          />
         ))}
-      </ul>
+      </div>
     </>
   )
 }

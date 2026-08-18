@@ -1,10 +1,10 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { Archive, Calendar, CornerLeftUp, Flag, Link as LinkIcon, Tag, User, X } from 'lucide-react'
+import { Archive, Calendar, CornerLeftUp, Flag, Link as LinkIcon, Tag, Users, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 import { Markdown } from '@/components/Markdown'
-import { PeoplePicker } from '@/components/PeoplePicker'
+import { PeoplePickerMulti } from '@/components/PeoplePickerMulti'
 import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
 import { SubtaskList } from '@/components/task/SubtaskList'
@@ -19,8 +19,14 @@ import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Input'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { useProject } from '@/hooks/useProjects'
-import { useArchiveTask, useTask, useUpdateTask } from '@/hooks/useTasks'
+import {
+  useArchiveTask,
+  useTask,
+  useToggleAssignee,
+  useUpdateTask,
+} from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
+import { taskAssignees } from '@/lib/taskAssignees'
 import {
   PRIORITY_LABEL,
   STATUS_LABEL,
@@ -74,6 +80,7 @@ export function TaskDetailDrawer({
   // Права считает сервер: viewer → read-only, hub:admin вне членства → правит.
   const readOnly = !project.data?.can_edit
   const update = useUpdateTask(projectId)
+  const toggleAssignee = useToggleAssignee(projectId)
   const archive = useArchiveTask(projectId)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -259,21 +266,18 @@ export function TaskDetailDrawer({
                 </Row>
 
                 <Row
-                  icon={<User className="h-4 w-4 text-text3" />}
-                  label="Исполнитель"
+                  icon={<Users className="h-4 w-4 text-text3" />}
+                  label="Исполнители"
                 >
-                  <PeoplePicker
-                    value={task.assignee_id}
-                    onChange={(id) =>
-                      update.mutate({ id: task.id, assignee_id: id })
+                  <PeoplePickerMulti
+                    value={taskAssignees(task)}
+                    onToggle={(person, next) =>
+                      toggleAssignee.mutate({ taskId: task.id, person, next })
                     }
-                    disabled={readOnly || update.isPending}
-                    currentLabel={
-                      task.assignee
-                        ? task.assignee.full_name || task.assignee.email
-                        : null
-                    }
-                    currentEmail={task.assignee?.email ?? null}
+                    // Намеренно НЕ отключаем на isPending: иначе меню
+                    // замирает после каждого тоггла и выбрать нескольких
+                    // подряд невозможно. Состояние ведёт оптимистичный кэш.
+                    disabled={readOnly}
                     placeholder="Не назначен"
                   />
                 </Row>

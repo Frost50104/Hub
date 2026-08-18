@@ -1,6 +1,24 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus } from 'lucide-react'
-import { useState } from 'react'
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import { CSS } from '@dnd-kit/utilities'
+import {
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  FolderPlus,
+  MoreHorizontal,
+  Plus,
+} from 'lucide-react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -16,11 +34,31 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/Dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { SkeletonRows } from '@/components/ui/Skeleton'
-import { useCreateProject, useProjects } from '@/hooks/useProjects'
+import {
+  useCreateFolder,
+  useCreateProject,
+  useDeleteFolder,
+  useProjectFolders,
+  useProjects,
+  useRenameFolder,
+  useReorderFolders,
+  useSetProjectFolder,
+} from '@/hooks/useProjects'
+import { cn } from '@/lib/cn'
+import { groupProjectsByFolder, UNFILED, type ProjectGroup } from '@/lib/groupProjects'
+import { type ProjectFolder } from '@/lib/projectFolders'
 import { PROJECT_ROLE_LABEL, type Project } from '@/lib/projects'
+import { useFolderCollapse } from '@/stores/projectFolders'
 
 const createSchema = z.object({
   name: z.string().min(1).max(255),
@@ -29,31 +67,394 @@ const createSchema = z.object({
 
 type CreateFormValues = z.infer<typeof createSchema>
 
-function ProjectCard({ project }: { project: Project }) {
+const DROP_PREFIX = 'folder-'
+
+function ProjectCard({
+  project,
+  folders,
+  onMove,
+}: {
+  project: Project
+  folders: ProjectFolder[]
+  onMove: (folderId: string | null) => void
+}) {
+  const [moveOpen, setMoveOpen] = useState(false)
+  // Перетаскивать может только тот, кто может и переложить через меню.
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: project.id,
+    disabled: !project.can_manage,
+    data: { projectId: project.id, folderId: project.folder_id },
+  })
+  // transform ОБЯЗАТЕЛЕН (паттерн CalendarTaskBar): без него карточка не
+  // едет за курсором, а её rect не смещается — collision detection не видит
+  // папку под указателем и дроп молча не срабатывает.
+  const style: CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    zIndex: isDragging ? 20 : undefined,
+  }
+
   return (
-    <Link
-      to={`/projects/${project.id}`}
-      className="glass group flex flex-col gap-2 p-5 transition-colors hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-amber"
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn('group relative', isDragging && 'opacity-60')}
     >
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber/20 font-display text-base font-black uppercase text-amber">
-          {project.key.slice(0, 2)}
+      <Link
+        to={`/projects/${project.id}`}
+        // У <a href> есть нативный HTML5-drag, конфликтующий с dnd-kit.
+        draggable={false}
+        {...attributes}
+        {...listeners}
+        className="glass flex flex-col gap-2 p-5 transition-colors hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-amber"
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber/20 font-display text-base font-black uppercase text-amber">
+            {project.key.slice(0, 2)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate font-display text-base font-semibold text-text">
+              {project.name}
+            </h3>
+            <p className="text-xs text-text3">{project.key}</p>
+          </div>
+          {project.archived_at && <Badge variant="secondary">архив</Badge>}
+          {project.my_role && project.my_role !== 'viewer' && (
+            <Badge variant="secondary">{PROJECT_ROLE_LABEL[project.my_role]}</Badge>
+          )}
         </div>
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate font-display text-base font-semibold text-text">
-            {project.name}
-          </h3>
-          <p className="text-xs text-text3">{project.key}</p>
-        </div>
-        {project.archived_at && <Badge variant="secondary">архив</Badge>}
-        {project.my_role && project.my_role !== 'viewer' && (
-          <Badge variant="default">{PROJECT_ROLE_LABEL[project.my_role]}</Badge>
+        {project.description && (
+          <p className="line-clamp-2 text-sm text-text2">{project.description}</p>
         )}
-      </div>
-      {project.description && (
-        <p className="line-clamp-2 text-sm text-text2">{project.description}</p>
+      </Link>
+
+      {project.can_manage && (
+        <div className="absolute right-2 top-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                // Иначе клик всплывёт в <Link> и уведёт со страницы.
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                className="rounded p-1 text-text3 transition-opacity hover:bg-glass hover:text-text focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 md:opacity-0 md:group-hover:opacity-100"
+                aria-label="Действия с проектом"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setMoveOpen(true)}>
+                <Folder className="mr-2 h-4 w-4" />
+                Переместить в папку…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       )}
-    </Link>
+
+      <MoveToFolderDialog
+        open={moveOpen}
+        onOpenChange={setMoveOpen}
+        folders={folders}
+        current={project.folder_id}
+        onPick={(folderId) => {
+          onMove(folderId)
+          setMoveOpen(false)
+        }}
+      />
+    </div>
+  )
+}
+
+/**
+ * Меню-путь перемещения — ОСНОВНОЙ, drag-n-drop поверх него дополнение:
+ * на мобильном TouchSensor конкурирует со скроллом, а KeyboardSensor в
+ * проекте не используется нигде, то есть DnD недоступен с клавиатуры.
+ */
+function MoveToFolderDialog({
+  open,
+  onOpenChange,
+  folders,
+  current,
+  onPick,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  folders: ProjectFolder[]
+  current: string | null
+  onPick: (folderId: string | null) => void
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Переместить в папку</DialogTitle>
+          <DialogDescription>
+            Папки общие для компании — раскладку увидят все участники.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1">
+          {[{ id: null, name: 'Без папки' }, ...folders].map((f) => (
+            <button
+              key={f.id ?? UNFILED}
+              type="button"
+              onClick={() => onPick(f.id)}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-glass',
+                (f.id ?? null) === current ? 'text-amber' : 'text-text2',
+              )}
+            >
+              <Folder className="h-4 w-4 shrink-0" />
+              <span className="flex-1 truncate">{f.name}</span>
+              {(f.id ?? null) === current && <span className="text-xs">текущая</span>}
+            </button>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function FolderSection({
+  group,
+  folders,
+  canManage,
+  onMoveProject,
+}: {
+  group: ProjectGroup
+  folders: ProjectFolder[]
+  canManage: boolean
+  onMoveProject: (projectId: string, folderId: string | null) => void
+}) {
+  const folder = group.folder
+  const dropId = DROP_PREFIX + (folder?.id ?? UNFILED)
+  const { setNodeRef, isOver } = useDroppable({ id: dropId })
+  const collapsed = useFolderCollapse((s) =>
+    folder ? (s.collapsed[folder.id] ?? false) : false,
+  )
+  const toggle = useFolderCollapse((s) => s.toggle)
+
+  const rename = useRenameFolder()
+  const reorder = useReorderFolders()
+  const remove = useDeleteFolder()
+  const [renaming, setRenaming] = useState(false)
+  const [draft, setDraft] = useState(folder?.name ?? '')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  // Тенант без папок видит ровно сегодняшний плоский список — без заголовков.
+  const headless = folder === null && folders.length === 0
+  if (headless && group.projects.length === 0) return null
+
+  const move = (dir: -1 | 1) => {
+    if (!folder) return
+    const idx = folders.findIndex((f) => f.id === folder.id)
+    const next = idx + dir
+    if (idx < 0 || next < 0 || next >= folders.length) return
+    const ids = folders.map((f) => f.id)
+    const [moved] = ids.splice(idx, 1)
+    ids.splice(next, 0, moved!)
+    reorder.mutate(ids)
+  }
+
+  const submitRename = () => {
+    const trimmed = draft.trim()
+    setRenaming(false)
+    if (folder && trimmed && trimmed !== folder.name) {
+      rename.mutate({ id: folder.id, name: trimmed })
+    }
+  }
+
+  return (
+    <section ref={setNodeRef} className="space-y-3">
+      {!headless && (
+        <div
+          className={cn(
+            'flex items-center gap-2 rounded-md px-1 py-1 transition-colors',
+            isOver && 'bg-amber/5 ring-1 ring-amber/40',
+          )}
+        >
+          {renaming && folder ? (
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={submitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitRename()
+                if (e.key === 'Escape') setRenaming(false)
+              }}
+              className="rounded border border-glass-border bg-glass px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => folder && toggle(folder.id)}
+              disabled={!folder}
+              className="flex flex-1 items-center gap-1.5 text-left text-sm font-semibold text-text2 disabled:cursor-default"
+            >
+              {folder &&
+                (collapsed ? (
+                  <ChevronRight className="h-4 w-4 shrink-0 text-text3" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 shrink-0 text-text3" />
+                ))}
+              <Folder className="h-4 w-4 shrink-0 text-text3" />
+              <span className="truncate">{folder?.name ?? 'Без папки'}</span>
+              <span className="text-xs font-normal text-text3">
+                {group.projects.length}
+              </span>
+            </button>
+          )}
+
+          {folder && canManage && !renaming && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="rounded p-1 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                  aria-label={`Действия с папкой ${folder.name}`}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setDraft(folder.name)
+                    // Radix возвращает фокус на триггер после закрытия —
+                    // без отложенного монтирования autoFocus не сработает.
+                    setTimeout(() => setRenaming(true), 0)
+                  }}
+                >
+                  Переименовать
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => move(-1)}>Выше</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => move(1)}>Ниже</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
+                  Удалить папку
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      )}
+
+      {!collapsed &&
+        (group.projects.length > 0 ? (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {group.projects.map((p) => (
+              <ProjectCard
+                key={p.id}
+                project={p}
+                folders={folders}
+                onMove={(folderId) => onMoveProject(p.id, folderId)}
+              />
+            ))}
+          </div>
+        ) : (
+          !headless && (
+            <p className="rounded-lg border border-dashed border-glass-border px-4 py-6 text-center text-sm text-text3">
+              Пусто — перетащите сюда проект
+            </p>
+          )
+        ))}
+
+      {folder && (
+        <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Удалить папку «{folder.name}»?</DialogTitle>
+              <DialogDescription>
+                Проекты ({group.projects.length}) останутся — они переедут в «Без
+                папки».
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => setConfirmDelete(false)}>
+                Отмена
+              </Button>
+              <Button
+                onClick={() => {
+                  remove.mutate(folder.id)
+                  setConfirmDelete(false)
+                }}
+              >
+                Удалить
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </section>
+  )
+}
+
+function CreateFolderDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+}) {
+  const create = useCreateFolder()
+  const [name, setName] = useState('')
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const trimmed = name.trim()
+    if (!trimmed) return
+    try {
+      await create.mutateAsync(trimmed)
+      // Подсказка нужна: в сайдбаре пустая папка скрыта, и без неё это
+      // читается как «создал папку, а её нет».
+      toast.success('Папка создана — перетащите в неё проекты')
+      setName('')
+      onOpenChange(false)
+    } catch {
+      // тост показывает глобальный onError мутаций
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <form onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>Новая папка</DialogTitle>
+            <DialogDescription>
+              Папки общие для компании: раскладку увидят все участники.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="folder-name">Название</Label>
+            <Input
+              id="folder-name"
+              autoFocus
+              placeholder="Маркетинг"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => onOpenChange(false)}
+              disabled={create.isPending}
+            >
+              Отмена
+            </Button>
+            <Button type="submit" disabled={create.isPending || !name.trim()}>
+              {create.isPending ? 'Создаём…' : 'Создать'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -143,7 +544,36 @@ function CreateProjectDialog({
 
 export function ProjectListPage() {
   const [createOpen, setCreateOpen] = useState(false)
+  const [createFolderOpen, setCreateFolderOpen] = useState(false)
   const { data, isLoading, error } = useProjects()
+  const foldersQuery = useProjectFolders()
+  const setFolder = useSetProjectFolder()
+
+  const folders = useMemo(() => foldersQuery.data?.folders ?? [], [foldersQuery.data])
+  const groups = useMemo(
+    () => groupProjectsByFolder(data ?? [], folders),
+    [data, folders],
+  )
+
+  // distance:5 — благодаря ему обычный клик по карточке по-прежнему
+  // открывает проект, а не начинает перетаскивание.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  )
+
+  const onDragEnd = (e: DragEndEvent) => {
+    if (!e.over) return
+    const overId = String(e.over.id)
+    if (!overId.startsWith(DROP_PREFIX)) return
+    const raw = overId.slice(DROP_PREFIX.length)
+    const target = raw === UNFILED ? null : raw
+    const payload = e.active.data.current as
+      | { projectId: string; folderId: string | null }
+      | undefined
+    if (!payload || payload.folderId === target) return
+    setFolder.mutate({ projectId: payload.projectId, folderId: target })
+  }
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -154,10 +584,18 @@ export function ProjectListPage() {
             Командные пространства с задачами, секциями и участниками.
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Новый проект
-        </Button>
+        <div className="flex items-center gap-2">
+          {foldersQuery.data?.can_manage && (
+            <Button variant="secondary" onClick={() => setCreateFolderOpen(true)}>
+              <FolderPlus className="h-4 w-4" />
+              Новая папка
+            </Button>
+          )}
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Новый проект
+          </Button>
+        </div>
       </div>
 
       {isLoading && <SkeletonRows rows={5} rowClassName="h-14" />}
@@ -176,14 +614,30 @@ export function ProjectListPage() {
         </div>
       )}
       {data && data.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {data.map((p) => (
-            <ProjectCard key={p.id} project={p} />
-          ))}
-        </div>
+        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+          <div
+            className={cn(
+              'space-y-6',
+              setFolder.isPending && 'pointer-events-none opacity-60',
+            )}
+          >
+            {groups.map((group) => (
+              <FolderSection
+                key={group.folder?.id ?? UNFILED}
+                group={group}
+                folders={folders}
+                canManage={foldersQuery.data?.can_manage ?? false}
+                onMoveProject={(projectId, folderId) =>
+                  setFolder.mutate({ projectId, folderId })
+                }
+              />
+            ))}
+          </div>
+        </DndContext>
       )}
 
       <CreateProjectDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <CreateFolderDialog open={createFolderOpen} onOpenChange={setCreateFolderOpen} />
     </div>
   )
 }

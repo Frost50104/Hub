@@ -15,7 +15,7 @@ import pytest
 from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
 from app.models.project import Project, ProjectMember
 from app.models.shadow import ShadowUser
-from app.models.task import Task
+from app.models.task import Task, TaskAssignee
 
 pytestmark = pytest.mark.integration
 
@@ -61,6 +61,18 @@ async def _seed_project(db, principal):
         seq=1,
     )
     db.add(task)
+    await db.flush()
+    # Источник истины по исполнителям — task_assignees (0034); assignee_id выше
+    # остаётся зеркалом. Фикстура пишет обе стороны, потому что конструирует
+    # Task напрямую, минуя set_task_assignees.
+    db.add(
+        TaskAssignee(
+            task_id=task.id,
+            employee_id=principal.employee_id,
+            tenant_id=principal.tenant_id,
+            position=0,
+        )
+    )
     await db.flush()
     return project, task
 

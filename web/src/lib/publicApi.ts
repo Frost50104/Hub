@@ -35,7 +35,9 @@ export interface PublicTaskView {
   priority: string
   start_at: string | null
   due_at: string | null
+  /** @deprecated Первые инициалы из `assignees_initials`. */
   assignee_initials: string | null
+  assignees_initials?: string[]
   created_by_initials: string | null
   created_at: string
   comments: PublicComment[]
@@ -48,7 +50,9 @@ export interface PublicTaskHit {
   status: string
   priority: string
   due_at: string | null
+  /** @deprecated Первые инициалы из `assignees_initials`. */
   assignee_initials: string | null
+  assignees_initials?: string[]
   has_attachments: boolean
   is_subtask?: boolean
 }

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 
+import { foldersApi, type ProjectFolderList } from '@/lib/projectFolders'
 import {
   membersApi,
   projectsApi,
@@ -11,6 +12,12 @@ import {
   type Section,
   type UpdateProjectBody,
 } from '@/lib/projects'
+
+/** ВНЕ namespace ['projects']: иначе invalidateQueries(projectKeys.all) из
+ *  каждой мутации проекта дёргал бы ещё и папки. */
+export const projectFolderKeys = {
+  all: ['project-folders'] as const,
+}
 
 export const projectKeys = {
   all: ['projects'] as const,
@@ -155,5 +162,69 @@ export function useDeleteSection(projectId: string) {
     mutationFn: (sectionId: string) => sectionsApi.remove(sectionId),
     meta: { errorMessage: 'Не удалось удалить секцию' },
     onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.sections(projectId) }),
+  })
+}
+
+
+// ─── Папки проектов ─────────────────────────────────────────────────────────
+
+export function useProjectFolders(): UseQueryResult<ProjectFolderList> {
+  return useQuery({
+    queryKey: projectFolderKeys.all,
+    queryFn: () => foldersApi.list(),
+  })
+}
+
+export function useCreateFolder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => foldersApi.create(name),
+    meta: { errorMessage: 'Не удалось создать папку' },
+    onSuccess: () => qc.invalidateQueries({ queryKey: projectFolderKeys.all }),
+  })
+}
+
+export function useRenameFolder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      foldersApi.rename(id, name),
+    meta: { errorMessage: 'Не удалось переименовать папку' },
+    onSuccess: () => qc.invalidateQueries({ queryKey: projectFolderKeys.all }),
+  })
+}
+
+export function useReorderFolders() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (folderIds: string[]) => foldersApi.reorder(folderIds),
+    meta: { errorMessage: 'Не удалось изменить порядок папок' },
+    onSuccess: () => qc.invalidateQueries({ queryKey: projectFolderKeys.all }),
+  })
+}
+
+export function useDeleteFolder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => foldersApi.remove(id),
+    meta: { errorMessage: 'Не удалось удалить папку' },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: projectFolderKeys.all })
+      // У проектов обнулился folder_id (FK ON DELETE SET NULL).
+      qc.invalidateQueries({ queryKey: projectKeys.all })
+    },
+  })
+}
+
+export function useSetProjectFolder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, folderId }: { projectId: string; folderId: string | null }) =>
+      projectsApi.setFolder(projectId, folderId),
+    meta: { errorMessage: 'Не удалось переместить проект' },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: projectKeys.all })
+      qc.invalidateQueries({ queryKey: projectKeys.detail(vars.projectId) })
+    },
   })
 }

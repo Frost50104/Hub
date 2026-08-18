@@ -18,8 +18,9 @@ from sqlalchemy import select
 from app import log as log_config
 from app.db import tenant_scoped_session
 from app.jobs._common import already_notified
-from app.models.task import Task, TaskWatcher
+from app.models.task import Task
 from app.services.notify import notify_overdue
+from app.services.task_assignees import collect_recipients
 
 log = structlog.get_logger("jobs.overdue")
 
@@ -45,13 +46,11 @@ async def main() -> int:
         ).scalars().all()
         log.info("overdue.scanned", task_count=len(tasks))
 
+        # Один батч на всю выборку вместо запроса за watcher'ами на задачу.
+        recipients_by_task = await collect_recipients(session, [t.id for t in tasks])
+
         for task in tasks:
-            watcher_rows = await session.execute(
-                select(TaskWatcher.employee_id).where(TaskWatcher.task_id == task.id)
-            )
-            recipients = {row[0] for row in watcher_rows.all()}
-            if task.assignee_id:
-                recipients.add(task.assignee_id)
+            recipients = recipients_by_task.get(task.id, set())
 
             for emp_id in recipients:
                 if await already_notified(

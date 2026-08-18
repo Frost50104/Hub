@@ -35,7 +35,10 @@ class PublicTaskHit(BaseModel):
     status: str
     priority: str
     due_at: datetime | None
+    # Легаси-скаляр = первый исполнитель: публичную страницу обслуживает тот
+    # же SPA-бандл, который у части пользователей ещё старый.
     assignee_initials: str | None
+    assignees_initials: list[str] = []
     has_attachments: bool
     is_subtask: bool = False
 
@@ -83,7 +86,10 @@ class PublicTaskView(BaseModel):
     priority: str
     start_at: datetime | None
     due_at: datetime | None
+    # Легаси-скаляр = первый исполнитель: публичную страницу обслуживает тот
+    # же SPA-бандл, который у части пользователей ещё старый.
     assignee_initials: str | None
+    assignees_initials: list[str] = []
     created_by_initials: str | None
     created_at: datetime
     comments: list[PublicComment]

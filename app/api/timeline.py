@@ -24,11 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps import get_db, require_auth
 from app.models.dependency import TaskDependency
 from app.models.section import Section
-from app.models.shadow import ShadowUser
 from app.models.task import Task
 from app.schemas.dependency import TaskDependencyResponse
-from app.schemas.task import AssigneeBrief, TaskResponse
+from app.schemas.task import TaskResponse
 from app.services.project_access import require_project_role
+from app.services.task_assignees import load_assignees, serialize_with_assignees
 
 router = APIRouter(tags=["timeline"])
 
@@ -89,13 +89,9 @@ async def get_timeline(
 
     # ─── Tasks overlapping the window ───────────────────────────────────────
     task_stmt = (
-        select(Task, ShadowUser.email, ShadowUser.full_name)
-        .join(
-            ShadowUser,
-            (ShadowUser.employee_id == Task.assignee_id)
-            & (ShadowUser.deleted_at.is_(None)),
-            isouter=True,
-        )
+        # Без JOIN на исполнителей — размножил бы задачу по их числу
+        # (дубли полос на диаграмме). Исполнители едут батчем ниже.
+        select(Task)
         .where(
             Task.project_id == project_id,
             Task.archived_at.is_(None),
@@ -110,20 +106,12 @@ async def get_timeline(
         .order_by(Task.section_id.nulls_first(), Task.position)
     )
 
-    tasks_out: list[TaskResponse] = []
-    visible_ids: set[UUID] = set()
-    for task, email, full_name in (await db.execute(task_stmt)).all():
-        assignee = (
-            AssigneeBrief(
-                employee_id=task.assignee_id, email=email, full_name=full_name
-            )
-            if task.assignee_id
-            else None
-        )
-        data = TaskResponse.model_validate(task)
-        data.assignee = assignee
-        tasks_out.append(data)
-        visible_ids.add(task.id)
+    tasks = (await db.execute(task_stmt)).scalars().all()
+    by_task = await load_assignees(db, [t.id for t in tasks])
+    tasks_out: list[TaskResponse] = [
+        serialize_with_assignees(t, by_task.get(t.id, [])) for t in tasks
+    ]
+    visible_ids: set[UUID] = {t.id for t in tasks}
 
     # ─── Dependencies confined to visible tasks ─────────────────────────────
     dep_out: list[TaskDependencyResponse] = []
