@@ -1,8 +1,9 @@
-import { CircleCheck, FolderPlus, Plus } from 'lucide-react'
+import { CircleCheck, FolderKanban, FolderPlus, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
+import { CreateFolderDialog } from '@/components/project/CreateFolderDialog'
 import { CreateTaskDialog } from '@/components/task/CreateTaskDialog'
 import {
   BottomSheet,
@@ -19,7 +20,7 @@ import {
 import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Button } from '@/components/ui/Button'
-import { useCreateProject } from '@/hooks/useProjects'
+import { useCreateProject, useProjectFolders } from '@/hooks/useProjects'
 import { cn } from '@/lib/cn'
 
 interface FloatingActionButtonProps {
@@ -30,7 +31,11 @@ interface FloatingActionButtonProps {
 
 /**
  * Asana-style FAB — fixed bottom-right rounded-square button with `+`.
- * Tap opens a bottom sheet to pick what to create (Task / Project).
+ * Tap opens a bottom sheet to pick what to create (Task / Project / Folder).
+ *
+ * Это ЕДИНСТВЕННАЯ кнопка создания на мобильном: сайдбар с его меню
+ * «Создать» рендерится только при ≥1024px. Всё, что можно создать, обязано
+ * быть здесь — иначе на телефоне фича недостижима.
  *
  * Lives outside the Shell so any page can mount it. Hidden on `lg` —
  * desktop uses the sidebar "Создать" dropdown instead.
@@ -42,6 +47,10 @@ export function FloatingActionButton({
   const [sheetOpen, setSheetOpen] = useState(false)
   const [taskOpen, setTaskOpen] = useState(false)
   const [projectOpen, setProjectOpen] = useState(false)
+  const [folderOpen, setFolderOpen] = useState(false)
+  // Права считает сервер; тот же queryKey, что у сайдбара и страницы —
+  // TanStack дедуплицирует, лишнего запроса нет.
+  const foldersCanManage = useProjectFolders().data?.can_manage ?? false
 
   return (
     <>
@@ -75,7 +84,7 @@ export function FloatingActionButton({
           Задача
         </BottomSheetItem>
         <BottomSheetItem
-          icon={<FolderPlus className="h-5 w-5" />}
+          icon={<FolderKanban className="h-5 w-5" />}
           onClick={() => {
             setSheetOpen(false)
             setProjectOpen(true)
@@ -83,10 +92,22 @@ export function FloatingActionButton({
         >
           Проект
         </BottomSheetItem>
+        {foldersCanManage && (
+          <BottomSheetItem
+            icon={<FolderPlus className="h-5 w-5" />}
+            onClick={() => {
+              setSheetOpen(false)
+              setFolderOpen(true)
+            }}
+          >
+            Папка
+          </BottomSheetItem>
+        )}
       </BottomSheet>
 
       <CreateTaskDialog open={taskOpen} onOpenChange={setTaskOpen} />
       <MobileCreateProjectDialog open={projectOpen} onOpenChange={setProjectOpen} />
+      <CreateFolderDialog open={folderOpen} onOpenChange={setFolderOpen} />
     </>
   )
 }
