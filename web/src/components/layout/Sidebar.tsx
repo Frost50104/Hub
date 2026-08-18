@@ -12,6 +12,19 @@ import {
   Settings,
   Star,
 } from 'lucide-react'
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  TouchSensor,
+  pointerWithin,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
 import { useState } from 'react'
 import { NavLink, Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -40,7 +53,12 @@ import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { useMe } from '@/hooks/useMe'
 import { useUnreadCount } from '@/hooks/useNotifications'
-import { useCreateProject, useProjectFolders, useProjects } from '@/hooks/useProjects'
+import {
+  useCreateProject,
+  useProjectFolders,
+  useProjects,
+  useSetProjectFolder,
+} from '@/hooks/useProjects'
 import { authClient } from '@/lib/auth'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/cn'
@@ -50,6 +68,12 @@ import {
   UNFILED,
   type ProjectGroup,
 } from '@/lib/groupProjects'
+import {
+  folderDropId,
+  projectDragId,
+  resolveFolderMove,
+  type ProjectDragData,
+} from '@/lib/projectDnd'
 import { type Project } from '@/lib/projects'
 import { useFolderCollapse } from '@/stores/projectFolders'
 
@@ -59,9 +83,9 @@ const NAV_ITEMS = [
   { to: '/inbox', label: 'Входящие', icon: Inbox, end: false, badge: true },
 ] as const
 
-function projectColorFor(p: Project): string {
+function projectColorFor(projectId: string): string {
   let hash = 0
-  for (const ch of p.id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+  for (const ch of projectId) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
   const palette = [
     'bg-amber/30 text-amber',
     'bg-green/20 text-green',
@@ -73,66 +97,144 @@ function projectColorFor(p: Project): string {
   return palette[hash % palette.length] ?? palette[0]!
 }
 
+/** Данные драга сайдбара = общий контракт + снапшот для DragOverlay.
+ *  Снапшот, а не поиск по useProjects(): Sidebar на список не подписан. */
+interface SidebarDragData extends ProjectDragData {
+  name: string
+  projectKey: string
+}
+
+/** Превью под курсором. bg-bg-alt, а не bg-surface/95: токены в
+ *  tailwind.config объявлены сырыми var() без <alpha-value>, слэш-опасити
+ *  на них не компилируется. */
+function ProjectDragPreview({ drag }: { drag: SidebarDragData }) {
+  return (
+    <div className="flex h-full w-full items-center gap-2 rounded-md border border-glass-border bg-bg-alt px-2 py-1.5 text-sm text-text shadow-glass">
+      <span
+        className={cn(
+          'flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] font-semibold uppercase',
+          projectColorFor(drag.projectId),
+        )}
+      >
+        {drag.projectKey.slice(0, 2)}
+      </span>
+      <span className="truncate">{drag.name}</span>
+    </div>
+  )
+}
+
 function FolderNavGroup({
   group,
+  drag,
+  dndEnabled,
   onItemClick,
 }: {
   group: ProjectGroup
+  /** null — перетаскивания сейчас нет. */
+  drag: SidebarDragData | null
+  dndEnabled: boolean
   onItemClick?: () => void
 }) {
   const folder = group.folder
+  const dragging = drag !== null
+  // Хуки — строго до любых return (rules-of-hooks).
+  const { setNodeRef, isOver } = useDroppable({
+    id: folderDropId(folder?.id ?? null),
+    data: { folderName: folder?.name ?? 'Без папки' },
+  })
   const collapsed = useFolderCollapse((s) =>
     folder ? (s.collapsed[folder.id] ?? false) : false,
   )
   const toggle = useFolderCollapse((s) => s.toggle)
 
-  // Пустые для пользователя папки в 260px-колонке — чистый шум; управление
-  // папками живёт на /projects, где пустая папка видна как drop-зона.
-  if (group.projects.length === 0) return null
+  // Пустые для пользователя папки в 260px-колонке — чистый шум, поэтому вне
+  // перетаскивания их не показываем. Во время драга они обязаны быть видны,
+  // иначе в пустую папку физически нечем целиться.
+  if (!dragging && group.projects.length === 0) return null
 
   // Проекты без папки — плоскими пунктами: фальшивый заголовок «Без папки»
-  // в узкой колонке читается хуже простого списка.
-  if (!folder) {
-    return (
-      <ul className="space-y-0.5">
-        {group.projects.map((p) => (
-          <ProjectLinkItem key={p.id} project={p} onItemClick={onItemClick} />
-        ))}
-      </ul>
-    )
-  }
+  // в узкой колонке читается хуже простого списка. Во время драга заголовок
+  // нужен как зона «вынуть из папки».
+  const headless = !folder && !dragging
+  // Подсветку гасим над собственной папкой проекта — переноса там не будет.
+  const isTarget = isOver && drag?.folderId !== (folder?.id ?? null)
+
+  const items = (
+    <ul className={cn('space-y-0.5', folder && 'pl-3')}>
+      {group.projects.map((p) => (
+        <ProjectLinkItem
+          key={p.id}
+          project={p}
+          scope="group"
+          dndEnabled={dndEnabled && p.can_manage}
+          isSource={drag?.projectId === p.id}
+          onItemClick={onItemClick}
+        />
+      ))}
+    </ul>
+  )
+
+  if (headless) return <div ref={setNodeRef}>{items}</div>
 
   return (
-    <div className="space-y-0.5">
-      <button
-        type="button"
-        onClick={() => toggle(folder.id)}
-        className="flex w-full items-center gap-1 px-2 py-0.5 text-left text-[11px] font-semibold uppercase tracking-wider text-text3 hover:text-text2"
-      >
-        {collapsed ? (
-          <ChevronRight className="h-3 w-3 shrink-0" />
-        ) : (
-          <ChevronDown className="h-3 w-3 shrink-0" />
-        )}
-        <span className="truncate">{folder.name}</span>
-        <span className="ml-auto font-normal normal-case">{group.projects.length}</span>
-      </button>
-      {!collapsed && (
-        <ul className="space-y-0.5 pl-3">
-          {group.projects.map((p) => (
-            <ProjectLinkItem key={p.id} project={p} onItemClick={onItemClick} />
-          ))}
-        </ul>
+    <div
+      ref={setNodeRef}
+      // py-1 вместо зазора у контейнера: pointerWithin требует, чтобы зоны
+      // стыковались, иначе между ними появляются мёртвые полосы.
+      className={cn(
+        'rounded-md py-1 transition-colors',
+        isTarget && 'bg-amber/5 ring-1 ring-amber/40',
+      )}
+    >
+      {folder ? (
+        <button
+          type="button"
+          onClick={() => toggle(folder.id)}
+          className="flex w-full items-center gap-1 px-2 py-0.5 text-left text-[11px] font-semibold uppercase tracking-wider text-text3 hover:text-text2"
+        >
+          {collapsed ? (
+            <ChevronRight className="h-3 w-3 shrink-0" />
+          ) : (
+            <ChevronDown className="h-3 w-3 shrink-0" />
+          )}
+          <span className="truncate">{folder.name}</span>
+          <span className="ml-auto font-normal normal-case">
+            {group.projects.length}
+          </span>
+        </button>
+      ) : (
+        <div className="flex w-full items-center gap-1 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-text3">
+          {/* спейсер вместо шеврона — текст на одной вертикали с папками */}
+          <span className="w-3 shrink-0" />
+          <span className="truncate">Без папки</span>
+          <span className="ml-auto font-normal normal-case">
+            {group.projects.length}
+          </span>
+        </div>
+      )}
+      {!collapsed && items}
+      {dragging && !collapsed && group.projects.length === 0 && (
+        <p className="mx-2 mt-0.5 rounded-md border border-dashed border-glass-border px-2 py-1.5 text-[11px] text-text3">
+          Перенести сюда
+        </p>
       )}
     </div>
   )
 }
 
-function ProjectsList({ onItemClick }: { onItemClick?: () => void }) {
+function ProjectsList({
+  drag,
+  onItemClick,
+}: {
+  drag: SidebarDragData | null
+  onItemClick?: () => void
+}) {
   const { data, isLoading, isError, refetch } = useProjects()
   const foldersQuery = useProjectFolders()
   const folders = foldersQuery.data?.folders ?? []
   const groups = groupProjectsByFolder(data ?? [], folders)
+  // Папок нет — тащить некуда, аффорданс не даём.
+  const dndEnabled = folders.length > 0
 
   if (isLoading) return <SkeletonRows rows={4} rowClassName="h-7" className="px-2" />
   if (isError) {
@@ -160,16 +262,27 @@ function ProjectsList({ onItemClick }: { onItemClick?: () => void }) {
           </p>
           <ul className="space-y-0.5 pb-2">
             {favorites.map((p) => (
-              <ProjectLinkItem key={p.id} project={p} onItemClick={onItemClick} />
+              <ProjectLinkItem
+                key={p.id}
+                project={p}
+                scope="fav"
+                dndEnabled={dndEnabled && p.can_manage}
+                isSource={drag?.projectId === p.id}
+                onItemClick={onItemClick}
+              />
             ))}
           </ul>
         </>
       )}
-      <div className="space-y-1.5">
+      {/* Без space-y: зазор перенесён внутрь зон (py-1), иначе pointerWithin
+          даёт мёртвые полосы между дропзонами. */}
+      <div>
         {groups.map((group) => (
           <FolderNavGroup
             key={group.folder?.id ?? UNFILED}
             group={group}
+            drag={drag}
+            dndEnabled={dndEnabled}
             onItemClick={onItemClick}
           />
         ))}
@@ -180,19 +293,49 @@ function ProjectsList({ onItemClick }: { onItemClick?: () => void }) {
 
 function ProjectLinkItem({
   project,
+  scope,
+  dndEnabled,
+  isSource,
   onItemClick,
 }: {
   project: Project
+  /** Часть dnd-id: один проект рендерится и в «Избранном», и в своей папке. */
+  scope: 'fav' | 'group'
+  dndEnabled: boolean
+  /** Перетаскивают именно этот проект — гасим ОБА его вхождения. */
+  isSource: boolean
   onItemClick?: () => void
 }) {
+  const { attributes, listeners, setNodeRef } = useDraggable({
+    id: projectDragId(scope, project.id),
+    disabled: !dndEnabled,
+    data: {
+      projectId: project.id,
+      folderId: project.folder_id,
+      name: project.name,
+      projectKey: project.key,
+    } satisfies SidebarDragData,
+    // Дефолт useDraggable — role="button": на <a> это ломает семантику ссылки.
+    attributes: {
+      role: 'link',
+      roleDescription: 'проект, можно перетащить в папку',
+    },
+  })
+
   return (
-    <li>
+    // transform НЕ ставим: перетаскиваемое рисует DragOverlay, а transform
+    // внутри overflow-y-auto контейнера обрезался бы по границе колонки.
+    <li ref={setNodeRef} className={cn(isSource && 'opacity-40')}>
       <NavLink
         to={`/projects/${project.id}`}
         onClick={onItemClick}
+        // У <a href> есть нативный HTML5-drag, конфликтующий с dnd-kit.
+        draggable={false}
+        {...(dndEnabled ? attributes : {})}
+        {...listeners}
         className={({ isActive }) =>
           cn(
-            'group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
+            'group flex select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
             isActive
               ? 'bg-surface text-text'
               : 'text-text2 hover:bg-glass hover:text-text',
@@ -202,7 +345,7 @@ function ProjectLinkItem({
         <span
           className={cn(
             'flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] font-semibold uppercase',
-            projectColorFor(project),
+            projectColorFor(project.id),
           )}
         >
           {project.key.slice(0, 2)}
@@ -304,7 +447,48 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
   const unreadCount = unread.data?.count ?? 0
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
   const [createTaskOpen, setCreateTaskOpen] = useState(false)
+  const [drag, setDrag] = useState<SidebarDragData | null>(null)
+  const setFolder = useSetProjectFolder()
+
+  // distance:5 — обычный клик по NavLink (жест короче) по-прежнему открывает
+  // проект; после успешного драга dnd-kit сам подавляет click.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  )
+
+  const onDragStart = (e: DragStartEvent) =>
+    setDrag((e.active.data.current as SidebarDragData | undefined) ?? null)
+
+  const onDragEnd = (e: DragEndEvent) => {
+    setDrag(null)
+    const move = resolveFolderMove(
+      e.active.data.current as ProjectDragData | undefined,
+      e.over?.id,
+    )
+    if (!move) return
+    const folderName = (e.over?.data.current as { folderName?: string } | undefined)
+      ?.folderName
+    setFolder.mutate(move, {
+      onSuccess: () =>
+        toast.success(`Проект перенесён в «${folderName ?? 'Без папки'}»`),
+    })
+  }
+
   return (
+    <DndContext
+      sensors={sensors}
+      // pointerWithin, а не дефолтный rectIntersection: зоны — вертикальный
+      // стек переменной высоты, и на границе двух групп выбор «по площади
+      // перекрытия» превращается в лотерею. Плюс вне зон он не возвращает
+      // ничего — случайный дроп мимо ничего не двигает.
+      collisionDetection={pointerWithin}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      // Escape посреди жеста: без этого drag завис бы, а пустые папки
+      // остались бы висеть навсегда.
+      onDragCancel={() => setDrag(null)}
+    >
     <aside className="glass flex h-screen w-[280px] shrink-0 flex-col gap-4 p-4 md:h-[calc(100vh-1.5rem)] md:w-[260px]">
       <Link to="/" onClick={onItemClick} className="flex items-center gap-2 px-1">
         <img
@@ -390,7 +574,7 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
             <Plus className="h-3.5 w-3.5" />
           </button>
         </div>
-        <ProjectsList onItemClick={onItemClick} />
+        <ProjectsList drag={drag} onItemClick={onItemClick} />
       </div>
 
       <div className="flex items-center justify-between gap-2 border-t border-glass-border pt-3">
@@ -437,5 +621,13 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
       />
       <CreateTaskDialog open={createTaskOpen} onOpenChange={setCreateTaskOpen} />
     </aside>
+
+    {/* Оверлей — СОСЕД <aside>, не потомок: .glass несёт backdrop-filter, а он
+        создаёт containing block для position:fixed — внутри сайдбара оверлей
+        сместился бы и обрезался его границами. */}
+    <DragOverlay dropAnimation={null}>
+      {drag && <ProjectDragPreview drag={drag} />}
+    </DragOverlay>
+    </DndContext>
   )
 }

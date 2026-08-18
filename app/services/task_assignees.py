@@ -2,10 +2,10 @@
 
 ИНВАРИАНТЫ, которые держит этот модуль:
 
-1. `task_assignees` — источник истины. `tasks.assignee_id` — deprecated-зеркало
-   первого исполнителя (position=0); присваивается ТОЛЬКО здесь и ТОЛЬКО через
-   ORM-атрибут (Core `update()` оставил бы объект в сессии протухшим, и
-   сериализация в том же запросе вернула бы старое значение). Удаляется в 0035.
+1. `task_assignees` — ЕДИНСТВЕННОЕ место, где живут исполнители. Колонки-зеркала
+   `tasks.assignee_id` больше нет (удалена ревизией 0036): она требовала
+   синхронной записи при каждом изменении набора и разъезжалась на параллельных
+   запросах — см. docs/TECH_DEBT.md, «ОС 17.08».
 2. `tenant_id` берётся из `task.tenant_id`, НИКОГДА из principal — расхождение
    источников уже давало дыру 0011 в `task_label_assignments`.
 3. Валидация всего списка идёт ДО любых записей: 404 на третьем исполнителе не
@@ -69,8 +69,8 @@ def serialize_with_assignees(
     """TaskResponse с исполнителями + легаси-зеркалами.
 
     Легаси-поля ВСЕГДА выводятся из списка, а не из ORM-атрибута — поэтому
-    удаление колонки tasks.assignee_id в 0035 не тронет сериализацию, а
-    assignee_id/assignee больше не могут разъехаться (раньше у уволенного
+    удаление колонки-зеркала tasks.assignee_id (0036) не тронуло сериализацию,
+    а assignee_id/assignee больше не могут разъехаться (раньше у уволенного
     сотрудника assignee_id был непустым при assignee=null).
     """
     data = TaskResponse.model_validate(task)
@@ -131,8 +131,8 @@ async def load_assignee_ids(
 ) -> dict[UUID, list[UUID]]:
     """Сырые employee_id БЕЗ фильтра deleted_at — для получателей уведомлений.
 
-    Паритет с прежним `if task.assignee_id: recipients.add(...)`, который на
-    deleted_at тоже не смотрел.
+    Паритет с прежним поведением одиночного исполнителя, которое на deleted_at
+    тоже не смотрело.
     """
     ids = list(dict.fromkeys(task_ids))
     if not ids:
@@ -308,7 +308,6 @@ async def set_task_assignees(
             )
         )
 
-    task.assignee_id = final[0] if final else None
 
     return AssigneeDiff(
         final=final,
@@ -361,7 +360,6 @@ async def add_assignee(
         .on_conflict_do_nothing(index_elements=["task_id", "employee_id"])
     )
     final = [*existing_names, employee_id]
-    task.assignee_id = final[0]
     return AssigneeDiff(
         final=final,
         added=[employee_id],
@@ -392,7 +390,6 @@ async def remove_assignee(
         )
     )
     final = [e for e in existing_names if e != employee_id]
-    task.assignee_id = final[0] if final else None
     return AssigneeDiff(
         final=final,
         added=[],

@@ -23,6 +23,10 @@ interface PeoplePickerMultiProps {
   value: TaskAssigneeBrief[]
   /** Вызывается на каждый тоггл: (человек, стал ли он выбран). */
   onToggle: (person: TaskAssigneeBrief, next: boolean) => void
+  /** Снять всех разом. Отдельно от onToggle: цикл по нему слал N параллельных
+   *  запросов, которые затирали друг другу оптимистичный кэш (onError любого
+   *  откатывал список целиком) и разъезжались на записи зеркала. */
+  onClearAll: () => void
   disabled?: boolean
   /** Потолок; зеркалит MAX_ASSIGNEES на бэкенде. */
   max?: number
@@ -44,6 +48,7 @@ function label(p: TaskAssigneeBrief): string {
 export function PeoplePickerMulti({
   value,
   onToggle,
+  onClearAll,
   disabled,
   max = 10,
   placeholder = 'Не назначен',
@@ -143,7 +148,7 @@ export function PeoplePickerMulti({
             <DropdownMenuItem
               onSelect={(e) => {
                 e.preventDefault()
-                for (const p of value) onToggle(p, false)
+                onClearAll()
               }}
             >
               Очистить всех

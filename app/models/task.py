@@ -82,16 +82,6 @@ class Task(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="todo")
     priority: Mapped[str] = mapped_column(String(16), nullable=False, server_default="medium")
 
-    # DEPRECATED (0034): зеркало первого исполнителя (position=0) из
-    # task_assignees — источник истины теперь там. Единственный писатель —
-    # app.services.task_assignees.set_task_assignees. Колонка удаляется
-    # ревизией 0035; до тех пор держит откат деплоя на предыдущий билд.
-    assignee_id: Mapped[UUID | None] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("shadow_users.employee_id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
     created_by: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("shadow_users.employee_id", ondelete="RESTRICT"),

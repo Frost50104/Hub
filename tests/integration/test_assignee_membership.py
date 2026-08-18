@@ -11,7 +11,6 @@ import uuid
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.projects import create_project, get_project
@@ -131,65 +130,3 @@ async def test_unassign_keeps_membership(db: AsyncSession, tenant_id: uuid.UUID)
         task.id, TaskUpdate.model_validate({"assignee_id": None}), owner, db
     )
     assert await _member_role(db, project.id, somebody.employee_id) == "viewer"
-
-
-async def test_backfill_sql_idempotent_and_no_downgrade(
-    db: AsyncSession, tenant_id: uuid.UUID
-):
-    """SQL из 0033: создаёт viewer не-члену, не трогает editor'а, идемпотентен."""
-    owner, project = await _seed(db, tenant_id, "am5")
-
-    orphan = make_principal(
-        tenant_id, email="orphan-am5@t.ru", role="member", tenant_slug="am5"
-    )
-    editor = make_principal(
-        tenant_id, email="editor-am5@t.ru", role="member", tenant_slug="am5"
-    )
-    await _register(db, orphan)
-    await _register(db, editor)
-    await _add_member(db, tenant_id, project.id, editor, "editor")
-
-    # Задачи с исполнителями; затем стираем членство orphan'а, имитируя
-    # до-релизное состояние (авто-членство ещё не существовало).
-    await create_task(
-        project.id,
-        TaskCreate(title="Сироте", assignee_id=orphan.employee_id),
-        owner,
-        db,
-    )
-    await create_task(
-        project.id,
-        TaskCreate(title="Редактору", assignee_id=editor.employee_id),
-        owner,
-        db,
-    )
-    await db.execute(
-        sa_text(
-            "DELETE FROM project_members WHERE project_id = :pid AND employee_id = :eid"
-        ).bindparams(pid=project.id, eid=orphan.employee_id)
-    )
-
-    backfill = sa_text(
-        """
-        INSERT INTO project_members
-            (id, tenant_id, project_id, employee_id, role, added_by, added_at)
-        SELECT gen_random_uuid(), sub.tenant_id, sub.project_id, sub.assignee_id,
-               'viewer', NULL, now()
-        FROM (
-            SELECT DISTINCT p.tenant_id, t.project_id, t.assignee_id
-            FROM tasks t
-            JOIN projects p ON p.id = t.project_id
-            JOIN shadow_users su
-              ON su.employee_id = t.assignee_id AND su.deleted_at IS NULL
-            WHERE t.assignee_id IS NOT NULL
-              AND t.archived_at IS NULL
-        ) sub
-        ON CONFLICT (project_id, employee_id) DO NOTHING
-        """
-    )
-    await db.execute(backfill)
-    assert await _member_role(db, project.id, orphan.employee_id) == "viewer"
-    assert await _member_role(db, project.id, editor.employee_id) == "editor"
-
-    await db.execute(backfill)  # повторный прогон — no-op
-    assert await _member_role(db, project.id, orphan.employee_id) == "viewer"

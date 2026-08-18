@@ -274,6 +274,20 @@ export function TaskDetailDrawer({
                     onToggle={(person, next) =>
                       toggleAssignee.mutate({ taskId: task.id, person, next })
                     }
+                    // Одним PATCH'ем, а не циклом по onToggle: replace-семантика
+                    // снимает всех в одной транзакции и даёт одно событие в
+                    // ленте вместо N.
+                    onClearAll={() =>
+                      update.mutate({
+                        id: task.id,
+                        assignee_ids: [],
+                        __optimistic: {
+                          assignees: [],
+                          assignee: null,
+                          assignee_id: null,
+                        },
+                      })
+                    }
                     // Намеренно НЕ отключаем на isPending: иначе меню
                     // замирает после каждого тоггла и выбрать нескольких
                     // подряд невозможно. Состояние ведёт оптимистичный кэш.

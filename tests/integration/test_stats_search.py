@@ -55,16 +55,14 @@ async def _seed_project(db, principal):
         description="Чек-лист онбординга и выдача доступов",
         status="in_progress",
         priority="high",
-        assignee_id=principal.employee_id,
         created_by=principal.employee_id,
         position=Decimal(1),
         seq=1,
     )
     db.add(task)
     await db.flush()
-    # Источник истины по исполнителям — task_assignees (0034); assignee_id выше
-    # остаётся зеркалом. Фикстура пишет обе стороны, потому что конструирует
-    # Task напрямую, минуя set_task_assignees.
+    # Исполнители живут только в task_assignees (0034); фикстура конструирует
+    # Task напрямую, минуя set_task_assignees, поэтому пишет строку сама.
     db.add(
         TaskAssignee(
             task_id=task.id,

@@ -31,9 +31,9 @@
 - `sections` (project_id, name, position)
 
 ### Задачи
-- `tasks` (project_id, section_id, parent_task_id, title, description markdown, status: `todo` | `in_progress` | `in_review` | `done`, priority: `low` | `medium` | `high` | `urgent`, ~~assignee_id~~ DEPRECATED, start_at, due_at, position NUMERIC, search_vector tsvector)
+- `tasks` (project_id, section_id, parent_task_id, title, description markdown, status: `todo` | `in_progress` | `in_review` | `done`, priority: `low` | `medium` | `high` | `urgent`, start_at, due_at, position NUMERIC, search_vector tsvector)
   - Подзадачи только 1 уровень — CHECK `parent_task_id IS NULL OR (SELECT parent_task_id FROM tasks t2 WHERE t2.id = parent_task_id) IS NULL`; UI — секция в карточке (SubtaskList), в топ-уровне List/Board не показываются
-- `task_assignees` (task_id, employee_id, position, assigned_by; PK составной, RLS с 0034) — **источник истины по исполнителям**; `tasks.assignee_id` остался deprecated-зеркалом первого (удаляется отдельной ревизией, см. docs/TECH_DEBT.md «ОС 17.08»). Пишет только `app/services/task_assignees.py`; в списках — EXISTS/батч, не JOIN
+- `task_assignees` (task_id, employee_id, position, assigned_by; PK составной, RLS с 0034) — **единственное место, где живут исполнители**; колонка-зеркало `tasks.assignee_id` удалена ревизией 0036. Пишет только `app/services/task_assignees.py`; в списках — EXISTS/батч, не JOIN
 - `task_watchers` — auto-добавление: assignee + creator + mentioned
 - `task_comments` (markdown, `mentioned_ids UUID[]`)
 - `task_labels` (name, color) + `task_label_assignments` (с tenant_id и RLS с миграции 0011); API `app/api/labels.py`, чипы в List/Board/drawer, фильтр

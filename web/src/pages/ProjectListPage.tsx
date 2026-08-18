@@ -56,6 +56,11 @@ import {
 } from '@/hooks/useProjects'
 import { cn } from '@/lib/cn'
 import { groupProjectsByFolder, UNFILED, type ProjectGroup } from '@/lib/groupProjects'
+import {
+  folderDropId,
+  resolveFolderMove,
+  type ProjectDragData,
+} from '@/lib/projectDnd'
 import { type ProjectFolder } from '@/lib/projectFolders'
 import { PROJECT_ROLE_LABEL, type Project } from '@/lib/projects'
 import { useFolderCollapse } from '@/stores/projectFolders'
@@ -66,8 +71,6 @@ const createSchema = z.object({
 })
 
 type CreateFormValues = z.infer<typeof createSchema>
-
-const DROP_PREFIX = 'folder-'
 
 function ProjectCard({
   project,
@@ -230,8 +233,7 @@ function FolderSection({
   onMoveProject: (projectId: string, folderId: string | null) => void
 }) {
   const folder = group.folder
-  const dropId = DROP_PREFIX + (folder?.id ?? UNFILED)
-  const { setNodeRef, isOver } = useDroppable({ id: dropId })
+  const { setNodeRef, isOver } = useDroppable({ id: folderDropId(folder?.id ?? null) })
   const collapsed = useFolderCollapse((s) =>
     folder ? (s.collapsed[folder.id] ?? false) : false,
   )
@@ -563,16 +565,11 @@ export function ProjectListPage() {
   )
 
   const onDragEnd = (e: DragEndEvent) => {
-    if (!e.over) return
-    const overId = String(e.over.id)
-    if (!overId.startsWith(DROP_PREFIX)) return
-    const raw = overId.slice(DROP_PREFIX.length)
-    const target = raw === UNFILED ? null : raw
-    const payload = e.active.data.current as
-      | { projectId: string; folderId: string | null }
-      | undefined
-    if (!payload || payload.folderId === target) return
-    setFolder.mutate({ projectId: payload.projectId, folderId: target })
+    const move = resolveFolderMove(
+      e.active.data.current as ProjectDragData | undefined,
+      e.over?.id,
+    )
+    if (move) setFolder.mutate(move)
   }
 
   return (
