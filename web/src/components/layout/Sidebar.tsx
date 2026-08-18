@@ -4,6 +4,7 @@ import {
   ChevronRight,
   CircleCheck,
   Folder,
+  FolderKanban,
   FolderPlus,
   Home,
   Inbox,
@@ -31,6 +32,7 @@ import { toast } from 'sonner'
 
 import { SidebarSearch } from './SidebarSearch'
 import { SpaceSwitcher } from './SpaceSwitcher'
+import { CreateFolderDialog } from '@/components/project/CreateFolderDialog'
 import { CreateTaskDialog } from '@/components/task/CreateTaskDialog'
 import { Avatar } from '@/components/ui/Avatar'
 import { SkeletonRows } from '@/components/ui/Skeleton'
@@ -147,10 +149,12 @@ function FolderNavGroup({
   )
   const toggle = useFolderCollapse((s) => s.toggle)
 
-  // Пустые для пользователя папки в 260px-колонке — чистый шум, поэтому вне
-  // перетаскивания их не показываем. Во время драга они обязаны быть видны,
-  // иначе в пустую папку физически нечем целиться.
-  if (!dragging && group.projects.length === 0) return null
+  // Пустые ИМЕНОВАННЫЕ папки показываем всегда: папку можно создать прямо
+  // отсюда, и она обязана быть видна там, где создана, — иначе это читается
+  // как «создал, а её нет». Прячем только пустую группу «Без папки»: её
+  // заголовок с нулём — чистый шум (во время драга он нужен как зона
+  // «вынуть из папки»).
+  if (!folder && group.projects.length === 0 && !dragging) return null
 
   // Проекты без папки — плоскими пунктами: фальшивый заголовок «Без папки»
   // в узкой колонке читается хуже простого списка. Во время драга заголовок
@@ -287,6 +291,18 @@ function ProjectsList({
           />
         ))}
       </div>
+      {/* Сбой папок раньше был молчаливым: список просто оставался плоским,
+          и это неотличимо от «фичи нет» — ровно та жалоба, с которой пришёл
+          тестировщик. */}
+      {foldersQuery.isError && (
+        <button
+          type="button"
+          onClick={() => void foldersQuery.refetch()}
+          className="px-3 py-1 text-left text-xs text-red hover:underline"
+        >
+          Папки не загрузились — повторить
+        </button>
+      )}
     </>
   )
 }
@@ -447,6 +463,10 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
   const unreadCount = unread.data?.count ?? 0
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
   const [createTaskOpen, setCreateTaskOpen] = useState(false)
+  const [createFolderOpen, setCreateFolderOpen] = useState(false)
+  // Тот же queryKey, что читает ProjectsList — TanStack дедуплицирует,
+  // лишнего запроса нет. Права считает сервер, копии правила тут не заводим.
+  const foldersCanManage = useProjectFolders().data?.can_manage ?? false
   const [drag, setDrag] = useState<SidebarDragData | null>(null)
   const setFolder = useSetProjectFolder()
 
@@ -526,9 +546,15 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
             Задача
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setCreateProjectOpen(true)}>
-            <FolderPlus className="mr-2 h-4 w-4" />
+            <FolderKanban className="mr-2 h-4 w-4" />
             Проект
           </DropdownMenuItem>
+          {foldersCanManage && (
+            <DropdownMenuItem onSelect={() => setCreateFolderOpen(true)}>
+              <FolderPlus className="mr-2 h-4 w-4" />
+              Папка
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -566,13 +592,40 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
           <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-text3">
             <Folder className="h-3.5 w-3.5" /> Проекты
           </span>
-          <button
-            onClick={() => setCreateProjectOpen(true)}
-            className="rounded p-1 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
-            aria-label="Новый проект"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
+          {/* Меню только когда есть права на папки: из одного пункта оно
+              было бы лишним кликом на ровном месте. */}
+          {foldersCanManage ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="rounded p-1 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                  aria-label="Создать проект или папку"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[200px]">
+                <DropdownMenuItem onSelect={() => setCreateProjectOpen(true)}>
+                  <FolderKanban className="mr-2 h-4 w-4" />
+                  Проект
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setCreateFolderOpen(true)}>
+                  <FolderPlus className="mr-2 h-4 w-4" />
+                  Папка
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCreateProjectOpen(true)}
+              className="rounded p-1 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+              aria-label="Новый проект"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
         <ProjectsList drag={drag} onItemClick={onItemClick} />
       </div>
@@ -620,6 +673,10 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
         onOpenChange={setCreateProjectOpen}
       />
       <CreateTaskDialog open={createTaskOpen} onOpenChange={setCreateTaskOpen} />
+      <CreateFolderDialog
+        open={createFolderOpen}
+        onOpenChange={setCreateFolderOpen}
+      />
     </aside>
 
     {/* Оверлей — СОСЕД <aside>, не потомок: .glass несёт backdrop-filter, а он

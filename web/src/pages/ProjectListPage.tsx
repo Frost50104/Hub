@@ -24,6 +24,7 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { z } from 'zod'
 
+import { CreateFolderDialog } from '@/components/project/CreateFolderDialog'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import {
@@ -45,7 +46,6 @@ import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import {
-  useCreateFolder,
   useCreateProject,
   useDeleteFolder,
   useProjectFolders,
@@ -395,71 +395,6 @@ function FolderSection({
   )
 }
 
-function CreateFolderDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean
-  onOpenChange: (v: boolean) => void
-}) {
-  const create = useCreateFolder()
-  const [name, setName] = useState('')
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const trimmed = name.trim()
-    if (!trimmed) return
-    try {
-      await create.mutateAsync(trimmed)
-      // Подсказка нужна: в сайдбаре пустая папка скрыта, и без неё это
-      // читается как «создал папку, а её нет».
-      toast.success('Папка создана — перетащите в неё проекты')
-      setName('')
-      onOpenChange(false)
-    } catch {
-      // тост показывает глобальный onError мутаций
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <form onSubmit={submit}>
-          <DialogHeader>
-            <DialogTitle>Новая папка</DialogTitle>
-            <DialogDescription>
-              Папки общие для компании: раскладку увидят все участники.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-1.5">
-            <Label htmlFor="folder-name">Название</Label>
-            <Input
-              id="folder-name"
-              autoFocus
-              placeholder="Маркетинг"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => onOpenChange(false)}
-              disabled={create.isPending}
-            >
-              Отмена
-            </Button>
-            <Button type="submit" disabled={create.isPending || !name.trim()}>
-              {create.isPending ? 'Создаём…' : 'Создать'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 function CreateProjectDialog({
   open,
   onOpenChange,
@@ -575,25 +510,61 @@ export function ProjectListPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <div className="flex items-center justify-between gap-4">
-        <div>
+        {/* min-w-0 + truncate: сжиматься должен заголовок, а не кнопки —
+            иначе на узком экране текст внутри кнопок переносится при
+            фиксированной высоте h-9 и вылезает за их границы. */}
+        <div className="min-w-0">
           <h1 className="font-display text-2xl">Проекты</h1>
-          <p className="text-sm text-text2">
+          <p className="truncate text-sm text-text2">
             Командные пространства с задачами, секциями и участниками.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {foldersQuery.data?.can_manage && (
-            <Button variant="secondary" onClick={() => setCreateFolderOpen(true)}>
-              <FolderPlus className="h-4 w-4" />
-              Новая папка
-            </Button>
+            <>
+              {/* До sm — иконка: две текстовые кнопки в 390px не помещаются. */}
+              <Button
+                variant="secondary"
+                size="icon"
+                className="sm:hidden"
+                onClick={() => setCreateFolderOpen(true)}
+                aria-label="Новая папка"
+              >
+                <FolderPlus className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="secondary"
+                className="hidden whitespace-nowrap sm:inline-flex"
+                onClick={() => setCreateFolderOpen(true)}
+              >
+                <FolderPlus className="h-4 w-4" />
+                Новая папка
+              </Button>
+            </>
           )}
-          <Button onClick={() => setCreateOpen(true)}>
+          <Button
+            className="whitespace-nowrap"
+            onClick={() => setCreateOpen(true)}
+          >
             <Plus className="h-4 w-4" />
-            Новый проект
+            <span className="hidden sm:inline">Новый проект</span>
+            <span className="sm:hidden">Проект</span>
           </Button>
         </div>
       </div>
+
+      {foldersQuery.isError && (
+        <p className="text-sm text-red">
+          Не удалось загрузить папки — раскладка по папкам временно недоступна.{' '}
+          <button
+            type="button"
+            onClick={() => void foldersQuery.refetch()}
+            className="underline hover:text-red/80"
+          >
+            Повторить
+          </button>
+        </p>
+      )}
 
       {isLoading && <SkeletonRows rows={5} rowClassName="h-14" />}
       {error && (
