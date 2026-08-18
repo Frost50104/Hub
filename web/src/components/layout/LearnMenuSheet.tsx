@@ -1,7 +1,8 @@
-import { User } from 'lucide-react'
+import { ChevronRight, User } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 import { ADMIN_NAV, LEARN_MENU_ITEMS } from './learnNav'
+import { SpaceSwitcher } from './SpaceSwitcher'
 import { BottomSheet, BottomSheetItem } from '@/components/ui/BottomSheet'
 import { useMe } from '@/hooks/useMe'
 
@@ -29,26 +30,58 @@ export function LearnMenuSheet({
   }
 
   return (
-    <BottomSheet open={open} onOpenChange={onOpenChange} title="Меню">
+    <BottomSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Меню"
+      // Слот trailing у BottomSheet есть, но раньше не передавался — закрыть
+      // лист можно было только тапом по оверлею.
+      trailing={
+        <button
+          type="button"
+          onClick={() => onOpenChange(false)}
+          className="-my-2.5 inline-flex min-h-[44px] items-center px-2 text-[15px] font-semibold text-text2 hover:text-text"
+        >
+          Готово
+        </button>
+      }
+    >
+      {/* Выход в «Задачи» с ЛЮБОГО learn-экрана: переключатель пространств
+          на мобильном есть только в шапках витрин, а «Меню» доступно всегда.
+          Без него из «Обучения» на телефоне было не выбраться.
+          Закрываем по ВСПЛЫТИЮ, а не в capture: capture размонтирует лист
+          раньше, чем отработает onClick самой кнопки, и навигация не
+          происходила вовсе. */}
+      <div className="px-3 pb-1" onClick={() => onOpenChange(false)}>
+        <SpaceSwitcher />
+      </div>
+      <div className="mx-3 mb-1 h-px bg-hair" />
+
       {LEARN_MENU_ITEMS.map(({ to, label, icon: Icon, soon }) => (
         <BottomSheetItem
           key={to}
           icon={<Icon className="h-5 w-5" />}
           disabled={soon}
           onClick={() => go(to)}
+          // Раздел ведёт на отдельный экран — шеврон об этом и говорит.
+          trailing={<ChevronRight className="h-[18px] w-[18px]" />}
         >
           {label}
         </BottomSheetItem>
       ))}
 
-      <div className="my-1 border-t border-glass-border" />
-      <BottomSheetItem icon={<User className="h-5 w-5" />} onClick={() => go('/profile')}>
+      <div className="mx-3 my-1 h-px bg-hair" />
+      <BottomSheetItem
+        icon={<User className="h-5 w-5" />}
+        onClick={() => go('/profile')}
+        trailing={<ChevronRight className="h-[18px] w-[18px]" />}
+      >
         Профиль
       </BottomSheetItem>
 
       {isAdmin && (
         <>
-          <p className="px-3 pb-0.5 pt-2 text-[11px] font-semibold uppercase tracking-wider text-text3">
+          <p className="px-3 pb-0.5 pt-2 text-[11px] font-bold uppercase tracking-[0.09em] text-text2">
             Управление
           </p>
           {ADMIN_NAV.map(({ to, label, icon: Icon }) => (
@@ -56,6 +89,7 @@ export function LearnMenuSheet({
               key={to}
               icon={<Icon className="h-5 w-5" />}
               onClick={() => go(to)}
+              trailing={<ChevronRight className="h-[18px] w-[18px]" />}
             >
               {label}
             </BottomSheetItem>
