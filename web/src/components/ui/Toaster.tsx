@@ -23,7 +23,7 @@ export function Toaster() {
       }}
       toastOptions={{
         classNames: {
-          toast: 'glass !bg-glass !border-glass-border !text-text',
+          toast: 'glass-solid !border-glass-border !text-text',
           description: '!text-text2',
           actionButton: '!bg-amber !text-on-amber',
           cancelButton: '!bg-surface !text-text2',

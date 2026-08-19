@@ -1,4 +1,4 @@
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, ChevronDown, Plus, X } from 'lucide-react'
 import { useState } from 'react'
 
 import { AvatarStack } from '@/components/ui/AvatarStack'
@@ -15,7 +15,7 @@ import { cn } from '@/lib/cn'
 import { type TaskAssigneeBrief } from '@/lib/tasks'
 
 const TRIGGER_CLASS =
-  'w-full rounded-md border border-glass-border bg-glass px-2 py-1 text-sm text-text placeholder:text-text3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60'
+  'w-full rounded-md border border-glass-border bg-glass px-2 py-1 text-sm text-text placeholder:text-text2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60'
 
 interface PeoplePickerMultiProps {
   /** ПОЛНЫЕ brief'ы, а не id: наверх тоже отдаём brief, чтобы вызывающий мог
@@ -31,6 +31,11 @@ interface PeoplePickerMultiProps {
   /** Потолок; зеркалит MAX_ASSIGNEES на бэкенде. */
   max?: number
   placeholder?: string
+  /**
+   * `chips` — раскладка карточки задачи: исполнители чипами с крестиком,
+   * добавление пунктирной кнопкой. `field` — компактный триггер для строк.
+   */
+  variant?: 'field' | 'chips'
 }
 
 function label(p: TaskAssigneeBrief): string {
@@ -52,6 +57,7 @@ export function PeoplePickerMulti({
   disabled,
   max = 10,
   placeholder = 'Не назначен',
+  variant = 'field',
 }: PeoplePickerMultiProps) {
   const [query, setQuery] = useState('')
   // Лимит выше дефолтного (10): в мультивыборе список — рабочая поверхность,
@@ -72,6 +78,8 @@ export function PeoplePickerMulti({
   ]
   const atMax = value.length >= max
 
+  const chips = variant === 'chips'
+
   const triggerText =
     value.length === 0
       ? placeholder
@@ -81,26 +89,66 @@ export function PeoplePickerMulti({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild disabled={disabled}>
-        <button
-          type="button"
-          className={cn(
-            TRIGGER_CLASS,
-            'flex items-center justify-between gap-2 text-left',
-            disabled && 'cursor-not-allowed opacity-60',
-          )}
-        >
-          <div className="flex min-w-0 items-center gap-2">
-            {value.length > 0 && <AvatarStack people={value} size="xs" max={3} />}
+      {chips ? (
+        // Карточка задачи: каждый исполнитель — чип с крестиком, добавление —
+        // пунктирная кнопка. Стек аватаров под выпадашкой там не читается:
+        // в карточке есть место назвать людей по именам.
+        <span className="flex flex-wrap items-center gap-2">
+          {value.map((p) => (
             <span
-              className={cn('truncate', value.length ? 'text-text' : 'text-text3')}
+              key={p.employee_id}
+              className="inline-flex h-8 items-center gap-[7px] rounded-full border border-glass-border py-0 pl-1 pr-2.5 text-[14px] font-medium text-text"
             >
-              {triggerText}
+              <Avatar name={p.full_name} email={p.email} className="h-6 w-6" />
+              <span className="max-w-[180px] truncate">{label(p)}</span>
+              {!disabled && (
+                <button
+                  type="button"
+                  onClick={() => onToggle(p, false)}
+                  aria-label={`Снять исполнителя ${label(p)}`}
+                  className="-mr-1.5 flex h-5 w-5 items-center justify-center rounded-full text-text2 hover:text-text"
+                >
+                  <X className="h-3 w-3" strokeWidth={2.4} />
+                </button>
+              )}
             </span>
-          </div>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
-        </button>
-      </DropdownMenuTrigger>
+          ))}
+          {!disabled && (
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-dashed border-glass-border px-3 text-[14px] font-semibold text-text2 hover:border-amber hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+              >
+                <Plus className="h-3.5 w-3.5" strokeWidth={2.2} /> Добавить
+              </button>
+            </DropdownMenuTrigger>
+          )}
+          {disabled && value.length === 0 && (
+            <span className="text-[14px] text-text2">Не назначен</span>
+          )}
+        </span>
+      ) : (
+        <DropdownMenuTrigger asChild disabled={disabled}>
+          <button
+            type="button"
+            className={cn(
+              TRIGGER_CLASS,
+              'flex items-center justify-between gap-2 text-left',
+              disabled && 'cursor-not-allowed opacity-60',
+            )}
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              {value.length > 0 && <AvatarStack people={value} max={3} />}
+              <span
+                className={cn('truncate', value.length ? 'text-text' : 'text-text2')}
+              >
+                {triggerText}
+              </span>
+            </div>
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+          </button>
+        </DropdownMenuTrigger>
+      )}
       <DropdownMenuContent align="start" className="w-[280px]">
         <div className="px-2 py-1">
           <input
@@ -112,7 +160,7 @@ export function PeoplePickerMulti({
           />
         </div>
         {options.length === 0 && (
-          <div className="px-2 py-1.5 text-xs text-text3">Никого не нашли</div>
+          <div className="px-2 py-1.5 text-[13px] text-text2">Никого не нашли</div>
         )}
         {options.map((m) => {
           const selected = selectedIds.has(m.employee_id)
@@ -130,7 +178,7 @@ export function PeoplePickerMulti({
               <Avatar
                 name={m.full_name}
                 email={m.email}
-                className="mr-2 h-5 w-5 text-[9px]"
+                className="mr-2 h-5 w-5 text-[12px]"
               />
               <span className="flex-1 truncate">{label(m)}</span>
               {selected && <Check className="h-3.5 w-3.5" />}
@@ -138,7 +186,7 @@ export function PeoplePickerMulti({
           )
         })}
         {atMax && (
-          <div className="px-2 py-1.5 text-xs text-text3">
+          <div className="px-2 py-1.5 text-[13px] text-text2">
             Максимум {max} исполнителей
           </div>
         )}

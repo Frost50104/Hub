@@ -7,16 +7,17 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { useMemo, useState } from 'react'
 
-import { Skeleton } from '@/components/ui/Skeleton'
+import { TaskEmptyState } from '@/components/task/TaskListStates'
 import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
 import { useProjectSections } from '@/hooks/useProjects'
 import { useTasks, useToggleDone, useUpdateTask } from '@/hooks/useTasks'
 import { type Label } from '@/lib/labels'
-import { toListFilters, type TaskViewFilters } from '@/lib/taskFilters'
+import { activeFilterCount, toListFilters, type TaskViewFilters } from '@/lib/taskFilters'
 import { type Task } from '@/lib/tasks'
 
 import { KanbanCard } from './KanbanCard'
@@ -28,11 +29,46 @@ interface BoardViewProps {
   canEdit: boolean
   onTaskClick: (id: string) => void
   filters?: TaskViewFilters
+  /** Сброс фильтров из пустого состояния «под фильтры не попала ни одна». */
+  onResetFilters?: () => void
+}
+
+/** Лента колонок: одна геометрия для карточек и для скелетона. */
+const LANE_CLASS =
+  'flex snap-x snap-mandatory items-start gap-3 overflow-x-auto overscroll-x-contain pb-4 md:snap-none'
+
+/**
+ * Скелетон доски повторяет раскладку колонок. Без пульсации — то же правило,
+ * что в списке: мигание читается как поломка, а не как загрузка.
+ */
+function BoardSkeleton() {
+  return (
+    <div className={LANE_CLASS} aria-hidden>
+      {Array.from({ length: 4 }, (_, i) => (
+        <div key={i} className="flex w-72 shrink-0 flex-col gap-2 p-1">
+          <span className="mx-1.5 mb-1 mt-1.5 h-3.5 w-[120px] rounded-[5px] bg-surface" />
+          {[78, 96, 84].map((h, j) => (
+            <span
+              key={j}
+              className="block rounded-xl border border-glass-border bg-surface"
+              style={{ height: h }}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 const ORPHAN_ID = '__orphan__'
 
-export function BoardView({ projectId, canEdit, onTaskClick, filters }: BoardViewProps) {
+export function BoardView({
+  projectId,
+  canEdit,
+  onTaskClick,
+  filters,
+  onResetFilters,
+}: BoardViewProps) {
   const sections = useProjectSections(projectId)
   // forBoard: доска всегда в position-порядке, иначе ломается drag.
   // При активных фильтрах позиция drag считается между видимыми соседями —
@@ -42,6 +78,11 @@ export function BoardView({ projectId, canEdit, onTaskClick, filters }: BoardVie
   const update = useUpdateTask(projectId)
   const toggleDone = useToggleDone(projectId)
   const [activeId, setActiveId] = useState<string | null>(null)
+  // Колонка-приёмник считается ЗДЕСЬ, а не из useDroppable в самой колонке:
+  // карточки — тоже droppable, и closestCorners почти всегда отдаёт id
+  // карточки, из-за чего `isOver` у колонки не поднимался и подсветка приёма
+  // не появлялась нигде, кроме пустого места под последней карточкой.
+  const [overColumnId, setOverColumnId] = useState<string | null>(null)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -120,8 +161,19 @@ export function BoardView({ projectId, canEdit, onTaskClick, filters }: BoardVie
     setActiveId(String(e.active.id))
   }
 
+  const columnIdFor = (overId: string): string | null => {
+    const byId = columns.find((c) => c.dndId === overId)
+    if (byId) return byId.dndId
+    return columns.find((c) => c.tasks.some((t) => t.id === overId))?.dndId ?? null
+  }
+
+  const onDragOver = (e: DragOverEvent) => {
+    setOverColumnId(e.over ? columnIdFor(String(e.over.id)) : null)
+  }
+
   const onDragEnd = (e: DragEndEvent) => {
     setActiveId(null)
+    setOverColumnId(null)
     if (!e.over) return
     const taskId = String(e.active.id)
     const overId = String(e.over.id)
@@ -175,17 +227,38 @@ export function BoardView({ projectId, canEdit, onTaskClick, filters }: BoardVie
     })
   }
 
-  if (tasks.isLoading || sections.isLoading) {
+  if (tasks.isLoading || sections.isLoading) return <BoardSkeleton />
+
+  // Пусто / фильтр / ошибка — ОДИН блок на всю область: четыре одинаковых
+  // сообщения в колонках читались бы как четыре разные проблемы.
+  if (tasks.isError || sections.isError) {
     return (
-      <div className="flex gap-3 pb-4" aria-hidden>
-        {Array.from({ length: 3 }, (_, i) => (
-          <div key={i} className="w-72 shrink-0 space-y-2">
-            <Skeleton className="h-5 w-32" />
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-24 w-full" />
-          </div>
-        ))}
-      </div>
+      <TaskEmptyState
+        tone="error"
+        title="Не удалось загрузить задачи"
+        text="Проверьте соединение и попробуйте ещё раз."
+        cta="Повторить"
+        onCta={() => {
+          if (tasks.isError) void tasks.refetch()
+          if (sections.isError) void sections.refetch()
+        }}
+      />
+    )
+  }
+  const visible = (tasks.data ?? []).filter((t) => !t.parent_task_id)
+  if (visible.length === 0) {
+    return activeFilterCount(filters ?? {}) > 0 ? (
+      <TaskEmptyState
+        title="Под фильтры не попала ни одна задача"
+        text="Снимите часть условий — или посмотрите список целиком."
+        cta="Сбросить фильтры"
+        onCta={onResetFilters}
+      />
+    ) : (
+      <TaskEmptyState
+        title="Пока нет задач. Создайте первую."
+        text="Колонки появятся вместе с первой задачей: доска группирует по секциям."
+      />
     )
   }
 
@@ -194,15 +267,21 @@ export function BoardView({ projectId, canEdit, onTaskClick, filters }: BoardVie
       sensors={sensors}
       collisionDetection={closestCorners}
       onDragStart={onDragStart}
+      onDragOver={onDragOver}
       onDragEnd={onDragEnd}
+      onDragCancel={() => {
+        setActiveId(null)
+        setOverColumnId(null)
+      }}
     >
-      <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain pb-4 md:snap-none">
+      <div className={LANE_CLASS}>
         {columns.map((col) => (
           <KanbanColumn
             key={col.dndId}
             column={col}
             projectId={projectId}
             canEdit={canEdit}
+            isOver={overColumnId === col.dndId}
             childrenByParent={childrenByParent}
             labelsByTask={labelsByTask}
             onTaskClick={onTaskClick}
@@ -211,7 +290,7 @@ export function BoardView({ projectId, canEdit, onTaskClick, filters }: BoardVie
         ))}
       </div>
       <DragOverlay>
-        {activeTask && <KanbanCard task={activeTask} />}
+        {activeTask && <KanbanCard task={activeTask} overlay />}
       </DragOverlay>
     </DndContext>
   )

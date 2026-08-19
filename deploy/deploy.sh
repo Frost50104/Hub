@@ -94,6 +94,7 @@ deploy_backend() {
     --exclude='uploads' \
     --exclude='LMS' \
     --exclude='import_bundle' \
+    --exclude='redesign' \
     "$PROJECT_DIR/" \
     "${SERVER_USER}@${SERVER_HOST}:${REMOTE_BASE}/"
 
@@ -134,6 +135,10 @@ deploy_frontend() {
     --exclude='node_modules' \
     --exclude='dist' \
     --exclude='.vite' \
+    --exclude='preview.html' \
+    --exclude='tracker.html' \
+    --exclude='frame.html' \
+    --exclude='src/dev' \
     "$PROJECT_DIR/web/" \
     "${SERVER_USER}@${SERVER_HOST}:${REMOTE_BASE}/web_src/"
 

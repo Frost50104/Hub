@@ -15,6 +15,7 @@ from app.api.courses import (
     _course_visible_to,
     answer_block,
     complete_lesson,
+    get_course,
     get_lesson,
     list_courses,
     video_progress,
@@ -382,3 +383,162 @@ async def test_lesson_progress_started_on_open(db: AsyncSession, tenant_id: uuid
         )
     ).scalar_one()
     assert row.status == "in_progress"
+
+
+# ─── Мета строки урока и адрес замка (редизайн) ──────────────────────────────
+
+
+async def test_lesson_meta_carries_reading_time_and_flags(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Шапка курса обещает «N уроков · M тестов · ~время» — считает сервер."""
+    from app.api.quizzes import upsert_lesson_quiz
+    from app.schemas.quiz import QuestionDraft, QuizUpsert
+
+    principal, profile = await _mk_member(db, tenant_id)
+    profile.content_role = "publisher"
+    await db.flush()
+    course, lessons = await _mk_course(db, tenant_id, lesson_content=GATED_CONTENT)
+
+    await upsert_lesson_quiz(
+        lessons[0].id,
+        QuizUpsert(
+            title="Тест урока",
+            status="published",
+            pass_score_pct=80,
+            attempts_limit=None,
+            shuffle_questions=False,
+            shuffle_options=False,
+            questions=[
+                QuestionDraft(
+                    qtype="single",
+                    prompt="2 + 2?",
+                    options={"options": ["3", "4"]},
+                    answer={"correct": [1]},
+                )
+            ],
+        ),
+        principal,
+        db,
+    )
+
+    detail = await get_course(course.id, principal, db)
+    first = next(m for m in detail.lessons if m.id == lessons[0].id)
+    second = next(m for m in detail.lessons if m.id == lessons[1].id)
+
+    # Оценка чтения — всегда хотя бы минута, даже у пустого урока.
+    assert first.estimated_minutes >= 1
+    assert first.has_check_question is True
+    assert first.has_quiz is True
+    assert second.has_quiz is False
+
+    assert detail.quizzes_total == 1
+    assert detail.estimated_minutes_total == sum(
+        m.estimated_minutes for m in detail.lessons
+    )
+
+
+async def test_locked_lesson_names_its_blocker(db: AsyncSession, tenant_id: uuid.UUID):
+    """Замок называет конкретный урок — «после предыдущих» интерфейс не пишет."""
+    principal, _profile = await _mk_member(db, tenant_id)
+    course, lessons = await _mk_course(db, tenant_id, lesson_count=3)
+
+    detail = await get_course(course.id, principal, db)
+    second = next(m for m in detail.lessons if m.id == lessons[1].id)
+
+    assert second.locked is True
+    assert second.blocked_by_id == lessons[0].id
+    assert second.blocked_by_title == lessons[0].title
+
+    # Открытый урок адреса замка не несёт.
+    first = next(m for m in detail.lessons if m.id == lessons[0].id)
+    assert first.locked is False and first.blocked_by_id is None
+
+
+async def test_blocker_points_at_tested_lesson_not_previous(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """after_prev_test: держит несданный тест, а не «незавершённый предыдущий»."""
+    from app.api.quizzes import upsert_lesson_quiz
+    from app.schemas.quiz import QuestionDraft, QuizUpsert
+
+    # Автор и обучающийся — разные люди: у publisher'а замков нет вовсе
+    # (он менеджер контента), и на нём этот сценарий не проверить.
+    author, author_profile = await _mk_member(db, tenant_id, email="hr@t.ru")
+    author_profile.content_role = "publisher"
+    principal, _profile = await _mk_member(db, tenant_id, email="barista@t.ru")
+    await db.flush()
+    course, lessons = await _mk_course(db, tenant_id, lesson_count=2)
+    lessons[1].unlock_rule = "after_prev_test"
+    await db.flush()
+
+    await upsert_lesson_quiz(
+        lessons[0].id,
+        QuizUpsert(
+            title="Тест урока 1",
+            status="published",
+            pass_score_pct=80,
+            attempts_limit=None,
+            shuffle_questions=False,
+            shuffle_options=False,
+            required_to_pass=True,
+            questions=[
+                QuestionDraft(
+                    qtype="single",
+                    prompt="2 + 2?",
+                    options={"options": ["3", "4"]},
+                    answer={"correct": [1]},
+                )
+            ],
+        ),
+        author,
+        db,
+    )
+
+    # Первый урок завершён, но его required-тест не сдан.
+    await get_lesson(lessons[0].id, principal, db)
+    await complete_lesson(lessons[0].id, principal, db)
+
+    detail = await get_course(course.id, principal, db)
+    second = next(m for m in detail.lessons if m.id == lessons[1].id)
+    assert second.locked is True
+    assert second.blocked_by_id == lessons[0].id
+
+
+async def test_catalog_minutes_match_python_estimate(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Каталог считает время в SQL, карточка курса — в Python: не разойтись."""
+    from app.services.lesson_content import estimate_reading_minutes
+
+    principal, _profile = await _mk_member(db, tenant_id)
+    long_text = "Эспрессо — крепкий кофейный напиток небольшого объёма. " * 60
+    content = {
+        "schema": 1,
+        "doc": {
+            "type": "doc",
+            "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": long_text}]},
+                {
+                    "type": "heading",
+                    "attrs": {"level": 2},
+                    "content": [{"type": "text", "text": "Как готовим"}],
+                },
+            ],
+        },
+    }
+    course, _lessons = await _mk_course(
+        db, tenant_id, lesson_count=2, lesson_content=content
+    )
+
+    listed = await list_courses(False, principal, db)
+    row = next(c for c in listed.items if c.id == course.id)
+    detail = await get_course(course.id, principal, db)
+
+    assert row.estimated_minutes_total > 0
+    # SQL считает по json-массиву текстов (служебные кавычки), Python — по
+    # чистому тексту: расхождение допускаем в пределах минуты на урок.
+    assert abs(row.estimated_minutes_total - detail.estimated_minutes_total) <= 2
+    assert detail.estimated_minutes_total == sum(
+        estimate_reading_minutes(content) for _ in range(2)
+    )

@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { authClient } from '@/lib/auth'
@@ -185,7 +186,15 @@ export function VideoPlayer({
   const pct = Math.round(coverage * 100)
 
   return (
-    <figure className={cn('my-3', className)}>
+    <figure
+      className={cn(
+        'my-7 overflow-hidden rounded-[14px] border border-glass-border bg-tint lg:my-8',
+        className,
+      )}
+    >
+      {/* Нативные controls остаются: iOS уходит в фулскрин и игнорирует
+          кастомный UI, а свой плеер стоил бы доступности. Из макета берём
+          оболочку — рамку, полосу покрытия и строку условия. */}
       <video
         ref={videoRef}
         src={src}
@@ -193,7 +202,7 @@ export function VideoPlayer({
         playsInline
         preload="metadata"
         controlsList={disableSeek ? 'nodownload noplaybackrate' : 'nodownload'}
-        className="w-full rounded-lg border border-glass-border bg-black"
+        className="block aspect-video w-full bg-[#08080E]"
         onLoadedMetadata={(e) => {
           durationRef.current = e.currentTarget.duration || 0
           refreshCoverage()
@@ -204,21 +213,36 @@ export function VideoPlayer({
         onEnded={refreshCoverage}
       />
       {requireFullWatch && (
-        <figcaption className="mt-1 flex items-center gap-2 text-xs text-text3">
-          <span
-            className={cn(
-              'inline-block h-1.5 w-24 overflow-hidden rounded-full bg-glass',
-            )}
-          >
-            <span
-              className={cn('block h-full rounded-full', pct >= 90 ? 'bg-green' : 'bg-amber')}
+        <>
+          {/* Полоса покрытия: амбер до порога, зелёный после. Порог считает
+              сервер — полоса лишь отражает. disableSeek её не прячет. */}
+          <div className="h-[3px] bg-surface">
+            <div
+              className={cn(
+                'h-full transition-[width] duration-300 ease-out',
+                pct >= 90 ? 'bg-green' : 'bg-amber',
+              )}
               style={{ width: `${pct}%` }}
             />
-          </span>
-          {pct >= 90
-            ? 'Видео досмотрено'
-            : `Обязательно к просмотру — ${pct}% из 90%`}
-        </figcaption>
+          </div>
+          <figcaption className="flex items-center gap-2.5 px-3.5 py-3">
+            <span
+              className={cn(
+                'flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full',
+                pct >= 90
+                  ? 'bg-green-deep text-bg'
+                  : 'border border-glass-border text-transparent',
+              )}
+            >
+              <Check className="h-[15px] w-[15px]" strokeWidth={2.4} />
+            </span>
+            <p className="flex-1 text-sm leading-[1.45] text-text2 lg:text-[15px]">
+              {pct >= 90
+                ? 'Видео досмотрено'
+                : `Досмотрите минимум 90% — сейчас ${pct}%`}
+            </p>
+          </figcaption>
+        </>
       )}
     </figure>
   )

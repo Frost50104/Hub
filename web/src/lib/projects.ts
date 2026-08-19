@@ -29,6 +29,10 @@ export interface Project {
    * с бэкендом и показывала админу чужой проект read-only. */
   can_edit: boolean
   can_manage: boolean
+  /** Неархивные задачи верхнего уровня и сколько из них закрыто. Считают только
+   *  список проектов и карточка проекта; мутирующие ручки отдают null. */
+  task_count?: number | null
+  done_count?: number | null
 }
 
 export interface ProjectMember {

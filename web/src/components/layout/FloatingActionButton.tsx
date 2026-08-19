@@ -59,7 +59,10 @@ export function FloatingActionButton({
         onClick={() => setSheetOpen(true)}
         aria-label="Создать"
         className={cn(
-          'fixed right-4 z-30 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-red text-white shadow-lg transition-transform hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 lg:hidden',
+          // Главное действие пространства — амбер с фиксированной тёмной краской.
+          // Красный в редизайне занят просрочкой и ошибками: кнопка создания,
+          // покрашенная в него, читалась как предупреждение.
+          'fixed right-4 z-30 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-amber text-on-amber shadow-lg transition-transform hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 lg:hidden',
           className,
         )}
         style={{

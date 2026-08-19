@@ -68,7 +68,7 @@ export function UpdateBanner() {
 
   return (
     <div
-      className="glass fixed inset-x-4 bottom-4 z-40 flex flex-col gap-3 p-4 shadow-glass sm:left-auto sm:right-4 sm:w-96"
+      className="glass-solid fixed inset-x-4 bottom-4 z-40 flex flex-col gap-3 p-4 shadow-glass sm:left-auto sm:right-4 sm:w-96"
       // Ниже lg таб-бар зафиксирован у нижнего края, и баннер садился прямо
       // на него — в отличие от тоста, висел там до нажатия «Позже», то есть
       // блокировал навигацию. Поднимаем по той же формуле safe-area, что у

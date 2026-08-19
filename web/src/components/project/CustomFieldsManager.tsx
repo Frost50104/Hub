@@ -177,12 +177,12 @@ export function CustomFieldsManager({
         </DialogHeader>
 
         <section className="space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-text3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-text2">
             Существующие
           </h3>
           {defs.isLoading && <p className="text-sm text-text2">Загружаем…</p>}
           {defs.data?.length === 0 && (
-            <p className="text-sm text-text3">Пока нет полей.</p>
+            <p className="text-sm text-text2">Пока нет полей.</p>
           )}
 
           <DndContext
@@ -227,7 +227,7 @@ export function CustomFieldsManager({
         </section>
 
         <form onSubmit={submit} className="space-y-3 border-t border-glass-border pt-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-text3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-text2">
             Новое поле
           </h3>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_180px]">
@@ -294,7 +294,7 @@ export function CustomFieldsManager({
                       onClick={() =>
                         setOptions((prev) => prev.filter((_, j) => j !== i))
                       }
-                      className="rounded p-1.5 text-text3 hover:bg-glass hover:text-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                      className="rounded p-1.5 text-text2 hover:bg-glass hover:text-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
                       aria-label="Удалить опцию"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -384,7 +384,7 @@ function SortableFieldRow({ definition, onRename, onDelete }: SortableFieldRowPr
         type="button"
         {...attributes}
         {...listeners}
-        className="cursor-grab text-text3 hover:text-text2 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+        className="cursor-grab text-text2 hover:text-text2 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
         aria-label="Перетащить"
         title="Перетащить, чтобы изменить порядок"
       >
@@ -421,12 +421,12 @@ function SortableFieldRow({ definition, onRename, onDelete }: SortableFieldRowPr
               <span className="truncate">{definition.name}</span>
               <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-100" />
             </button>
-            <span className="shrink-0 rounded bg-glass px-1.5 py-0.5 text-[10px] text-text3">
+            <span className="shrink-0 rounded bg-glass px-1.5 py-0.5 text-[12px] text-text2">
               {CUSTOM_FIELD_TYPE_LABEL[definition.type]}
             </span>
             {(definition.type === 'select' ||
               definition.type === 'multi_select') && (
-              <span className="shrink-0 text-[10px] text-text3">
+              <span className="shrink-0 text-[12px] text-text2">
                 {definition.options.length} опц.
               </span>
             )}
@@ -437,7 +437,7 @@ function SortableFieldRow({ definition, onRename, onDelete }: SortableFieldRowPr
       <button
         type="button"
         onClick={onDelete}
-        className="rounded p-1 text-text3 hover:bg-glass hover:text-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+        className="rounded p-1 text-text2 hover:bg-glass hover:text-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
         aria-label={`Удалить ${definition.name}`}
       >
         <Trash2 className="h-3.5 w-3.5" />

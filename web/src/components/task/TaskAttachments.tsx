@@ -16,6 +16,7 @@ import {
   formatBytes,
   type Attachment,
 } from '@/lib/attachments'
+import { DrawerSection } from '@/components/task/DrawerSection'
 import { cn } from '@/lib/cn'
 
 const MAX_BYTES = 20 * 1024 * 1024
@@ -31,10 +32,10 @@ function AttachmentRow({
 }) {
   return (
     <div className="group flex items-center gap-3 rounded-md border border-glass-border px-2 py-1.5">
-      <Paperclip className="h-3.5 w-3.5 shrink-0 text-text3" />
+      <Paperclip className="h-3.5 w-3.5 shrink-0 text-text2" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm text-text">{attachment.filename}</p>
-        <p className="text-[10px] text-text3">
+        <p className="text-[12px] text-text2">
           {formatBytes(attachment.size_bytes)} ·{' '}
           {attachment.uploader_full_name || attachment.uploader_email || '—'}
         </p>
@@ -50,7 +51,7 @@ function AttachmentRow({
             })
           }
         }}
-        className="rounded p-1 text-text3 hover:bg-glass hover:text-text"
+        className="rounded p-1 text-text2 hover:bg-glass hover:text-text"
         title="Скачать"
         aria-label="Скачать"
       >
@@ -59,7 +60,7 @@ function AttachmentRow({
       {isMine && (
         <button
           onClick={onDelete}
-          className="rounded p-1 text-text3 opacity-0 transition-opacity hover:text-red group-hover:opacity-100"
+          className="rounded p-1 text-text2 opacity-0 transition-opacity hover:text-red group-hover:opacity-100"
           aria-label="Удалить"
           title="Удалить"
         >
@@ -116,10 +117,7 @@ export function TaskAttachments({ taskId, canEdit = true }: TaskAttachmentsProps
   const meId = me.data?.employee_id
 
   return (
-    <section className="space-y-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text3">
-        Вложения {list.data ? `(${list.data.length})` : ''}
-      </h3>
+    <DrawerSection title="Вложения" count={list.data?.length ?? null}>
 
       <div className="space-y-1">
         {list.data?.map((a) => (
@@ -150,12 +148,12 @@ export function TaskAttachments({ taskId, canEdit = true }: TaskAttachmentsProps
               'flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed py-3 text-xs transition-colors',
               dragOver
                 ? 'border-amber bg-amber/10 text-amber'
-                : 'border-glass-border text-text3 hover:border-amber/50 hover:text-text2',
+                : 'border-glass-border text-text2 hover:border-amber/50 hover:text-text2',
             )}
           >
             <Upload className="h-3.5 w-3.5" />
             {upload.isPending ? 'Загружаем…' : 'Перетащите файл или нажмите'}
-            <span className="text-[10px] opacity-60">до 20 МБ</span>
+            <span className="text-[12px] opacity-60">до 20 МБ</span>
           </div>
           <input
             ref={inputRef}
@@ -174,6 +172,6 @@ export function TaskAttachments({ taskId, canEdit = true }: TaskAttachmentsProps
           </Button>
         </>
       )}
-    </section>
+    </DrawerSection>
   )
 }

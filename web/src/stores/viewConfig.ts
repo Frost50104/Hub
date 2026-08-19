@@ -5,6 +5,11 @@ interface ProjectViewConfig {
   /** Custom-field IDs that should appear as columns in the List view.
    *  Order = render order; absence = hidden. */
   visibleCustomFields: string[]
+  /** Свёрнутые секции списка. `'__orphan__'` — блок «Без секции».
+   *  Строка выросла до 64px, и сворачивание секций — главное средство
+   *  плотности на сотнях задач; в локальном useState оно сбрасывалось при
+   *  каждом переключении вкладки вида. */
+  collapsedSections?: string[]
 }
 
 interface ViewConfigState {
@@ -12,7 +17,11 @@ interface ViewConfigState {
   setVisibleCustomFields: (projectId: string, ids: string[]) => void
   toggleCustomField: (projectId: string, fieldId: string) => void
   getVisible: (projectId: string) => string[]
+  toggleSection: (projectId: string, sectionKey: string) => void
 }
+
+/** Ключ блока «Без секции» в `collapsedSections`. */
+export const ORPHAN_SECTION_KEY = '__orphan__'
 
 const EMPTY: ProjectViewConfig = { visibleCustomFields: [] }
 
@@ -49,10 +58,25 @@ export const useViewConfig = create<ViewConfigState>()(
         }),
       getVisible: (projectId) =>
         get().byProject[projectId]?.visibleCustomFields ?? EMPTY.visibleCustomFields,
+      toggleSection: (projectId, sectionKey) =>
+        set((state) => {
+          const cfg = state.byProject[projectId] ?? EMPTY
+          const current = cfg.collapsedSections ?? []
+          const next = current.includes(sectionKey)
+            ? current.filter((k) => k !== sectionKey)
+            : [...current, sectionKey]
+          return {
+            byProject: {
+              ...state.byProject,
+              [projectId]: { ...cfg, collapsedSections: next },
+            },
+          }
+        }),
     }),
     {
       name: 'hub-view-config',
-      version: 1,
+      // v2: + collapsedSections. Поле опционально, миграция не нужна.
+      version: 2,
     },
   ),
 )

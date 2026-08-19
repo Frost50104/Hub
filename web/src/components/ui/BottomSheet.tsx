@@ -52,7 +52,7 @@ export const BottomSheet = forwardRef<HTMLDivElement, BottomSheetProps>(
                 <span aria-hidden />
                 <div className="text-center">
                   {title && (
-                    <DialogPrimitive.Title className="font-display text-base font-semibold text-text">
+                    <DialogPrimitive.Title className="font-display text-base font-bold text-text">
                       {title}
                     </DialogPrimitive.Title>
                   )}
@@ -104,19 +104,21 @@ export function BottomSheetItem({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm transition-colors',
+        // 52px, а не 44: восемь разделов подряд читаются в смене одной рукой,
+        // и запас в 8px снимает промахи по соседней строке.
+        'flex min-h-[52px] w-full items-center gap-3 rounded-[10px] px-3 py-3 text-left text-[16px] transition-colors',
         'hover:bg-surface focus-visible:bg-surface focus-visible:outline-none',
         destructive ? 'text-red' : 'text-text',
         disabled && 'pointer-events-none opacity-50',
       )}
     >
       {icon && (
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-text2">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center text-text2">
           {icon}
         </span>
       )}
       <span className="flex-1 truncate">{children}</span>
-      {trailing && <span className="shrink-0 text-text3">{trailing}</span>}
+      {trailing && <span className="shrink-0 text-text2">{trailing}</span>}
     </button>
   )
 }

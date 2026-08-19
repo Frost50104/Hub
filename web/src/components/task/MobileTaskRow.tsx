@@ -1,133 +1,114 @@
-import { CheckCircle2, Circle, ClipboardCheck, Clock } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Plus } from 'lucide-react'
 
+import { TaskContextLine } from '@/components/task/TaskContextLine'
+import { TaskStatusControl } from '@/components/task/TaskStatusControl'
+import { PriorityBar } from '@/components/task/PriorityBar'
 import { AvatarStack } from '@/components/ui/AvatarStack'
 import { cn } from '@/lib/cn'
-import { type Task, type TaskStatus } from '@/lib/tasks'
+import { type Label } from '@/lib/labels'
 import { taskAssignees } from '@/lib/taskAssignees'
-
-const STATUS_ICON: Record<TaskStatus, typeof Circle> = {
-  todo: Circle,
-  in_progress: Clock,
-  in_review: ClipboardCheck,
-  done: CheckCircle2,
-}
-
-const STATUS_TONE: Record<TaskStatus, string> = {
-  todo: 'text-text3',
-  in_progress: 'text-amber',
-  in_review: 'text-amber',
-  done: 'text-green',
-}
+import { isOverdue, shortDate } from '@/lib/taskDates'
+import { type SubtaskStats, type Task } from '@/lib/tasks'
 
 interface MobileTaskRowProps {
   task: Task
-  /** Secondary line under the title — usually the project name. */
-  subtitle?: string
+  labels?: Label[]
+  subtasks?: SubtaskStats
+  /** Секция или проект — чем занять строку контекста, когда она пуста. */
+  fallback?: string | null
+  selected?: boolean
+  onClick?: () => void
   onToggleDone?: () => void
-  /** Link target; falls back to deep-link into the task's project drawer. */
-  href?: string
+  /** `fallback` — в строке контекста только проект (узкие списки «Главной»). */
+  context?: 'auto' | 'fallback'
 }
 
 /**
- * Asana-mobile-style task row. Two-line layout (title + subtitle) on the
- * left, status checkbox on the far left, due-date chip pinned right.
- * Chip is **green-tinted** because Asana's mobile uses green for both
- * Today and Tomorrow — only past dates show red.
+ * Мобильная строка задачи: та же модель, другая раскладка.
+ *
+ * На 390px заголовок в 64 знака в одну строку не влезает физически (nowrap
+ * показывал 37-49% текста) — две строки с обрезкой на третьей. Колонок нет:
+ * срок уходит вправо, остальное — в строку контекста, где по месту помещается
+ * одна метка, а прочие схлопываются в «+N».
+ *
+ * Раньше строка была `<Link>` с `<button>` внутри — невалидная вложенность,
+ * из-за которой кнопка статуса была недостижима частью скринридеров.
  */
 export function MobileTaskRow({
   task,
-  subtitle,
+  labels,
+  subtasks,
+  fallback,
+  selected = false,
+  onClick,
   onToggleDone,
-  href,
+  context = 'auto',
 }: MobileTaskRowProps) {
-  const StatusIcon = STATUS_ICON[task.status]
-  const due = task.due_at ? new Date(task.due_at) : null
-  const target =
-    href ?? (task.project_id ? `/projects/${task.project_id}?task=${task.id}` : '#')
+  const done = task.status === 'done'
+  const overdue = isOverdue(task.due_at, task.status)
+  const assignees = taskAssignees(task)
 
   return (
-    <Link
-      to={target}
-      className="flex items-center gap-3 border-b border-glass-border/60 px-4 py-3 active:bg-glass"
-    >
-      <button
-        type="button"
-        onClick={(e) => {
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={task.title}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          e.stopPropagation()
-          onToggleDone?.()
-        }}
-        className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center -ml-1.5',
-          STATUS_TONE[task.status],
-        )}
-        aria-label="Сменить статус"
-      >
-        <StatusIcon className="h-6 w-6" strokeWidth={1.5} />
-      </button>
+          onClick?.()
+        }
+      }}
+      className={cn(
+        'relative flex min-h-16 items-center gap-3 border-b border-hair py-[9px] pl-[13px] pr-4 active:bg-glass',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber',
+        selected && 'bg-surface shadow-[inset_0_0_0_1px_rgb(var(--amber))]',
+      )}
+    >
+      <PriorityBar priority={task.priority} />
 
-      <div className="min-w-0 flex-1">
-        <p
+      <TaskStatusControl status={task.status} size="mobile" onToggle={onToggleDone} />
+
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span
           className={cn(
-            'truncate text-[15px] leading-snug text-text',
-            task.status === 'done' && 'text-text3 line-through',
+            'line-clamp-2 min-w-0 text-[16px] font-medium leading-[1.35] [text-wrap:pretty]',
+            done ? 'text-text2 line-through' : 'text-text',
           )}
         >
           {task.title}
-        </p>
-        {subtitle && (
-          <p className="truncate text-xs text-text3">{subtitle}</p>
+        </span>
+        <TaskContextLine
+          task={task}
+          labels={labels}
+          subtasks={subtasks}
+          fallback={fallback}
+          compact
+          mode={context}
+        />
+      </span>
+
+      <span className="flex shrink-0 flex-col items-end gap-1.5">
+        <span
+          className={cn(
+            'whitespace-nowrap text-[13px] tabular-nums',
+            overdue ? 'font-semibold text-red' : 'text-text2',
+          )}
+        >
+          {task.due_at ? shortDate(task.due_at) : '—'}
+        </span>
+        {assignees.length === 0 ? (
+          <span
+            aria-hidden
+            className="flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-glass-border text-text2"
+          >
+            <Plus className="h-[14px] w-[14px]" strokeWidth={2} />
+          </span>
+        ) : (
+          <AvatarStack people={assignees} max={2} />
         )}
-      </div>
-
-      <AvatarStack people={taskAssignees(task)} size="xs" max={2} />
-
-      {due && <DueChip due={due} done={task.status === 'done'} />}
-    </Link>
+      </span>
+    </div>
   )
-}
-
-function DueChip({ due, done }: { due: Date; done: boolean }) {
-  const today = startOfDay(new Date())
-  const dueDay = startOfDay(due)
-  const diff = Math.round(
-    (dueDay.getTime() - today.getTime()) / (24 * 60 * 60 * 1000),
-  )
-  let label: string
-  let tone: 'green' | 'red' | 'muted'
-  if (diff < 0 && !done) {
-    label = due.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
-    tone = 'red'
-  } else if (diff === 0) {
-    label = 'Сегодня'
-    tone = 'green'
-  } else if (diff === 1) {
-    label = 'Завтра'
-    tone = 'green'
-  } else if (diff < 7) {
-    label = due.toLocaleDateString('ru-RU', { weekday: 'short' })
-    tone = 'muted'
-  } else {
-    label = due.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
-    tone = 'muted'
-  }
-  return (
-    <span
-      className={cn(
-        'shrink-0 rounded-md px-2 py-1 text-xs font-medium',
-        tone === 'green' && 'bg-green/15 text-green',
-        tone === 'red' && 'bg-red/15 text-red',
-        tone === 'muted' && 'bg-surface text-text2',
-      )}
-    >
-      {label}
-    </span>
-  )
-}
-
-function startOfDay(d: Date): Date {
-  const c = new Date(d)
-  c.setHours(0, 0, 0, 0)
-  return c
 }

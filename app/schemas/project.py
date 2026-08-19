@@ -49,6 +49,14 @@ class ProjectResponse(BaseModel):
     # на валидации, а не молча прятать контролы.
     can_edit: bool  # секции create/rename, задачи, публичные ссылки, метки на задаче
     can_manage: bool  # удаление секций, кастом-поля, CRUD меток, участники, архив
+    # Счётчики задач для шапки проекта («N задач · M секций»), пустого фильтра
+    # («Из N — ни одной») и карточки проекта на «Главной» («26 задач · 4 закрыты»).
+    # Считают ТОЛЬКО list_projects и get_project. Дефолт None здесь сознателен:
+    # правило «без дефолтов» защищает can_edit/can_manage от забытого call-site,
+    # а девяти мутирующим ручкам (patch, archive, favorite…) счётчики не нужны —
+    # платить за лишний запрос на каждое переименование незачем.
+    task_count: int | None = None
+    done_count: int | None = None
 
 
 class ProjectFavoriteUpdate(BaseModel):

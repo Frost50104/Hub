@@ -1,10 +1,15 @@
 import { cn } from '@/lib/cn'
 
-/** Пульсирующая заглушка загрузки. Размеры задаются className. */
+/**
+ * Заглушка загрузки. Размеры задаются className.
+ *
+ * Без пульсации (редизайн): на слабых Android анимация дороже, чем полезна,
+ * а скелетон обязан повторять ритм контента, а не привлекать внимание.
+ */
 export function Skeleton({ className }: { className?: string }) {
   return (
     <div
-      className={cn('animate-pulse rounded-md bg-glass', className)}
+      className={cn('rounded-md bg-surface', className)}
       aria-hidden
     />
   )

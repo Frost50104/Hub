@@ -14,6 +14,10 @@ import { CALLOUT_META, type CalloutKind } from './calloutMeta'
  * extraNodes: расширение доменными нодами (уроки Ф3a — video/figure/
  * checkQuestion) без импорта их рендереров сюда — LessonRenderer передаёт
  * карту `{type: render}`; неизвестные типы по-прежнему fail-closed.
+ *
+ * Типографика — шкала редизайна (моб./десктоп): текст 17/18 при 1.65/1.7,
+ * H2 21/24, H3 18/19, H4 15. Мера строки 68-72 знака вместо прежних ~105
+ * (14px в колонке 768px). Ширину колонки задаёт страница, не рендерер.
  */
 
 export interface RichNode {
@@ -36,13 +40,25 @@ export type ExtraNodeRenderers = Record<
 
 const ExtraNodesContext = createContext<ExtraNodeRenderers>({})
 
-const CALLOUT_STYLE: Record<CalloutKind, string> = {
-  important: 'border-amber/50 bg-amber/10',
-  warning: 'border-red/50 bg-red/10',
-  tip: 'border-green/50 bg-green/10',
-  mistake: 'border-red/50 bg-red/5',
-  example: 'border-glass-border bg-surface',
-  recommendation: 'border-amber/30 bg-glass',
+/**
+ * Цвета из перенесённого контента ServiceGuru — не выбор автора, а артефакт
+ * миграции: 74 span'а #e60000 и 42 span'а #0066cc. На тёмной теме (она
+ * дефолтная) они дают 4,15:1 и 3,59:1 при норме 4,5:1, причём красным набраны
+ * инструкции «Пищевой безопасности». Красный уводим в токен (5,3:1 в тёмной,
+ * 4,6:1 в светлой), синий — в обычный текст: смысла бренда он не несёт.
+ *
+ * Цвета из палитры редактора (TEXT_COLORS в RichEditor) сюда не попадают —
+ * авторский выбор рендерер не переписывает.
+ */
+const LEGACY_COLORS: Record<string, string | null> = {
+  '#e60000': 'rgb(var(--red))',
+  '#0066cc': null,
+}
+
+function normalizeColor(value: string): string | null {
+  const key = value.trim().toLowerCase()
+  if (key in LEGACY_COLORS) return LEGACY_COLORS[key] ?? null
+  return value
 }
 
 function renderText(node: RichNode, key: number): ReactNode {
@@ -81,7 +97,10 @@ function renderText(node: RichNode, key: number): ReactNode {
       case 'textStyle': {
         // color и fontSize живут в ОДНОЙ марке — применяем оба.
         const style: CSSProperties = {}
-        if (typeof mark.attrs?.color === 'string') style.color = mark.attrs.color
+        if (typeof mark.attrs?.color === 'string') {
+          const color = normalizeColor(mark.attrs.color)
+          if (color) style.color = color
+        }
         if (typeof mark.attrs?.fontSize === 'string') style.fontSize = mark.attrs.fontSize
         if (Object.keys(style).length > 0) {
           el = (
@@ -120,56 +139,104 @@ function renderChildren(node: RichNode): ReactNode {
   return (node.content ?? []).map((child, i) => <RenderNode key={i} node={child} index={i} />)
 }
 
+/**
+ * Заголовки получают id ОТ ИНДЕКСА ноды, а не от слага текста: в курсах есть
+ * повторяющиеся названия разделов («Как готовим»), слаг дал бы дубли id и
+ * сломал бы навигацию правого рельса.
+ */
+export function headingAnchorId(index: number): string {
+  return `s${index}`
+}
+
+/**
+ * H1/H2 — Unbounded (дисплейная), H3/H4 — Onest: глобальное правило brand.css
+ * делает Unbounded'ом все h1-h4, поэтому подзаголовки явно возвращаются на
+ * основную гарнитуру — в макете они набраны основным шрифтом.
+ */
+const HEADING_CLASS: Record<number, string> = {
+  1: 'mb-3 mt-11 font-display tracking-[0.01em] [text-wrap:balance] text-[24px] leading-[1.22] lg:mt-[52px] lg:text-[28px] lg:leading-[1.2]',
+  2: 'mb-3 mt-11 font-display tracking-[0.01em] [text-wrap:balance] text-[21px] leading-[1.25] lg:mt-[52px] lg:text-[24px] lg:leading-[1.22]',
+  3: 'mb-2 mt-8 font-body text-[18px] font-bold leading-[1.35] lg:mb-2.5 lg:mt-9 lg:text-[19px]',
+  4: 'mb-2 mt-7 font-body text-[15px] font-semibold leading-[1.4]',
+}
+
 function RenderNode({ node, index }: { node: RichNode; index: number }): ReactNode {
   const extraNodes = useContext(ExtraNodesContext)
   switch (node.type) {
     case 'text':
       return renderText(node, index)
     case 'paragraph':
-      return <p className="my-1.5 leading-relaxed">{renderChildren(node)}</p>
+      return (
+        <p className="mb-5 text-[17px] leading-[1.65] [text-wrap:pretty] lg:mb-[22px] lg:text-[18px] lg:leading-[1.7]">
+          {renderChildren(node)}
+        </p>
+      )
     case 'heading': {
-      const level = Number(node.attrs?.level) || 2
-      const cls = ['text-xl', 'text-lg', 'text-base', 'text-sm'][level - 1] ?? 'text-base'
-      const Tag = (`h${Math.min(Math.max(level, 1), 4)}`) as 'h1' | 'h2' | 'h3' | 'h4'
-      return <Tag className={cn('mb-1.5 mt-3 font-semibold text-text', cls)}>{renderChildren(node)}</Tag>
+      const level = Math.min(Math.max(Number(node.attrs?.level) || 2, 1), 4)
+      const Tag = `h${level}` as 'h1' | 'h2' | 'h3' | 'h4'
+      return (
+        <Tag
+          id={headingAnchorId(index)}
+          className={cn('scroll-mt-24 text-text', HEADING_CLASS[level])}
+        >
+          {renderChildren(node)}
+        </Tag>
+      )
     }
     case 'bulletList':
-      return <ul className="my-1.5 list-disc space-y-0.5 pl-5">{renderChildren(node)}</ul>
+      return (
+        <ul className="mb-5 list-disc space-y-1.5 pl-6 text-[17px] leading-[1.65] lg:mb-[22px] lg:text-[18px] lg:leading-[1.7]">
+          {renderChildren(node)}
+        </ul>
+      )
     case 'orderedList':
-      return <ol className="my-1.5 list-decimal space-y-0.5 pl-5">{renderChildren(node)}</ol>
+      return (
+        <ol className="mb-5 list-decimal space-y-1.5 pl-6 text-[17px] leading-[1.65] lg:mb-[22px] lg:text-[18px] lg:leading-[1.7]">
+          {renderChildren(node)}
+        </ol>
+      )
     case 'listItem':
-      return <li>{renderChildren(node)}</li>
+      // Абзац внутри пункта не начинает новый блок — иначе маркер уезжает.
+      return <li className="[&>p]:mb-0">{renderChildren(node)}</li>
     case 'blockquote':
       return (
-        <blockquote className="my-2 border-l-2 border-amber/60 pl-3 text-text2">
+        <blockquote className="my-7 border-l-[3px] border-amber/60 pl-4 text-text2 lg:my-8 [&>p:last-child]:mb-0">
           {renderChildren(node)}
         </blockquote>
       )
     case 'horizontalRule':
-      return <hr className="my-3 border-glass-border" />
+      return <hr className="my-7 border-hair lg:my-8" />
     case 'hardBreak':
       return <br />
     case 'callout': {
       const kind = (node.attrs?.kind as CalloutKind) ?? 'important'
       const meta = CALLOUT_META[kind] ?? CALLOUT_META.important
+      const Icon = meta.icon
       return (
         <div
           className={cn(
-            'my-2 rounded-lg border px-3 py-2',
-            CALLOUT_STYLE[kind] ?? CALLOUT_STYLE.important,
+            'my-7 flex gap-3 rounded-xl border border-l-[3px] px-4 py-3.5 lg:my-8',
+            meta.box,
           )}
         >
-          <p className="mb-0.5 text-xs font-semibold uppercase tracking-wide text-text2">
-            {meta.emoji} {meta.label}
-          </p>
-          {renderChildren(node)}
+          {/* Тип выноски несёт левая полоса 3px, а не иконка: амбер-глиф на
+              16px даёт 1,64:1 в светлой теме — в макете иконка нейтральная. */}
+          <Icon className="mt-px h-5 w-5 shrink-0 text-text2" />
+          <div className="min-w-0 flex-1">
+            <p className="mb-1 text-xs font-bold uppercase tracking-[0.09em] text-text2">
+              {meta.label}
+            </p>
+            <div className="[&>p:last-child]:mb-0 [&>p]:text-[16px] [&>p]:leading-[1.6]">
+              {renderChildren(node)}
+            </div>
+          </div>
         </div>
       )
     }
     case 'table':
       return (
-        <div className="my-2 overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
+        <div className="my-7 overflow-x-auto lg:my-8">
+          <table className="w-full border-collapse text-[15px] leading-[1.5]">
             <tbody>{renderChildren(node)}</tbody>
           </table>
         </div>
@@ -192,7 +259,7 @@ function RenderNode({ node, index }: { node: RichNode; index: number }): ReactNo
             typeof align === 'string' ? ({ textAlign: align } as CSSProperties) : undefined
           }
           className={cn(
-            'border border-glass-border px-2 py-1',
+            'border border-hair px-3 py-2 [&>p]:mb-0 [&>p]:text-[15px] [&>p]:leading-[1.5]',
             node.type === 'tableHeader'
               ? 'bg-surface text-left font-semibold'
               : 'align-top',
@@ -207,7 +274,7 @@ function RenderNode({ node, index }: { node: RichNode; index: number }): ReactNo
       if (renderExtra) return renderExtra(node, index)
       // Fail-closed: старый клиент + новая нода → видимая плашка, не молчание.
       return (
-        <div className="my-2 rounded border border-dashed border-glass-border px-3 py-2 text-xs text-text3">
+        <div className="my-7 rounded-lg border border-dashed border-hair px-4 py-3 text-sm text-text2 lg:my-8">
           Этот блок не поддерживается вашей версией приложения — обновите страницу.
         </div>
       )
@@ -226,7 +293,9 @@ export function RichRenderer({
 }) {
   if (!value || value.schema !== 1 || !value.doc) return null
   const body = (
-    <div className={cn('text-sm text-text', className)}>{renderChildren(value.doc)}</div>
+    <div className={cn('text-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0', className)}>
+      {renderChildren(value.doc)}
+    </div>
   )
   if (!extraNodes) return body
   return <ExtraNodesContext.Provider value={extraNodes}>{body}</ExtraNodesContext.Provider>

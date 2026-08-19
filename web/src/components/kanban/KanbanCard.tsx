@@ -1,36 +1,17 @@
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { CheckCircle2, Circle, ClipboardCheck, Clock, ListTree } from 'lucide-react'
+import { ListTree, Plus } from 'lucide-react'
 import type { CSSProperties } from 'react'
 
+import { PriorityBar } from '@/components/task/PriorityBar'
+import { TaskLabelChip } from '@/components/task/TaskLabelChip'
+import { TaskStatusControl } from '@/components/task/TaskStatusControl'
 import { AvatarStack } from '@/components/ui/AvatarStack'
-import { Badge } from '@/components/ui/Badge'
-import { useProject } from '@/hooks/useProjects'
 import { cn } from '@/lib/cn'
 import { taskAssignees } from '@/lib/taskAssignees'
+import { isOverdue, shortDate } from '@/lib/taskDates'
 import { type Label } from '@/lib/labels'
-import {
-  PRIORITY_LABEL,
-  STATUS_LABEL,
-  taskKey,
-  type SubtaskStats,
-  type Task,
-  type TaskStatus,
-} from '@/lib/tasks'
-
-const STATUS_ICON: Record<TaskStatus, typeof Circle> = {
-  todo: Circle,
-  in_progress: Clock,
-  in_review: ClipboardCheck,
-  done: CheckCircle2,
-}
-
-const STATUS_TONE: Record<TaskStatus, string> = {
-  todo: 'text-text3',
-  in_progress: 'text-amber',
-  in_review: 'text-amber',
-  done: 'text-green',
-}
+import { type SubtaskStats, type Task } from '@/lib/tasks'
 
 interface KanbanCardProps {
   task: Task
@@ -38,13 +19,18 @@ interface KanbanCardProps {
   labels?: Label[]
   onClick?: () => void
   onToggleDone?: () => void
+  /** Карточка в DragOverlay: без sortable-обвязки и без обработчиков. */
+  overlay?: boolean
 }
 
 /**
- * Compact card for board view. Sortable via @dnd-kit.
- * Click anywhere → open task drawer (drag won't trigger thanks to
- * `activationConstraint: { distance: 5 }` on the PointerSensor).
- * Status-icon stops propagation to handle done-toggle independently.
+ * Карточка доски. Геометрия из спеки: радиус 12, рамка `--glass-border`, фон
+ * `--bg-alt`, отбивки 11/12/11/14 (слева больше — там планка приоритета).
+ *
+ * Просрочка показывается ТАК ЖЕ, как в списке: плотный красный текст, а не
+ * серая подпись 10px. Один факт не имеет права выглядеть в двух представлениях
+ * по-разному — это и был главный дефект прежней доски. Ключа «KEY-42» на
+ * карточке нет: он живёт в карточке задачи.
  */
 export function KanbanCard({
   task,
@@ -52,30 +38,33 @@ export function KanbanCard({
   labels,
   onClick,
   onToggleDone,
+  overlay = false,
 }: KanbanCardProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: task.id })
-  const style: CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.4 : 1,
-  }
-  const StatusIcon = STATUS_ICON[task.status]
+  const sortable = useSortable({ id: task.id, disabled: overlay })
+  const style: CSSProperties = overlay
+    ? {}
+    : {
+        transform: CSS.Transform.toString(sortable.transform),
+        transition: sortable.transition,
+        opacity: sortable.isDragging ? 0.4 : 1,
+      }
   const assignees = taskAssignees(task)
-  // Доска живёт только на странице проекта — query уже в кэше, N+1 нет.
-  const key = taskKey(useProject(task.project_id).data?.key, task.seq)
+  const done = task.status === 'done'
+  const overdue = isOverdue(task.due_at, task.status)
+  const hasMeta = (labels?.length ?? 0) > 0 || (subtasks?.total ?? 0) > 0
 
   return (
     <div
-      ref={setNodeRef}
+      ref={overlay ? undefined : sortable.setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
+      {...(overlay ? {} : sortable.attributes)}
+      {...(overlay ? {} : sortable.listeners)}
       onClick={onClick}
       role="button"
-      tabIndex={0}
+      tabIndex={overlay ? -1 : 0}
       aria-roledescription="draggable task"
-      aria-grabbed={isDragging || undefined}
+      aria-grabbed={sortable.isDragging || undefined}
+      aria-label={task.title}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
@@ -83,97 +72,70 @@ export function KanbanCard({
         }
       }}
       className={cn(
-        'glass cursor-grab space-y-2 p-3 active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
-        task.status === 'done' && 'opacity-70',
-        isDragging && 'shadow-glass ring-1 ring-amber',
+        'relative flex cursor-grab flex-col gap-[9px] rounded-xl border border-glass-border bg-bg-alt py-[11px] pl-[14px] pr-3 transition-colors',
+        'hover:bg-glass active:cursor-grabbing',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
+        sortable.isDragging && 'ring-1 ring-amber',
       )}
     >
-      <div className="flex items-start gap-1">
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            onToggleDone?.()
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
+      <PriorityBar priority={task.priority} className="inset-y-[10px]" />
+
+      <div className="flex items-start gap-2.5">
+        <TaskStatusControl status={task.status} size="card" onToggle={onToggleDone} />
+        <span
           className={cn(
-            '-m-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 md:-m-1 md:h-8 md:w-8',
-            STATUS_TONE[task.status],
-          )}
-          title={STATUS_LABEL[task.status]}
-          aria-label={STATUS_LABEL[task.status]}
-        >
-          <StatusIcon className="h-4 w-4" />
-        </button>
-        <p
-          className={cn(
-            'flex-1 text-sm font-medium leading-tight text-text',
-            task.status === 'done' && 'line-through',
+            'min-w-0 flex-1 text-[16px] font-semibold leading-[1.35]',
+            done ? 'text-text2 line-through' : 'text-text',
           )}
         >
-          {key && (
-            <span className="mr-1.5 font-mono text-[10px] font-normal text-text3">
-              {key}
-            </span>
-          )}
           {task.title}
-        </p>
+        </span>
       </div>
 
-      {(task.priority !== 'medium' ||
-        task.due_at ||
-        assignees.length > 0 ||
-        subtasks) && (
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-1">
-            {task.priority !== 'medium' && (
-              <Badge
-                variant={
-                  task.priority === 'urgent' || task.priority === 'high'
-                    ? 'destructive'
-                    : 'secondary'
-                }
-              >
-                {PRIORITY_LABEL[task.priority]}
-              </Badge>
-            )}
-            {subtasks && subtasks.total > 0 && (
-              <span
-                className="inline-flex items-center gap-0.5 text-[10px] text-text3"
-                title={`Подзадачи: ${subtasks.done} из ${subtasks.total} готово`}
-              >
-                <ListTree className="h-3 w-3" /> {subtasks.done}/{subtasks.total}
-              </span>
-            )}
-            {labels?.slice(0, 3).map((l) => (
-              <span
-                key={l.id}
-                className="inline-flex items-center gap-1 rounded-full border border-glass-border px-1.5 text-[10px] text-text2"
-                title={l.name}
-              >
-                <span
-                  className="h-1.5 w-1.5 rounded-full"
-                  style={{ backgroundColor: l.color }}
-                  aria-hidden
-                />
-                {l.name}
-              </span>
-            ))}
-            {labels && labels.length > 3 && (
-              <span className="text-[10px] text-text3">+{labels.length - 3}</span>
-            )}
-            {task.due_at && (
-              <span className="text-[10px] text-text3">
-                {new Date(task.due_at).toLocaleDateString('ru-RU', {
-                  day: 'numeric',
-                  month: 'short',
-                })}
-              </span>
-            )}
-          </div>
-          <AvatarStack people={assignees} size="sm" max={3} />
+      {hasMeta && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {labels?.map((l) => (
+            <TaskLabelChip key={l.id} label={l} />
+          ))}
+          {subtasks && subtasks.total > 0 && (
+            <span
+              className="inline-flex h-[22px] items-center gap-1 text-[13px] text-text2"
+              title={`Подзадачи: ${subtasks.done} из ${subtasks.total}`}
+            >
+              <ListTree className="h-[13px] w-[13px]" strokeWidth={1.9} />
+              {subtasks.done}/{subtasks.total}
+            </span>
+          )}
         </div>
       )}
+
+      <div className="flex items-center justify-between gap-2 border-t border-hair pt-[9px]">
+        <span
+          className={cn(
+            'text-[13px] tabular-nums',
+            overdue ? 'font-semibold text-red' : 'text-text2',
+          )}
+        >
+          {task.due_at ? shortDate(task.due_at) : 'Без срока'}
+        </span>
+        {assignees.length === 0 ? (
+          <button
+            type="button"
+            aria-label="Назначить исполнителя"
+            title="Назначить исполнителя"
+            onClick={(e) => {
+              e.stopPropagation()
+              onClick?.()
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-glass-border text-text2 hover:border-amber hover:text-text"
+          >
+            <Plus className="h-[14px] w-[14px]" strokeWidth={2} />
+          </button>
+        ) : (
+          <AvatarStack people={assignees} max={2} />
+        )}
+      </div>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, ChevronDown, UserRound } from 'lucide-react'
 import { useState } from 'react'
 
 import { Avatar } from '@/components/ui/Avatar'
@@ -12,7 +12,7 @@ import { useTenantMembers } from '@/hooks/useTenantMembers'
 import { cn } from '@/lib/cn'
 
 const TRIGGER_CLASS =
-  'w-full rounded-md border border-glass-border bg-glass px-2 py-1 text-sm text-text placeholder:text-text3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60'
+  'w-full rounded-md border border-glass-border bg-glass px-2 py-1 text-sm text-text placeholder:text-text2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60'
 
 interface PeoplePickerProps {
   /** employee_id выбранного человека или null. */
@@ -29,6 +29,11 @@ interface PeoplePickerProps {
   placeholder?: string
   /** Показывать пункт «Очистить» при выбранном значении. */
   allowClear?: boolean
+  /**
+   * `filter` — компактный комбобокс тулбара: 32px, 12/500, в один ряд с
+   * нативными селектами фильтров (у них общая геометрия SELECT_CLASS).
+   */
+  variant?: 'field' | 'filter'
 }
 
 /**
@@ -44,6 +49,7 @@ export function PeoplePicker({
   currentEmail,
   placeholder = '—',
   allowClear = true,
+  variant = 'field',
 }: PeoplePickerProps) {
   const [query, setQuery] = useState('')
   const members = useTenantMembers(query)
@@ -56,30 +62,43 @@ export function PeoplePicker({
     current?.full_name || current?.email || currentLabel || null
   const email = current?.email ?? currentEmail ?? null
 
+  const isFilter = variant === 'filter'
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild disabled={disabled}>
         <button
           type="button"
           className={cn(
-            TRIGGER_CLASS,
-            'flex items-center justify-between gap-2 text-left',
+            isFilter
+              ? 'inline-flex h-8 shrink-0 items-center gap-[7px] whitespace-nowrap rounded-md border border-glass-border bg-glass px-2.5 text-[12px] font-medium text-text2 hover:bg-surface focus-visible:border-amber focus-visible:outline-none'
+              : cn(TRIGGER_CLASS, 'flex items-center justify-between gap-2 text-left'),
             disabled && 'cursor-not-allowed opacity-60',
           )}
         >
           <div className="flex min-w-0 items-center gap-2">
-            {value && (
-              <Avatar
-                name={label}
-                email={email}
-                className="h-5 w-5 text-[9px]"
-              />
+            {value ? (
+              <Avatar name={label} email={email} className="h-5 w-5 text-[12px]" />
+            ) : (
+              isFilter && (
+                <span className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-glass-border text-text2">
+                  <UserRound className="h-3 w-3" strokeWidth={2} />
+                </span>
+              )
             )}
-            <span className={cn('truncate', value ? 'text-text' : 'text-text3')}>
+            <span
+              className={cn(
+                'truncate',
+                value ? 'text-text' : isFilter ? 'text-text2' : 'text-text2',
+              )}
+            >
               {value ? label || value : placeholder}
             </span>
           </div>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+          <ChevronDown
+            className={cn('shrink-0', isFilter ? 'h-[13px] w-[13px]' : 'h-3.5 w-3.5 opacity-60')}
+            strokeWidth={2.2}
+          />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-[260px]">
@@ -93,7 +112,7 @@ export function PeoplePicker({
           />
         </div>
         {options.length === 0 && (
-          <div className="px-2 py-1.5 text-xs text-text3">Никого не нашли</div>
+          <div className="px-2 py-1.5 text-[13px] text-text2">Никого не нашли</div>
         )}
         {options.map((m) => (
           <DropdownMenuItem
@@ -103,7 +122,7 @@ export function PeoplePicker({
             <Avatar
               name={m.full_name}
               email={m.email}
-              className="mr-2 h-5 w-5 text-[9px]"
+              className="mr-2 h-5 w-5 text-[12px]"
             />
             <span className="flex-1 truncate">
               {m.full_name || m.email || m.employee_id}

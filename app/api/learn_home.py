@@ -12,17 +12,22 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from signaris_auth import Principal
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.courses import list_courses
-from app.api.library import _effective_ack_version, _not_acked
+from app.api.library import _effective_ack_version, _not_acked, ack_deadline_for
+from app.api.products import _photo_urls
 from app.api.quizzes import rating as rating_endpoint
 from app.deps import get_db, require_auth
+from app.models.activity import ActivityEvent
+from app.models.audience import AudienceMember
 from app.models.library import LibraryMaterial
 from app.models.org import Department, Position, Store
+from app.models.product import ProductCard
+from app.models.quiz import QuizQuestion
 from app.models.search_document import SearchDocument
-from app.models.survey import Survey, SurveyParticipation
+from app.models.survey import Survey, SurveyParticipation, SurveyQuestion
 from app.schemas.product import (
     HomeAck,
     HomeAssessment,
@@ -81,13 +86,24 @@ async def learn_home(
             .scalars()
             .all()
         )
+        granted_at_by_audience: dict[UUID, datetime] = {
+            r[0]: r[1]
+            for r in await db.execute(
+                select(AudienceMember.audience_id, AudienceMember.granted_at).where(
+                    AudienceMember.profile_id == profile_id
+                )
+            )
+        }
         for material in materials:
             if await _not_acked(db, material, [profile_id]):
-                deadline = None
-                if material.ack_deadline_days and material.published_at:
-                    deadline = material.published_at + timedelta(
-                        days=material.ack_deadline_days
-                    )
+                # Та же формула, что в библиотеке: попавший в аудиторию позже
+                # публикации получает свои дни целиком.
+                deadline = ack_deadline_for(
+                    material,
+                    granted_at_by_audience.get(material.audience_id)
+                    if material.audience_id
+                    else None,
+                )
                 pending_acks.append(
                     HomeAck(
                         id=material.id,
@@ -114,6 +130,21 @@ async def learn_home(
         .scalars()
         .all()
     )
+    product_photos: dict[UUID, str] = {}
+    product_ids = [d.object_id for d in novelty_rows if d.object_type == "product"]
+    if product_ids:
+        for card in (
+            (
+                await db.execute(
+                    select(ProductCard).where(ProductCard.id.in_(product_ids))
+                )
+            )
+            .scalars()
+            .all()
+        ):
+            urls = _photo_urls(card)
+            if urls:
+                product_photos[card.id] = urls[0]
     novelties = [
         HomeNovelty(
             object_type=d.object_type,
@@ -121,6 +152,7 @@ async def learn_home(
             title=d.title,
             url_path=d.url_path,
             published_at=d.published_at,
+            image_url=product_photos.get(d.object_id),
         )
         for d in novelty_rows
     ]
@@ -147,12 +179,33 @@ async def learn_home(
             .scalars()
             .all()
         )
-        surveys = [
-            HomeSurvey(id=s.id, title=s.title, kind=s.kind, closes_at=s.closes_at)
+        open_surveys = [
+            s
             for s in survey_rows
             if (s.opens_at is None or s.opens_at <= now)
             and (s.closes_at is None or s.closes_at > now)
         ][:5]
+        question_counts: dict[UUID, int] = {}
+        if open_surveys:
+            question_counts = {
+                r[0]: r[1]
+                for r in await db.execute(
+                    select(SurveyQuestion.survey_id, func.count())
+                    .where(SurveyQuestion.survey_id.in_([s.id for s in open_surveys]))
+                    .group_by(SurveyQuestion.survey_id)
+                )
+            }
+        surveys = [
+            HomeSurvey(
+                id=s.id,
+                title=s.title,
+                kind=s.kind,
+                closes_at=s.closes_at,
+                question_count=question_counts.get(s.id, 0),
+                is_anonymous=s.is_anonymous,
+            )
+            for s in open_surveys
+        ]
 
     # 5) Активные аттестации, которые ещё не сданы (QA-находка: сотрудник
     # узнавал об аттестации только из уведомления или нав-пункта).
@@ -160,7 +213,6 @@ async def learn_home(
     if profile_id:
         from app.api.assessments import _campaign_quiz, _in_window
         from app.models.assessment import AssessmentCampaign
-        from app.models.audience import AudienceMember
         from app.models.quiz import QuizAttempt
 
         now = datetime.now(UTC)
@@ -198,9 +250,19 @@ async def learn_home(
                 )
             ).first()
             if passed is None:
+                question_count = (
+                    await db.execute(
+                        select(func.count())
+                        .select_from(QuizQuestion)
+                        .where(QuizQuestion.quiz_id == quiz.id)
+                    )
+                ).scalar_one()
                 assessments.append(
                     HomeAssessment(
-                        id=campaign.id, title=campaign.title, ends_at=campaign.ends_at
+                        id=campaign.id,
+                        title=campaign.title,
+                        ends_at=campaign.ends_at,
+                        question_count=int(question_count),
                     )
                 )
             if len(assessments) >= 5:
@@ -211,10 +273,20 @@ async def learn_home(
     if profile_id:
         rating_data = await rating_endpoint("month", "all", principal, db)
         me = rating_data.me
+        # Дельта за 7 дней — по тем же activity_events, что и сам рейтинг.
+        week_points = (
+            await db.execute(
+                select(func.coalesce(func.sum(ActivityEvent.points), 0)).where(
+                    ActivityEvent.profile_id == profile_id,
+                    ActivityEvent.occurred_at >= datetime.now(UTC) - timedelta(days=7),
+                )
+            )
+        ).scalar_one()
         home_rating = HomeRating(
             points=me.points if me else 0.0,
             rank=me.rank if me else None,
             total_participants=rating_data.total_participants,
+            delta_week=float(week_points or 0),
         )
 
     return HomeResponse(

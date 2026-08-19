@@ -20,7 +20,7 @@ interface CustomFieldEditorProps {
 }
 
 const INPUT_CLASS =
-  'w-full rounded-md border border-glass-border bg-glass px-2 py-1 text-sm text-text placeholder:text-text3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60'
+  'w-full rounded-md border border-glass-border bg-glass px-2 py-1 text-sm text-text placeholder:text-text2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60'
 
 /**
  * Inline editor for one (definition, value) pair. Type-switch:
@@ -174,7 +174,7 @@ function SelectEditor({
             'flex items-center justify-between text-left',
           )}
         >
-          <span className={cn(current ? 'text-text' : 'text-text3')}>
+          <span className={cn(current ? 'text-text' : 'text-text2')}>
             {current?.label ?? '—'}
           </span>
           <ChevronDown className="h-3.5 w-3.5 opacity-60" />
@@ -234,7 +234,7 @@ function MultiSelectEditor({
           <span
             className={cn(
               'truncate',
-              labels.length ? 'text-text' : 'text-text3',
+              labels.length ? 'text-text' : 'text-text2',
             )}
           >
             {labels.length ? labels.join(', ') : '—'}

@@ -34,17 +34,17 @@ export function ColumnsMenu({ projectId }: ColumnsMenuProps) {
           <Columns3 className="h-3.5 w-3.5" />
           Колонки
           {visible.length > 0 && (
-            <span className="ml-1 text-xs text-text3">({visible.length})</span>
+            <span className="ml-1 text-[13px] text-text2">({visible.length})</span>
           )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[220px]">
-        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-text3">
-          Кастом-поля
+        <DropdownMenuLabel className="text-[12px] uppercase tracking-[0.07em] text-text2">
+          Показывать поля
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {defs.isError && (
-          <p className="px-2 py-1.5 text-xs text-red">Не удалось загрузить поля</p>
+          <p className="px-2 py-1.5 text-[13px] text-red">Не удалось загрузить поля</p>
         )}
         {defs.data?.map((d) => {
           const checked = visible.includes(d.id)

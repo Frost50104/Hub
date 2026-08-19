@@ -63,6 +63,7 @@ import {
 } from '@/hooks/useProjects'
 import { authClient } from '@/lib/auth'
 import { useTheme } from '@/lib/theme'
+import { ProjectKeyChip } from '@/components/project/ProjectKeyChip'
 import { cn } from '@/lib/cn'
 import { HUB_ROLE_BADGE } from '@/lib/learn'
 import {
@@ -85,20 +86,6 @@ const NAV_ITEMS = [
   { to: '/inbox', label: 'Входящие', icon: Inbox, end: false, badge: true },
 ] as const
 
-function projectColorFor(projectId: string): string {
-  let hash = 0
-  for (const ch of projectId) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
-  const palette = [
-    'bg-amber/30 text-amber',
-    'bg-green/20 text-green',
-    'bg-blue-500/20 text-blue-300',
-    'bg-pink-500/20 text-pink-300',
-    'bg-purple-500/20 text-purple-300',
-    'bg-cyan-500/20 text-cyan-300',
-  ]
-  return palette[hash % palette.length] ?? palette[0]!
-}
-
 /** Данные драга сайдбара = общий контракт + снапшот для DragOverlay.
  *  Снапшот, а не поиск по useProjects(): Sidebar на список не подписан. */
 interface SidebarDragData extends ProjectDragData {
@@ -112,14 +99,10 @@ interface SidebarDragData extends ProjectDragData {
 function ProjectDragPreview({ drag }: { drag: SidebarDragData }) {
   return (
     <div className="flex h-full w-full items-center gap-2 rounded-md border border-glass-border bg-bg-alt px-2 py-1.5 text-sm text-text shadow-glass">
-      <span
-        className={cn(
-          'flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] font-semibold uppercase',
-          projectColorFor(drag.projectId),
-        )}
-      >
-        {drag.projectKey.slice(0, 2)}
-      </span>
+      <ProjectKeyChip
+        project={{ key: drag.projectKey, is_favorite: false }}
+        size="sm"
+      />
       <span className="truncate">{drag.name}</span>
     </div>
   )
@@ -194,7 +177,7 @@ function FolderNavGroup({
         <button
           type="button"
           onClick={() => toggle(folder.id)}
-          className="flex w-full items-center gap-1 px-2 py-0.5 text-left text-[11px] font-semibold uppercase tracking-wider text-text3 hover:text-text2"
+          className="flex w-full items-center gap-1 px-2 py-0.5 text-left text-[12px] font-semibold uppercase tracking-wider text-text2 hover:text-text2"
         >
           {collapsed ? (
             <ChevronRight className="h-3 w-3 shrink-0" />
@@ -207,7 +190,7 @@ function FolderNavGroup({
           </span>
         </button>
       ) : (
-        <div className="flex w-full items-center gap-1 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-text3">
+        <div className="flex w-full items-center gap-1 px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wider text-text2">
           {/* спейсер вместо шеврона — текст на одной вертикали с папками */}
           <span className="w-3 shrink-0" />
           <span className="truncate">Без папки</span>
@@ -218,7 +201,7 @@ function FolderNavGroup({
       )}
       {!collapsed && items}
       {dragging && !collapsed && group.projects.length === 0 && (
-        <p className="mx-2 mt-0.5 rounded-md border border-dashed border-glass-border px-2 py-1.5 text-[11px] text-text3">
+        <p className="mx-2 mt-0.5 rounded-md border border-dashed border-glass-border px-2 py-1.5 text-[12px] text-text2">
           Перенести сюда
         </p>
       )}
@@ -253,7 +236,7 @@ function ProjectsList({
     )
   }
   if (!data || data.length === 0) {
-    return <p className="px-3 py-1 text-xs text-text3">Нет проектов</p>
+    return <p className="px-3 py-1 text-xs text-text2">Нет проектов</p>
   }
   const favorites = data.filter((p) => p.is_favorite)
   return (
@@ -261,7 +244,7 @@ function ProjectsList({
       {favorites.length > 0 && (
         <>
           {/* Избранное — персональный сквозной срез, папки его не касаются. */}
-          <p className="flex items-center gap-1 px-2 pb-0.5 text-[11px] font-semibold uppercase tracking-wider text-text3">
+          <p className="flex items-center gap-1 px-2 pb-0.5 text-[12px] font-semibold uppercase tracking-wider text-text2">
             <Star className="h-3 w-3 fill-amber text-amber" /> Избранное
           </p>
           <ul className="space-y-0.5 pb-2">
@@ -351,21 +334,14 @@ function ProjectLinkItem({
         {...listeners}
         className={({ isActive }) =>
           cn(
-            'group flex select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
+            'group flex h-[34px] select-none items-center gap-[9px] rounded-[9px] px-2 text-[14px] transition-colors',
             isActive
-              ? 'bg-surface text-text'
-              : 'text-text2 hover:bg-glass hover:text-text',
+              ? 'bg-surface font-semibold text-text'
+              : 'font-medium text-text2 hover:bg-glass hover:text-text',
           )
         }
       >
-        <span
-          className={cn(
-            'flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] font-semibold uppercase',
-            projectColorFor(project.id),
-          )}
-        >
-          {project.key.slice(0, 2)}
-        </span>
+        <ProjectKeyChip project={project} size="sm" />
         <span className="truncate">{project.name}</span>
       </NavLink>
     </li>
@@ -524,7 +500,7 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
           Hub
         </span>
         {me.data?.hub_role && (
-          <span className="ml-1 text-[10px] font-semibold uppercase tracking-widest text-text3">
+          <span className="ml-1 text-[12px] font-semibold uppercase tracking-widest text-text2">
             {HUB_ROLE_BADGE[me.data.hub_role]}
           </span>
         )}
@@ -579,7 +555,7 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
             <Icon className="h-4 w-4" />
             <span className="flex-1">{label}</span>
             {badge && unreadCount > 0 && (
-              <span className="rounded-full bg-amber px-1.5 py-0.5 text-[10px] font-semibold text-on-amber">
+              <span className="rounded-full bg-amber px-1.5 py-0.5 text-[12px] font-semibold text-on-amber">
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}
@@ -589,7 +565,7 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
 
       <div className="flex flex-1 min-h-0 flex-col gap-1 overflow-y-auto">
         <div className="flex items-center justify-between px-1 pb-1 pt-2">
-          <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-text3">
+          <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-text2">
             <Folder className="h-3.5 w-3.5" /> Проекты
           </span>
           {/* Меню только когда есть права на папки: из одного пункта оно
@@ -599,7 +575,7 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="rounded p-1 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                  className="rounded p-1 text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
                   aria-label="Создать проект или папку"
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -620,7 +596,7 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
             <button
               type="button"
               onClick={() => setCreateProjectOpen(true)}
-              className="rounded p-1 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+              className="rounded p-1 text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
               aria-label="Новый проект"
             >
               <Plus className="h-3.5 w-3.5" />
@@ -636,20 +612,22 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
             name={me.data?.full_name}
             email={me.data?.email}
             src={me.data?.avatar_url}
-            className="h-7 w-7 text-[10px]"
+            className="h-7 w-7 text-[13px]"
           />
           <div className="min-w-0">
-            <p className="truncate text-xs font-medium text-text">
+            <p className="truncate text-[13px] font-medium leading-[1.35] text-text">
               {me.data?.full_name || me.data?.email || '—'}
             </p>
-            <p className="truncate text-[10px] text-text3">{me.data?.email ?? ''}</p>
+            <p className="truncate text-[12px] leading-[1.35] text-text2">
+              {me.data?.email ?? ''}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-1">
           <Link
             to="/settings/notifications"
             onClick={onItemClick}
-            className="rounded p-1.5 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+            className="rounded p-1.5 text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
             aria-label="Настройки"
             title="Настройки"
           >
@@ -659,7 +637,7 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
             onClick={() => {
               void authClient.logout()
             }}
-            className="rounded p-1.5 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+            className="rounded p-1.5 text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
             aria-label="Выйти"
             title="Выйти"
           >

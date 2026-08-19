@@ -48,7 +48,7 @@ export function CalendarCell({
             'inline-flex h-5 w-5 items-center justify-center text-xs',
             isToday && 'rounded-full bg-amber font-semibold text-on-amber',
             !isToday && isCurrentMonth && 'text-text2',
-            !isCurrentMonth && 'text-text3',
+            !isCurrentMonth && 'text-text2',
           )}
           aria-current={isToday ? 'date' : undefined}
         >
@@ -69,7 +69,7 @@ export function CalendarCell({
           <button
             type="button"
             onClick={() => setExpanded(true)}
-            className="rounded px-1 py-0.5 text-left text-[10px] text-text3 hover:bg-glass hover:text-text"
+            className="rounded px-1 py-0.5 text-left text-[12px] text-text2 hover:bg-glass hover:text-text"
           >
             +{hiddenCount} ещё
           </button>

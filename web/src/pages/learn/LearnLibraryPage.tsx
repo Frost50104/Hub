@@ -1,26 +1,28 @@
 import {
   Archive,
-  BookOpen,
   Check,
-  CheckCircle2,
+  ChevronRight,
+  CircleAlert,
   ExternalLink,
   FileText,
   FolderCog,
   Link2,
   Pencil,
   Plus,
+  Search,
   Send,
   Upload,
   Users,
+  X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
-import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
+import { MetaLine } from '@/components/ui/MetaLine'
 import { Button } from '@/components/ui/Button'
 import {
   Dialog,
@@ -35,8 +37,8 @@ import { Label } from '@/components/ui/Label'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useLibrary, useLibraryMutation } from '@/hooks/useLearn'
-import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/cn'
+import { nbsp, plural } from '@/lib/typography'
 import {
   CONTENT_STATUS_LABEL,
   learnApi,
@@ -59,9 +61,56 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
 }
 
+/** Расширение файла для плитки: тип не кодируется цветом — он написан текстом. */
+function extLabel(m: LibraryMaterial): string {
+  if (m.kind === 'link') return ''
+  const name = m.current_version?.file_name ?? ''
+  const dot = name.lastIndexOf('.')
+  const ext = dot > 0 ? name.slice(dot + 1) : ''
+  return ext.slice(0, 4).toUpperCase() || 'ФАЙЛ'
+}
+
+function materialMeta(m: LibraryMaterial): string[] {
+  return [
+    m.kind === 'link'
+      ? 'внешняя ссылка'
+      : m.current_version
+        ? `v${m.current_version.version_no} · ${formatSize(m.current_version.size_bytes)}`
+        : 'файл не загружен',
+    m.owner_name ? `владелец: ${m.owner_name}` : '',
+    `обновлён ${formatDate(m.updated_at)}`,
+  ].filter(Boolean)
+}
+
+/** «до 20 августа · осталось 3 дня» — срок ознакомления лично для меня. */
+function ackDeadlineText(m: LibraryMaterial): string {
+  if (!m.ack_deadline_at) return 'Требует ознакомления'
+  const due = new Date(m.ack_deadline_at)
+  const when = due.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+  const days = Math.ceil((due.getTime() - Date.now()) / 86_400_000)
+  if (days < 0) return `Просрочено · срок был ${when}`
+  if (days === 0) return `Ознакомиться до ${when} · сегодня последний день`
+  return `Ознакомиться до ${when} · осталось ${plural(days, 'день', 'дня', 'дней')}`
+}
+
+function ExtTile({ material, accent }: { material: LibraryMaterial; accent?: boolean }) {
+  return (
+    <span
+      className={cn(
+        'flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border font-display text-[9px] font-bold tracking-[0.02em]',
+        accent
+          ? 'border-transparent bg-amber text-on-amber'
+          : 'border-hair bg-surface text-text2',
+      )}
+    >
+      {material.kind === 'link' ? <Link2 className="h-[18px] w-[18px]" /> : extLabel(material)}
+    </span>
+  )
+}
+
 export function LearnLibraryPage() {
-  const isDesktop = useIsDesktop()
   const [params, setParams] = useSearchParams()
+  const [query, setQuery] = useState('')
   const [sectionFilter, setSectionFilter] = useState<string>('')
   const [createOpen, setCreateOpen] = useState(false)
   const [sectionsOpen, setSectionsOpen] = useState(false)
@@ -87,123 +136,202 @@ export function LearnLibraryPage() {
     setParams(next, { replace: true })
   }
 
-  const sections = data?.sections ?? []
-  const materials = useMemo(() => {
-    let list = data?.materials ?? []
-    if (sectionFilter) list = list.filter((m) => m.section_id === sectionFilter)
-    return list
-  }, [data, sectionFilter])
+  // `?? []` каждый раз создаёт новый массив и обнуляет мемоизацию ниже.
+  const sections = useMemo(() => data?.sections ?? [], [data])
+  const sectionTitle = useMemo(
+    () => new Map(sections.map((s) => [s.id, s.title])),
+    [sections],
+  )
 
-  const pendingCount = (data?.materials ?? []).filter((m) => m.ack_pending).length
+  const all = useMemo(() => data?.materials ?? [], [data])
+
+  // Поиск и раздел фильтруют ОБА блока: иначе над результатами поиска висели
+  // бы нерелевантные амбер-карточки просто потому, что они срочные.
+  const matching = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return all
+      .filter((m) => (sectionFilter ? m.section_id === sectionFilter : true))
+      .filter((m) => {
+        if (!q) return true
+        const section = m.section_id ? (sectionTitle.get(m.section_id) ?? '') : ''
+        return m.title.toLowerCase().includes(q) || section.toLowerCase().includes(q)
+      })
+  }, [all, query, sectionFilter, sectionTitle])
+
+  // Требующие ознакомления и общий список — подмножества одного массива:
+  // документ не может встретиться дважды на одном экране.
+  const urgent = useMemo(() => matching.filter((m) => m.ack_pending), [matching])
+  const materials = useMemo(() => matching.filter((m) => !m.ack_pending), [matching])
+
+  const searching = query.trim().length > 0 || sectionFilter !== ''
+  const found = searching
+    ? `${matching.length} из ${all.length}`
+    : plural(all.length, 'документ', 'документа', 'документов')
 
   return (
-    <div className="mx-auto max-w-5xl">
-      {!isDesktop && <MobilePageHeader eyebrow="Обучение" title="Библиотека" />}
-      <div className="space-y-4 p-4 lg:p-8">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          {isDesktop && (
-            <h1 className="font-display text-2xl font-bold text-text">Библиотека</h1>
-          )}
-          {canManage && (
-            <div className="flex flex-wrap gap-2">
-              {['admin', 'publisher'].includes(data?.content_role ?? '') && (
-                <Button variant="secondary" onClick={() => setSectionsOpen(true)}>
-                  <FolderCog className="h-4 w-4" /> Разделы
-                </Button>
-              )}
-              <Button onClick={() => setCreateOpen(true)}>
-                <Plus className="h-4 w-4" /> Материал
+    <div className="mx-auto max-w-[680px]">
+      <header className="flex items-end justify-between gap-3 px-5 pt-11">
+        <div className="min-w-0">
+          <p className="mb-1 text-xs leading-[1.35] text-text2">{nbsp(found)}</p>
+          <h1 className="font-display text-[28px] font-bold leading-[1.18] tracking-[0.01em] text-text lg:text-[34px] lg:leading-[1.15]">
+            Библиотека
+          </h1>
+        </div>
+        {canManage && (
+          <div className="flex shrink-0 flex-wrap justify-end gap-2">
+            {['admin', 'publisher'].includes(data?.content_role ?? '') && (
+              <Button variant="secondary" onClick={() => setSectionsOpen(true)}>
+                <FolderCog className="h-4 w-4" /> Разделы
               </Button>
-            </div>
+            )}
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4" /> Материал
+            </Button>
+          </div>
+        )}
+      </header>
+
+      {/* Поле 48px, input растянут на всю высоту строки: иначе фокус ловит 23px. */}
+      <div className="px-5 pt-4">
+        <div className="flex min-h-[48px] items-center gap-2.5 rounded-xl border border-glass-border bg-tint px-3.5">
+          <Search className="h-[18px] w-[18px] shrink-0 text-text2" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Название или раздел"
+            aria-label="Поиск по библиотеке"
+            className="min-w-0 flex-1 self-stretch border-none bg-transparent text-[16px] text-text outline-none placeholder:text-text2"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              aria-label="Очистить"
+              className="-mr-2.5 flex h-11 w-11 shrink-0 items-center justify-center text-text2 hover:text-text"
+            >
+              <X className="h-[18px] w-[18px]" />
+            </button>
           )}
         </div>
+      </div>
 
-        {pendingCount > 0 && (
-          <div className="flex items-center gap-2 rounded-xl border border-amber/40 bg-amber/10 px-4 py-2.5 text-sm text-text">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-amber" />
-            Требуют ознакомления: <b>{pendingCount}</b>
-          </div>
+      <div className="flex flex-col gap-7 px-5 pb-8 pt-6">
+        {probe.isLoading && <SkeletonRows rows={6} rowClassName="h-[56px]" />}
+        {probe.isError && <QueryError onRetry={() => void probe.refetch()} />}
+
+        {urgent.length > 0 && (
+          <section className="flex flex-col gap-2.5">
+            <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.09em] text-text2">
+              <CircleAlert className="h-[15px] w-[15px]" strokeWidth={2.2} />
+              Требуют ознакомления
+            </p>
+            {urgent.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setOpened(m.id)}
+                className="flex min-h-[56px] items-center gap-3 rounded-[14px] border border-amber/40 bg-amber/[0.06] px-3.5 py-3 text-left"
+              >
+                <ExtTile material={m} accent />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[16px] font-semibold leading-[1.35] text-text">
+                    {m.title}
+                  </span>
+                  <span className="mt-0.5 block text-[13px] text-text">
+                    {nbsp(ackDeadlineText(m))}
+                  </span>
+                </span>
+                <ChevronRight className="h-[18px] w-[18px] shrink-0 text-text2" />
+              </button>
+            ))}
+          </section>
         )}
 
         {sections.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            <SectionChip
-              label="Все"
-              active={sectionFilter === ''}
-              onClick={() => setSectionFilter('')}
-            />
-            {sections.map((s) => (
-              <SectionChip
-                key={s.id}
-                label={s.title}
-                active={sectionFilter === s.id}
-                onClick={() => setSectionFilter(s.id)}
-              />
-            ))}
-          </div>
-        )}
-
-        {probe.isLoading && <SkeletonRows rows={6} />}
-        {probe.isError && <QueryError onRetry={() => void probe.refetch()} />}
-        {data && materials.length === 0 && (
-          <div className="rounded-xl border border-glass-border bg-glass p-8 text-center">
-            <BookOpen className="mx-auto h-8 w-8 text-text3" />
-            <p className="mt-3 text-sm text-text2">
-              {sectionFilter ? 'В этом разделе пока пусто.' : 'В библиотеке пока пусто.'}
+          <section className="flex flex-col gap-2.5">
+            <p className="text-xs font-bold uppercase tracking-[0.09em] text-text2">
+              Разделы
             </p>
-            {canManage && (
-              <p className="mt-1 text-xs text-text3">
-                Нажмите «Материал», чтобы загрузить первый документ.
-              </p>
-            )}
-          </div>
+            <div className="flex flex-wrap gap-2">
+              <SectionChip
+                label="Все"
+                active={sectionFilter === ''}
+                onClick={() => setSectionFilter('')}
+              />
+              {sections.map((s) => (
+                <SectionChip
+                  key={s.id}
+                  label={s.title}
+                  active={sectionFilter === s.id}
+                  onClick={() => setSectionFilter(s.id)}
+                />
+              ))}
+            </div>
+          </section>
         )}
 
-        <ul className="space-y-2">
-          {materials.map((m) => (
-            <li key={m.id}>
+        <section className="flex flex-col gap-2.5">
+          <p className="text-xs font-bold uppercase tracking-[0.09em] text-text2">
+            Документы
+          </p>
+
+          {data && materials.length === 0 && urgent.length === 0 && (
+            <div className="flex flex-col items-center gap-3 px-5 py-12 text-center">
+              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-surface text-text2">
+                <Search className="h-[26px] w-[26px]" strokeWidth={1.7} />
+              </span>
+              <p className="text-[16px] leading-[1.6] text-text2 [text-wrap:pretty]">
+                {searching
+                  ? 'Ничего не нашлось. Попробуйте короче — например «кофемашина» вместо полного названия.'
+                  : 'В библиотеке пока пусто.'}
+              </p>
+              {searching && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery('')
+                    setSectionFilter('')
+                  }}
+                  className="inline-flex min-h-[44px] items-center justify-center rounded-[10px] border border-glass-border px-[18px] text-[15px] font-semibold text-text"
+                >
+                  Сбросить поиск
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            {materials.map((m) => (
               <button
+                key={m.id}
+                type="button"
                 onClick={() => setOpened(m.id)}
-                className="flex w-full items-center gap-3 rounded-xl border border-glass-border bg-glass px-4 py-3 text-left transition-colors hover:border-amber/40 hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                className="flex min-h-[56px] items-center gap-3 rounded-[14px] border border-hair px-3 py-2.5 text-left transition-colors hover:border-amber/40"
               >
-                {m.kind === 'link' ? (
-                  <Link2 className="h-5 w-5 shrink-0 text-text3" />
-                ) : (
-                  <FileText className="h-5 w-5 shrink-0 text-text3" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-text">{m.title}</p>
-                  <p className="truncate text-xs text-text3">
-                    {[
-                      m.current_version
-                        ? `v${m.current_version.version_no} · ${formatSize(m.current_version.size_bytes)}`
-                        : m.kind === 'link'
-                          ? 'внешняя ссылка'
-                          : 'файл не загружен',
-                      m.owner_name && `владелец: ${m.owner_name}`,
-                      `обновлён ${formatDate(m.updated_at)}`,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </p>
-                </div>
+                <ExtTile material={m} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[15px] font-semibold leading-[1.35] text-text lg:text-[16px]">
+                    {m.title}
+                  </span>
+                  <MetaLine
+                    className="mt-0.5 text-[13px] text-text2 lg:text-sm"
+                    items={materialMeta(m)}
+                  />
+                </span>
                 {canManage && m.status !== 'published' && (
-                  <Badge variant="outline" className="text-text3">
-                    {CONTENT_STATUS_LABEL[m.status]}
-                  </Badge>
-                )}
-                {m.ack_pending && (
-                  <Badge variant="outline" className="border-amber/50 text-amber">
-                    ознакомиться
-                  </Badge>
+                  <Badge variant="secondary">{CONTENT_STATUS_LABEL[m.status]}</Badge>
                 )}
                 {m.requires_acknowledgement && m.acked_by_me && (
                   <Check className="h-4 w-4 shrink-0 text-green" />
                 )}
+                {m.kind === 'link' && (
+                  <ExternalLink className="h-4 w-4 shrink-0 text-text2" />
+                )}
               </button>
-            </li>
-          ))}
-        </ul>
+            ))}
+          </div>
+        </section>
       </div>
 
       {openedMaterial && data && (
@@ -215,11 +343,7 @@ export function LearnLibraryPage() {
         />
       )}
       {createOpen && data && (
-        <MaterialFormDialog
-          data={data}
-          material={null}
-          onClose={() => setCreateOpen(false)}
-        />
+        <MaterialFormDialog data={data} material={null} onClose={() => setCreateOpen(false)} />
       )}
       {sectionsOpen && data && (
         <SectionsDialog sections={data.sections} onClose={() => setSectionsOpen(false)} />
@@ -241,8 +365,11 @@ function SectionChip({
     <button
       onClick={onClick}
       className={cn(
-        'rounded-full px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
-        active ? 'bg-amber text-on-amber' : 'bg-glass text-text2 hover:text-text',
+        // 44px — тап-таргет, а не декоративная высота чипа.
+        'inline-flex min-h-[44px] items-center whitespace-nowrap rounded-full border px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+        active
+          ? 'border-amber bg-amber text-on-amber'
+          : 'border-hair text-text2 hover:text-text',
       )}
     >
       {label}
@@ -358,6 +485,14 @@ function MaterialDialog({
                 >
                   <Check className="h-4 w-4" /> Ознакомлен
                 </Button>
+              )}
+            {material.requires_acknowledgement &&
+              material.status === 'published' &&
+              !material.acked_by_me &&
+              !openedLocally && (
+                <p className="w-full text-[13px] leading-[1.45] text-text2">
+                  Отметка станет доступна, когда вы откроете документ.
+                </p>
               )}
             {material.requires_acknowledgement && material.acked_by_me && (
               <span className="flex items-center gap-1.5 text-sm text-green">

@@ -13,6 +13,7 @@ import {
   useCreateComment,
   useDeleteComment,
 } from '@/hooks/useThreads'
+import { DrawerSection } from '@/components/task/DrawerSection'
 import { cn } from '@/lib/cn'
 import { STATUS_LABEL, type TaskStatus } from '@/lib/tasks'
 import { type Activity, type Comment } from '@/lib/threads'
@@ -100,14 +101,14 @@ function CommentBubble({
       <Avatar
         name={comment.author_full_name}
         email={comment.author_email}
-        className="h-8 w-8 shrink-0 text-[10px]"
+        className="h-8 w-8 shrink-0 text-[12px]"
       />
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-medium text-text">
             {comment.author_full_name || comment.author_email || 'Аноним'}
           </span>
-          <span className="text-[10px] text-text3">
+          <span className="text-[12px] text-text2">
             {new Date(comment.created_at).toLocaleString('ru-RU', {
               day: 'numeric',
               month: 'short',
@@ -115,13 +116,13 @@ function CommentBubble({
               minute: '2-digit',
             })}
             {comment.edited_at && (
-              <span className="ml-1 italic text-text3">(ред.)</span>
+              <span className="ml-1 italic text-text2">(ред.)</span>
             )}
           </span>
           {isMine && (
             <button
               onClick={onDelete}
-              className="ml-auto rounded p-0.5 text-text3 opacity-0 transition-opacity hover:text-red group-hover:opacity-100"
+              className="ml-auto rounded p-0.5 text-text2 opacity-0 transition-opacity hover:text-red group-hover:opacity-100"
               aria-label="Удалить"
               title="Удалить"
             >
@@ -137,7 +138,7 @@ function CommentBubble({
 
 function ActivityRow({ text, at }: { text: string; at: string }) {
   return (
-    <div className="flex items-center gap-3 py-1 text-xs text-text3">
+    <div className="flex items-center gap-3 py-1 text-xs text-text2">
       <span className="ml-1 h-1 w-1 shrink-0 rounded-full bg-text3" />
       <span className="flex-1">{text}</span>
       <span>
@@ -188,10 +189,7 @@ export function TaskThread({ taskId }: TaskThreadProps) {
 
   return (
     <div className="space-y-5">
-      <section className="space-y-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-text3">
-          Комментарии {comments.data ? `(${comments.data.length})` : ''}
-        </h3>
+      <DrawerSection title="Обсуждение" count={comments.data?.length ?? null}>
 
         <div className="space-y-3">
           {comments.isError && (
@@ -211,7 +209,7 @@ export function TaskThread({ taskId }: TaskThreadProps) {
             />
           ))}
           {comments.data && comments.data.length === 0 && (
-            <p className="text-xs text-text3">Комментариев пока нет.</p>
+            <p className="text-xs text-text2">Комментариев пока нет.</p>
           )}
         </div>
 
@@ -229,7 +227,7 @@ export function TaskThread({ taskId }: TaskThreadProps) {
             }}
           />
           <div className="flex items-center justify-between">
-            <span className="text-[10px] text-text3">
+            <span className="text-[12px] text-text2">
               ⌘/Ctrl + Enter — отправить · @имя — упоминание
             </span>
             <Button type="submit" size="sm" disabled={create.isPending || !draft.trim()}>
@@ -237,7 +235,7 @@ export function TaskThread({ taskId }: TaskThreadProps) {
             </Button>
           </div>
         </form>
-      </section>
+      </DrawerSection>
 
       <section className="rounded-md border border-glass-border">
         <button
@@ -261,7 +259,7 @@ export function TaskThread({ taskId }: TaskThreadProps) {
             {activity.isError ? (
               <p className="text-xs text-red">Не удалось загрузить историю.</p>
             ) : visibleActivity.length === 0 ? (
-              <p className="text-xs text-text3">Событий пока нет.</p>
+              <p className="text-xs text-text2">Событий пока нет.</p>
             ) : (
               visibleActivity.map((a) => {
                 const text = renderActivity(a)

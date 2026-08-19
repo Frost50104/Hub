@@ -204,7 +204,7 @@ export function CalendarView({ projectId, onTaskClick, filters }: CalendarViewPr
           <h2 className="font-display text-base font-semibold text-text md:text-lg">
             {monthLabel}
           </h2>
-          <div className="text-xs text-text3">
+          <div className="text-xs text-text2">
             {tasks.isLoading && 'Загружаем…'}
             {tasks.isError && 'Ошибка загрузки'}
           </div>
@@ -214,7 +214,7 @@ export function CalendarView({ projectId, onTaskClick, filters }: CalendarViewPr
           {WEEKDAYS.map((wd) => (
             <div
               key={wd}
-              className="bg-bg-alt px-2 py-1 text-center text-[11px] font-semibold uppercase tracking-wider text-text3"
+              className="bg-bg-alt px-2 py-1 text-center text-[12px] font-semibold uppercase tracking-wider text-text2"
             >
               {wd}
             </div>

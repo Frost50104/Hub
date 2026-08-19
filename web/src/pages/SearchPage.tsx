@@ -93,13 +93,13 @@ function MobileSearch() {
 
       <div className="space-y-4 px-4">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text3" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text2" />
           <input
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={`Поиск в ${tenantSlug.toUpperCase() || 'Hub'}`}
-            className="w-full rounded-xl border border-glass-border bg-surface px-10 py-2.5 text-sm text-text placeholder:text-text3 focus:border-amber focus:outline-none"
+            className="w-full rounded-xl border border-glass-border bg-surface px-10 py-2.5 text-sm text-text placeholder:text-text2 focus:border-amber focus:outline-none"
           />
         </div>
 
@@ -135,9 +135,9 @@ function MobileSearch() {
                       onClick={() => setQuery(f.dsl)}
                       className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-glass"
                     >
-                      <UserCircle className="h-5 w-5 text-text3" />
+                      <UserCircle className="h-5 w-5 text-text2" />
                       <span className="flex-1 text-sm text-text">{f.label}</span>
-                      <ChevronRight className="h-4 w-4 text-text3" />
+                      <ChevronRight className="h-4 w-4 text-text2" />
                     </button>
                   </li>
                 ))}
@@ -159,7 +159,7 @@ function MobileSearch() {
                       onClick={() => setQuery(s.dsl)}
                       className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-glass"
                     >
-                      <RotateCcw className="h-5 w-5 text-text3" />
+                      <RotateCcw className="h-5 w-5 text-text2" />
                       <span className="flex-1 text-sm text-text">{s.label}</span>
                     </button>
                   </li>
@@ -254,14 +254,14 @@ function DesktopSearch() {
       </header>
 
       <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text3" />
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text2" />
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder='напр. assignee:me status:in_progress "договор"'
           autoFocus
-          className="w-full rounded-md border border-glass-border bg-glass px-10 py-2 text-sm text-text placeholder:text-text3 focus:border-amber focus:outline-none"
+          className="w-full rounded-md border border-glass-border bg-glass px-10 py-2 text-sm text-text placeholder:text-text2 focus:border-amber focus:outline-none"
         />
       </div>
 
@@ -279,7 +279,7 @@ function DesktopSearch() {
       )}
 
       {query.trim().length < 2 ? (
-        <p className="text-sm text-text3">
+        <p className="text-sm text-text2">
           Введите не меньше двух символов, чтобы начать поиск.
         </p>
       ) : (

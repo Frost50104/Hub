@@ -1,7 +1,7 @@
 import { Bell, BellOff } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { Button } from '@/components/ui/Button'
+import { cn } from '@/lib/cn'
 import { useMe } from '@/hooks/useMe'
 import { useToggleWatch, useWatchers } from '@/hooks/useThreads'
 
@@ -30,19 +30,19 @@ export function WatchControl({ taskId }: WatchControlProps) {
   }
 
   return (
-    <Button
-      variant="ghost"
-      size="sm"
+    <button
+      type="button"
       onClick={onClick}
       disabled={toggle.isPending || !myEmployeeId}
       title={iWatch ? `Отписаться (${count} следят)` : `Подписаться (${count} следят)`}
-    >
-      {iWatch ? (
-        <Bell className="h-4 w-4 text-amber" />
-      ) : (
-        <BellOff className="h-4 w-4" />
+      aria-label={iWatch ? 'Отписаться от задачи' : 'Подписаться на задачу'}
+      className={cn(
+        'flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[13px] font-semibold hover:bg-glass lg:min-h-8',
+        iWatch ? 'text-amber' : 'text-text2 hover:text-text',
       )}
-      <span className="text-xs">{count}</span>
-    </Button>
+    >
+      {iWatch ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+      {count > 0 && <span className="font-mono">{count}</span>}
+    </button>
   )
 }

@@ -59,7 +59,7 @@ export function LabelsManager({ projectId, open, onOpenChange }: LabelsManagerPr
         <section className="space-y-1">
           {labels.isLoading && <p className="text-sm text-text2">Загружаем…</p>}
           {labels.data?.length === 0 && (
-            <p className="text-sm text-text3">Пока нет меток.</p>
+            <p className="text-sm text-text2">Пока нет меток.</p>
           )}
           {labels.data?.map((l) => (
             <LabelRow key={l.id} label={l} projectId={projectId} />

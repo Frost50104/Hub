@@ -246,6 +246,8 @@ export interface LibraryMaterial {
   opened_by_me: boolean
   acked_by_me: boolean
   ack_pending: boolean
+  /** Дедлайн ознакомления лично для меня: max(публикация, выдача доступа) + дни. */
+  ack_deadline_at: string | null
 }
 
 export interface LibraryData {
@@ -446,6 +448,12 @@ export interface LessonMeta {
   locked: boolean
   completed: boolean
   started: boolean
+  estimated_minutes: number
+  has_quiz: boolean
+  has_check_question: boolean
+  /** Кто держит замок — считает сервер: клиент не знает, урок это или тест. */
+  blocked_by_id: string | null
+  blocked_by_title: string | null
 }
 
 export interface Course {
@@ -465,6 +473,9 @@ export interface Course {
   enrolled: boolean
   due_at: string | null
   completed: boolean
+  /** Агрегаты шапки курса — приходят только из детальной ручки. */
+  quizzes_total: number
+  estimated_minutes_total: number
 }
 
 export interface CourseList {
@@ -711,10 +722,29 @@ export interface HomeData {
     title: string
     url_path: string
     published_at: string | null
+    /** Есть только у карточек ассортимента — у остального фото не бывает. */
+    image_url: string | null
   }[]
-  surveys: { id: string; title: string; kind: string; closes_at: string | null }[]
-  rating: { points: number; rank: number | null; total_participants: number } | null
-  assessments: { id: string; title: string; ends_at: string | null }[]
+  surveys: {
+    id: string
+    title: string
+    kind: string
+    closes_at: string | null
+    question_count: number
+    is_anonymous: boolean
+  }[]
+  rating: {
+    points: number
+    rank: number | null
+    total_participants: number
+    delta_week: number
+  } | null
+  assessments: {
+    id: string
+    title: string
+    ends_at: string | null
+    question_count: number
+  }[]
 }
 
 /** Тип контента в лентах витрины («Новинки»/«Недавнее») — иначе товар,

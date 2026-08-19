@@ -50,6 +50,15 @@ class LessonMeta(BaseModel):
     locked: bool = False
     completed: bool = False
     started: bool = False
+    # Мета для строки урока (редизайн): оценка чтения, наличие теста и
+    # контрольного вопроса.
+    estimated_minutes: int = 1
+    has_quiz: bool = False
+    has_check_question: bool = False
+    # Кто держит замок. Считает сервер рядом с самим замком: клиент не знает,
+    # чем заперт урок — незавершённым предыдущим или несданным тестом.
+    blocked_by_id: UUID | None = None
+    blocked_by_title: str | None = None
 
 
 class CourseResponse(BaseModel):
@@ -72,6 +81,10 @@ class CourseResponse(BaseModel):
     enrolled: bool = False
     due_at: datetime | None = None
     completed: bool = False
+    # Агрегаты шапки курса — заполняются только в детальной ручке, где уроки
+    # уже загружены целиком (в каталоге они не показываются).
+    quizzes_total: int = 0
+    estimated_minutes_total: int = 0
 
 
 class CourseListResponse(BaseModel):

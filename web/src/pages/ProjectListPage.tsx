@@ -54,6 +54,7 @@ import {
   useReorderFolders,
   useSetProjectFolder,
 } from '@/hooks/useProjects'
+import { ProjectKeyChip, projectMeta } from '@/components/project/ProjectKeyChip'
 import { cn } from '@/lib/cn'
 import { groupProjectsByFolder, UNFILED, type ProjectGroup } from '@/lib/groupProjects'
 import {
@@ -111,14 +112,14 @@ function ProjectCard({
         className="glass flex flex-col gap-2 p-5 transition-colors hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-amber"
       >
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber/20 font-display text-base font-black uppercase text-amber">
-            {project.key.slice(0, 2)}
-          </div>
+          <ProjectKeyChip project={project} size="lg" />
           <div className="min-w-0 flex-1">
             <h3 className="truncate font-display text-base font-semibold text-text">
               {project.name}
             </h3>
-            <p className="text-xs text-text3">{project.key}</p>
+            <p className="truncate text-[13px] text-text2">
+              {projectMeta(project) ?? project.key}
+            </p>
           </div>
           {project.archived_at && <Badge variant="secondary">архив</Badge>}
           {project.my_role && project.my_role !== 'viewer' && (
@@ -142,7 +143,7 @@ function ProjectCard({
                   e.stopPropagation()
                 }}
                 onPointerDown={(e) => e.stopPropagation()}
-                className="rounded p-1 text-text3 transition-opacity hover:bg-glass hover:text-text focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 md:opacity-0 md:group-hover:opacity-100"
+                className="rounded p-1 text-text2 transition-opacity hover:bg-glass hover:text-text focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 md:opacity-0 md:group-hover:opacity-100"
                 aria-label="Действия с проектом"
               >
                 <MoreHorizontal className="h-4 w-4" />
@@ -299,13 +300,13 @@ function FolderSection({
             >
               {folder &&
                 (collapsed ? (
-                  <ChevronRight className="h-4 w-4 shrink-0 text-text3" />
+                  <ChevronRight className="h-4 w-4 shrink-0 text-text2" />
                 ) : (
-                  <ChevronDown className="h-4 w-4 shrink-0 text-text3" />
+                  <ChevronDown className="h-4 w-4 shrink-0 text-text2" />
                 ))}
-              <Folder className="h-4 w-4 shrink-0 text-text3" />
+              <Folder className="h-4 w-4 shrink-0 text-text2" />
               <span className="truncate">{folder?.name ?? 'Без папки'}</span>
-              <span className="text-xs font-normal text-text3">
+              <span className="text-xs font-normal text-text2">
                 {group.projects.length}
               </span>
             </button>
@@ -316,7 +317,7 @@ function FolderSection({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="rounded p-1 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                  className="rounded p-1 text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
                   aria-label={`Действия с папкой ${folder.name}`}
                 >
                   <MoreHorizontal className="h-4 w-4" />
@@ -359,7 +360,7 @@ function FolderSection({
           </div>
         ) : (
           !headless && (
-            <p className="rounded-lg border border-dashed border-glass-border px-4 py-6 text-center text-sm text-text3">
+            <p className="rounded-lg border border-dashed border-glass-border px-4 py-6 text-center text-sm text-text2">
               Пусто — перетащите сюда проект
             </p>
           )

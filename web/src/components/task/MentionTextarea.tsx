@@ -131,13 +131,13 @@ export const MentionTextarea = forwardRef<HTMLTextAreaElement, MentionTextareaPr
                 <Avatar
                   name={m.full_name}
                   email={m.email}
-                  className="h-6 w-6 text-[10px]"
+                  className="h-6 w-6 text-[12px]"
                 />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm text-text">
                     {m.full_name || m.email}
                   </p>
-                  <p className="truncate text-xs text-text3">@{m.handle}</p>
+                  <p className="truncate text-xs text-text2">@{m.handle}</p>
                 </div>
               </button>
             ))}

@@ -1,6 +1,7 @@
-import { CheckCircle2, Circle } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { useMemo } from 'react'
 
+import { DrawerSection } from '@/components/task/DrawerSection'
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { AvatarStack } from '@/components/ui/AvatarStack'
 import { useTasks, useToggleDone } from '@/hooks/useTasks'
@@ -39,48 +40,48 @@ export function SubtaskList({ taskId, projectId, canEdit, onOpenTask }: SubtaskL
   if (!canEdit && subtasks.length === 0) return null
 
   return (
-    <section className="space-y-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text3">
-        Подзадачи{subtasks.length > 0 ? ` (${doneCount}/${subtasks.length})` : ''}
-      </h3>
-
-      <div>
-        {subtasks.map((t) => (
-          <div
-            key={t.id}
-            className="flex items-center gap-2 border-b border-glass-border py-1.5"
-          >
-            <button
-              type="button"
-              onClick={() => toggleDone(t)}
-              disabled={!canEdit}
-              aria-label={t.status === 'done' ? 'Вернуть в работу' : 'Завершить'}
-              className={cn(
-                'flex h-5 w-5 shrink-0 items-center justify-center rounded-full',
-                t.status === 'done'
-                  ? 'text-green hover:text-green/80'
-                  : 'text-text3 hover:text-text2',
-              )}
+    <DrawerSection
+      title="Подзадачи"
+      count={subtasks.length > 0 ? `${doneCount}/${subtasks.length}` : null}
+    >
+      <div className="flex flex-col">
+        {subtasks.map((t) => {
+          const done = t.status === 'done'
+          return (
+            <div
+              key={t.id}
+              className="flex min-h-12 items-center gap-[11px] border-b border-hair py-2"
             >
-              {t.status === 'done' ? (
-                <CheckCircle2 className="h-4 w-4" />
-              ) : (
-                <Circle className="h-4 w-4" />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => onOpenTask?.(t.id)}
-              className={cn(
-                'min-w-0 flex-1 truncate text-left text-sm text-text hover:text-amber',
-                t.status === 'done' && 'line-through opacity-60',
-              )}
-            >
-              {t.title}
-            </button>
-            <AvatarStack people={taskAssignees(t)} size="xs" max={2} />
-          </div>
-        ))}
+              {/* Отметка выполнения — плотный зелёный круг 22px: зелёный в
+                  редизайне означает ровно «сделано». */}
+              <button
+                type="button"
+                onClick={() => toggleDone(t)}
+                disabled={!canEdit}
+                aria-label={done ? 'Вернуть в работу' : 'Завершить'}
+                className={cn(
+                  'flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full',
+                  done
+                    ? 'bg-green-deep text-bg'
+                    : 'border border-glass-border text-transparent hover:border-amber',
+                )}
+              >
+                <Check className="h-[13px] w-[13px]" strokeWidth={3} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenTask?.(t.id)}
+                className={cn(
+                  'min-w-0 flex-1 truncate text-left text-[16px] leading-[1.4] hover:text-amber',
+                  done ? 'text-text2 line-through' : 'text-text',
+                )}
+              >
+                {t.title}
+              </button>
+              <AvatarStack people={taskAssignees(t)} max={2} />
+            </div>
+          )
+        })}
       </div>
 
       {canEdit && (
@@ -91,6 +92,6 @@ export function SubtaskList({ taskId, projectId, canEdit, onOpenTask }: SubtaskL
           placeholder="+ Подзадача"
         />
       )}
-    </section>
+    </DrawerSection>
   )
 }

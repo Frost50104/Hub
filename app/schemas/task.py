@@ -112,6 +112,13 @@ class TaskResponse(BaseModel):
     updated_at: datetime
     completed_at: datetime | None
     archived_at: datetime | None
+    # Счётчики строки контекста в списке. Заполняет ТОЛЬКО list_tasks (батчем,
+    # см. services/task_counts.py); одиночные ручки отдают None — «не знаем».
+    # Клиент обязан различать None (чип не рисуем) и 0 (знаем, что нет), иначе
+    # чип мигал бы при каждом оптимистичном обновлении.
+    comment_count: int | None = None
+    attachment_count: int | None = None
+    blocker_count: int | None = None
 
 
 def resolve_assignee_ids(body: TaskCreate | TaskUpdate) -> list[UUID] | None:

@@ -2,19 +2,18 @@ import { Avatar } from '@/components/ui/Avatar'
 import { cn } from '@/lib/cn'
 import { type TaskAssigneeBrief } from '@/lib/tasks'
 
+// Шкала редизайна: минимум 12px даже в 24px-круге — два знака bold занимают
+// 17px и влезают с запасом, а прежние 9-10px были тем же дефектом старой
+// шкалы трекера.
 const SIZE_CLASS = {
-  xs: 'h-5 w-5 text-[9px]',
-  sm: 'h-6 w-6 text-[9px]',
-  md: 'h-7 w-7 text-[10px]',
+  xs: 'h-5 w-5 text-[12px]',
+  sm: 'h-6 w-6 text-[12px]',
+  md: 'h-7 w-7 text-[13px]',
 } as const
 
-// Перекрытие пропорционально размеру: фиксированные -ml-2 на 20px-аватаре
-// съедали обводку и инициалы сливались в кашу («ДФ»+«ПП» → «дфпп»).
-const OVERLAP_CLASS = {
-  xs: '-ml-1.5',
-  sm: '-ml-2',
-  md: '-ml-2',
-} as const
+// −4px, а не −8: видимая полоса должна быть шире двухбуквенного глифа, иначе
+// непрозрачный сосед срезает вторую букву и «ДФ» не отличить от «ДС».
+const OVERLAP = '-ml-1'
 
 export type AvatarStackSize = keyof typeof SIZE_CLASS
 
@@ -35,9 +34,13 @@ function label(p: TaskAssigneeBrief): string {
 /**
  * Наложенные аватары исполнителей.
  *
- * Обводка — `ring-glass-border`, а не цвет фона: стек живёт на разных
- * подложках (glass-карточка, surface-строка, обычный bg) и в обеих темах,
- * подбирать ring под каждую пришлось бы вручную.
+ * Обводка выводится из КРАСКИ (`--text2`), а не из подложки: заливка --av-fill
+ * близка к цвету страницы, поэтому ring в цвет страницы совпадал с заливкой
+ * соседа и границы не было. `--text2` против той же заливки даёт 4,6:1 в
+ * тёмной и ~6:1 в светлой — перекрытие читается.
+ *
+ * «+N» получает нейтральную обводку `--glass-border`, чтобы счётчик не
+ * выглядел ещё одним человеком.
  *
  * Ширина не фиксируется — контейнер-обёртка обязан позволять расти
  * (`w-auto`), иначе стек обрежется по ширине одного аватара.
@@ -68,8 +71,8 @@ export function AvatarStack({
           email={p.email}
           className={cn(
             SIZE_CLASS[size],
-            'ring-1 ring-glass-border',
-            i > 0 && OVERLAP_CLASS[size],
+            'ring-[1.5px] ring-text2',
+            i > 0 && OVERLAP,
           )}
           // Первый аватар сверху — иначе стек «читается» справа налево.
           style={{ zIndex: shown.length - i }}
@@ -79,8 +82,8 @@ export function AvatarStack({
         <span
           className={cn(
             SIZE_CLASS[size],
-            OVERLAP_CLASS[size],
-            'inline-flex select-none items-center justify-center rounded-full bg-surface font-medium text-text3 ring-1 ring-glass-border',
+            OVERLAP,
+            'inline-flex select-none items-center justify-center rounded-full bg-av-fill font-bold text-text ring-[1.5px] ring-glass-border',
           )}
           title={hidden.map(label).join(', ')}
         >

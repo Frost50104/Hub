@@ -25,6 +25,7 @@ import {
   useTaskDependencies,
 } from '@/hooks/useTaskDependencies'
 import { useTasks } from '@/hooks/useTasks'
+import { DrawerSection } from '@/components/task/DrawerSection'
 import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
 import { taskKey, type TaskStatus } from '@/lib/tasks'
@@ -38,7 +39,7 @@ interface TaskDependenciesProps {
 }
 
 const STATUS_TONE: Record<DependencyPeer['status'], string> = {
-  todo: 'text-text3',
+  todo: 'text-text2',
   in_progress: 'text-amber',
   in_review: 'text-amber',
   done: 'text-green',
@@ -131,7 +132,7 @@ export function TaskDependencies({
     <span className="flex min-w-0 items-center gap-2">
       <LinkIcon className={cn('h-3 w-3 shrink-0', STATUS_TONE[p.status])} />
       {projectKey && (
-        <span className="shrink-0 font-mono text-[10px] text-text3">
+        <span className="shrink-0 font-mono text-[12px] text-text2">
           {projectKey}-{p.seq}
         </span>
       )}
@@ -144,21 +145,18 @@ export function TaskDependencies({
   if (deps.isLoading) return null
 
   return (
-    <section className="space-y-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text3">
-        Зависимости
-      </h3>
+    <DrawerSection title="Зависимости">
 
       {deps.isError && (
         <p className="text-xs text-red">Не удалось загрузить зависимости.</p>
       )}
 
       <div className="space-y-1">
-        <p className="text-[10px] uppercase tracking-wider text-text3">
+        <p className="text-[12px] uppercase tracking-wider text-text2">
           Зависит от
         </p>
         {deps.data?.predecessors.length === 0 && (
-          <p className="text-xs text-text3">—</p>
+          <p className="text-xs text-text2">—</p>
         )}
         <ul className="space-y-1">
           {deps.data?.predecessors.map((p) => (
@@ -171,7 +169,7 @@ export function TaskDependencies({
                 <button
                   type="button"
                   onClick={() => onRemove(p.id)}
-                  className="rounded p-1 text-text3 hover:bg-glass hover:text-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                  className="rounded p-1 text-text2 hover:bg-glass hover:text-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
                   aria-label="Удалить связь"
                 >
                   <X className="h-3 w-3" />
@@ -192,7 +190,7 @@ export function TaskDependencies({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="mt-1 flex items-center gap-1 rounded px-1 text-[11px] text-text2 hover:text-amber focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                className="mt-1 flex items-center gap-1 rounded px-1 text-[12px] text-text2 hover:text-amber focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
               >
                 <ChevronDown className="h-3 w-3" />
                 Добавить
@@ -212,7 +210,7 @@ export function TaskDependencies({
                 />
               </div>
               {visible.length === 0 && (
-                <p className="px-2 py-1.5 text-xs text-text3">
+                <p className="px-2 py-1.5 text-xs text-text2">
                   {query ? 'Ничего не нашли' : 'Нет доступных задач'}
                 </p>
               )}
@@ -234,14 +232,14 @@ export function TaskDependencies({
                       <div className="min-w-0 flex-1">
                         <p className="text-sm leading-snug" title={c.title}>
                           {projectKey && c.seq != null && (
-                            <span className="mr-1.5 font-mono text-[10px] text-text3">
+                            <span className="mr-1.5 font-mono text-[12px] text-text2">
                               {projectKey}-{c.seq}
                             </span>
                           )}
                           <span className="line-clamp-2 inline">{c.title}</span>
                         </p>
                         {(section || cLabels.length > 0) && (
-                          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-text3">
+                          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-text2">
                             {section && <span className="truncate">{section}</span>}
                             {cLabels.slice(0, 3).map((l) => (
                               <span
@@ -265,7 +263,7 @@ export function TaskDependencies({
                 )
               })}
               {candidates.length > MAX_VISIBLE && (
-                <p className="px-2 py-1.5 text-[10px] text-text3">
+                <p className="px-2 py-1.5 text-[12px] text-text2">
                   Показаны первые {MAX_VISIBLE} из {candidates.length} — уточните
                   запрос.
                 </p>
@@ -277,7 +275,7 @@ export function TaskDependencies({
 
       {deps.data && deps.data.successors.length > 0 && (
         <div className="space-y-1 pt-1">
-          <p className="text-[10px] uppercase tracking-wider text-text3">
+          <p className="text-[12px] uppercase tracking-wider text-text2">
             Блокирует
           </p>
           <ul className="space-y-1">
@@ -292,6 +290,6 @@ export function TaskDependencies({
           </ul>
         </div>
       )}
-    </section>
+    </DrawerSection>
   )
 }

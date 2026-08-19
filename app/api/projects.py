@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from signaris_auth import Principal
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,7 @@ from app.deps import get_db, require_auth
 from app.models.project import Project, ProjectMember
 from app.models.project_folder import ProjectFolder
 from app.models.shadow import ShadowUser
+from app.models.task import Task
 from app.schemas.project import (
     ProjectCreate,
     ProjectFavoriteUpdate,
@@ -36,12 +38,41 @@ from app.services.project_key import generate_unique_key
 router = APIRouter(tags=["projects"])
 
 
+async def _task_counts(
+    db: AsyncSession, project_ids: Sequence[UUID]
+) -> dict[UUID, tuple[int, int]]:
+    """{project_id: (всего, закрыто)} одним GROUP BY.
+
+    Считаем только неархивные задачи верхнего уровня: подзадачи живут в
+    карточке родителя и в счётчике проекта не участвуют — иначе «26 задач» в
+    шапке не сойдётся с числом строк в списке.
+    """
+    ids = list(dict.fromkeys(project_ids))
+    if not ids:
+        return {}
+    rows = await db.execute(
+        select(
+            Task.project_id,
+            func.count(),
+            func.count().filter(Task.status == "done"),
+        )
+        .where(
+            Task.project_id.in_(ids),
+            Task.archived_at.is_(None),
+            Task.parent_task_id.is_(None),
+        )
+        .group_by(Task.project_id)
+    )
+    return {pid: (total, done) for pid, total, done in rows.all()}
+
+
 def _project_to_response(
     project: Project,
     my_role: str | None,
     is_favorite: bool = False,
     *,
     principal: Principal,
+    counts: tuple[int, int] | None = None,
 ) -> ProjectResponse:
     """my_role — ФАКТИЧЕСКОЕ членство (для бейджа роли), может быть None у
     hub:admin вне проекта. Права для UI считаются отдельно: у админа они полные
@@ -61,6 +92,8 @@ def _project_to_response(
         is_favorite=is_favorite,
         can_edit=can_edit,
         can_manage=can_manage,
+        task_count=counts[0] if counts else None,
+        done_count=counts[1] if counts else None,
     )
 
 
@@ -109,9 +142,13 @@ async def list_projects(
             member_map = {pid: (role, fav) for pid, role, fav in roles_q.all()}
         else:
             member_map = {}
+        counts = await _task_counts(db, [p.id for p in rows])
         return [
             _project_to_response(
-                p, *member_map.get(p.id, (None, False)), principal=principal
+                p,
+                *member_map.get(p.id, (None, False)),
+                principal=principal,
+                counts=counts.get(p.id, (0, 0)),
             )
             for p in rows
         ]
@@ -124,8 +161,11 @@ async def list_projects(
     if not include_archived:
         stmt = stmt.where(Project.archived_at.is_(None))
     rows = (await db.execute(stmt.order_by(Project.created_at.desc()))).all()
+    counts = await _task_counts(db, [p.id for (p, _role, _fav) in rows])
     return [
-        _project_to_response(p, role, fav, principal=principal)
+        _project_to_response(
+            p, role, fav, principal=principal, counts=counts.get(p.id, (0, 0))
+        )
         for (p, role, fav) in rows
     ]
 
@@ -195,8 +235,13 @@ async def get_project(
     member_role, is_favorite = await _my_membership(
         db, project_id, principal.employee_id
     )
+    counts = await _task_counts(db, [project_id])
     return _project_to_response(
-        project, my_role or member_role, is_favorite, principal=principal
+        project,
+        my_role or member_role,
+        is_favorite,
+        principal=principal,
+        counts=counts.get(project_id, (0, 0)),
     )
 
 

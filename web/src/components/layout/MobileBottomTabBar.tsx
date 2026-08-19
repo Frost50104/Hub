@@ -93,8 +93,10 @@ export function MobileBottomTabBar({ space = 'tasks' }: { space?: Space }) {
 
   const itemClass = (active: boolean) =>
     cn(
-      'flex h-[50px] w-full flex-col items-center gap-0.5 pt-2.5 text-[10px] transition-colors',
-      active ? 'font-medium text-amber' : 'font-light text-text3 hover:text-text2',
+      // 56px и подпись 11px — геометрия из спеки редизайна: пункт таб-бара
+      // должен проходить порог тап-таргета целиком, а не только иконкой.
+      'flex min-h-14 w-full flex-col items-center justify-center gap-[3px] pt-2 text-[11px] transition-colors',
+      active ? 'font-semibold text-amber' : 'font-normal text-text2 hover:text-text',
     )
 
   return (

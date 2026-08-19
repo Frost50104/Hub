@@ -107,6 +107,8 @@ class HomeNovelty(BaseModel):
     title: str
     url_path: str
     published_at: datetime | None
+    # Есть только у карточек ассортимента — у остального фото не бывает.
+    image_url: str | None = None
 
 
 class HomeSurvey(BaseModel):
@@ -114,18 +116,23 @@ class HomeSurvey(BaseModel):
     title: str
     kind: str
     closes_at: datetime | None
+    question_count: int = 0
+    is_anonymous: bool = True
 
 
 class HomeRating(BaseModel):
     points: float
     rank: int | None
     total_participants: int
+    # Баллы за последние 7 дней — дельта-бейдж виджета.
+    delta_week: float = 0.0
 
 
 class HomeAssessment(BaseModel):
     id: UUID
     title: str
     ends_at: datetime | None
+    question_count: int = 0
 
 
 class HomeResponse(BaseModel):

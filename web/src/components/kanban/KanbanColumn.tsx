@@ -1,8 +1,5 @@
 import { useDroppable } from '@dnd-kit/core'
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { cn } from '@/lib/cn'
@@ -28,8 +25,21 @@ interface KanbanColumnProps {
   labelsByTask?: Map<string, Label[]>
   onTaskClick: (id: string) => void
   onToggleDone: (task: Task) => void
+  /** Колонка под курсором. Считает BoardView: собственный `isOver` droppable'а
+   *  почти всегда false — ближайшей целью оказывается карточка, а не колонка. */
+  isOver?: boolean
 }
 
+/**
+ * Колонка доски: 288px (`sm:w-72`), отбивка 4px, радиус 12.
+ *
+ * Состояние приёма — пунктир `--amber` 50% и фон 5%, БЕЗ сплошной рамки.
+ * Мобильная колонка отличается только шириной и `scroll-snap`: раньше она
+ * рендерилась отдельным контейнером, и подсветка приёма на телефоне пропадала.
+ *
+ * Точка в шапке нейтральная: колонка — это секция проекта, а у секции нет
+ * статуса. Красить её зелёным нельзя — зелёный означает «сделано».
+ */
 export function KanbanColumn({
   column,
   projectId,
@@ -38,23 +48,32 @@ export function KanbanColumn({
   labelsByTask,
   onTaskClick,
   onToggleDone,
+  isOver: isOverColumn = false,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column.dndId })
+  const receiving = isOver || isOverColumn
 
   return (
-    <div className="flex w-[85vw] max-w-[320px] shrink-0 snap-start flex-col gap-2 sm:w-72">
-      <header className="flex items-center justify-between px-1">
-        <h3 className="font-display text-sm font-semibold text-text">{column.name}</h3>
-        <span className="text-xs text-text3">{column.tasks.length}</span>
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'flex w-[85%] max-w-[320px] shrink-0 snap-start flex-col rounded-xl border border-dashed p-1 transition-colors sm:w-72 sm:max-w-none',
+        receiving
+          ? 'border-amber/50 bg-amber/[0.05]'
+          : 'border-transparent bg-transparent',
+      )}
+    >
+      <header className="flex items-center gap-2 px-1.5 pb-2.5 pt-1.5">
+        <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-text2" />
+        <h3 className="min-w-0 truncate font-display text-[14px] font-bold text-text">
+          {column.name}
+        </h3>
+        <span className="ml-auto font-mono text-[13px] text-text2">
+          {column.tasks.length}
+        </span>
       </header>
 
-      <div
-        ref={setNodeRef}
-        className={cn(
-          'flex min-h-[40vh] flex-col gap-2 rounded-lg border border-dashed border-transparent p-1 transition-colors',
-          isOver && 'border-amber/50 bg-amber/5',
-        )}
-      >
+      <div className="flex flex-col gap-2">
         <SortableContext
           items={column.tasks.map((t) => t.id)}
           strategy={verticalListSortingStrategy}
@@ -70,6 +89,17 @@ export function KanbanColumn({
             />
           ))}
         </SortableContext>
+
+        {column.tasks.length === 0 && (
+          // Заголовка нет: продукт говорит «Здесь пока пусто», а не командует.
+          <div className="flex flex-col gap-2 rounded-xl border border-dashed border-glass-border px-3.5 py-[18px] text-center">
+            <p className="text-[14px] leading-[1.45] text-text2">Здесь пока пусто.</p>
+            <p className="text-[13px] leading-[1.45] text-text2">
+              Перетащите задачу или создайте новую внизу колонки.
+            </p>
+          </div>
+        )}
+
         {canEdit && (
           <TaskInlineCreate projectId={projectId} sectionId={column.sectionId} />
         )}

@@ -53,7 +53,7 @@ export function CalendarTaskBar({ task, day, onClick }: CalendarTaskBarProps) {
       }}
       type="button"
       className={cn(
-        'w-full truncate rounded-sm border-l-2 bg-surface px-1.5 py-0.5 text-left text-[11px] leading-tight text-text',
+        'w-full truncate rounded-sm border-l-2 bg-surface px-1.5 py-0.5 text-left text-[12px] leading-tight text-text',
         'hover:bg-glass focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/60',
         task.status === 'done' && 'line-through opacity-60',
         PRIORITY_BAR[task.priority],

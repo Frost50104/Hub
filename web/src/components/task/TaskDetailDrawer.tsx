@@ -1,5 +1,15 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { Archive, Calendar, CornerLeftUp, Flag, Link as LinkIcon, Tag, Users, X } from 'lucide-react'
+import {
+  Archive,
+  Calendar,
+  CornerLeftUp,
+  Flag,
+  Link as LinkIcon,
+  MoreHorizontal,
+  Tag,
+  Users,
+  X,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -7,18 +17,25 @@ import { Markdown } from '@/components/Markdown'
 import { PeoplePickerMulti } from '@/components/PeoplePickerMulti'
 import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
+import { DrawerSection } from '@/components/task/DrawerSection'
 import { SubtaskList } from '@/components/task/SubtaskList'
 import { TaskAttachments } from '@/components/task/TaskAttachments'
 import { TaskLabels } from '@/components/task/TaskLabels'
 import { TaskCustomFields } from '@/components/task/TaskCustomFields'
 import { TaskDependencies } from '@/components/task/TaskDependencies'
 import { TaskThread } from '@/components/task/TaskThread'
+import { TaskWatchers } from '@/components/task/TaskWatchers'
 import { WatchControl } from '@/components/task/WatchControl'
-import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu'
+import { AutoGrowTextarea } from '@/components/ui/AutoGrowTextarea'
 import { Textarea } from '@/components/ui/Input'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
-import { useProject } from '@/hooks/useProjects'
+import { useProject, useProjectSections } from '@/hooks/useProjects'
 import {
   useArchiveTask,
   useTask,
@@ -27,6 +44,7 @@ import {
 } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { taskAssignees } from '@/lib/taskAssignees'
+import { isOverdue, overdueDays } from '@/lib/taskDates'
 import {
   PRIORITY_LABEL,
   STATUS_LABEL,
@@ -34,6 +52,7 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from '@/lib/tasks'
+import { plural } from '@/lib/typography'
 
 interface TaskDetailDrawerProps {
   taskId: string | null
@@ -46,27 +65,57 @@ interface TaskDetailDrawerProps {
 const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done']
 const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
 
-function ParentLink({
-  parentId,
-  onOpen,
+/** Кнопка-вариант в наборе «Статус»/«Приоритет». */
+function OptionButton({
+  active,
+  disabled,
+  tone,
+  onClick,
+  children,
 }: {
-  parentId: string
-  onOpen: (id: string) => void
+  active: boolean
+  disabled: boolean
+  /** Активный статус — плотный амбер, активный приоритет — амбер 30% с обводкой. */
+  tone: 'solid' | 'tint'
+  onClick: () => void
+  children: React.ReactNode
 }) {
-  const parent = useTask(parentId)
   return (
     <button
       type="button"
-      onClick={() => onOpen(parentId)}
-      className="flex max-w-full items-center gap-1 text-xs text-text2 hover:text-amber"
+      disabled={disabled}
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        'inline-flex min-h-[30px] items-center rounded-lg px-2.5 text-[13px] font-semibold transition-colors',
+        disabled ? 'cursor-default' : 'cursor-pointer',
+        active
+          ? tone === 'solid'
+            ? 'bg-amber text-on-amber'
+            : 'bg-amber/30 text-text shadow-[inset_0_0_0_1px_color-mix(in_srgb,rgb(var(--amber))_55%,transparent)]'
+          : disabled
+            ? 'bg-tint text-text2'
+            : 'bg-surface text-text2 hover:text-text',
+      )}
     >
-      <CornerLeftUp className="h-3.5 w-3.5 shrink-0" />
-      <span className="truncate">
-        {parent.data ? `К родительской: ${parent.data.title}` : 'К родительской задаче'}
-      </span>
+      {children}
     </button>
   )
 }
+
+/** Подпись свойства в <dl>: иконка + слово, 13/600 на --text2. */
+function Dt({ icon: Icon, children }: { icon?: typeof Flag; children: React.ReactNode }) {
+  return (
+    <dt className="flex items-center gap-[7px] text-[13px] font-semibold text-text2">
+      {Icon && <Icon className="h-4 w-4 shrink-0" strokeWidth={1.9} />}
+      {children}
+    </dt>
+  )
+}
+
+/** Дата — значение поля, а не статус: силуэт чипа 26px, не бейджа. */
+const DATE_INPUT =
+  'inline-flex h-[26px] items-center rounded-md bg-surface px-2 font-body text-[12px] font-semibold text-text2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 disabled:cursor-default'
 
 export function TaskDetailDrawer({
   taskId,
@@ -77,6 +126,7 @@ export function TaskDetailDrawer({
   const taskQuery = useTask(taskId ?? undefined)
   const { data: task, isLoading } = taskQuery
   const project = useProject(projectId)
+  const sections = useProjectSections(projectId)
   // Права считает сервер: viewer → read-only, hub:admin вне членства → правит.
   const readOnly = !project.data?.can_edit
   const update = useUpdateTask(projectId)
@@ -116,25 +166,21 @@ export function TaskDetailDrawer({
     }
   }
 
-  const saveDueAt = async (val: string) => {
+  const saveDate = async (field: 'due_at' | 'start_at', val: string) => {
     if (!task) return
     const iso = val ? new Date(val + 'T12:00:00').toISOString() : null
     try {
-      await update.mutateAsync({ id: task.id, due_at: iso })
+      await update.mutateAsync({ id: task.id, [field]: iso })
     } catch {
       // тост показывает глобальный onError мутаций
     }
   }
 
-  const saveStartAt = async (val: string) => {
-    if (!task) return
-    const iso = val ? new Date(val + 'T12:00:00').toISOString() : null
-    try {
-      await update.mutateAsync({ id: task.id, start_at: iso })
-    } catch {
-      // тост показывает глобальный onError мутаций
-    }
-  }
+  const key = taskKey(project.data?.key, task?.seq)
+  const sectionName = task?.section_id
+    ? (sections.data?.find((s) => s.id === task.section_id)?.name ?? null)
+    : null
+  const overdue = task ? isOverdue(task.due_at, task.status) : false
 
   return (
     <DialogPrimitive.Root open={!!taskId} onOpenChange={(o) => !o && onClose()}>
@@ -142,316 +188,348 @@ export function TaskDetailDrawer({
         <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
         <DialogPrimitive.Content
           className={cn(
-            'glass fixed z-50 overflow-y-auto bg-bg-alt p-4 shadow-glass focus:outline-none',
-            // Mobile: full-screen sheet, no glass rounding, slide from bottom.
-            'inset-0 !rounded-none',
+            'fixed z-50 flex flex-col bg-bg-alt focus:outline-none',
+            // Мобильный — полноэкранный лист снизу.
+            'inset-0',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',
-            // Desktop ≥md: anchored right-side drawer with rounding.
-            'md:inset-auto md:right-3 md:top-3 md:bottom-3 md:w-full md:max-w-[480px] md:p-6 md:!rounded-[20px]',
-            'md:data-[state=closed]:slide-out-to-right-2 md:data-[state=open]:slide-in-from-right-2',
+            // Десктоп — панель 560px у правого края, с волосяной границей и
+            // тенью; ширина из спеки (была 480 — свойства не помещались в две
+            // колонки и переносились).
+            'lg:inset-y-0 lg:left-auto lg:right-0 lg:w-[560px] lg:border-l lg:border-hair lg:shadow-[-18px_0_48px_rgba(0,0,0,.35)]',
+            'lg:data-[state=closed]:slide-out-to-right-2 lg:data-[state=open]:slide-in-from-right-2',
           )}
         >
           <DialogPrimitive.Title className="sr-only">
             Карточка задачи
           </DialogPrimitive.Title>
 
-          <header className="sticky top-0 z-10 -mx-4 mb-4 flex items-center justify-between border-b border-glass-border bg-bg-alt/95 px-4 py-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none">
-            <Badge variant="secondary">
-              {taskKey(project.data?.key, taskQuery.data?.seq) ?? 'Задача'}
-            </Badge>
-            <div className="flex items-center gap-1">
-              {task && <WatchControl taskId={task.id} />}
-              <DialogPrimitive.Close
-                className="inline-flex h-11 w-11 items-center justify-center rounded text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 md:h-8 md:w-8"
-                aria-label="Закрыть"
-              >
-                <X className="h-4 w-4" />
-              </DialogPrimitive.Close>
-            </div>
-          </header>
-
-          {isLoading && (
-            <div className="space-y-4">
-              <Skeleton className="h-8 w-2/3" />
-              <SkeletonRows rows={4} rowClassName="h-7" />
-              <Skeleton className="h-24 w-full" />
-            </div>
-          )}
-          {taskQuery.isError && (
-            <QueryError
-              error={taskQuery.error}
-              onRetry={() => void taskQuery.refetch()}
-              title="Не удалось загрузить задачу"
-            />
-          )}
-
-          {task && (
-            <div className="space-y-5">
-              {task.parent_task_id && onOpenTask && (
-                <ParentLink
-                  parentId={task.parent_task_id}
-                  onOpen={onOpenTask}
-                />
+          <header
+            className="shrink-0 border-b border-hair px-4 pb-3 lg:px-5 lg:pb-4 lg:pt-4"
+            style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
+          >
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[13px] tracking-[0.02em] text-text2">
+                {key ?? 'Задача'}
+              </span>
+              {task && (
+                <button
+                  type="button"
+                  onClick={() => setShareOpen(true)}
+                  aria-label="Скопировать ссылку"
+                  title="Поделиться"
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-text2 hover:bg-glass hover:text-text"
+                >
+                  <LinkIcon className="h-[15px] w-[15px]" strokeWidth={1.9} />
+                </button>
               )}
-              {/* textarea с авторостом: длинные названия переносятся на узких
-                  экранах вместо обрезки за краем; Enter по-прежнему сохраняет. */}
-              <textarea
+              <span className="ml-auto flex items-center gap-1">
+                {task && <WatchControl taskId={task.id} />}
+                {task && !readOnly && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="Ещё"
+                        className="flex h-11 w-11 items-center justify-center rounded-lg text-text2 hover:bg-glass hover:text-text lg:h-8 lg:w-8"
+                      >
+                        <MoreHorizontal className="h-4 w-4" strokeWidth={2.2} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onSelect={async () => {
+                          try {
+                            const wasArchived = !!task.archived_at
+                            await archive.mutateAsync({
+                              id: task.id,
+                              archive: !wasArchived,
+                            })
+                            toast.success(
+                              wasArchived ? 'Задача восстановлена' : 'Задача в архиве',
+                              {
+                                action: {
+                                  label: 'Отменить',
+                                  onClick: () =>
+                                    archive.mutate({ id: task.id, archive: wasArchived }),
+                                },
+                              },
+                            )
+                            onClose()
+                          } catch {
+                            // тост показывает глобальный onError мутаций
+                          }
+                        }}
+                      >
+                        <Archive className="mr-2 h-4 w-4" />
+                        {task.archived_at ? 'Восстановить' : 'В архив'}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+                <DialogPrimitive.Close
+                  className="flex h-11 w-11 items-center justify-center rounded-lg text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 lg:h-8 lg:w-8"
+                  aria-label="Закрыть"
+                >
+                  <X className="h-4 w-4" strokeWidth={2.2} />
+                </DialogPrimitive.Close>
+              </span>
+            </div>
+
+            {/* Хлебные крошки: проект / секция / родительская задача. */}
+            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[13px] text-text2">
+              {project.data && <span className="truncate">{project.data.name}</span>}
+              {sectionName && (
+                <>
+                  <span aria-hidden>/</span>
+                  <span className="truncate">{sectionName}</span>
+                </>
+              )}
+              {task?.parent_task_id && onOpenTask && (
+                <>
+                  <span aria-hidden>/</span>
+                  <button
+                    type="button"
+                    onClick={() => onOpenTask(task.parent_task_id!)}
+                    className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-text"
+                  >
+                    <CornerLeftUp className="h-3.5 w-3.5" />
+                    К родительской
+                  </button>
+                </>
+              )}
+            </p>
+
+            {task && (
+              // Заголовок — редактируемое поле с автовысотой: переименование
+              // здесь основное действие, а без прав поле readOnly.
+              <AutoGrowTextarea
                 value={title}
-                rows={1}
-                onChange={(e) => {
-                  setTitle(e.target.value)
-                  e.target.style.height = 'auto'
-                  e.target.style.height = `${e.target.scrollHeight}px`
-                }}
-                ref={(el) => {
-                  if (el) {
-                    el.style.height = 'auto'
-                    el.style.height = `${el.scrollHeight}px`
-                  }
-                }}
+                onChange={(e) => setTitle(e.target.value)}
                 onBlur={saveTitle}
                 readOnly={readOnly}
+                aria-label="Название задачи"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault()
                     ;(e.target as HTMLTextAreaElement).blur()
                   }
                 }}
-                className="w-full resize-none overflow-hidden rounded-lg border border-transparent bg-transparent px-0 py-1 font-display text-xl font-semibold text-text focus-visible:border-amber focus-visible:outline-none"
+                className={cn(
+                  'mt-2.5 block w-full rounded-lg border border-transparent bg-transparent px-0 py-0.5 font-display text-[20px] font-bold leading-[1.26] text-text focus-visible:border-amber focus-visible:outline-none lg:text-[22px] lg:leading-[1.24]',
+                  readOnly ? 'cursor-default' : 'cursor-text',
+                )}
               />
+            )}
 
-              <section className="space-y-3 text-sm">
-                <Row icon={<Flag className="h-4 w-4 text-text3" />} label="Статус">
-                  <div className="flex flex-wrap gap-1">
+            {readOnly && task && (
+              <p className="mt-2.5 flex items-center gap-2 rounded-[10px] border border-glass-border bg-tint px-[11px] py-[9px] text-[14px] leading-[1.45] text-text2">
+                Вы наблюдатель проекта: поля доступны только для чтения.
+              </p>
+            )}
+          </header>
+
+          <div className="flex min-h-0 flex-1 flex-col gap-[22px] overflow-y-auto px-4 pb-7 pt-[18px] lg:px-5">
+            {isLoading && (
+              <div className="space-y-4">
+                <Skeleton className="h-8 w-2/3" />
+                <SkeletonRows rows={4} rowClassName="h-7" />
+                <Skeleton className="h-24 w-full" />
+              </div>
+            )}
+            {taskQuery.isError && (
+              <QueryError
+                error={taskQuery.error}
+                onRetry={() => void taskQuery.refetch()}
+                title="Не удалось загрузить задачу"
+              />
+            )}
+
+            {task && (
+              <>
+                <dl className="m-0 grid grid-cols-1 items-start gap-x-3.5 gap-y-3 lg:grid-cols-[112px_1fr] lg:items-center lg:gap-y-2.5">
+                  <Dt icon={Flag}>Статус</Dt>
+                  <dd className="m-0 flex flex-wrap gap-1">
                     {STATUSES.map((s) => (
-                      <button
+                      <OptionButton
                         key={s}
+                        active={task.status === s}
                         disabled={readOnly}
+                        tone="solid"
                         onClick={() => update.mutate({ id: task.id, status: s })}
-                        className={cn(
-                          'rounded-md px-2 py-1 text-xs transition-colors',
-                          task.status === s
-                            ? 'bg-amber text-on-amber'
-                            : 'bg-surface text-text2 hover:text-text',
-                        )}
                       >
                         {STATUS_LABEL[s]}
-                      </button>
+                      </OptionButton>
                     ))}
-                  </div>
-                </Row>
+                  </dd>
 
-                <Row
-                  icon={<Tag className="h-4 w-4 text-text3" />}
-                  label="Приоритет"
-                >
-                  <div className="flex flex-wrap gap-1">
+                  <Dt icon={Tag}>Приоритет</Dt>
+                  <dd className="m-0 flex flex-wrap gap-1">
                     {PRIORITIES.map((p) => (
-                      <button
+                      <OptionButton
                         key={p}
+                        active={task.priority === p}
                         disabled={readOnly}
+                        tone="tint"
                         onClick={() => update.mutate({ id: task.id, priority: p })}
-                        className={cn(
-                          'rounded-md px-2 py-1 text-xs transition-colors',
-                          task.priority === p
-                            ? 'bg-amber/30 text-amber'
-                            : 'bg-surface text-text2 hover:text-text',
-                        )}
                       >
                         {PRIORITY_LABEL[p]}
-                      </button>
+                      </OptionButton>
                     ))}
-                  </div>
-                </Row>
+                  </dd>
 
-                <Row
-                  icon={<Users className="h-4 w-4 text-text3" />}
-                  label="Исполнители"
-                >
-                  <PeoplePickerMulti
-                    value={taskAssignees(task)}
-                    onToggle={(person, next) =>
-                      toggleAssignee.mutate({ taskId: task.id, person, next })
-                    }
-                    // Одним PATCH'ем, а не циклом по onToggle: replace-семантика
-                    // снимает всех в одной транзакции и даёт одно событие в
-                    // ленте вместо N.
-                    onClearAll={() =>
-                      update.mutate({
-                        id: task.id,
-                        assignee_ids: [],
-                        __optimistic: {
-                          assignees: [],
-                          assignee: null,
-                          assignee_id: null,
-                        },
-                      })
-                    }
-                    // Намеренно НЕ отключаем на isPending: иначе меню
-                    // замирает после каждого тоггла и выбрать нескольких
-                    // подряд невозможно. Состояние ведёт оптимистичный кэш.
-                    disabled={readOnly}
-                    placeholder="Не назначен"
-                  />
-                </Row>
+                  <Dt icon={Users}>Исполнители</Dt>
+                  <dd className="m-0 min-w-0">
+                    <PeoplePickerMulti
+                      variant="chips"
+                      value={taskAssignees(task)}
+                      onToggle={(person, next) =>
+                        toggleAssignee.mutate({ taskId: task.id, person, next })
+                      }
+                      // Одним PATCH'ем, а не циклом по onToggle: replace-семантика
+                      // снимает всех в одной транзакции и даёт одно событие в
+                      // ленте вместо N.
+                      onClearAll={() =>
+                        update.mutate({
+                          id: task.id,
+                          assignee_ids: [],
+                          __optimistic: {
+                            assignees: [],
+                            assignee: null,
+                            assignee_id: null,
+                          },
+                        })
+                      }
+                      // Намеренно НЕ отключаем на isPending: иначе меню замирает
+                      // после каждого тоггла. Состояние ведёт оптимистичный кэш.
+                      disabled={readOnly}
+                    />
+                  </dd>
 
-                <Row
-                  icon={<Calendar className="h-4 w-4 text-text3" />}
-                  label="Старт"
-                >
-                  <input
-                    type="date"
-                    value={startAt}
-                    disabled={readOnly}
-                    onChange={(e) => {
-                      setStartAt(e.target.value)
-                      void saveStartAt(e.target.value)
-                    }}
-                    className="rounded-lg border border-glass-border bg-glass px-2 py-1 text-sm text-text"
-                  />
-                </Row>
+                  <Dt icon={Calendar}>Старт</Dt>
+                  <dd className="m-0">
+                    <input
+                      type="date"
+                      value={startAt}
+                      disabled={readOnly}
+                      aria-label="Дата старта"
+                      onChange={(e) => {
+                        setStartAt(e.target.value)
+                        void saveDate('start_at', e.target.value)
+                      }}
+                      className={DATE_INPUT}
+                    />
+                  </dd>
 
-                <Row
-                  icon={<Calendar className="h-4 w-4 text-text3" />}
-                  label="Срок"
-                >
-                  <input
-                    type="date"
-                    value={dueAt}
-                    disabled={readOnly}
-                    onChange={(e) => {
-                      setDueAt(e.target.value)
-                      void saveDueAt(e.target.value)
-                    }}
-                    className="rounded-lg border border-glass-border bg-glass px-2 py-1 text-sm text-text"
-                  />
-                </Row>
-              </section>
-
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-text2">
-                  Описание
-                  {!readOnly && (
-                    <span className="ml-1 font-normal text-text3">
-                      (markdown)
-                    </span>
-                  )}
-                </label>
-                {editingDesc && !readOnly ? (
-                  <Textarea
-                    autoFocus
-                    rows={6}
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    onBlur={() => {
-                      void saveDescription()
-                      setEditingDesc(false)
-                    }}
-                    placeholder="Что нужно сделать? Поддерживается markdown."
-                  />
-                ) : description ? (
-                  <div
-                    role={readOnly ? undefined : 'button'}
-                    tabIndex={readOnly ? undefined : 0}
-                    onClick={readOnly ? undefined : () => setEditingDesc(true)}
-                    onKeyDown={
-                      readOnly
-                        ? undefined
-                        : (e) => {
-                            if (e.key === 'Enter') setEditingDesc(true)
-                          }
-                    }
-                    className={cn(
-                      'rounded-lg border border-transparent px-1 py-0.5',
-                      !readOnly &&
-                        'cursor-text hover:border-glass-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+                  <Dt icon={Calendar}>Срок</Dt>
+                  <dd className="m-0 flex flex-wrap items-center gap-2">
+                    <input
+                      type="date"
+                      value={dueAt}
+                      disabled={readOnly}
+                      aria-label="Срок"
+                      onChange={(e) => {
+                        setDueAt(e.target.value)
+                        void saveDate('due_at', e.target.value)
+                      }}
+                      className={cn(
+                        DATE_INPUT,
+                        overdue && 'bg-red font-bold text-bg',
+                      )}
+                    />
+                    {overdue && task.due_at && (
+                      <span className="text-[14px] text-red">
+                        просрочено на {plural(overdueDays(task.due_at), 'день', 'дня', 'дней')}
+                      </span>
                     )}
-                    title={readOnly ? undefined : 'Нажмите, чтобы редактировать'}
-                  >
-                    <Markdown text={description} />
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setEditingDesc(true)}
-                    disabled={readOnly}
-                    className="w-full rounded-lg border border-dashed border-glass-border px-3 py-2 text-left text-sm text-text3 hover:text-text2 disabled:cursor-default"
-                  >
-                    Что нужно сделать? Поддерживается markdown.
-                  </button>
+                  </dd>
+
+                  <Dt icon={Tag}>Метки</Dt>
+                  <dd className="m-0 min-w-0">
+                    <TaskLabels
+                      bare
+                      taskId={task.id}
+                      projectId={projectId}
+                      canEdit={!readOnly}
+                    />
+                  </dd>
+
+                  <TaskCustomFields
+                    variant="rows"
+                    taskId={task.id}
+                    projectId={projectId}
+                  />
+                </dl>
+
+                <DrawerSection title="Описание">
+                  {editingDesc && !readOnly ? (
+                    <Textarea
+                      autoFocus
+                      rows={6}
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      onBlur={() => {
+                        void saveDescription()
+                        setEditingDesc(false)
+                      }}
+                      placeholder="Что нужно сделать? Поддерживается markdown."
+                    />
+                  ) : description ? (
+                    <div
+                      role={readOnly ? undefined : 'button'}
+                      tabIndex={readOnly ? undefined : 0}
+                      onClick={readOnly ? undefined : () => setEditingDesc(true)}
+                      onKeyDown={
+                        readOnly
+                          ? undefined
+                          : (e) => {
+                              if (e.key === 'Enter') setEditingDesc(true)
+                            }
+                      }
+                      className={cn(
+                        'rounded-lg border border-transparent px-1 py-0.5 text-[17px] leading-[1.6] text-text',
+                        !readOnly &&
+                          'cursor-text hover:border-glass-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+                      )}
+                      title={readOnly ? undefined : 'Нажмите, чтобы редактировать'}
+                    >
+                      <Markdown text={description} />
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setEditingDesc(true)}
+                      disabled={readOnly}
+                      className="w-full rounded-lg border border-dashed border-glass-border px-3 py-2.5 text-left text-[15px] text-text2 hover:border-amber hover:text-text disabled:cursor-default disabled:hover:border-glass-border disabled:hover:text-text2"
+                    >
+                      Что нужно сделать? Поддерживается markdown.
+                    </button>
+                  )}
+                </DrawerSection>
+
+                {!task.parent_task_id && (
+                  <SubtaskList
+                    taskId={task.id}
+                    projectId={projectId}
+                    canEdit={!readOnly}
+                    onOpenTask={onOpenTask}
+                  />
                 )}
-              </div>
 
-              <TaskLabels
-                taskId={task.id}
-                projectId={projectId}
-                canEdit={!readOnly}
-              />
-
-              {!task.parent_task_id && (
-                <SubtaskList
+                <TaskDependencies
                   taskId={task.id}
                   projectId={projectId}
                   canEdit={!readOnly}
-                  onOpenTask={onOpenTask}
                 />
-              )}
 
-              <TaskCustomFields taskId={task.id} projectId={projectId} />
+                <TaskAttachments taskId={task.id} canEdit={!readOnly} />
 
-              <TaskDependencies
-                taskId={task.id}
-                projectId={projectId}
-                canEdit={!readOnly}
-              />
+                <TaskThread taskId={task.id} />
 
-              <TaskAttachments taskId={task.id} canEdit={!readOnly} />
-
-              <TaskThread taskId={task.id} />
-
-              <footer className="flex justify-between gap-2 pt-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={readOnly}
-                  onClick={async () => {
-                    try {
-                      await archive.mutateAsync({
-                        id: task.id,
-                        archive: !task.archived_at,
-                      })
-                      const wasArchived = !!task.archived_at
-                      toast.success(
-                        wasArchived ? 'Задача восстановлена' : 'Задача в архиве',
-                        {
-                          action: {
-                            label: 'Отменить',
-                            onClick: () =>
-                              archive.mutate({ id: task.id, archive: wasArchived }),
-                          },
-                        },
-                      )
-                      onClose()
-                    } catch {
-                      // тост показывает глобальный onError мутаций
-                    }
-                  }}
-                >
-                  <Archive className="h-4 w-4" />
-                  {task.archived_at ? 'Восстановить' : 'В архив'}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShareOpen(true)}
-                >
-                  <LinkIcon className="h-4 w-4" />
-                  Поделиться
-                </Button>
-              </footer>
-            </div>
-          )}
+                <TaskWatchers taskId={task.id} />
+              </>
+            )}
+          </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
       {task && (
@@ -464,25 +542,5 @@ export function TaskDetailDrawer({
         />
       )}
     </DialogPrimitive.Root>
-  )
-}
-
-function Row({
-  icon,
-  label,
-  children,
-}: {
-  icon: React.ReactNode
-  label: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="grid grid-cols-[100px_1fr] items-center gap-3">
-      <div className="flex items-center gap-2 text-xs font-medium text-text2">
-        {icon}
-        {label}
-      </div>
-      <div>{children}</div>
-    </div>
   )
 }

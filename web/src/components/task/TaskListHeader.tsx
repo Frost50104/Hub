@@ -1,37 +1,44 @@
-import { type CustomFieldDefinition } from '@/lib/customFields'
-
-interface TaskListHeaderProps {
-  visibleFields: CustomFieldDefinition[]
-}
+import { cn } from '@/lib/cn'
 
 /**
- * Compact column header row above a list of `TaskRow` — only renders the
- * static "Срок" + dynamic custom-field labels. The fixed leading cells
- * (status checkbox, title, assignee) are obvious enough not to need
- * labels and would clutter the layout on narrow viewports.
+ * Шапка колонок списка. Треки приходят из `lib/taskGrid.ts` — те же, что у
+ * строки: две независимые декларации расходятся на пиксели, и подписи
+ * перестают стоять над значениями.
+ *
+ * Колонки задачи и исполнителей подписей не имеют (`aria-hidden`): заголовок
+ * и аватары называют себя сами.
  */
-export function TaskListHeader({ visibleFields }: TaskListHeaderProps) {
-  if (visibleFields.length === 0) return null
+export function TaskListHeader({
+  gridColumns,
+  fieldNames,
+  compact = false,
+  leadLabel,
+}: {
+  gridColumns: string
+  /** Подписи средних колонок в порядке треков. */
+  fieldNames: string[]
+  compact?: boolean
+  /** Подпись первой средней колонки в «Моих задачах» — «Проект». */
+  leadLabel?: string
+}) {
+  const cell = 'flex h-[38px] items-center text-[12px] font-bold uppercase tracking-[0.07em] text-text2'
+  const labels = leadLabel ? [leadLabel, ...fieldNames] : fieldNames
   return (
-    <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 border-b border-glass-border px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-text3">
-      {/* status checkbox + title columns — no header text */}
-      <span aria-hidden="true" className="invisible">·</span>
-      <span aria-hidden="true" className="invisible">·</span>
-      {/* fields render to the right of title; we replay the suffix columns
-          so headers line up with TaskRow cells. */}
-      <span aria-hidden="true" className="invisible">·</span>
-      <div className="flex items-center gap-3 text-right">
-        {visibleFields.map((f) => (
-          <span
-            key={f.id}
-            className="hidden w-24 truncate text-right lg:inline-block"
-            title={f.name}
-          >
-            {f.name}
-          </span>
-        ))}
-        <span className="inline-block w-14 text-right lg:w-24">Срок</span>
-      </div>
+    <div
+      style={{ gridTemplateColumns: gridColumns }}
+      className={cn(
+        'grid items-center border-b border-hair bg-bg',
+        compact ? 'pl-[11px] pr-2' : 'pl-[21px] pr-6',
+      )}
+    >
+      <span aria-hidden className={cell} />
+      {labels.map((name, i) => (
+        <span key={`${name}-${i}`} className={cn(cell, 'truncate pr-3.5')} title={name}>
+          {name}
+        </span>
+      ))}
+      <span aria-hidden className={cn(cell, 'justify-end')} />
+      <span className={cn(cell, 'justify-end')}>Срок</span>
     </div>
   )
 }

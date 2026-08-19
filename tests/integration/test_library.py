@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.library import _effective_ack_version, _not_acked
+from app.api.library import _effective_ack_version, _not_acked, ack_deadline_for
 from app.models.audience import Audience, AudienceRule
 from app.models.employee_profile import EmployeeProfile
 from app.models.library import LibraryMaterial, MaterialAcknowledgement
@@ -205,3 +205,34 @@ async def test_granted_hook_notifies_pending_ack(
     ).scalar_one()
     assert notif.kind == "library.ack_required"
     assert "Регламент возвратов" in notif.body
+
+
+async def test_ack_deadline_counts_from_access_grant(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Попавший в аудиторию позже публикации получает свои дни целиком."""
+    from datetime import UTC, datetime, timedelta
+
+    published = datetime(2026, 8, 1, tzinfo=UTC)
+    material = await _mk_material(
+        db,
+        tenant_id,
+        requires_acknowledgement=True,
+        ack_deadline_days=7,
+        published_at=published,
+        status="published",
+    )
+
+    # Доступ был с публикации — дедлайн от неё.
+    assert ack_deadline_for(material, None) == published + timedelta(days=7)
+    assert ack_deadline_for(material, published - timedelta(days=3)) == published + timedelta(
+        days=7
+    )
+
+    # Доступ выдан позже — отсчёт от выдачи, иначе дедлайн уже просрочен.
+    granted = datetime(2026, 8, 10, tzinfo=UTC)
+    assert ack_deadline_for(material, granted) == granted + timedelta(days=7)
+
+    # Без срока ознакомления дедлайна нет вовсе.
+    material.ack_deadline_days = None
+    assert ack_deadline_for(material, granted) is None

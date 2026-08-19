@@ -192,6 +192,22 @@ async def _audience_profile_ids(
     return [r[0] for r in rows]
 
 
+def ack_deadline_for(
+    material: LibraryMaterial, granted_at: datetime | None
+) -> datetime | None:
+    """Дедлайн ознакомления: отсчёт от публикации или от выдачи доступа.
+
+    Один источник формулы для списка и для отчёта: сотрудник, попавший в
+    аудиторию позже публикации, получает свои дни целиком.
+    """
+    if not material.ack_deadline_days or not material.published_at:
+        return None
+    base = material.published_at
+    if granted_at is not None and granted_at > base:
+        base = granted_at
+    return base + timedelta(days=material.ack_deadline_days)
+
+
 async def _not_acked(
     db: AsyncSession, material: LibraryMaterial, profile_ids: list[UUID]
 ) -> list[UUID]:
@@ -298,6 +314,21 @@ async def get_library(
         ):
             versions[(v.material_id, v.version_no)] = v
 
+    # granted_at для МОИХ аудиторий — одним запросом: иначе 179 материалов
+    # библиотеки дали бы 179 обращений за датой выдачи доступа.
+    granted: dict[UUID, datetime] = {}
+    audience_ids = {m.audience_id for m in materials if m.audience_id}
+    if profile_id and audience_ids:
+        granted = {
+            r[0]: r[1]
+            for r in await db.execute(
+                select(AudienceMember.audience_id, AudienceMember.granted_at).where(
+                    AudienceMember.profile_id == profile_id,
+                    AudienceMember.audience_id.in_(audience_ids),
+                )
+            )
+        }
+
     owner_ids = {m.owner_id for m in materials if m.owner_id}
     owner_names: dict[UUID, str] = {}
     if owner_ids:
@@ -327,6 +358,10 @@ async def get_library(
         resp.ack_pending = (
             m.requires_acknowledgement and m.status == "published" and not resp.acked_by_me
         )
+        if m.requires_acknowledgement:
+            resp.ack_deadline_at = ack_deadline_for(
+                m, granted.get(m.audience_id) if m.audience_id else None
+            )
         out.append(resp)
 
     return LibraryResponse(
@@ -1014,12 +1049,7 @@ async def ack_report(
     now = datetime.now(UTC)
     rows = []
     for p, granted_at in sorted(members, key=lambda x: x[0].full_name):
-        deadline = None
-        if material.ack_deadline_days and material.published_at:
-            base = material.published_at
-            if granted_at is not None and granted_at > base:
-                base = granted_at
-            deadline = base + timedelta(days=material.ack_deadline_days)
+        deadline = ack_deadline_for(material, granted_at)
         ack_ts = acked_at.get(p.id)
         rows.append(
             AckReportRow(

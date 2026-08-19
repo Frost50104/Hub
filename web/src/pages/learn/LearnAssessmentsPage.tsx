@@ -125,6 +125,8 @@ function EmployeeCampaignCard({ campaign }: { campaign: AssessmentCampaign }) {
         {attempt ? (
           <AttemptView
             attempt={attempt}
+            quiz={state}
+            onExit={() => setAttempt(null)}
             onFinished={(a) => {
               setAttempt(null)
               setFinished(a)
@@ -137,6 +139,7 @@ function EmployeeCampaignCard({ campaign }: { campaign: AssessmentCampaign }) {
             quiz={state}
             canRetry={false}
             onRetry={() => undefined}
+            onExit={() => setFinished(null)}
           />
         ) : state.pending_review ? (
           <p className="inline-flex items-center gap-1.5 rounded-lg border border-amber/40 bg-amber/5 px-3 py-2 text-sm text-text2">

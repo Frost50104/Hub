@@ -145,6 +145,8 @@ class MaterialResponse(BaseModel):
     opened_by_me: bool = False
     acked_by_me: bool = False
     ack_pending: bool = False  # обязателен и мной ещё не подтверждён
+    # Дедлайн ознакомления лично для меня: max(published_at, granted_at) + дни.
+    ack_deadline_at: datetime | None = None
 
 
 class LibraryResponse(BaseModel):

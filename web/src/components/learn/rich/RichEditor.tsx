@@ -362,7 +362,10 @@ function Toolbar({ editor }: { editor: Editor }) {
                 : 'text-text3 hover:bg-glass hover:text-text',
             )}
           >
-            {CALLOUT_META[kind].emoji}
+            {(() => {
+              const Icon = CALLOUT_META[kind].icon
+              return <Icon className="h-4 w-4" />
+            })()}
           </button>
         ))}
       </span>

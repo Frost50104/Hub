@@ -18,7 +18,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from signaris_auth import Principal
-from sqlalchemy import func, select
+from sqlalchemy import Text, func, literal_column, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,8 @@ from app.models.audience import AudienceMember
 from app.models.course import Course, CourseLesson, LessonTemplate, MediaFile
 from app.models.employee_profile import EmployeeProfile
 from app.models.progress import CourseAssignment, CourseProgress, LessonProgress
+from app.models.quiz import Quiz
+from app.models.survey import SurveyQuestion
 from app.schemas.course import (
     AssignBody,
     BlockAnswerBody,
@@ -56,7 +58,11 @@ from app.services.lesson_content import (
     check_answer,
     collect_gate_blocks,
     collect_required_videos,
+    collect_survey_ids,
+    estimate_reading_minutes,
     extract_lesson_text,
+    has_check_question,
+    minutes_from_chars,
     prepare_for_consumer,
     validate_lesson_content,
 )
@@ -169,24 +175,28 @@ async def _progress_map(
     return {p.lesson_id: p for p in rows}
 
 
-def _lesson_locked(
+def _lesson_blocker(
     course: Course,
     lessons: list[CourseLesson],
     lesson: CourseLesson,
     progress: dict[UUID, LessonProgress],
     quiz_gate: dict[UUID, bool] | None = None,
-) -> bool:
-    """Серверный замок. Монотонность: свой прогресс = никогда не заперт.
+) -> CourseLesson | None:
+    """Урок, который держит замок, или None если урок открыт.
 
-    quiz_gate (Ф3b): lesson_id → пройден ли его required-тест; урок с
-    unlock_rule='after_prev_test' дополнительно требует сданный тест
-    предыдущего урока."""
+    Монотонность: свой прогресс = никогда не заперт. quiz_gate (Ф3b):
+    lesson_id → пройден ли его required-тест; урок с unlock_rule=
+    'after_prev_test' дополнительно требует сданный тест предыдущего урока.
+
+    Возвращает именно блокирующий урок, а не флаг: интерфейс называет его по
+    имени, и «предыдущий урок» вместо «несданного теста» был бы враньём.
+    """
     if lesson.id in progress:
-        return False
+        return None
     if course.progression_mode == "free":
-        return False
+        return None
     if course.progression_mode == "mixed" and lesson.unlock_rule == "free":
-        return False
+        return None
     prev_lesson: CourseLesson | None = None
     for prev in lessons:
         if prev.id == lesson.id:
@@ -194,13 +204,25 @@ def _lesson_locked(
         prev_lesson = prev
         prev_progress = progress.get(prev.id)
         if prev_progress is None or prev_progress.status != "completed":
-            return True
-    return (
+            return prev
+    if (
         lesson.unlock_rule == "after_prev_test"
         and prev_lesson is not None
         and quiz_gate is not None
         and quiz_gate.get(prev_lesson.id) is False
-    )
+    ):
+        return prev_lesson
+    return None
+
+
+def _lesson_locked(
+    course: Course,
+    lessons: list[CourseLesson],
+    lesson: CourseLesson,
+    progress: dict[UUID, LessonProgress],
+    quiz_gate: dict[UUID, bool] | None = None,
+) -> bool:
+    return _lesson_blocker(course, lessons, lesson, progress, quiz_gate) is not None
 
 
 async def _reindex(db: AsyncSession, course: Course) -> None:
@@ -336,6 +358,7 @@ async def list_courses(
     progress: dict[UUID, CourseProgress] = {}
     assignments: dict[UUID, CourseAssignment] = {}
     lesson_totals: dict[UUID, int] = {}
+    lesson_minutes: dict[UUID, int] = {}
     if course_ids:
         if profile_id:
             for p in (
@@ -374,6 +397,42 @@ async def list_courses(
         ):
             lesson_totals[course_id] = count
 
+        # Оценка времени для каталога: длину текста считает Postgres
+        # (jsonb_path_query_array по всем .text), контент уроков в приложение
+        # не едет. Служебные кавычки массива дают ~3 знака на текстовую ноду —
+        # для оценки «~» это доли минуты.
+        for course_id, chars in await db.execute(
+            select(
+                CourseLesson.course_id,
+                func.coalesce(
+                    func.sum(
+                        func.length(
+                            func.cast(
+                                func.jsonb_path_query_array(
+                                    CourseLesson.content,
+                                    # strict: в lax-режиме `.**` обходит
+                                    # массивы дважды и удваивает объём текста.
+                                    # silent гасит ошибку на нодах без .text.
+                                    literal_column("'strict $.**.text'::jsonpath"),
+                                    literal_column("'{}'::jsonb"),
+                                    literal_column("true"),
+                                ),
+                                Text,
+                            )
+                        )
+                    ),
+                    0,
+                ),
+            )
+            .where(
+                CourseLesson.course_id.in_(course_ids),
+                CourseLesson.status == "published",
+                CourseLesson.content.is_not(None),
+            )
+            .group_by(CourseLesson.course_id)
+        ):
+            lesson_minutes[course_id] = minutes_from_chars(int(chars))
+
     items = []
     for c in courses:
         resp = CourseResponse.model_validate(c)
@@ -384,6 +443,7 @@ async def list_courses(
         resp.completed = bool(p and p.completed_at)
         resp.enrolled = bool(a or p or c.course_type == "mandatory")
         resp.due_at = a.due_at if a else None
+        resp.estimated_minutes_total = lesson_minutes.get(c.id, 0)
         items.append(resp)
     return CourseListResponse(items=items, content_role=role)
 
@@ -427,12 +487,31 @@ async def get_course(
         else {}
     )
 
+    # Уроки уже загружены целиком (контент в той же строке), поэтому оценка
+    # чтения и наличие контрольного вопроса не стоят ни одного запроса.
+    # Тесты — один батч-запрос на курс.
+    lesson_ids = [lesson.id for lesson in lessons]
+    quiz_lessons: set[UUID] = set()
+    if lesson_ids:
+        quiz_lessons = set(
+            (
+                await db.execute(
+                    select(Quiz.lesson_id).where(
+                        Quiz.lesson_id.in_(lesson_ids),
+                        Quiz.status == "published",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
     metas = []
     for lesson in lessons:
-        locked = (
-            _lesson_locked(course, published, lesson, progress, quiz_gate)
+        blocker = (
+            _lesson_blocker(course, published, lesson, progress, quiz_gate)
             if lesson.status == "published" and not manager
-            else False
+            else None
         )
         p = progress.get(lesson.id)
         metas.append(
@@ -443,9 +522,14 @@ async def get_course(
                 content_format=lesson.content_format,
                 unlock_rule=lesson.unlock_rule,
                 status=lesson.status,
-                locked=locked,
+                locked=blocker is not None,
                 completed=bool(p and p.status == "completed"),
                 started=p is not None,
+                estimated_minutes=estimate_reading_minutes(lesson.content),
+                has_quiz=lesson.id in quiz_lessons,
+                has_check_question=has_check_question(lesson.content),
+                blocked_by_id=blocker.id if blocker else None,
+                blocked_by_title=blocker.title if blocker else None,
             )
         )
 
@@ -453,6 +537,11 @@ async def get_course(
     resp.lessons = metas
     resp.lessons_total = len(published)
     resp.lessons_completed = sum(1 for m in metas if m.completed and m.status == "published")
+    published_ids = {lesson.id for lesson in published}
+    resp.quizzes_total = len(quiz_lessons & published_ids)
+    resp.estimated_minutes_total = sum(
+        m.estimated_minutes for m in metas if m.status == "published"
+    )
     if profile_id:
         a = (
             await db.execute(
@@ -928,9 +1017,21 @@ async def get_lesson(
     if lesson.content_format == "blocks" and lesson.content:
         gate_blocks = collect_gate_blocks(lesson.content)
         required_videos = collect_required_videos(lesson.content)
+        survey_counts: dict[str, int] = {}
+        survey_ids = collect_survey_ids(lesson.content)
+        if survey_ids:
+            rows = await db.execute(
+                select(SurveyQuestion.survey_id, func.count())
+                .where(SurveyQuestion.survey_id.in_([UUID(sid) for sid in survey_ids]))
+                .group_by(SurveyQuestion.survey_id)
+            )
+            survey_counts = {str(sid): count for sid, count in rows}
         # Менеджеру correct остаётся (редактор), потребителю — вырезается.
         content = prepare_for_consumer(
-            lesson.content, sign_media_path, strip_correct=not manager
+            lesson.content,
+            sign_media_path,
+            strip_correct=not manager,
+            survey_counts=survey_counts,
         )
 
     pdf_url = None

@@ -24,7 +24,10 @@ export function Avatar({ name, email, src, className, ...props }: AvatarProps) {
   return (
     <div
       className={cn(
-        'inline-flex h-8 w-8 select-none items-center justify-center overflow-hidden rounded-full bg-amber/20 text-xs font-medium uppercase text-amber',
+        // Заливка --av-fill НЕПРОЗРАЧНАЯ: полупрозрачная (amber/20) в стеке
+        // просвечивала инициалы соседа. Краска --text, а не --amber: амбер на
+        // амбер-тинте даёт 1,7:1 в светлой теме.
+        'inline-flex h-6 w-6 select-none items-center justify-center overflow-hidden rounded-full bg-av-fill text-[12px] font-semibold uppercase text-text',
         className,
       )}
       title={name || email || undefined}

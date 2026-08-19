@@ -5,6 +5,9 @@ import { useState } from 'react'
 import { cn } from '@/lib/cn'
 import { learnApi } from '@/lib/learn'
 
+/** Буквы вариантов — как в макете: кружок с буквой, а не голая точка. */
+const LETTERS = ['А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ж', 'З', 'И', 'К']
+
 /**
  * Контрольный вопрос внутри урока (Ф3a). Правильный ответ знает ТОЛЬКО
  * сервер (attrs.correct вырезан из consumer-контента) — проверка через
@@ -51,25 +54,29 @@ export function CheckQuestion({
   return (
     <div
       className={cn(
-        'my-3 rounded-lg border px-3 py-2.5',
+        'my-7 rounded-[14px] border p-4 lg:my-8 lg:p-5',
         solvedCorrectly
-          ? 'border-green/50 bg-green/5'
+          ? 'border-green/40 bg-green/[0.06]'
           : answered
-            ? 'border-red/50 bg-red/5'
-            : 'border-amber/40 bg-glass',
+            ? 'border-red/40 bg-red/[0.06]'
+            : 'border-amber/40 bg-amber/5',
       )}
     >
-      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text2">
-        <CircleHelp className="h-3.5 w-3.5 text-amber" />
-        Проверьте себя
+      <p className="mb-3 flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-[0.09em] text-text2">
+        <span className="inline-flex items-center gap-1.5">
+          <CircleHelp className="h-3.5 w-3.5" />
+          Проверьте себя
+        </span>
         {gateNext && !solvedCorrectly && (
-          <span className="rounded bg-amber/15 px-1.5 py-0.5 text-[10px] normal-case text-amber">
-            нужен ответ для завершения урока
+          <span className="rounded-md bg-surface px-[7px] py-[3px] text-[11px] font-medium normal-case tracking-normal text-text2">
+            нужен ответ, чтобы завершить урок
           </span>
         )}
       </p>
-      <p className="mb-2 text-sm font-medium text-text">{question}</p>
-      <div className="space-y-1">
+      <p className="mb-3 text-[18px] font-semibold leading-[1.4] text-text [text-wrap:pretty] lg:text-[19px]">
+        {question}
+      </p>
+      <div className="flex flex-col gap-2">
         {options.map((option, i) => {
           const isPicked = selected === i
           const showState = answered && result.answer === i
@@ -83,34 +90,37 @@ export function CheckQuestion({
                 if (!solvedCorrectly) submit.mutate(i)
               }}
               className={cn(
-                'flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm transition-colors',
+                // min-height 48px — тап-таргет, а не декоративная высота.
+                'flex min-h-[48px] w-full items-center gap-3 rounded-xl border px-3.5 text-left text-[16px] font-medium transition-colors',
                 showState && result.correct
-                  ? 'border-green/60 bg-green/10 text-text'
+                  ? 'border-green bg-green/[0.12] text-text'
                   : showState
-                    ? 'border-red/60 bg-red/10 text-text'
+                    ? 'border-red bg-red/[0.12] text-text'
                     : isPicked
-                      ? 'border-amber/60 bg-amber/10 text-text'
-                      : 'border-glass-border bg-surface text-text2 hover:border-amber/40 hover:text-text',
-                (solvedCorrectly || submit.isPending) && 'cursor-default opacity-80',
+                      ? 'border-amber bg-amber/[0.08] text-text'
+                      : 'border-glass-border bg-tint text-text hover:border-amber/40',
+                (solvedCorrectly || submit.isPending) && 'cursor-default',
               )}
             >
               <span
                 className={cn(
-                  'flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[10px]',
+                  'flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full text-xs font-bold',
                   showState && result.correct
-                    ? 'border-green bg-green text-white'
+                    ? 'bg-green-deep text-bg'
                     : showState
-                      ? 'border-red bg-red text-white'
-                      : 'border-glass-border',
+                      ? 'bg-red text-bg'
+                      : 'border border-glass-border text-text2',
                 )}
               >
                 {showState ? (
                   result.correct ? (
-                    <Check className="h-3 w-3" />
+                    <Check className="h-3.5 w-3.5" />
                   ) : (
-                    <X className="h-3 w-3" />
+                    <X className="h-3.5 w-3.5" />
                   )
-                ) : null}
+                ) : (
+                  LETTERS[i] ?? i + 1
+                )}
               </span>
               {option}
             </button>
@@ -118,12 +128,18 @@ export function CheckQuestion({
         })}
       </div>
       {answered && !solvedCorrectly && !lessonCompleted && (
-        <p className="mt-1.5 text-xs text-red">Неверно — попробуйте другой вариант.</p>
+        <p className="mt-3 text-[15px] font-medium leading-[1.5] text-text">
+          Неверно — попробуйте другой вариант.
+        </p>
       )}
       {answered && !solvedCorrectly && lessonCompleted && (
-        <p className="mt-1.5 text-xs text-text3">Урок завершён — ответ учтён.</p>
+        <p className="mt-3 text-[15px] leading-[1.5] text-text2">
+          Урок завершён — ответ учтён.
+        </p>
       )}
-      {solvedCorrectly && <p className="mt-1.5 text-xs text-green">Верно!</p>}
+      {solvedCorrectly && (
+        <p className="mt-3 text-[15px] font-medium leading-[1.5] text-text">Верно!</p>
+      )}
     </div>
   )
 }

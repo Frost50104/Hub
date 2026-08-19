@@ -8,7 +8,11 @@ import {
   useNotificationPreferences,
   useSetNotificationPreferences,
 } from '@/hooks/useNotificationPreferences'
+import { cn } from '@/lib/cn'
 import {
+  KIND_GROUP,
+  NOTIFICATION_GROUP_LABEL,
+  NOTIFICATION_GROUP_ORDER,
   NOTIFICATION_KINDS,
   NOTIFICATION_KIND_LABEL,
   type NotificationKind,
@@ -138,58 +142,73 @@ export function NotificationsSettingsTab() {
 
       <div className="space-y-3">
         <h2 className="font-display text-lg font-semibold text-text">События</h2>
-        <p className="text-sm text-text2">
+        <p className="text-[15px] text-text2">
           Раздельно отключайте push (звуковое уведомление на устройстве) и
           in-app (запись во «Входящие»). По умолчанию оба канала включены.
         </p>
 
-        <div className="overflow-hidden rounded-lg border border-glass-border">
-          <table className="w-full text-sm">
-            <thead className="bg-surface text-xs uppercase tracking-wider text-text3">
-              <tr>
-                <th className="px-3 py-2 text-left font-semibold">Событие</th>
-                <th className="w-16 px-3 py-2 text-center font-semibold">Push</th>
-                <th className="w-16 px-3 py-2 text-center font-semibold">In-app</th>
-              </tr>
-            </thead>
-            <tbody>
-              {NOTIFICATION_KINDS.map((kind, idx) => {
+        {NOTIFICATION_GROUP_ORDER.map((group) => {
+          const kinds = NOTIFICATION_KINDS.filter((k) => KIND_GROUP[k] === group)
+          if (kinds.length === 0) return null
+          return (
+            <section
+              key={group}
+              className="overflow-hidden rounded-xl border border-glass-border"
+            >
+              <header className="grid grid-cols-[minmax(0,1fr)_72px_72px] items-center gap-2 bg-surface px-3.5 py-2">
+                <span className="text-[12px] font-bold uppercase tracking-[0.07em] text-text2">
+                  {NOTIFICATION_GROUP_LABEL[group]}
+                </span>
+                <span className="text-center text-[12px] font-bold uppercase tracking-[0.07em] text-text2">
+                  Push
+                </span>
+                <span className="text-center text-[12px] font-bold uppercase tracking-[0.07em] text-text2">
+                  In-app
+                </span>
+              </header>
+              {kinds.map((kind, idx) => {
                 const pref = prefs[kind] ?? { push: true, in_app: true }
+                const label = NOTIFICATION_KIND_LABEL[kind]
                 return (
-                  <tr
+                  <div
                     key={kind}
-                    className={
-                      idx % 2 === 0
-                        ? 'bg-transparent'
-                        : 'bg-glass/40'
-                    }
+                    className={cn(
+                      'grid grid-cols-[minmax(0,1fr)_72px_72px] items-center gap-2 border-t border-hair px-3.5 py-2.5',
+                      idx % 2 === 1 && 'bg-tint',
+                    )}
                   >
-                    <td className="px-3 py-2.5 text-text">
-                      {NOTIFICATION_KIND_LABEL[kind]}
-                    </td>
-                    <td className="px-3 py-2.5 text-center">
+                    <span className="text-[15px] text-text">{label}</span>
+                    {/* Дорожка 44×24 — визуал, а тап-цель вокруг неё 44×44:
+                        сама дорожка ниже порога, и её геометрию менять нельзя. */}
+                    <TapTarget>
                       <Switch
                         checked={pref.push}
                         onCheckedChange={(v) => setChannel(kind, 'push', v)}
                         disabled={setPrefs.isPending}
-                        aria-label={`Push для «${NOTIFICATION_KIND_LABEL[kind]}»`}
+                        aria-label={`Push для «${label}»`}
                       />
-                    </td>
-                    <td className="px-3 py-2.5 text-center">
+                    </TapTarget>
+                    <TapTarget>
                       <Switch
                         checked={pref.in_app}
                         onCheckedChange={(v) => setChannel(kind, 'in_app', v)}
                         disabled={setPrefs.isPending}
-                        aria-label={`In-app для «${NOTIFICATION_KIND_LABEL[kind]}»`}
+                        aria-label={`In-app для «${label}»`}
                       />
-                    </td>
-                  </tr>
+                    </TapTarget>
+                  </div>
                 )
               })}
-            </tbody>
-          </table>
-        </div>
+            </section>
+          )
+        })}
       </div>
     </div>
+  )
+}
+
+function TapTarget({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="flex h-11 items-center justify-center">{children}</span>
   )
 }

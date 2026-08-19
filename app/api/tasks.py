@@ -42,6 +42,7 @@ from app.services.task_assignees import (
     serialize_with_assignees,
     set_task_assignees,
 )
+from app.services.task_counts import load_row_counts
 from app.services.task_watchers import ensure_watcher
 
 router = APIRouter(tags=["tasks"])
@@ -183,8 +184,19 @@ async def list_tasks(
         stmt = stmt.where(Task.due_at <= due_to)
 
     tasks = (await db.execute(stmt)).scalars().all()
-    by_task = await load_assignees(db, [t.id for t in tasks])
-    return [_serialize(t, by_task.get(t.id, [])) for t in tasks]
+    ids = [t.id for t in tasks]
+    by_task = await load_assignees(db, ids)
+    counts = await load_row_counts(db, ids)
+    out: list[TaskResponse] = []
+    for t in tasks:
+        item = _serialize(t, by_task.get(t.id, []))
+        c = counts.get(t.id)
+        if c is not None:
+            item.comment_count = c.comments
+            item.attachment_count = c.attachments
+            item.blocker_count = c.blockers
+        out.append(item)
+    return out
 
 
 @router.post(

@@ -255,15 +255,15 @@ export function TimelineView({ projectId, onTaskClick }: TimelineViewProps) {
                 type="button"
                 onClick={() => setScale(s)}
                 className={cn(
-                  'rounded px-2 py-0.5 text-[11px] font-medium uppercase tracking-wider focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
-                  scale === s ? 'bg-surface text-text' : 'text-text3 hover:text-text',
+                  'rounded px-2 py-0.5 text-[12px] font-medium uppercase tracking-wider focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+                  scale === s ? 'bg-surface text-text' : 'text-text2 hover:text-text',
                 )}
               >
                 {s === 'day' ? 'день' : s === 'week' ? 'нед' : 'мес'}
               </button>
             ))}
           </div>
-          <div className="text-xs text-text3">
+          <div className="text-xs text-text2">
             {tl.isLoading && 'Загружаем…'}
             {tl.isError && 'Ошибка'}
           </div>
@@ -282,7 +282,7 @@ export function TimelineView({ projectId, onTaskClick }: TimelineViewProps) {
               {headerTicks.map((t) => (
                 <div
                   key={t.left}
-                  className="absolute top-0 flex h-full items-center overflow-hidden whitespace-nowrap border-l border-glass-border px-1 text-[10px] text-text3"
+                  className="absolute top-0 flex h-full items-center overflow-hidden whitespace-nowrap border-l border-glass-border px-1 text-[12px] text-text2"
                   style={{ left: t.left, maxWidth: pxPerDay * 2 }}
                 >
                   <span className={t.isStrong ? 'font-semibold text-text2' : ''}>
@@ -308,7 +308,7 @@ export function TimelineView({ projectId, onTaskClick }: TimelineViewProps) {
             {sectionRowAnchors.map((a) => (
               <div
                 key={`sec-${a.rowIdx}`}
-                className="absolute left-0 flex items-center border-b border-glass-border bg-surface/50 px-2 text-[11px] font-semibold uppercase tracking-wider text-text2"
+                className="absolute left-0 flex items-center border-b border-glass-border bg-surface/50 px-2 text-[12px] font-semibold uppercase tracking-wider text-text2"
                 style={{
                   top: HEADER_HEIGHT + a.rowIdx * ROW_HEIGHT,
                   height: ROW_HEIGHT,
@@ -373,7 +373,7 @@ function DraggableBar({ task, bar, onClick }: DraggableBarProps) {
         onClick()
       }}
       className={cn(
-        'absolute z-[1] cursor-grab rounded border px-2 text-left text-[11px] active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+        'absolute z-[1] cursor-grab rounded border px-2 text-left text-[12px] active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
         PRIORITY_FILL[task.priority],
         PRIORITY_BORDER[task.priority],
         task.status === 'done' && 'opacity-60 line-through',
@@ -385,7 +385,7 @@ function DraggableBar({ task, bar, onClick }: DraggableBarProps) {
       ) : (
         // Узкий бар: название целиком справа от бара, а не обрезком внутри.
         <span
-          className="absolute left-full top-1/2 ml-1.5 max-w-[240px] -translate-y-1/2 truncate text-[11px] text-text2"
+          className="absolute left-full top-1/2 ml-1.5 max-w-[240px] -translate-y-1/2 truncate text-[12px] text-text2"
           aria-hidden
         >
           {task.title}
@@ -452,7 +452,7 @@ function DependencyArrows({ dependencies, bars }: DependencyArrowsProps) {
           strokeWidth={1.5}
           strokeDasharray="3 2"
           markerEnd="url(#tl-arrow)"
-          className="text-text3"
+          className="text-text2"
         />
       ))}
     </svg>

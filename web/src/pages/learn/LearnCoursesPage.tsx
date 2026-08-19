@@ -1,8 +1,8 @@
-import { Archive, CalendarClock, Check, GraduationCap, Pencil, Plus, Trash2 } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import { Archive, Check, GraduationCap, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
-import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
+import { CourseCover, courseTypeBadgeClass } from '@/components/learn/CourseCover'
 import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -16,9 +16,8 @@ import {
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select } from '@/components/ui/Select'
-import { SkeletonRows } from '@/components/ui/Skeleton'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { useCourseMutation, useCourses } from '@/hooks/useLearn'
-import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/cn'
 import {
   CONTENT_STATUS_LABEL,
@@ -29,24 +28,66 @@ import {
   type CourseType,
   type ProgressionMode,
 } from '@/lib/learn'
+import { formatMinutes, nbsp, plural } from '@/lib/typography'
 
 /**
  * «Моё обучение» (Ф3a): каталог видимых курсов = mandatory по аудитории ∪
- * личные назначения. Управление курсами — в /learn/admin/courses (Ф3a.7).
+ * личные назначения. Порядок задаёт срочность, а не структура базы.
  */
 
-function dueLabel(iso: string): { text: string; overdue: boolean } {
-  const due = new Date(iso)
-  const overdue = due.getTime() < Date.now()
-  return {
-    text: due.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }),
-    overdue,
+type CourseState = 'overdue' | 'due' | 'active' | 'new' | 'done'
+
+function courseState(course: Course): CourseState {
+  if (course.completed) return 'done'
+  if (course.due_at) {
+    return new Date(course.due_at) < new Date() ? 'overdue' : 'due'
   }
+  return course.lessons_completed > 0 ? 'active' : 'new'
 }
 
-/** Удаление/архив курса прямо из списка (ОС 12.08 — «не проваливаясь в
- * курс»): сервер разрешает hard-delete только никогда не публиковавшимся
- * (иначе 409), публиковавшиеся — в архив. */
+const GROUPS: { label: string; states: CourseState[] }[] = [
+  { label: 'Требуют внимания', states: ['overdue', 'due'] },
+  { label: 'В работе', states: ['active'] },
+  { label: 'Можно пройти', states: ['new'] },
+  { label: 'Пройдено', states: ['done'] },
+]
+
+const FILTERS: { key: string; label: string }[] = [
+  { key: 'all', label: 'Все' },
+  { key: 'mandatory', label: 'Обязательные' },
+  { key: 'career', label: 'Карьерные' },
+  { key: 'info', label: 'Информационные' },
+  { key: 'done', label: 'Пройденные' },
+]
+
+function dayWord(days: number): string {
+  return plural(days, 'день', 'дня', 'дней')
+}
+
+function courseMeta(course: Course, state: CourseState): string {
+  const lessons = `${course.lessons_completed} из ${course.lessons_total} уроков`
+  if (state === 'overdue' && course.due_at) {
+    const days = Math.max(
+      1,
+      Math.floor((Date.now() - new Date(course.due_at).getTime()) / 86_400_000),
+    )
+    return `Просрочен ${dayWord(days)} · ${lessons}`
+  }
+  if (state === 'due' && course.due_at) {
+    const when = new Date(course.due_at).toLocaleDateString('ru-RU', {
+      day: 'numeric',
+      month: 'long',
+    })
+    return `До ${when} · ${lessons}`
+  }
+  if (state === 'active') return `В работе · ${lessons}`
+  if (state === 'done') return 'Пройден'
+  const parts = [plural(course.lessons_total, 'урок', 'урока', 'уроков')]
+  if (course.estimated_minutes_total > 0) parts.push(formatMinutes(course.estimated_minutes_total))
+  return parts.join(' · ')
+}
+
+/** Удаление/архив курса прямо из списка (ОС 12.08 — «не проваливаясь в курс»). */
 function CourseRowActions({ course }: { course: Course }) {
   const remove = useCourseMutation(() => learnApi.deleteCourse(course.id))
   const archive = useCourseMutation(() => learnApi.setCourseStatus(course.id, 'archived'))
@@ -62,7 +103,7 @@ function CourseRowActions({ course }: { course: Course }) {
           if (!window.confirm(`Удалить курс «${course.title}»? Действие необратимо.`)) return
           void remove.mutateAsync(undefined as never).catch(() => undefined)
         }}
-        className="rounded p-1.5 text-text3 hover:bg-surface hover:text-red"
+        className="rounded p-1.5 text-text2 hover:bg-surface hover:text-red"
       >
         <Trash2 className="h-4 w-4" />
       </button>
@@ -79,96 +120,103 @@ function CourseRowActions({ course }: { course: Course }) {
         if (!window.confirm(`Отправить курс «${course.title}» в архив?`)) return
         void archive.mutateAsync(undefined as never).catch(() => undefined)
       }}
-      className="rounded p-1.5 text-text3 hover:bg-surface hover:text-text"
+      className="rounded p-1.5 text-text2 hover:bg-surface hover:text-text"
     >
       <Archive className="h-4 w-4" />
     </button>
   )
 }
 
-function CourseCard({ course, manage }: { course: Course; manage?: boolean }) {
+function CourseCard({
+  course,
+  index,
+  manage,
+}: {
+  course: Course
+  index: number
+  manage?: boolean
+}) {
   const navigate = useNavigate()
+  const state = courseState(course)
   const pct =
     course.lessons_total > 0
       ? Math.round((course.lessons_completed / course.lessons_total) * 100)
       : 0
-  const due = course.due_at ? dueLabel(course.due_at) : null
+  const showBar = pct > 0 && state !== 'done'
 
   return (
     <Link
       to={`/learn/courses/${course.id}`}
-      className="block rounded-xl border border-glass-border bg-glass p-4 transition-colors hover:border-amber/50"
+      className={cn(
+        'flex items-center gap-3.5 rounded-[14px] border p-2.5 text-left transition-colors',
+        state === 'overdue' ? 'border-red/45 bg-red/[0.05]' : 'border-hair hover:border-amber/40',
+      )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant={course.course_type === 'mandatory' ? 'default' : 'secondary'}>
-              {COURSE_TYPE_LABEL[course.course_type]}
-            </Badge>
-            {due && !course.completed && (
+      <CourseCover
+        courseType={course.course_type}
+        index={index}
+        muted={course.completed}
+      />
+      <span className="min-w-0 flex-1">
+        <span className={courseTypeBadgeClass(course.course_type, course.completed)}>
+          {COURSE_TYPE_LABEL[course.course_type]}
+        </span>
+        <span className="block text-[16px] font-semibold leading-[1.35] text-text [text-wrap:pretty] lg:text-[17px]">
+          {course.title}
+        </span>
+        <span
+          className={cn(
+            'mt-[3px] block text-[13px] leading-[1.4]',
+            state === 'overdue' ? 'text-text' : 'text-text2',
+          )}
+        >
+          {nbsp(courseMeta(course, state))}
+        </span>
+        {showBar && (
+          <span className="mt-2 flex items-center gap-2">
+            <span className="block h-1 flex-1 overflow-hidden rounded-full bg-surface">
               <span
                 className={cn(
-                  'inline-flex items-center gap-1 text-xs',
-                  due.overdue ? 'text-red' : 'text-text3',
+                  'block h-full rounded-full',
+                  state === 'overdue' ? 'bg-red' : 'bg-amber',
                 )}
-              >
-                <CalendarClock className="h-3.5 w-3.5" />
-                до {due.text}
-              </span>
-            )}
-          </div>
-          <h3 className="mt-1.5 truncate font-display text-base font-semibold text-text">
-            {course.title}
-          </h3>
-          {course.description && (
-            <p className="mt-0.5 line-clamp-2 text-sm text-text2">{course.description}</p>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {manage && (
-            <>
-              <button
-                type="button"
-                title="Редактировать курс"
-                onClick={(e) => {
-                  e.preventDefault()
-                  navigate(`/learn/courses/${course.id}/edit`)
-                }}
-                className="rounded p-1.5 text-text3 hover:bg-surface hover:text-text"
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
-              <CourseRowActions course={course} />
-            </>
-          )}
-          {course.completed && (
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-green/15">
-              <Check className="h-4 w-4 text-green" />
+                style={{ width: `${pct}%` }}
+              />
             </span>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-3 flex items-center gap-2">
-        <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface">
-          <span
-            className={cn('block h-full rounded-full', course.completed ? 'bg-green' : 'bg-amber')}
-            style={{ width: `${course.completed ? 100 : pct}%` }}
-          />
+            <span className="text-[11px] tabular-nums text-text2">{pct}%</span>
+          </span>
+        )}
+      </span>
+      {/* Зелёным у пройденного остаётся только медальон: заливать им карточку
+          нельзя — тогда завершённое конкурирует за внимание с просроченным. */}
+      {course.completed && (
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green-deep text-bg">
+          <Check className="h-3.5 w-3.5" strokeWidth={3} />
         </span>
-        <span className="shrink-0 text-xs text-text3">
-          {course.completed
-            ? 'Пройден'
-            : `${course.lessons_completed}/${course.lessons_total} уроков`}
+      )}
+      {manage && (
+        <span className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            title="Редактировать курс"
+            onClick={(e) => {
+              e.preventDefault()
+              navigate(`/learn/courses/${course.id}/edit`)
+            }}
+            className="rounded p-1.5 text-text2 hover:bg-surface hover:text-text"
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+          <CourseRowActions course={course} />
         </span>
-      </div>
+      )}
     </Link>
   )
 }
 
 export function LearnCoursesPage() {
-  const isDesktop = useIsDesktop()
   const [createOpen, setCreateOpen] = useState(false)
+  const [filter, setFilter] = useState('all')
 
   const probe = useCourses(false)
   const canManage =
@@ -176,73 +224,142 @@ export function LearnCoursesPage() {
     ['admin', 'publisher', 'author'].includes(probe.data.content_role)
   const managed = useCourses(true, canManage)
 
-  const items = probe.data?.items ?? []
-  const active = items.filter((c) => !c.completed)
-  const done = items.filter((c) => c.completed)
-  // «Управление» — курсы вне личного каталога (черновики, архив, чужие аудитории).
+  const items = useMemo(() => probe.data?.items ?? [], [probe.data])
+  // Индекс обложки — от позиции курса в полном каталоге, а не в отфильтрованном.
+  const indexById = useMemo(
+    () => new Map(items.map((c, i) => [c.id, i])),
+    [items],
+  )
+
+  const filtered = useMemo(() => {
+    if (filter === 'all') return items
+    if (filter === 'done') return items.filter((c) => c.completed)
+    return items.filter((c) => c.course_type === filter)
+  }, [items, filter])
+
+  const groups = useMemo(
+    () =>
+      GROUPS.map((g) => ({
+        label: g.label,
+        courses: filtered.filter((c) => g.states.includes(courseState(c))),
+      })).filter((g) => g.courses.length > 0),
+    [filtered],
+  )
+
   const consumerIds = new Set(items.map((c) => c.id))
   const managedOnly = (managed.data?.items ?? []).filter((c) => !consumerIds.has(c.id))
 
   return (
-    <div className="mx-auto max-w-3xl">
-      {!isDesktop && <MobilePageHeader eyebrow="Обучение" title="Моё обучение" />}
-      <div className="space-y-4 p-4 lg:p-8">
-        <div className="flex items-center justify-between gap-2">
-          {isDesktop && (
-            <h1 className="font-display text-2xl font-bold text-text">Моё обучение</h1>
-          )}
-          {canManage && (
-            <Button onClick={() => setCreateOpen(true)}>
-              <Plus className="h-4 w-4" /> Курс
-            </Button>
-          )}
-        </div>
+    <div className="mx-auto max-w-[680px]">
+      <header className="flex items-end justify-between gap-3 px-5 pt-14">
+        <h1 className="font-display text-[28px] font-bold leading-[1.18] tracking-[0.01em] text-text lg:text-[34px] lg:leading-[1.15]">
+          Моё обучение
+        </h1>
+        {canManage && (
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" /> Курс
+          </Button>
+        )}
+      </header>
 
-        {probe.isLoading && <SkeletonRows rows={4} />}
+      {items.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto px-5 pb-1 pt-4">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setFilter(f.key)}
+              className={cn(
+                'h-11 shrink-0 rounded-full border px-3.5 text-[13px] font-medium transition-colors',
+                filter === f.key
+                  ? 'border-amber bg-amber text-on-amber'
+                  : 'border-hair text-text2 hover:text-text',
+              )}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2 px-5 pb-8 pt-3">
+        {probe.isLoading &&
+          [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[84px] w-full" />)}
         {probe.isError && <QueryError onRetry={() => void probe.refetch()} />}
 
         {probe.data && items.length === 0 && (
-          <div className="rounded-xl border border-glass-border bg-glass p-8 text-center">
-            <GraduationCap className="mx-auto h-8 w-8 text-text3" />
-            <p className="mt-3 text-sm text-text2">
-              Вам пока не назначено ни одного курса.
+          <div className="flex flex-col items-center gap-3.5 px-7 py-16 text-center">
+            <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-surface text-text2">
+              <GraduationCap className="h-[26px] w-[26px]" strokeWidth={1.7} />
+            </span>
+            <h2 className="font-display text-[19px] font-bold leading-[1.25] text-text lg:text-[22px]">
+              Здесь пока пусто
+            </h2>
+            <p className="text-[15px] leading-[1.6] text-text2 [text-wrap:pretty]">
+              Вам пока не назначено ни одного курса. Загляните на витрину — там новинки
+              и то, что требует ознакомления.
             </p>
+            <Link
+              to="/learn"
+              className="inline-flex h-12 items-center justify-center rounded-xl bg-amber px-[22px] text-[15px] font-semibold text-on-amber"
+            >
+              На витрину
+            </Link>
           </div>
         )}
 
-        {active.length > 0 && (
-          <div className="space-y-3">
-            {active.map((c) => (
-              <CourseCard key={c.id} course={c} manage={canManage} />
-            ))}
+        {probe.data && items.length > 0 && filtered.length === 0 && (
+          <div className="flex flex-col items-center gap-3.5 px-7 py-16 text-center">
+            <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-surface text-text2">
+              <GraduationCap className="h-[26px] w-[26px]" strokeWidth={1.7} />
+            </span>
+            <h2 className="font-display text-[19px] font-bold leading-[1.25] text-text lg:text-[22px]">
+              Здесь пока пусто
+            </h2>
+            <p className="text-[15px] leading-[1.6] text-text2 [text-wrap:pretty]">
+              С этим фильтром курсов нет. Снимите фильтр или загляните на витрину.
+            </p>
+            <button
+              type="button"
+              onClick={() => setFilter('all')}
+              className="inline-flex h-12 items-center justify-center rounded-xl bg-amber px-[22px] text-[15px] font-semibold text-on-amber"
+            >
+              Показать все курсы
+            </button>
           </div>
         )}
 
-        {done.length > 0 && (
-          <div className="space-y-3">
-            <p className="pt-2 text-[11px] font-semibold uppercase tracking-wider text-text3">
-              Пройденные
+        {groups.map((group) => (
+          <div key={group.label} className="flex flex-col gap-2">
+            <p className="mb-0.5 mt-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.09em] text-text2">
+              <span>{group.label}</span>
+              <span className="font-display tabular-nums">{group.courses.length}</span>
             </p>
-            {done.map((c) => (
-              <CourseCard key={c.id} course={c} manage={canManage} />
+            {group.courses.map((c) => (
+              <CourseCard
+                key={c.id}
+                course={c}
+                index={indexById.get(c.id) ?? 0}
+                manage={canManage}
+              />
             ))}
           </div>
-        )}
+        ))}
 
         {canManage && managedOnly.length > 0 && (
-          <div className="space-y-2">
-            <p className="pt-2 text-[11px] font-semibold uppercase tracking-wider text-text3">
+          <div className="flex flex-col gap-2">
+            <p className="mb-0.5 mt-4 text-xs font-bold uppercase tracking-[0.09em] text-text2">
               Управление контентом
             </p>
             {managedOnly.map((c) => (
               <Link
                 key={c.id}
                 to={`/learn/courses/${c.id}/edit`}
-                className="flex items-center gap-2 rounded-lg border border-glass-border bg-surface px-3 py-2 text-sm text-text transition-colors hover:border-amber/50"
+                className="flex min-h-[44px] items-center gap-2 rounded-xl border border-hair px-3.5 py-2.5 text-[15px] text-text transition-colors hover:border-amber/40"
               >
                 <span className="min-w-0 flex-1 truncate">{c.title}</span>
                 <Badge variant="secondary">{CONTENT_STATUS_LABEL[c.status]}</Badge>
-                <Pencil className="h-4 w-4 shrink-0 text-text3" />
+                <Pencil className="h-4 w-4 shrink-0 text-text2" />
                 <CourseRowActions course={c} />
               </Link>
             ))}

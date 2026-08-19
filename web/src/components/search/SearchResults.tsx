@@ -16,7 +16,7 @@ const STATUS_LABEL: Record<SearchTaskHit['status'], string> = {
 }
 
 const PRIORITY_TONE: Record<SearchTaskHit['priority'], string> = {
-  low: 'text-text3',
+  low: 'text-text2',
   medium: 'text-text2',
   high: 'text-amber',
   urgent: 'text-red',
@@ -48,7 +48,7 @@ export function SearchResults({
   onRetry,
 }: SearchResultsProps) {
   if (loading) {
-    return <p className="px-1 text-sm text-text3">Ищем…</p>
+    return <p className="px-1 text-sm text-text2">Ищем…</p>
   }
   if (error !== undefined) {
     return (
@@ -57,14 +57,14 @@ export function SearchResults({
   }
   if (empty) {
     return (
-      <p className="px-1 text-sm text-text3">
+      <p className="px-1 text-sm text-text2">
         Ничего не нашлось. Попробуйте сократить запрос или убрать фильтры.
       </p>
     )
   }
   return (
     <div className="space-y-5">
-      <p className="text-xs text-text3">
+      <p className="text-xs text-text2">
         Найдено: {total} результатов в {groups.length}{' '}
         {groups.length === 1 ? 'проекте' : 'проектах'}.
       </p>
@@ -78,7 +78,7 @@ export function SearchResults({
               {g.project_name}
             </Link>
             <Badge variant="outline">{g.project_key}</Badge>
-            <span className="text-xs text-text3">
+            <span className="text-xs text-text2">
               {g.tasks.length}
               {g.comments.length > 0 && ` + ${g.comments.length} комм.`}
             </span>
@@ -94,14 +94,14 @@ export function SearchResults({
                   >
                     <div className="flex items-center justify-between gap-3">
                       <span className="flex min-w-0 items-center gap-1.5">
-                        <span className="shrink-0 font-mono text-[10px] text-text3">
+                        <span className="shrink-0 font-mono text-[12px] text-text2">
                           {g.project_key}-{t.seq}
                         </span>
                         <span
                           className={cn(
                             'truncate',
                             t.status === 'done'
-                              ? 'text-text3 line-through'
+                              ? 'text-text2 line-through'
                               : 'text-text',
                           )}
                         >
@@ -110,7 +110,7 @@ export function SearchResults({
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
                         {t.due_at && (
-                          <span className="text-[10px] text-text3">
+                          <span className="text-[12px] text-text2">
                             {new Date(t.due_at).toLocaleDateString('ru-RU', {
                               day: 'numeric',
                               month: 'short',
@@ -119,13 +119,13 @@ export function SearchResults({
                         )}
                         <span
                           className={cn(
-                            'text-[10px] uppercase tracking-wider',
+                            'text-[12px] uppercase tracking-wider',
                             PRIORITY_TONE[t.priority],
                           )}
                         >
                           {PRIORITY_LABEL[t.priority]}
                         </span>
-                        <span className="rounded bg-glass px-1.5 py-0.5 text-[10px] text-text2">
+                        <span className="rounded bg-glass px-1.5 py-0.5 text-[12px] text-text2">
                           {STATUS_LABEL[t.status]}
                         </span>
                       </span>
@@ -133,7 +133,7 @@ export function SearchResults({
                     {t.headline && (
                       <HighlightedSnippet
                         text={t.headline}
-                        className="line-clamp-2 text-xs text-text3"
+                        className="line-clamp-2 text-xs text-text2"
                       />
                     )}
                   </Link>
@@ -144,7 +144,7 @@ export function SearchResults({
 
           {g.comments.length > 0 && (
             <div className="space-y-1 pt-1">
-              <p className="px-1 text-[10px] font-semibold uppercase tracking-wider text-text3">
+              <p className="px-1 text-[12px] font-semibold uppercase tracking-wider text-text2">
                 Комментарии
               </p>
               <ul className="space-y-0.5">
@@ -154,16 +154,16 @@ export function SearchResults({
                       to={`/projects/${g.project_id}?task=${c.task_id}`}
                       className="flex items-start gap-2 rounded-md border border-glass-border bg-surface px-3 py-2 text-xs hover:bg-glass focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
                     >
-                      <MessageSquare className="mt-0.5 h-3 w-3 shrink-0 text-text3" />
+                      <MessageSquare className="mt-0.5 h-3 w-3 shrink-0 text-text2" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-text">{c.task_title}</p>
                         <HighlightedSnippet
                           text={c.snippet}
-                          className="line-clamp-2 text-text3"
+                          className="line-clamp-2 text-text2"
                         />
                       </div>
                       {c.author_initials && (
-                        <span className="shrink-0 text-[10px] text-text3">
+                        <span className="shrink-0 text-[12px] text-text2">
                           {c.author_initials}
                         </span>
                       )}

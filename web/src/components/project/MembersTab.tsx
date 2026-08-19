@@ -101,10 +101,10 @@ export function MembersTab({ projectId, canManage }: MembersTabProps) {
               <p className="truncate text-sm font-medium text-text">
                 {m.full_name || m.email || m.employee_id}
                 {m.employee_id === me.data?.employee_id && (
-                  <span className="ml-1 text-xs text-text3">(вы)</span>
+                  <span className="ml-1 text-xs text-text2">(вы)</span>
                 )}
               </p>
-              {m.email && <p className="truncate text-xs text-text3">{m.email}</p>}
+              {m.email && <p className="truncate text-xs text-text2">{m.email}</p>}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -128,7 +128,7 @@ export function MembersTab({ projectId, canManage }: MembersTabProps) {
                 ))}
               </select>
             ) : (
-              <Badge variant={m.role === 'owner' ? 'default' : 'secondary'}>
+              <Badge variant="secondary">
                 {ROLE_LABEL[m.role]}
               </Badge>
             )}
@@ -149,7 +149,7 @@ export function MembersTab({ projectId, canManage }: MembersTabProps) {
 
       {canManage && (
         <div className="space-y-2 pt-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-text3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-text2">
             Добавить участника
           </h3>
           <div className="flex flex-wrap items-center gap-2">
@@ -183,7 +183,7 @@ export function MembersTab({ projectId, canManage }: MembersTabProps) {
               Добавить
             </Button>
           </div>
-          <p className="text-xs text-text3">
+          <p className="text-xs text-text2">
             В списке — сотрудники, которые хотя бы раз заходили в Hub.
           </p>
         </div>

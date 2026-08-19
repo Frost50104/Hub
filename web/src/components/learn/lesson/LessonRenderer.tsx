@@ -1,4 +1,4 @@
-import { ClipboardList, ExternalLink, FileText } from 'lucide-react'
+import { ChevronRight, ClipboardList, ExternalLink, FileText, Maximize2 } from 'lucide-react'
 import { lazy, Suspense, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -8,6 +8,7 @@ import {
   type RichNode,
 } from '@/components/learn/rich/RichRenderer'
 import { type LessonContent } from '@/lib/learn'
+import { plural } from '@/lib/typography'
 
 import { CheckQuestion } from './CheckQuestion'
 import { ImageLightbox, type LightboxImage } from './ImageLightbox'
@@ -51,28 +52,34 @@ export function LessonRenderer({
   } | null>(null)
 
   const extraNodes: ExtraNodeRenderers = {
+    // Иллюстрация выходит за колонку во всю ширину экрана — но через
+    // отрицательный margin по паддингу контейнера, а не 100vw: vw включает
+    // ширину скроллбара и уводит страницу вбок.
     figure: (node: RichNode, index: number) => {
       const src = str(node.attrs?.src)
       const caption = str(node.attrs?.caption)
       if (!src) return null
       return (
-        <figure key={index} className="my-3">
+        <figure key={index} className="-mx-5 my-7 lg:mx-0 lg:my-8">
           <button
             type="button"
             onClick={() => setLightbox({ images: [{ src, caption }], index: 0 })}
-            className="block cursor-zoom-in rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+            className="block w-full cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 lg:rounded-xl"
             aria-label="Открыть изображение на весь экран"
           >
             <img
               src={src}
               alt={caption || 'Иллюстрация'}
               loading="lazy"
-              className="max-h-[480px] w-auto max-w-full rounded-lg border border-glass-border"
+              className="block max-h-[280px] w-full object-cover lg:h-[340px] lg:max-h-none lg:rounded-xl"
             />
           </button>
-          {caption && (
-            <figcaption className="mt-1 text-xs text-text3">{caption}</figcaption>
-          )}
+          <figcaption className="mx-5 mt-2 flex gap-2 text-[13px] leading-[1.45] text-text2 lg:mx-0 lg:text-sm lg:leading-[1.5]">
+            <Maximize2 className="mt-[3px] h-3.5 w-3.5 shrink-0" />
+            <span>
+              {caption ? `${caption}. ` : ''}Нажмите, чтобы увеличить.
+            </span>
+          </figcaption>
         </figure>
       )
     },
@@ -88,25 +95,33 @@ export function LessonRenderer({
         caption: it.caption || `Шаг ${i + 1}`,
       }))
       return (
-        <div key={index} className="my-3 flex gap-2 overflow-x-auto pb-1">
+        <div
+          key={index}
+          className="-mx-5 my-7 flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 pb-1.5 lg:mx-0 lg:my-8 lg:grid lg:grid-cols-3 lg:gap-4 lg:overflow-visible lg:px-0"
+        >
           {visible.map((item, i) => (
-            <figure key={i} className="w-44 shrink-0 sm:w-56">
+            <figure key={i} className="w-[248px] shrink-0 snap-start lg:w-auto">
               <button
                 type="button"
                 onClick={() => setLightbox({ images: lightboxImages, index: i })}
-                className="block w-full cursor-zoom-in rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                className="relative block w-full cursor-zoom-in rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
                 aria-label={`Открыть изображение ${i + 1} на весь экран`}
               >
                 <img
                   src={item.src}
                   alt={item.caption || `Шаг ${i + 1}`}
                   loading="lazy"
-                  className="h-32 w-full rounded-lg border border-glass-border object-cover sm:h-40"
+                  className="h-[186px] w-full rounded-xl object-cover lg:h-[150px]"
                 />
+                <span className="absolute left-2.5 top-2.5 inline-flex items-center rounded-lg bg-[rgb(8_8_14/0.78)] px-2.5 py-1 font-display text-[11px] font-bold tracking-[0.06em] text-[#F0F0F5]">
+                  ШАГ {i + 1} / {visible.length}
+                </span>
               </button>
-              <figcaption className="mt-1 text-xs text-text3">
-                {item.caption || `Шаг ${i + 1}`}
-              </figcaption>
+              {item.caption && (
+                <figcaption className="mt-2 text-sm leading-[1.45] text-text2">
+                  {item.caption}
+                </figcaption>
+              )}
             </figure>
           ))}
         </div>
@@ -141,7 +156,7 @@ export function LessonRenderer({
       // pdf.js вместо iframe (Android Chrome не рендерит PDF во
       // встраиваниях); подписанный URL работает без Bearer.
       return (
-        <div key={index} className="my-3 space-y-2">
+        <div key={index} className="my-7 space-y-2 lg:my-8">
           <Suspense fallback={<Skeleton className="h-[70vh] w-full rounded-lg" />}>
             <PdfViewer
               src={src}
@@ -168,15 +183,28 @@ export function LessonRenderer({
     surveyEmbed: (node: RichNode, index: number) => {
       const surveyId = str(node.attrs?.surveyId)
       if (!surveyId) return null
+      const count = Number(node.attrs?.questionCount)
+      // Шеврон, а не внешняя стрелка: опрос уводит внутрь продукта.
       return (
         <Link
           key={index}
           to={`/learn/surveys?s=${surveyId}`}
-          className="my-3 flex items-center gap-2.5 rounded-lg border border-amber/40 bg-amber/5 px-3 py-2.5 text-sm text-text transition-colors hover:border-amber"
+          className="my-7 flex min-h-[44px] items-center gap-3 rounded-xl border border-amber/35 bg-amber/[0.07] px-4 py-3.5 transition-colors hover:border-amber lg:my-8"
         >
-          <ClipboardList className="h-5 w-5 shrink-0 text-amber" />
-          <span className="min-w-0 flex-1">Пройдите опрос — это часть урока</span>
-          <ExternalLink className="h-4 w-4 shrink-0 text-text3" />
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-amber text-on-amber lg:h-11 lg:w-11">
+            <ClipboardList className="h-[19px] w-[19px]" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[16px] font-semibold text-text lg:text-[17px]">
+              Опрос
+            </span>
+            <span className="mt-0.5 block text-sm text-text2 lg:text-[15px]">
+              {Number.isFinite(count) && count > 0
+                ? `${plural(count, 'вопрос', 'вопроса', 'вопросов')} · часть урока`
+                : 'часть урока'}
+            </span>
+          </span>
+          <ChevronRight className="h-[18px] w-[18px] shrink-0 text-text2" />
         </Link>
       )
     },

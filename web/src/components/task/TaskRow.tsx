@@ -1,196 +1,134 @@
-import { CheckCircle2, Circle, ClipboardCheck, Clock, ListTree } from 'lucide-react'
+import { Plus } from 'lucide-react'
 
+import { TaskContextLine } from '@/components/task/TaskContextLine'
+import { TaskStatusControl } from '@/components/task/TaskStatusControl'
+import { PriorityBar } from '@/components/task/PriorityBar'
 import { AvatarStack } from '@/components/ui/AvatarStack'
-import { Badge } from '@/components/ui/Badge'
 import { cn } from '@/lib/cn'
-import { taskAssignees } from '@/lib/taskAssignees'
-import { type CustomFieldDefinition, type CustomFieldValue } from '@/lib/customFields'
-import { formatCustomFieldValue } from '@/lib/formatCustomField'
 import { type Label } from '@/lib/labels'
-import {
-  PRIORITY_LABEL,
-  STATUS_LABEL,
-  taskKey,
-  type SubtaskStats,
-  type Task,
-  type TaskStatus,
-} from '@/lib/tasks'
-
-const STATUS_ICON: Record<TaskStatus, typeof Circle> = {
-  todo: Circle,
-  in_progress: Clock,
-  in_review: ClipboardCheck,
-  done: CheckCircle2,
-}
-
-const STATUS_TONE: Record<TaskStatus, string> = {
-  todo: 'text-text3 hover:text-text2',
-  in_progress: 'text-amber hover:text-amber/80',
-  in_review: 'text-amber hover:text-amber/80',
-  done: 'text-green hover:text-green/80',
-}
+import { taskAssignees } from '@/lib/taskAssignees'
+import { isOverdue, shortDate } from '@/lib/taskDates'
+import { type SubtaskStats, type Task } from '@/lib/tasks'
 
 interface TaskRowProps {
   task: Task
-  /** Ключ проекта для бейджа «KEY-42» — страница проекта передаёт его сама;
-   * кросс-проектные списки работают от task.project_key из API. */
-  projectKey?: string | null
-  subtasks?: SubtaskStats
+  /** Треки из `lib/taskGrid.ts` — те же, что у шапки колонок. */
+  gridColumns: string
+  /** Ячейки между заголовком и исполнителями: кастом-поля или проект. */
+  cells?: React.ReactNode
   labels?: Label[]
+  subtasks?: SubtaskStats
+  /** Чем занять строку контекста, когда рассказывать нечего. */
+  fallback?: string | null
+  /** Строка, открытая в карточке задачи. */
+  selected?: boolean
   onClick?: () => void
   onToggleDone?: () => void
-  /** Custom field definitions to render as trailing columns, in display order. */
-  visibleFields?: CustomFieldDefinition[]
-  /** Map field_id → stored value for THIS task (parent fetches once). */
-  customValues?: Map<string, CustomFieldValue>
+  /** «Мои задачи» — узкие отбивки: колонок кастом-полей там нет. */
+  compact?: boolean
 }
 
 /**
- * List-view task row (Asana-style table line).
+ * Строка списка задач (десктоп): фиксированные 64px, две строки внутри.
  *
- * Columns: status | title (+ badges) | assignee | <custom fields...> | due.
- * Custom-field cells are read-only — click propagates to onClick which
- * opens the task drawer (full editor lives there). Inline editing in the
- * table is a future enhancement.
+ * Высота фиксирована, а строка контекста рендерится всегда — иначе список
+ * «дышит» и перестаёт сканироваться. Слева 21px вместо 24px: три пикселя
+ * отданы планке приоритета.
+ *
+ * Выделение — обводка всей строки, а не полоса слева: левый край принадлежит
+ * приоритету, и красная планка `urgent` перекрывала бы амбер, из-за чего
+ * «выбрано» выглядело бы по-разному на разных приоритетах.
  */
 export function TaskRow({
   task,
-  projectKey,
-  subtasks,
+  gridColumns,
+  cells,
   labels,
+  subtasks,
+  fallback,
+  selected = false,
   onClick,
   onToggleDone,
-  visibleFields = [],
-  customValues,
+  compact = false,
 }: TaskRowProps) {
-  const StatusIcon = STATUS_ICON[task.status]
-  const key = taskKey(projectKey ?? task.project_key, task.seq)
-  const overdue =
-    task.due_at &&
-    task.status !== 'done' &&
-    new Date(task.due_at).getTime() < Date.now()
+  const done = task.status === 'done'
+  const overdue = isOverdue(task.due_at, task.status)
+  const assignees = taskAssignees(task)
 
   return (
     <div
-      className={cn(
-        'group grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 border-b border-glass-border px-2 py-2 transition-colors',
-        onClick && 'cursor-pointer hover:bg-glass',
-        task.status === 'done' && 'opacity-60',
-      )}
+      role="button"
+      tabIndex={0}
+      aria-label={task.title}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick?.()
+        }
+      }}
+      style={{ gridTemplateColumns: gridColumns }}
+      className={cn(
+        'relative grid h-16 items-center border-b border-hair transition-colors',
+        compact ? 'pl-[11px] pr-2' : 'pl-[21px] pr-6',
+        onClick && 'cursor-pointer hover:bg-glass',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber',
+        selected && 'bg-surface shadow-[inset_0_0_0_1px_rgb(var(--amber))]',
+      )}
     >
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation()
-          onToggleDone?.()
-        }}
+      <PriorityBar priority={task.priority} />
+
+      <span className="flex min-w-0 items-center gap-3 pl-[3px]">
+        <TaskStatusControl status={task.status} onToggle={onToggleDone} />
+        <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
+          <span
+            className={cn(
+              'min-w-0 truncate text-[17px] font-medium leading-[1.35]',
+              done ? 'text-text2 line-through' : 'text-text',
+            )}
+          >
+            {task.title}
+          </span>
+          <TaskContextLine
+            task={task}
+            labels={labels}
+            subtasks={subtasks}
+            fallback={fallback}
+          />
+        </span>
+      </span>
+
+      {cells}
+
+      <span className="flex items-center justify-end">
+        {assignees.length === 0 ? (
+          <button
+            type="button"
+            aria-label="Назначить исполнителя"
+            title="Назначить исполнителя"
+            onClick={(e) => {
+              e.stopPropagation()
+              // Пикер живёт в карточке задачи: держать поповер в каждой из
+              // сотен строк дороже, чем открыть карточку.
+              onClick?.()
+            }}
+            className="flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-glass-border text-text2 hover:border-amber hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+          >
+            <Plus className="h-[14px] w-[14px]" strokeWidth={2} />
+          </button>
+        ) : (
+          <AvatarStack people={assignees} max={3} />
+        )}
+      </span>
+
+      <span
         className={cn(
-          'flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors',
-          STATUS_TONE[task.status],
+          'text-right text-[14px] tabular-nums',
+          overdue ? 'font-semibold text-red' : 'text-text2',
         )}
-        title={STATUS_LABEL[task.status]}
-        aria-label={STATUS_LABEL[task.status]}
       >
-        <StatusIcon className="h-5 w-5" />
-      </button>
-
-      <div className="flex min-w-0 items-center gap-2">
-        {key && (
-          <span className="hidden shrink-0 font-mono text-[10px] text-text3 sm:inline">
-            {key}
-          </span>
-        )}
-        <span
-          className={cn(
-            'truncate text-sm text-text',
-            task.status === 'done' && 'line-through',
-          )}
-        >
-          {task.title}
-        </span>
-        {task.priority !== 'medium' && (
-          <Badge
-            variant={
-              task.priority === 'urgent' || task.priority === 'high'
-                ? 'destructive'
-                : 'secondary'
-            }
-          >
-            {PRIORITY_LABEL[task.priority]}
-          </Badge>
-        )}
-        {subtasks && subtasks.total > 0 && (
-          <span
-            className="inline-flex shrink-0 items-center gap-0.5 text-[10px] text-text3"
-            title={`Подзадачи: ${subtasks.done} из ${subtasks.total} готово`}
-          >
-            <ListTree className="h-3 w-3" /> {subtasks.done}/{subtasks.total}
-          </span>
-        )}
-        {labels?.slice(0, 3).map((l) => (
-          <span
-            key={l.id}
-            className="hidden shrink-0 items-center gap-1 rounded-full border border-glass-border px-1.5 text-[10px] text-text2 lg:inline-flex"
-            title={l.name}
-          >
-            <span
-              className="h-1.5 w-1.5 rounded-full"
-              style={{ backgroundColor: l.color }}
-              aria-hidden
-            />
-            {l.name}
-          </span>
-        ))}
-        {labels && labels.length > 3 && (
-          <span className="hidden shrink-0 text-[10px] text-text3 lg:inline">
-            +{labels.length - 3}
-          </span>
-        )}
-      </div>
-
-      {/* w-auto: фиксированная ширина обрезала бы стек по одному аватару.
-          Колонка в сетке — auto, поэтому шапка списка не разъезжается. */}
-      <div className="flex h-7 w-auto min-w-[1.75rem] shrink-0 items-center justify-end text-text3">
-        <AvatarStack
-          people={taskAssignees(task)}
-          size="md"
-          max={3}
-          emptyPlaceholder={
-            <span
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-glass-border opacity-50"
-              title="Не назначено"
-            />
-          }
-        />
-      </div>
-
-      <div className="flex items-center gap-3 text-right text-xs">
-        {visibleFields.map((f) => {
-          const v = customValues?.get(f.id)?.value
-          return (
-            <span
-              key={f.id}
-              className="hidden w-24 truncate text-text2 lg:inline-block"
-              title={`${f.name}: ${formatCustomFieldValue(f, v)}`}
-            >
-              {formatCustomFieldValue(f, v)}
-            </span>
-          )
-        })}
-        <span className="inline-block w-14 lg:w-24">
-          {task.due_at ? (
-            <span className={cn(overdue ? 'text-red' : 'text-text2')}>
-              {new Date(task.due_at).toLocaleDateString('ru-RU', {
-                day: 'numeric',
-                month: 'short',
-              })}
-            </span>
-          ) : (
-            <span className="text-text3">—</span>
-          )}
-        </span>
-      </div>
+        {task.due_at ? shortDate(task.due_at) : '—'}
+      </span>
     </div>
   )
 }

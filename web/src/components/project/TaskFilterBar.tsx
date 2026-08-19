@@ -1,7 +1,8 @@
-import { X } from 'lucide-react'
+import { ChevronDown, X } from 'lucide-react'
 
 import { PeoplePicker } from '@/components/PeoplePicker'
 import { Button } from '@/components/ui/Button'
+import { cn } from '@/lib/cn'
 import { useLabels } from '@/hooks/useLabels'
 import {
   activeFilterCount,
@@ -30,8 +31,49 @@ const SORT_LABEL: Record<TaskSortField, string> = {
   title: 'По названию',
 }
 
-const SELECT_CLASS =
-  'h-8 rounded-md border border-glass-border bg-glass px-2 text-xs text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60'
+/**
+ * Нативный select с геометрией тулбара: 32px, радиус 6, 12/500.
+ *
+ * Системный шеврон жмётся к самому краю поля, поэтому `appearance:none` и свой
+ * шеврон 13px в 10px от края. Ширина считается по ВЫБРАННОЙ подписи, а не по
+ * самой длинной опции — иначе «Метка: любая» растягивалась бы под самое
+ * длинное имя метки и ряд фильтров уезжал на три этажа. `field-sizing:content`
+ * решал бы это сам, но он есть только в Chrome, а PWA на iPhone — WebKit.
+ */
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  children,
+  ariaLabel,
+}: {
+  /** Подпись, по которой считается ширина. */
+  label: string
+  value: string
+  onChange: (v: string) => void
+  children: React.ReactNode
+  ariaLabel: string
+}) {
+  return (
+    <span className="relative inline-flex shrink-0 items-center">
+      <select
+        aria-label={ariaLabel}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        // 10px слева + 30px справа (гнездо под шеврон); `ch` в Onest немного
+        // уже среднего знака кириллицы, поэтому коэффициент 1.05.
+        style={{ width: `calc(${(label.length * 1.05).toFixed(1)}ch + 40px)` }}
+        className="h-8 cursor-pointer appearance-none whitespace-nowrap rounded-md border border-glass-border bg-glass pl-2.5 pr-[30px] font-body text-[12px] font-medium text-text2 focus-visible:border-amber focus-visible:outline-none"
+      >
+        {children}
+      </select>
+      <ChevronDown
+        className="pointer-events-none absolute right-2.5 h-[13px] w-[13px] text-text2"
+        strokeWidth={2.2}
+      />
+    </span>
+  )
+}
 
 interface TaskFilterBarProps {
   projectId: string
@@ -57,24 +99,22 @@ export function TaskFilterBar({
   const labels = useLabels(projectId)
   const count = activeFilterCount(value)
   const set = (patch: Partial<TaskViewFilters>) => onChange({ ...value, ...patch })
+  const labelName = labels.data?.find((l) => l.id === value.label)?.name
 
   return (
-    <div className="flex flex-wrap items-center gap-2 px-1">
-      <div className="w-[200px]">
-        <PeoplePicker
-          value={value.assignee ?? null}
-          onChange={(id) => set({ assignee: id ?? undefined })}
-          placeholder="Исполнитель: все"
-        />
-      </div>
+    <div className="flex flex-wrap items-center gap-2">
+      <PeoplePicker
+        variant="filter"
+        value={value.assignee ?? null}
+        onChange={(id) => set({ assignee: id ?? undefined })}
+        placeholder="Исполнитель: все"
+      />
 
-      <select
+      <FilterSelect
+        ariaLabel="Фильтр по статусу"
+        label={value.status ? STATUS_LABEL[value.status] : 'Статус: все'}
         value={value.status ?? ''}
-        onChange={(e) =>
-          set({ status: (e.target.value || undefined) as TaskStatus | undefined })
-        }
-        aria-label="Фильтр по статусу"
-        className={SELECT_CLASS}
+        onChange={(v) => set({ status: (v || undefined) as TaskStatus | undefined })}
       >
         <option value="">Статус: все</option>
         {(Object.keys(STATUS_LABEL) as TaskStatus[]).map((s) => (
@@ -82,17 +122,13 @@ export function TaskFilterBar({
             {STATUS_LABEL[s]}
           </option>
         ))}
-      </select>
+      </FilterSelect>
 
-      <select
+      <FilterSelect
+        ariaLabel="Фильтр по приоритету"
+        label={value.priority ? PRIORITY_LABEL[value.priority] : 'Приоритет: любой'}
         value={value.priority ?? ''}
-        onChange={(e) =>
-          set({
-            priority: (e.target.value || undefined) as TaskPriority | undefined,
-          })
-        }
-        aria-label="Фильтр по приоритету"
-        className={SELECT_CLASS}
+        onChange={(v) => set({ priority: (v || undefined) as TaskPriority | undefined })}
       >
         <option value="">Приоритет: любой</option>
         {(Object.keys(PRIORITY_LABEL) as TaskPriority[]).map((p) => (
@@ -100,14 +136,14 @@ export function TaskFilterBar({
             {PRIORITY_LABEL[p]}
           </option>
         ))}
-      </select>
+      </FilterSelect>
 
       {showLabel && (labels.data?.length ?? 0) > 0 && (
-        <select
+        <FilterSelect
+          ariaLabel="Фильтр по метке"
+          label={labelName ?? 'Метка: любая'}
           value={value.label ?? ''}
-          onChange={(e) => set({ label: e.target.value || undefined })}
-          aria-label="Фильтр по метке"
-          className={SELECT_CLASS}
+          onChange={(v) => set({ label: v || undefined })}
         >
           <option value="">Метка: любая</option>
           {labels.data?.map((l) => (
@@ -115,16 +151,14 @@ export function TaskFilterBar({
               {l.name}
             </option>
           ))}
-        </select>
+        </FilterSelect>
       )}
 
-      <select
+      <FilterSelect
+        ariaLabel="Фильтр по сроку"
+        label={value.due ? DUE_LABEL[value.due] : 'Срок: любой'}
         value={value.due ?? ''}
-        onChange={(e) =>
-          set({ due: (e.target.value || undefined) as DuePreset | undefined })
-        }
-        aria-label="Фильтр по сроку"
-        className={SELECT_CLASS}
+        onChange={(v) => set({ due: (v || undefined) as DuePreset | undefined })}
       >
         <option value="">Срок: любой</option>
         {(Object.keys(DUE_LABEL) as DuePreset[]).map((d) => (
@@ -132,34 +166,37 @@ export function TaskFilterBar({
             {DUE_LABEL[d]}
           </option>
         ))}
-      </select>
+      </FilterSelect>
 
       {showSort && (
-        <select
+        <FilterSelect
+          ariaLabel="Сортировка"
+          label={SORT_LABEL[value.sort ?? 'position']}
           value={value.sort ?? 'position'}
-          onChange={(e) => {
-            const sort = e.target.value as TaskSortField
+          onChange={(v) => {
+            const sort = v as TaskSortField
             set({
               sort: sort === 'position' ? undefined : sort,
               order: sort === 'position' ? undefined : (value.order ?? 'asc'),
             })
           }}
-          aria-label="Сортировка"
-          className={SELECT_CLASS}
         >
           {(Object.keys(SORT_LABEL) as TaskSortField[]).map((s) => (
             <option key={s} value={s}>
               {SORT_LABEL[s]}
             </option>
           ))}
-        </select>
+        </FilterSelect>
       )}
       {showSort && value.sort && value.sort !== 'position' && (
         <button
           type="button"
           onClick={() => set({ order: value.order === 'desc' ? 'asc' : 'desc' })}
           aria-label="Направление сортировки"
-          className="h-8 rounded-md border border-glass-border bg-glass px-2 text-xs text-text2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+          className={cn(
+            'inline-flex h-8 shrink-0 items-center rounded-md border border-glass-border bg-glass px-2.5 text-[12px] font-medium text-text2',
+            'hover:bg-surface focus-visible:border-amber focus-visible:outline-none',
+          )}
         >
           {value.order === 'desc' ? '↓ убыв.' : '↑ возр.'}
         </button>
@@ -169,9 +206,7 @@ export function TaskFilterBar({
         <Button
           variant="ghost"
           size="sm"
-          onClick={() =>
-            onChange({ sort: value.sort, order: value.order })
-          }
+          onClick={() => onChange({ sort: value.sort, order: value.order })}
         >
           <X className="h-3.5 w-3.5" />
           Сбросить{count > 1 ? ` (${count})` : ''}

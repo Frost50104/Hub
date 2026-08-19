@@ -202,16 +202,38 @@ def check_answer(payload: dict[str, Any], block_id: str, answer: int) -> bool | 
     return result.get("ok")
 
 
+def collect_survey_ids(payload: dict[str, Any] | None) -> set[str]:
+    """surveyId всех встроенных опросов — чтобы взять их размер одним запросом."""
+    if not payload:
+        return set()
+    ids: set[str] = set()
+
+    def fn(node: dict[str, Any]) -> None:
+        attrs = node.get("attrs") or {}
+        if node.get("type") == "surveyEmbed" and _is_uuid(attrs.get("surveyId")):
+            ids.add(attrs["surveyId"])
+        return
+
+    transform_nodes(payload, fn)
+    return ids
+
+
 def prepare_for_consumer(
     payload: dict[str, Any],
     sign: Callable[[UUID], str],
     *,
     strip_correct: bool = True,
+    survey_counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Подписанные URL в media-нодах + вырезанный correct у checkQuestion.
 
     strip_correct=False — режим редактора (author/publisher): подписи src
     нужны для превью, но правильный ответ остаётся в контенте.
+
+    survey_counts: surveyId → число вопросов, чтобы карточка опроса обещала
+    «3 вопроса», а не отправляла в неизвестность. Значение вычисляется на
+    каждой отдаче, поэтому осевшая в контенте копия устареть не может — как
+    и подписанный src, она перезаписывается при чтении.
     """
 
     def fn(node: dict[str, Any]) -> dict[str, Any] | None:
@@ -229,6 +251,12 @@ def prepare_for_consumer(
                     items.append(item)
             attrs["items"] = items
             return {**node, "attrs": attrs}
+        if ntype == "surveyEmbed" and survey_counts is not None:
+            count = survey_counts.get(str(attrs.get("surveyId")))
+            if count is not None:
+                attrs["questionCount"] = count
+                return {**node, "attrs": attrs}
+            return None
         if ntype == "checkQuestion" and strip_correct:
             attrs.pop("correct", None)
             return {**node, "attrs": attrs}
@@ -241,3 +269,59 @@ def extract_lesson_text(payload: dict[str, Any]) -> str:
     from app.services.rich_content import extract_text
 
     return extract_text(payload)
+
+
+# Скорость чтения ~180 слов/мин при средней длине русского слова с пробелом
+# ~6 знаков; иллюстрация добавляет 10 секунд на разглядывание. Оценка нужна
+# только как ориентир в шапке урока — точность до минуты избыточна.
+_CHARS_PER_MINUTE = 1080
+_SECONDS_PER_IMAGE = 10
+
+
+def minutes_from_chars(chars: int, images: int = 0) -> int:
+    """Минуты чтения по объёму текста — общая формула для Python и SQL.
+
+    Списку курсов грузить контент всех уроков незачем: он берёт длину текста
+    агрегатом в Postgres (jsonb_path_query_array по всем .text) и приводит её
+    сюда. Оценка «~», поэтому расхождение в служебные кавычки не важно.
+    """
+    seconds = chars / _CHARS_PER_MINUTE * 60 + images * _SECONDS_PER_IMAGE
+    return max(1, round(seconds / 60))
+
+
+def estimate_reading_minutes(payload: dict[str, Any] | None) -> int:
+    """Минуты чтения урока. Пустой урок — 1 минута, не 0."""
+    if not payload:
+        return 1
+    text = extract_lesson_text(payload)
+    images = 0
+
+    def fn(node: dict[str, Any]) -> None:
+        nonlocal images
+        if node.get("type") == "figure":
+            images += 1
+        elif node.get("type") == "gallery":
+            items = (node.get("attrs") or {}).get("items")
+            images += len(items) if isinstance(items, list) else 0
+
+    transform_nodes(payload, fn)
+    return minutes_from_chars(len(text), images)
+
+
+def has_check_question(payload: dict[str, Any] | None) -> bool:
+    """Есть ли в уроке контрольный вопрос — для меты в списке уроков.
+
+    Считаются ВСЕ checkQuestion, а не только гейтящие: в строке урока мета
+    обещает вопрос по ходу чтения, а не предусловие завершения.
+    """
+    if not payload:
+        return False
+    found: list[bool] = []
+
+    def fn(node: dict[str, Any]) -> None:
+        if node.get("type") == "checkQuestion":
+            found.append(True)
+        return
+
+    transform_nodes(payload, fn)
+    return bool(found)

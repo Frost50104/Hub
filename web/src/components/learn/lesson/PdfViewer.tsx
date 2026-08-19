@@ -1,4 +1,4 @@
-import { ExternalLink, FileWarning } from 'lucide-react'
+import { ExternalLink, FileText, FileWarning } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import * as pdfjs from 'pdfjs-dist'
 // ?worker&url — worker через Vite-pipeline бандлится в .js-чанк (es-format,
@@ -9,6 +9,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?worker&url'
 
 import { Skeleton } from '@/components/ui/Skeleton'
 import { cn } from '@/lib/cn'
+import { nbsp } from '@/lib/typography'
 
 // workerSrc, не workerPort: каждый документ получает СВОЙ worker — несколько
 // pdfEmbed-блоков в одном уроке не делят один порт (одноместная грабля pdf.js).
@@ -103,7 +104,7 @@ export default function PdfViewer({
         const canvas = document.createElement('canvas')
         canvas.width = Math.floor(viewport.width)
         canvas.height = Math.floor(viewport.height)
-        canvas.className = 'block w-full rounded-lg border border-glass-border bg-white'
+        canvas.className = 'block w-full rounded-md border border-hair bg-white'
         const ctx = canvas.getContext('2d')
         if (!ctx) throw new Error('canvas 2d context unavailable')
         container.append(canvas)
@@ -151,23 +152,57 @@ export default function PdfViewer({
   }
 
   return (
-    <div className={cn('space-y-2', className)}>
-      {state === 'loading' && <Skeleton className="h-[70vh] w-full rounded-lg" />}
-      {/* Контейнер НЕ прячем display:none — скрытый div имеет clientWidth 0
-          и рендер никогда бы не стартовал; пустой блок высоты не добавляет. */}
-      <div
-        ref={containerRef}
-        role="document"
-        aria-label={title || 'Документ PDF'}
-        className="space-y-2"
-      />
-      {state === 'ready' && pageCount > 0 && (
-        <p className="text-xs text-text3">
-          {pageCount > MAX_PAGES
-            ? `Показаны первые ${MAX_PAGES} страниц из ${pageCount}`
-            : `${shownPages} из ${pageCount} стр.`}
-        </p>
+    <div
+      className={cn(
+        'overflow-hidden rounded-[14px] border border-glass-border bg-tint',
+        className,
       )}
+    >
+      {/* Тулбар в две строки на мобильном: в одну имя файла сжималось до
+          «Карта на…», а три кнопки по 44px в 360px не помещаются. */}
+      <div className="flex flex-col gap-1 border-b border-hair bg-surface px-2.5 py-2 lg:flex-row lg:items-center lg:gap-3 lg:px-3.5">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber/[0.14] text-amber lg:h-[34px] lg:w-[34px]">
+            <FileText className="h-4 w-4" />
+          </span>
+          <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-text lg:text-sm">
+            {title || 'Документ PDF'}
+          </p>
+        </div>
+        <div className="flex items-center justify-between gap-2 lg:justify-end">
+          {state === 'ready' && pageCount > 0 && (
+            <span className="text-[13px] tabular-nums text-text2 lg:text-sm">
+              {pageCount > MAX_PAGES
+                ? nbsp(`Первые ${MAX_PAGES} из ${pageCount} стр.`)
+                : nbsp(`${shownPages} из ${pageCount} стр.`)}
+            </span>
+          )}
+          {fallbackHref && (
+            <a
+              href={fallbackHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Открыть в новой вкладке"
+              title="Открыть в новой вкладке"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-text2 hover:bg-glass hover:text-text"
+            >
+              <ExternalLink className="h-[18px] w-[18px]" />
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div className="p-2">
+        {state === 'loading' && <Skeleton className="h-[70vh] w-full rounded-md" />}
+        {/* Контейнер НЕ прячем display:none — скрытый div имеет clientWidth 0
+            и рендер никогда бы не стартовал; пустой блок высоты не добавляет. */}
+        <div
+          ref={containerRef}
+          role="document"
+          aria-label={title || 'Документ PDF'}
+          className="space-y-2"
+        />
+      </div>
     </div>
   )
 }

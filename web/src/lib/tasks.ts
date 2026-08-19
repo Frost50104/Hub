@@ -40,6 +40,13 @@ export interface Task {
   updated_at: string
   completed_at: string | null
   archived_at: string | null
+  /** Счётчики строки контекста в списке. Заполняет ТОЛЬКО список задач проекта;
+   *  у одиночных ручек и оптимистичных объектов их нет. `undefined` = «не знаем,
+   *  чип не рисуем», `0` = «знаем, что нет» — иначе чип мигал бы при каждом
+   *  оптимистичном обновлении. */
+  comment_count?: number | null
+  attachment_count?: number | null
+  blocker_count?: number | null
 }
 
 /** «KEY-42» или null, если чего-то не хватает (optimistic-объект, нет key). */
