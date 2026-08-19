@@ -38,11 +38,22 @@ type ViewerState = 'loading' | 'ready' | 'error'
  */
 export default function PdfViewer({
   src,
+  data,
   title,
   fallbackHref,
   className,
 }: {
-  src: string
+  /** Подписанный URL медиа (уроки). Взаимоисключимо с `data`. */
+  src?: string
+  /**
+   * Готовые байты документа (библиотека: файл качается с Bearer'ом).
+   *
+   * Blob-URL сюда передавать НЕЛЬЗЯ: для не-http(s) источника pdf.js берёт
+   * XHR-поток, а `connect-src` в CSP не содержит `blob:` — запрос падает со
+   * статусом 0, и вьювер показывает «не удалось отобразить». Проверено на
+   * staging 2026-08-19.
+   */
+  data?: Uint8Array
   title?: string
   /** Ссылка «Открыть в новой вкладке» в error-карточке (нет при forbidDownload). */
   fallbackHref?: string
@@ -72,14 +83,19 @@ export default function PdfViewer({
     const container = containerRef.current
     if (!SUPPORTED || !container || renderWidth <= 0) return
 
+    if (!src && !data) return
+
     let cancelled = false
     // Один GET вместо range-чанков: media-локация под limit_req 60 r/s,
     // а размер вложений ограничен 20MB — стриминг не нужен.
-    const task = pdfjs.getDocument({
-      url: src,
-      disableRange: true,
-      disableAutoFetch: true,
-    })
+    // Байты копируем на каждый заход: pdf.js передаёт буфер воркеру
+    // (transfer), и повторный рендер — например после смены ширины —
+    // получил бы уже отсоединённый.
+    const task = pdfjs.getDocument(
+      data
+        ? { data: new Uint8Array(data) }
+        : { url: src, disableRange: true, disableAutoFetch: true },
+    )
 
     void (async () => {
       const doc = await task.promise
@@ -123,7 +139,7 @@ export default function PdfViewer({
       cancelled = true
       void task.destroy() // терминирует и worker документа
     }
-  }, [src, renderWidth])
+  }, [src, data, renderWidth])
 
   if (!SUPPORTED || state === 'error') {
     return (

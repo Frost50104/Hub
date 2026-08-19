@@ -404,15 +404,18 @@ function MaterialDialog({
   const [reportOpen, setReportOpen] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
-  // Инлайн-просмотр: object-URL живёт, пока открыт вьювер (иначе pdf.js
-  // теряет источник на перерисовке), и отзывается при закрытии карточки.
-  const [inlineUrl, setInlineUrl] = useState<string | null>(null)
+  // Инлайн-просмотр. PDF рисуется из БАЙТОВ (pdf.js тянул бы blob-URL
+  // XHR'ом, а `connect-src` в CSP не содержит `blob:`), картинка — из
+  // object-URL (`img-src` blob: разрешает). URL отзываем при закрытии.
+  const [inline, setInline] = useState<{ bytes: Uint8Array; objectUrl: string } | null>(
+    null,
+  )
   const viewerKind = inlineViewerKind(material.current_version?.mime)
   useEffect(
     () => () => {
-      if (inlineUrl) URL.revokeObjectURL(inlineUrl)
+      if (inline) URL.revokeObjectURL(inline.objectUrl)
     },
-    [inlineUrl],
+    [inline],
   )
 
   const open = useLibraryMutation(async () => {
@@ -421,7 +424,7 @@ function MaterialDialog({
       window.open(material.url, '_blank', 'noopener')
     } else if (viewerKind) {
       // Тот же download-эндпоинт — он же отмечает открытие для «Ознакомлен».
-      setInlineUrl(await learnApi.materialBlobUrl(material.id))
+      setInline(await learnApi.materialFile(material.id))
     } else {
       await learnApi.openMaterialFile(material)
     }
@@ -651,25 +654,25 @@ function MaterialDialog({
         {reportOpen && (
           <AckReportDialog material={material} onClose={() => setReportOpen(false)} />
         )}
-        {inlineUrl && viewerKind === 'pdf' && (
-          <Dialog open onOpenChange={(v) => !v && setInlineUrl(null)}>
+        {inline && viewerKind === 'pdf' && (
+          <Dialog open onOpenChange={(v) => !v && setInline(null)}>
             <DialogContent className="max-h-[92vh] max-w-[900px] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle className="pr-8">{material.title}</DialogTitle>
               </DialogHeader>
               <Suspense fallback={<Skeleton className="h-[70vh] w-full rounded-lg" />}>
-                <PdfViewer src={inlineUrl} title={material.title} />
+                <PdfViewer data={inline.bytes} title={material.title} />
               </Suspense>
             </DialogContent>
           </Dialog>
         )}
-        {inlineUrl && viewerKind === 'image' && (
+        {inline && viewerKind === 'image' && (
           <ImageLightbox
-            images={[{ src: inlineUrl, caption: material.title }]}
+            images={[{ src: inline.objectUrl, caption: material.title }]}
             index={0}
             onIndexChange={() => undefined}
             open
-            onOpenChange={(v) => !v && setInlineUrl(null)}
+            onOpenChange={(v) => !v && setInline(null)}
           />
         )}
       </DialogContent>

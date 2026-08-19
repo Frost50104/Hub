@@ -1594,17 +1594,28 @@ export const learnApi = {
   },
 
   /**
-   * Скачать файл материала как blob и вернуть object-URL.
+   * Скачать файл материала для показа внутри приложения.
    *
    * Тот же эндпоинт, что и «скачать»: он отмечает открытие (`_track_open`),
    * а по этой отметке стоит гейт кнопки «Ознакомлен» — обходить его отдельной
-   * ручкой нельзя. Освобождать URL обязан вызывающий.
+   * ручкой нельзя.
+   *
+   * Отдаём И байты, И object-URL: pdf.js читает байты напрямую (blob-URL он
+   * тянет XHR'ом, а `connect-src` в CSP не содержит `blob:` — запрос падает),
+   * а <img> в лайтбоксе показывает object-URL (`img-src` blob: разрешает).
+   * Освобождать URL обязан вызывающий.
    */
-  materialBlobUrl: async (materialId: string): Promise<string> => {
+  materialFile: async (
+    materialId: string,
+  ): Promise<{ bytes: Uint8Array; objectUrl: string }> => {
     const resp = await api.get(`/learn/library/materials/${materialId}/download`, {
       responseType: 'blob',
     })
-    return URL.createObjectURL(resp.data as Blob)
+    const blob = resp.data as Blob
+    return {
+      bytes: new Uint8Array(await blob.arrayBuffer()),
+      objectUrl: URL.createObjectURL(blob),
+    }
   },
 
   /**
