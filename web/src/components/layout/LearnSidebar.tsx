@@ -1,7 +1,7 @@
 import { LogOut, Settings } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 
-import { ADMIN_NAV, LEARN_NAV, type LearnNavItem } from './learnNav'
+import { ADMIN_NAV, coursesSectionTitle, LEARN_NAV, type LearnNavItem } from './learnNav'
 import { SpaceSwitcher } from './SpaceSwitcher'
 import { Avatar } from '@/components/ui/Avatar'
 import { useMe } from '@/hooks/useMe'
@@ -64,6 +64,10 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
   const unread = useUnreadCount()
   const unreadCount = unread.data?.count ?? 0
   const isAdmin = me.data?.hub_role === 'admin'
+  const coursesTitle = coursesSectionTitle(
+    me.data?.profile?.content_role,
+    me.data?.hub_role,
+  )
 
   return (
     <aside className="glass flex h-screen w-[280px] shrink-0 flex-col gap-4 p-4 md:h-[calc(100vh-1.5rem)] md:w-[260px]">
@@ -98,7 +102,8 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
           {LEARN_NAV.map((item) => (
             <NavEntry
               key={item.to + item.label}
-              item={item}
+              // Раздел курсов называется по роли — и в меню, и в заголовке.
+              item={item.to === '/learn/courses' ? { ...item, label: coursesTitle } : item}
               unreadCount={unreadCount}
               onItemClick={onItemClick}
             />

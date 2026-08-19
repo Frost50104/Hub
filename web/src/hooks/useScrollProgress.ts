@@ -43,6 +43,8 @@ export interface ScrollProgress {
   pct: number
   /** Позиция скролла в пикселях — для порога появления мини-шапки. */
   top: number
+  /** Промотать фактический контейнер в начало (переход между уроками). */
+  scrollToTop: () => void
 }
 
 export function useScrollProgress(): ScrollProgress {
@@ -75,5 +77,13 @@ export function useScrollProgress(): ScrollProgress {
     }
   }, [target])
 
-  return { ref, pct, top }
+  // Сбрасывать скролл window.scrollTo нельзя: на десктопе скроллится <main>,
+  // и документ там не двигается вовсе. Контейнер уже найден — используем его.
+  const scrollToTop = useCallback(() => {
+    if (!target) return
+    if (target === window) window.scrollTo({ top: 0 })
+    else (target as HTMLElement).scrollTop = 0
+  }, [target])
+
+  return { ref, pct, top, scrollToTop }
 }

@@ -1,7 +1,32 @@
-import { Archive, Check, GraduationCap, Pencil, Plus, Trash2 } from 'lucide-react'
-import { useMemo, useState, type FormEvent } from 'react'
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { useQueryClient } from '@tanstack/react-query'
+import {
+  Archive,
+  ArrowDownUp,
+  Check,
+  GraduationCap,
+  GripVertical,
+  Pencil,
+  Plus,
+  Trash2,
+} from 'lucide-react'
+import { useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
+import { coursesSectionTitle } from '@/components/layout/learnNav'
 import { CourseCover, courseTypeBadgeClass } from '@/components/learn/CourseCover'
 import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
@@ -31,7 +56,7 @@ import {
 import { formatMinutes, nbsp, plural } from '@/lib/typography'
 
 /**
- * «Моё обучение» (Ф3a): каталог видимых курсов = mandatory по аудитории ∪
+ * Каталог курсов (Ф3a): видимые = mandatory по аудитории ∪
  * личные назначения. Порядок задаёт срочность, а не структура базы.
  */
 
@@ -218,10 +243,16 @@ export function LearnCoursesPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [filter, setFilter] = useState('all')
 
+  const [orderOpen, setOrderOpen] = useState(false)
+
   const probe = useCourses(false)
   const canManage =
     probe.data !== undefined &&
     ['admin', 'publisher', 'author'].includes(probe.data.content_role)
+  // Порядок каталога — общий для тенанта, поэтому только publisher+:
+  // author правит свои курсы, но расставлять чужие ему не за что.
+  const canOrder =
+    probe.data !== undefined && ['admin', 'publisher'].includes(probe.data.content_role)
   const managed = useCourses(true, canManage)
 
   const items = useMemo(() => probe.data?.items ?? [], [probe.data])
@@ -253,12 +284,19 @@ export function LearnCoursesPage() {
     <div className="mx-auto max-w-[680px]">
       <header className="flex items-end justify-between gap-3 px-5 pt-14">
         <h1 className="font-display text-[28px] font-bold leading-[1.18] tracking-[0.01em] text-text lg:text-[34px] lg:leading-[1.15]">
-          Моё обучение
+          {coursesSectionTitle(probe.data?.content_role)}
         </h1>
         {canManage && (
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" /> Курс
-          </Button>
+          <div className="flex shrink-0 gap-2">
+            {canOrder && (
+              <Button variant="secondary" onClick={() => setOrderOpen(true)}>
+                <ArrowDownUp className="h-4 w-4" /> Порядок
+              </Button>
+            )}
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4" /> Курс
+            </Button>
+          </div>
         )}
       </header>
 
@@ -367,7 +405,122 @@ export function LearnCoursesPage() {
         )}
 
         {createOpen && <CreateCourseDialog onClose={() => setCreateOpen(false)} />}
+        {orderOpen && (
+          <CourseOrderDialog
+            courses={managed.data?.items ?? items}
+            onClose={() => setOrderOpen(false)}
+          />
+        )}
       </div>
+    </div>
+  )
+}
+
+// ─── Порядок каталога ────────────────────────────────────────────────────────
+
+/**
+ * ОС 19.08 «курсы нельзя расставить в нужном порядке».
+ *
+ * Отдельный диалог, а не dnd прямо в каталоге: список сотрудника сгруппирован
+ * по срочности («Требуют внимания», «В работе»…), и перетаскивание внутри
+ * такой группировки означало бы не то, что видит управляющий. Порядок общий
+ * для тенанта — меняется сразу всем.
+ */
+function CourseOrderDialog({
+  courses,
+  onClose,
+}: {
+  courses: Course[]
+  onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const [order, setOrder] = useState<string[]>(() => courses.map((c) => c.id))
+  const byId = useMemo(() => new Map(courses.map((c) => [c.id, c])), [courses])
+  const rows = order.map((id) => byId.get(id)).filter(Boolean) as Course[]
+
+  const reorder = useCourseMutation((ids: string[]) => learnApi.reorderCourses(ids))
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  )
+
+  const onDragEnd = (e: DragEndEvent) => {
+    if (!e.over || e.active.id === e.over.id) return
+    const oldIdx = order.indexOf(String(e.active.id))
+    const newIdx = order.indexOf(String(e.over.id))
+    if (oldIdx === -1 || newIdx === -1) return
+    setOrder(arrayMove(order, oldIdx, newIdx))
+  }
+
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Порядок курсов</DialogTitle>
+        </DialogHeader>
+        <p className="text-[13px] leading-[1.45] text-text2">
+          Порядок общий для всей сети — его увидят все сотрудники. Внутри
+          каталога курсы всё равно группируются по срочности, поэтому порядок
+          решает внутри группы и на витрине.
+        </p>
+        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+          <SortableContext items={order} strategy={verticalListSortingStrategy}>
+            <div className="space-y-1.5">
+              {rows.map((course, i) => (
+                <SortableCourseRow key={course.id} course={course} index={i} />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose} disabled={reorder.isPending}>
+            Отмена
+          </Button>
+          <Button
+            disabled={reorder.isPending}
+            onClick={() =>
+              void reorder.mutateAsync(order).then(() => {
+                void qc.invalidateQueries({ queryKey: ['learn-courses'] })
+                void qc.invalidateQueries({ queryKey: ['learn-home-feed'] })
+                onClose()
+              })
+            }
+          >
+            Сохранить порядок
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function SortableCourseRow({ course, index }: { course: Course; index: number }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: course.id })
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  }
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-2 rounded-lg border border-glass-border bg-surface px-2 py-1.5"
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        className="cursor-grab touch-none p-1 text-text3 hover:text-text"
+        aria-label="Перетащить"
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+      <span className="w-6 shrink-0 text-center text-xs tabular-nums text-text3">
+        {index + 1}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-sm text-text">{course.title}</span>
+      <Badge variant="secondary">{CONTENT_STATUS_LABEL[course.status]}</Badge>
     </div>
   )
 }

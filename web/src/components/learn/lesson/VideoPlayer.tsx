@@ -23,6 +23,25 @@ const GAP_CLOSE = 0.5 // локальный мёрж — та же щель, ч�
 
 type Interval = [number, number]
 
+/**
+ * Незавершённые отправки прогресса по урокам.
+ *
+ * ОС 19.08 «видео не засчитывается сразу»: полоса покрытия зелёная (её считает
+ * клиент), а «Завершить урок» отвечает 409 — сервер судит по интервалам,
+ * которые уходят раз в 15 секунд. Досмотрев ролик, сотрудник жмёт кнопку
+ * раньше ближайшего пинга и упирается в данные пятнадцатисекундной давности;
+ * прогресс доезжал позже — на pagehide/visibilitychange, то есть «когда
+ * погас экран». Поэтому завершение урока обязано сначала дослать прогресс.
+ */
+const pendingByLesson = new Map<string, Set<() => Promise<void>>>()
+
+/** Дослать прогресс всех видео урока и дождаться ответа сервера. */
+export async function flushVideoProgress(lessonId: string): Promise<void> {
+  const flushes = pendingByLesson.get(lessonId)
+  if (!flushes) return
+  await Promise.all([...flushes].map((fn) => fn()))
+}
+
 function mergeLocal(intervals: Interval[]): Interval[] {
   const sorted = intervals
     .filter(([s, e]) => e > s && s >= 0)
@@ -76,6 +95,10 @@ export function VideoPlayer({
   const [coverage, setCoverage] = useState(() =>
     coverageOf(intervalsRef.current, 0),
   )
+  // Провал отправки раньше гасился молча: на экране это неотличимо от
+  // «не досмотрел», и человек пересматривал ролик вместо того, чтобы
+  // проверить связь.
+  const [saveFailed, setSaveFailed] = useState(false)
 
   const snapshot = useCallback((): Interval[] => {
     intervalsRef.current = mergeLocal(intervalsRef.current)
@@ -99,10 +122,27 @@ export function VideoPlayer({
         intervals: merged,
         duration: durationRef.current,
       })
+      setSaveFailed(false)
     } catch {
       dirtyRef.current = true // не потеряли — уйдёт со следующим пингом
+      setSaveFailed(true)
     }
   }, [lessonId, mediaId, snapshot])
+
+  // Регистрируемся в реестре урока, пока плеер на экране.
+  useEffect(() => {
+    let flushes = pendingByLesson.get(lessonId)
+    if (!flushes) {
+      flushes = new Set()
+      pendingByLesson.set(lessonId, flushes)
+    }
+    const registry = flushes
+    registry.add(flush)
+    return () => {
+      registry.delete(flush)
+      if (registry.size === 0) pendingByLesson.delete(lessonId)
+    }
+  }, [lessonId, flush])
 
   // Кэш Bearer для keepalive-флаша: pagehide не дождётся async-получения.
   useEffect(() => {
@@ -209,8 +249,14 @@ export function VideoPlayer({
         }}
         onTimeUpdate={onTimeUpdate}
         onSeeking={onSeeking}
-        onPause={refreshCoverage}
-        onEnded={refreshCoverage}
+        onPause={() => {
+          refreshCoverage()
+          void flush()
+        }}
+        onEnded={() => {
+          refreshCoverage()
+          void flush()
+        }}
       />
       {requireFullWatch && (
         <>
@@ -243,6 +289,12 @@ export function VideoPlayer({
             </p>
           </figcaption>
         </>
+      )}
+      {saveFailed && (
+        <p className="border-t border-glass-border px-3.5 py-2.5 text-[13px] leading-[1.45] text-red">
+          Прогресс просмотра не сохранён — проверьте связь. Мы попробуем ещё раз
+          сами; пока этого не случилось, урок завершить не выйдет.
+        </p>
       )}
     </figure>
   )

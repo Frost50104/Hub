@@ -10,7 +10,7 @@ import {
   Lock,
   Trophy,
 } from 'lucide-react'
-import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -20,6 +20,7 @@ import {
   LessonSections,
 } from '@/components/learn/lesson/LessonSections'
 import { QuizRunner } from '@/components/learn/lesson/QuizRunner'
+import { flushVideoProgress } from '@/components/learn/lesson/VideoPlayer'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useCourse, useLesson } from '@/hooks/useLearn'
 import { useScrollProgress } from '@/hooks/useScrollProgress'
@@ -148,6 +149,14 @@ export function LearnLessonPage() {
   const [answeredExtra, setAnsweredExtra] = useState<Set<string>>(new Set())
   const [liveCoverage, setLiveCoverage] = useState<Record<string, number>>({})
 
+  // ОС 19.08: «Следующий урок» открывал следующий урок в самом низу. Роут тот
+  // же (/learn/lessons/:lessonId), компонент не размонтируется, а SPA-переход
+  // позицию скролла не трогает — сбрасываем сами, через фактический контейнер.
+  const { scrollToTop } = progress
+  useEffect(() => {
+    scrollToTop()
+  }, [lessonId, scrollToTop])
+
   const data = lesson.data
 
   // Курс нужен всей шапке: название, «урок N из M», имена соседних уроков и
@@ -191,7 +200,13 @@ export function LearnLessonPage() {
   }, [data, liveCoverage])
 
   const complete = useMutation({
-    mutationFn: () => learnApi.completeLesson(lessonId!),
+    // Сначала дослать прогресс видео, потом просить завершение: покрытие
+    // уходит на сервер раз в 15 секунд, и кнопка, нажатая сразу после
+    // последнего кадра, судилась по устаревшим интервалам (ОС 19.08).
+    mutationFn: async () => {
+      await flushVideoProgress(lessonId!)
+      return learnApi.completeLesson(lessonId!)
+    },
     meta: { suppressGlobalError: true },
     onSuccess: (fresh) => {
       qc.setQueryData(['learn-lesson', lessonId], fresh)

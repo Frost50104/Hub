@@ -10,11 +10,13 @@ import {
 } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 
+import { coursesSectionTitle } from '@/components/layout/learnNav'
 import { courseTypeBadgeClass } from '@/components/learn/CourseCover'
 import { QueryError } from '@/components/QueryError'
 import { MetaLine } from '@/components/ui/MetaLine'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useCourse, useMyCertificates } from '@/hooks/useLearn'
+import { useMe } from '@/hooks/useMe'
 import { cn } from '@/lib/cn'
 import { COURSE_TYPE_LABEL, type CourseDetail, type LessonMeta } from '@/lib/learn'
 import { formatMinutes, nbsp, plural } from '@/lib/typography'
@@ -114,6 +116,11 @@ function LessonRow({
 }
 
 function CourseHeader({ data }: { data: CourseDetail }) {
+  const me = useMe()
+  const coursesTitle = coursesSectionTitle(
+    me.data?.profile?.content_role,
+    me.data?.hub_role,
+  )
   const published = data.lessons.filter((l) => l.status === 'published')
   const next = published.find((l) => !l.completed && !l.locked)
   const first = published[0]
@@ -137,7 +144,7 @@ function CourseHeader({ data }: { data: CourseDetail }) {
         to="/learn/courses"
         className="inline-flex h-11 items-center gap-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-text2 hover:text-text"
       >
-        <ArrowLeft className="h-4 w-4" strokeWidth={2.2} /> Моё обучение
+        <ArrowLeft className="h-4 w-4" strokeWidth={2.2} /> {coursesTitle}
       </Link>
 
       <div className="mb-2.5 mt-1 flex flex-wrap items-center gap-2.5">

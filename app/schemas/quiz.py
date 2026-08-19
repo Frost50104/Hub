@@ -180,6 +180,12 @@ class ReviewQueueItem(BaseModel):
     open_question_count: int
 
 
+class CertificateBackgroundBody(BaseModel):
+    """Подложка сертификата: id картинки из media_files либо None (сброс)."""
+
+    media_id: UUID | None = None
+
+
 class ResetAttemptsBody(BaseModel):
     profile_id: UUID
 

@@ -71,7 +71,12 @@ export function LessonRenderer({
               src={src}
               alt={caption || 'Иллюстрация'}
               loading="lazy"
-              className="block max-h-[280px] w-full object-cover lg:h-[340px] lg:max-h-none lg:rounded-xl"
+              // ОС 19.08: фотография показывается ЦЕЛИКОМ. Раньше стоял
+              // object-cover в рамке фиксированной высоты — макет задавал
+              // кадр 640×340, и вертикальные снимки теряли верх и низ.
+              // Рамка стала максимумом: ширина по контейнеру, высота — сколько
+              // нужно, но не выше экрана.
+              className="mx-auto block h-auto max-h-[70vh] w-auto max-w-full lg:rounded-xl"
             />
           </button>
           <figcaption className="mx-5 mt-2 flex gap-2 text-[13px] leading-[1.45] text-text2 lg:mx-0 lg:text-sm lg:leading-[1.5]">
@@ -111,7 +116,10 @@ export function LessonRenderer({
                   src={item.src}
                   alt={item.caption || `Шаг ${i + 1}`}
                   loading="lazy"
-                  className="h-[186px] w-full rounded-xl object-cover lg:h-[150px]"
+                  // Карточка галереи держит одну высоту (scroll-snap), поэтому
+                  // здесь object-contain на подложке: снимок виден целиком,
+                  // а поля по бокам читаются как рамка, а не как обрезка.
+                  className="h-[186px] w-full rounded-xl bg-surface object-contain lg:h-[150px]"
                 />
                 <span className="absolute left-2.5 top-2.5 inline-flex items-center rounded-lg bg-[rgb(8_8_14/0.78)] px-2.5 py-1 font-display text-[11px] font-bold tracking-[0.06em] text-[#F0F0F5]">
                   ШАГ {i + 1} / {visible.length}

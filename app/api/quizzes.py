@@ -32,11 +32,13 @@ from app.api.courses import (
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.activity import Certificate
 from app.models.audience import AudienceMember
+from app.models.course import MediaFile
 from app.models.employee_profile import EmployeeProfile
 from app.models.quiz import Quiz, QuizAttempt, QuizQuestion
 from app.schemas.quiz import (
     AnswerBody,
     AttemptResponse,
+    CertificateBackgroundBody,
     QuestionFull,
     QuizConsumerResponse,
     QuizManageResponse,
@@ -52,6 +54,7 @@ from app.services import audit, lifecycle, points
 from app.services.content_access import require_content_role, resolve_content_role
 from app.services.learn_media import sign_media_path
 from app.services.learn_notify import _employee_ids
+from app.services.learn_settings import get_settings_dict, set_setting
 from app.services.notify_batch import notify_many
 from app.services.org_scope import get_profile
 from app.services.quiz_scoring import (
@@ -749,7 +752,14 @@ async def review_attempt(
             f"Тест проверен: {score_pct}% — "
             + ("сдан. Поздравляем!" if passed else "не сдан. Можно попробовать ещё раз.")
         ),
-        url=f"/learn/courses/{quiz.course_id}",
+        # Квиз аттестации живёт под кампанией, а не под курсом (CHECK «ровно
+        # один владелец»), и его course_id = NULL: ссылка «/learn/courses/None»
+        # вела сотрудника на ошибку вместо результата.
+        url=(
+            f"/learn/courses/{quiz.course_id}"
+            if quiz.course_id is not None
+            else "/learn/assessments"
+        ),
         payload={"quiz_id": str(quiz.id)},
     )
     await db.commit()
@@ -887,6 +897,56 @@ async def get_certificate(
         "course_title": cert.course_title,
         "full_name": cert.full_name,
         "issued_at": cert.issued_at.isoformat(),
+        "background_url": await _certificate_background_url(db, principal.tenant_id),
     }
+
+
+async def _certificate_background_url(db: AsyncSession, tenant_id: UUID) -> str | None:
+    """Подписанный URL подложки сертификата или None (рамка по умолчанию)."""
+    settings = await get_settings_dict(db, tenant_id)
+    raw = settings.get("certificate_background_media_id")
+    if not raw:
+        return None
+    try:
+        media_id = UUID(str(raw))
+    except ValueError:
+        return None
+    return sign_media_path(media_id)
+
+
+@router.get("/learn/certificate-background")
+async def get_certificate_background(
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return {"background_url": await _certificate_background_url(db, principal.tenant_id)}
+
+
+@router.put("/learn/certificate-background")
+async def set_certificate_background(
+    body: CertificateBackgroundBody,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Подложка сертификата — общая для тенанта, ставит только hub-admin.
+
+    Файл заливается обычным `POST /api/learn/media` (там же whitelist MIME и
+    лимит размера); сюда приходит только id уже загруженной картинки.
+    """
+    await require_content_role(db, principal, "admin")
+    if body.media_id is not None:
+        media = await db.get(MediaFile, body.media_id)
+        if media is None or media.kind != "image":
+            raise HTTPException(
+                status_code=422, detail="Подложкой может быть только загруженная картинка"
+            )
+    await set_setting(
+        db,
+        principal.tenant_id,
+        "certificate_background_media_id",
+        str(body.media_id) if body.media_id else None,
+    )
+    await db.commit()
+    return {"background_url": await _certificate_background_url(db, principal.tenant_id)}
 
 

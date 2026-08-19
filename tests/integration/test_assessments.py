@@ -250,3 +250,54 @@ async def test_publisher_still_reviews_campaign_attempts(
         attempt.id, ReviewBody(scores={open_id: 2}), publisher, db
     )
     assert reviewed.needs_review is False and reviewed.passed is True
+
+
+async def test_review_notification_points_at_assessments_not_null_course(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Квиз кампании не принадлежит курсу — ссылка в уведомлении обязана вести
+    в аттестации.
+
+    Раньше URL строился как `/learn/courses/{quiz.course_id}`, а у квиза
+    кампании course_id = NULL: сотрудник открывал письмо «тест проверен» и
+    попадал на «/learn/courses/None».
+    """
+    admin, _ = await _mk_admin(db, tenant_id, email="admin-url@t.ru")
+    publisher, _ = await _mk_publisher(db, tenant_id)
+    member, _profile = await _mk_member(db, tenant_id, email="a-url@t.ru")
+
+    campaign = await create_campaign(CampaignUpsert(title="Ссылка"), admin, db)
+    await upsert_campaign_quiz(
+        campaign.id,
+        QuizUpsert(
+            title="Ссылка",
+            status="draft",
+            pass_score_pct=60,
+            attempts_limit=1,
+            shuffle_questions=False,
+            shuffle_options=False,
+            questions=[_single_draft(correct=1), _open_draft()],
+        ),
+        admin,
+        db,
+    )
+    await activate_campaign(campaign.id, admin, db)
+
+    attempt = await start_or_resume_attempt(campaign.quiz_id, member, db)
+    single_id = next(q.id for q in attempt.questions if q.qtype == "single")
+    open_id = next(q.id for q in attempt.questions if q.qtype == "open")
+    await save_answer(attempt.id, AnswerBody(question_id=single_id, value=1), member, db)
+    await save_answer(
+        attempt.id, AnswerBody(question_id=open_id, value="Ответ"), member, db
+    )
+    await submit_attempt(attempt.id, member, db)
+    await review_attempt(attempt.id, ReviewBody(scores={open_id: 2}), publisher, db)
+
+    rows = (
+        await db.execute(
+            select(Notification).where(Notification.kind == "quiz.reviewed")
+        )
+    ).scalars().all()
+    assert rows, "уведомление о проверке не создано"
+    assert all(n.url == "/learn/assessments" for n in rows), [n.url for n in rows]
+    assert all("None" not in (n.url or "") for n in rows)

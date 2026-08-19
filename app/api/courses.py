@@ -35,6 +35,7 @@ from app.schemas.course import (
     CourseCreate,
     CourseDetailResponse,
     CourseListResponse,
+    CourseReorderBody,
     CourseResponse,
     CourseUpdate,
     LessonContentResponse,
@@ -446,6 +447,38 @@ async def list_courses(
         resp.estimated_minutes_total = lesson_minutes.get(c.id, 0)
         items.append(resp)
     return CourseListResponse(items=items, content_role=role)
+
+
+@router.put("/learn/courses/reorder", status_code=204)
+async def reorder_courses(
+    body: CourseReorderBody,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Порядок каталога курсов (ОС 19.08: «курсы нельзя расставить»).
+
+    Порядок ОБЩИЙ для тенанта: publisher меняет его сразу всем сотрудникам,
+    поэтому право — publisher+, а не author над своими курсами. Нумеруем весь
+    список одной транзакцией: `position` у всех курсов стартует с 0, и правка
+    одного значения ничего не упорядочила бы. Курсы, которых нет в запросе
+    (создан параллельно), сохраняют свою позицию — при гонке побеждает
+    последний пишущий, для каталога это приемлемо.
+
+    Маршрут объявлен ДО `/learn/courses/{course_id}`: иначе «reorder» ушёл бы
+    в path-параметр и упал бы на разборе UUID.
+    """
+    await require_content_role(db, principal, "publisher")
+    courses = {
+        c.id: c
+        for c in (await db.execute(select(Course).where(Course.id.in_(body.course_ids))))
+        .scalars()
+        .all()
+    }
+    for i, course_id in enumerate(body.course_ids):
+        course = courses.get(course_id)
+        if course is not None:
+            course.position = i
+    await db.commit()
 
 
 @router.get("/learn/courses/{course_id}", response_model=CourseDetailResponse)

@@ -11,11 +11,14 @@ import {
   Images,
   LayoutTemplate,
   Save,
+  SlidersHorizontal,
   X,
 } from 'lucide-react'
 import {
   lazy,
   Suspense,
+  useEffect,
+  useReducer,
   useRef,
   useState,
   type ChangeEvent,
@@ -23,7 +26,11 @@ import {
 } from 'react'
 import { toast } from 'sonner'
 
-import { LESSON_NODE_EXTENSIONS, LESSON_NODE_TYPES } from '@/components/learn/rich/lessonNodes'
+import {
+  LESSON_NODE_EXTENSIONS,
+  LESSON_NODE_TYPES,
+  type GalleryItemAttrs,
+} from '@/components/learn/rich/lessonNodes'
 import {
   SurveyQuestionsEditor,
   validateQuestions,
@@ -56,6 +63,7 @@ import {
   learnApi,
   type LessonMeta,
   type LessonUnlockRule,
+  type ProgressionMode,
   type QuestionDraft,
   type RichDoc,
 } from '@/lib/learn'
@@ -102,9 +110,12 @@ function ToolButton({
 
 export function LessonEditor({
   lessonMeta,
+  progressionMode,
   onClose,
 }: {
   lessonMeta: LessonMeta
+  /** Режим прогрессии курса — от него зависит, действует ли правило доступа. */
+  progressionMode: ProgressionMode
   onClose: () => void
 }) {
   const lesson = useLesson(lessonMeta.id)
@@ -123,15 +134,23 @@ export function LessonEditor({
         </button>
       </div>
       {lesson.isLoading && <SkeletonRows rows={4} />}
-      {lesson.data && <LessonEditorInner key={lesson.data.id} lesson={lesson.data} />}
+      {lesson.data && (
+        <LessonEditorInner
+          key={lesson.data.id}
+          lesson={lesson.data}
+          progressionMode={progressionMode}
+        />
+      )}
     </div>
   )
 }
 
 function LessonEditorInner({
   lesson,
+  progressionMode,
 }: {
   lesson: NonNullable<ReturnType<typeof useLesson>['data']>
+  progressionMode: ProgressionMode
 }) {
   const [title, setTitle] = useState(lesson.title)
   const [unlockRule, setUnlockRule] = useState<LessonUnlockRule>(lesson.unlock_rule)
@@ -143,6 +162,7 @@ function LessonEditorInner({
 
   const [checkOpen, setCheckOpen] = useState(false)
   const [surveyOpen, setSurveyOpen] = useState(false)
+  const [blockPropsOpen, setBlockPropsOpen] = useState(false)
   const [videoUpload, setVideoUpload] = useState<File | null>(null)
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
@@ -264,6 +284,7 @@ function LessonEditorInner({
         <ToolButton title="Встроить опрос" onClick={() => setSurveyOpen(true)}>
           <ClipboardList className="h-4 w-4" /> Опрос
         </ToolButton>
+        <BlockPropsButton editor={editor} onOpen={() => setBlockPropsOpen(true)} />
         {uploading && <span className="px-1 text-xs text-text3">Загрузка…</span>}
       </>
     )
@@ -294,6 +315,17 @@ function LessonEditorInner({
               </option>
             ))}
           </Select>
+          {/* ОС 19.08: «написано, что тест урока открывает следующий, но
+              переходит без сдачи». В свободном курсе замки уроков не работают
+              вовсе (`_lesson_blocker` выходит на progression_mode === 'free'),
+              а селект молчал об этом — обещали то, чего продукт не делает. */}
+          {progressionMode === 'free' && (
+            <p className="mt-1 text-[13px] leading-[1.45] text-text2">
+              Курс со свободной прогрессией: замки уроков не действуют, любой
+              урок открыт сразу. Чтобы правило работало, включите
+              последовательный или смешанный режим в настройках курса.
+            </p>
+          )}
         </div>
       </div>
 
@@ -447,6 +479,12 @@ function LessonEditorInner({
             editorRef.current?.chain().focus().insertSurveyEmbed(surveyId).run()
             setSurveyOpen(false)
           }}
+        />
+      )}
+      {blockPropsOpen && editorRef.current && (
+        <BlockPropsDialog
+          editor={editorRef.current}
+          onClose={() => setBlockPropsOpen(false)}
         />
       )}
       {videoUpload && (
@@ -726,6 +764,151 @@ function SurveyEmbedDialog({
             </div>
           </div>
         )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * Свойства уже вставленного блока: подпись у фото и шагов галереи, настройки
+ * досмотра у видео.
+ *
+ * ОС 19.08: подпись задавалась только моделью (редактор всегда клал пустую —
+ * отсюда «Шаг 1, Шаг 2» вместо текста), а галочки видео жили ТОЛЬКО в диалоге
+ * загрузки — «потеряла кнопку, чтобы запретить перемотку».
+ */
+const EDITABLE_BLOCKS = ['figure', 'gallery', 'video'] as const
+type EditableBlock = (typeof EDITABLE_BLOCKS)[number]
+
+function activeBlock(editor: Editor): EditableBlock | null {
+  return EDITABLE_BLOCKS.find((type) => editor.isActive(type)) ?? null
+}
+
+/**
+ * extraToolbar RichEditor'а не перерисовывается на смену выделения (в отличие
+ * от его собственного Toolbar'а) — подписываемся на selectionUpdate сами,
+ * иначе кнопка навсегда осталась бы неактивной.
+ */
+function BlockPropsButton({ editor, onOpen }: { editor: Editor; onOpen: () => void }) {
+  const [, rerender] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    editor.on('selectionUpdate', rerender)
+    return () => {
+      editor.off('selectionUpdate', rerender)
+    }
+  }, [editor])
+  const block = activeBlock(editor)
+  return (
+    <ToolButton
+      title={
+        block
+          ? 'Свойства выделенного блока'
+          : 'Свойства блока — сначала выделите фото, галерею или видео'
+      }
+      disabled={block === null}
+      onClick={onOpen}
+    >
+      <SlidersHorizontal className="h-4 w-4" /> Свойства
+    </ToolButton>
+  )
+}
+
+function BlockPropsDialog({ editor, onClose }: { editor: Editor; onClose: () => void }) {
+  const type = activeBlock(editor)
+  const attrs = type ? editor.getAttributes(type) : {}
+  const [caption, setCaption] = useState(String(attrs.caption ?? ''))
+  const [items, setItems] = useState<GalleryItemAttrs[]>(
+    () => ((attrs.items as GalleryItemAttrs[] | undefined) ?? []).map((i) => ({ ...i })),
+  )
+  const [requireFullWatch, setRequireFullWatch] = useState(Boolean(attrs.requireFullWatch))
+  const [disableSeek, setDisableSeek] = useState(Boolean(attrs.disableSeek))
+  if (!type) return null
+
+  const save = () => {
+    const patch =
+      type === 'figure'
+        ? { caption: caption.trim() }
+        : type === 'gallery'
+          ? { items: items.map((i) => ({ ...i, caption: (i.caption ?? '').trim() })) }
+          : { requireFullWatch, disableSeek }
+    // Без .focus(): выделение блока живёт в состоянии ProseMirror и переживает
+    // модалку, а возврат фокуса Radix'ом мог бы его сбить.
+    editor.chain().updateAttributes(type, patch).run()
+    onClose()
+  }
+
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            {type === 'figure' ? 'Фотография' : type === 'gallery' ? 'Галерея' : 'Видео'}
+          </DialogTitle>
+        </DialogHeader>
+        {type === 'figure' && (
+          <div className="space-y-1.5">
+            <Label htmlFor="block-caption">Подпись</Label>
+            <Input
+              id="block-caption"
+              autoFocus
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+              placeholder="Например: готовое блюдо на подаче"
+              maxLength={200}
+            />
+            <p className="text-xs text-text3">
+              Показывается под фотографией и в полноэкранном просмотре.
+            </p>
+          </div>
+        )}
+        {type === 'gallery' && (
+          <div className="space-y-2.5">
+            {items.map((item, i) => (
+              <div key={item.mediaId} className="flex items-center gap-2.5">
+                {item.src && (
+                  <img
+                    src={item.src}
+                    alt=""
+                    className="h-12 w-16 shrink-0 rounded object-cover"
+                  />
+                )}
+                <Input
+                  value={item.caption ?? ''}
+                  onChange={(e) =>
+                    setItems((prev) =>
+                      prev.map((it, j) =>
+                        j === i ? { ...it, caption: e.target.value } : it,
+                      ),
+                    )
+                  }
+                  placeholder={`Шаг ${i + 1}`}
+                  maxLength={200}
+                />
+              </div>
+            ))}
+            <p className="text-xs text-text3">
+              Без подписи шаг так и останется «Шаг {items.length || 1}».
+            </p>
+          </div>
+        )}
+        {type === 'video' && (
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm text-text2">
+              <Switch checked={requireFullWatch} onCheckedChange={setRequireFullWatch} />
+              обязательный досмотр (≥90% для завершения урока)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-text2">
+              <Switch checked={disableSeek} onCheckedChange={setDisableSeek} />
+              запретить перемотку вперёд
+            </label>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose}>
+            Отмена
+          </Button>
+          <Button onClick={save}>Применить</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

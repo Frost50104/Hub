@@ -542,3 +542,55 @@ async def test_catalog_minutes_match_python_estimate(
     assert detail.estimated_minutes_total == sum(
         estimate_reading_minutes(content) for _ in range(2)
     )
+
+
+async def test_reorder_courses_renumbers_whole_catalog(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """ОС 19.08: порядок каталога задаётся перенумерацией ВСЕГО списка.
+
+    У всех курсов `position` со `server_default 0`, поэтому проверяем именно
+    то, ради чего ручка существует: после запроса позиции идут 0,1,2 в
+    присланном порядке, а не остаются нулями.
+    """
+    from app.api.courses import reorder_courses
+    from app.schemas.course import CourseReorderBody
+
+    principal, profile = await _mk_member(db, tenant_id, email="pub@t.ru")
+    profile.content_role = "publisher"
+    a, _ = await _mk_course(db, tenant_id, lesson_count=0, title="А")
+    b, _ = await _mk_course(db, tenant_id, lesson_count=0, title="Б")
+    c, _ = await _mk_course(db, tenant_id, lesson_count=0, title="В")
+    await db.flush()
+    assert {a.position, b.position, c.position} == {0}
+
+    await reorder_courses(
+        CourseReorderBody(course_ids=[c.id, a.id, b.id]), principal=principal, db=db
+    )
+
+    for course in (a, b, c):
+        await db.refresh(course)
+    assert (c.position, a.position, b.position) == (0, 1, 2)
+
+    # Каталог сортируется по position: сверяем ТОЛЬКО свои три курса —
+    # эндпоинты в этом файле коммитят, и в базе живут курсы соседних тестов.
+    listed = await list_courses(manage=True, principal=principal, db=db)
+    mine = [i.title for i in listed.items if i.id in {a.id, b.id, c.id}]
+    assert mine == ["В", "А", "Б"]
+
+
+async def test_reorder_courses_denied_for_author(db: AsyncSession, tenant_id: uuid.UUID):
+    """Порядок общий для тенанта — author чужие курсы не расставляет."""
+    from app.api.courses import reorder_courses
+    from app.schemas.course import CourseReorderBody
+
+    principal, profile = await _mk_member(db, tenant_id, email="author@t.ru")
+    profile.content_role = "author"
+    course, _ = await _mk_course(db, tenant_id, lesson_count=0)
+    await db.flush()
+
+    with pytest.raises(HTTPException) as exc:
+        await reorder_courses(
+            CourseReorderBody(course_ids=[course.id]), principal=principal, db=db
+        )
+    assert exc.value.status_code == 403

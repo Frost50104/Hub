@@ -11,15 +11,17 @@ import {
   Plus,
   Search,
   Send,
+  Download,
   Upload,
   Users,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
+import { ImageLightbox } from '@/components/learn/lesson/ImageLightbox'
 import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
 import { MetaLine } from '@/components/ui/MetaLine'
@@ -35,10 +37,11 @@ import {
 import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select } from '@/components/ui/Select'
-import { SkeletonRows } from '@/components/ui/Skeleton'
+import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { useLibrary, useLibraryMutation } from '@/hooks/useLearn'
 import { cn } from '@/lib/cn'
 import { nbsp, plural } from '@/lib/typography'
+import { inlineViewerKind } from '@/lib/inlineViewer'
 import {
   CONTENT_STATUS_LABEL,
   learnApi,
@@ -49,6 +52,10 @@ import {
   type LibrarySection,
   type MaterialUpsert,
 } from '@/lib/learn'
+
+// Тот же lazy-чанк, что и в уроке: имя PdfViewer-*.js обязано сохраниться —
+// по нему globIgnores в vite.config держит вьювер и worker вне PWA-precache.
+const PdfViewer = lazy(() => import('@/components/learn/lesson/PdfViewer'))
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} Б`
@@ -397,13 +404,31 @@ function MaterialDialog({
   const [reportOpen, setReportOpen] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
+  // Инлайн-просмотр: object-URL живёт, пока открыт вьювер (иначе pdf.js
+  // теряет источник на перерисовке), и отзывается при закрытии карточки.
+  const [inlineUrl, setInlineUrl] = useState<string | null>(null)
+  const viewerKind = inlineViewerKind(material.current_version?.mime)
+  useEffect(
+    () => () => {
+      if (inlineUrl) URL.revokeObjectURL(inlineUrl)
+    },
+    [inlineUrl],
+  )
+
   const open = useLibraryMutation(async () => {
     if (material.kind === 'link' && material.url) {
       await learnApi.trackOpen(material.id)
       window.open(material.url, '_blank', 'noopener')
+    } else if (viewerKind) {
+      // Тот же download-эндпоинт — он же отмечает открытие для «Ознакомлен».
+      setInlineUrl(await learnApi.materialBlobUrl(material.id))
     } else {
       await learnApi.openMaterialFile(material)
     }
+    setOpenedLocally(true)
+  })
+  const download = useLibraryMutation(async () => {
+    await learnApi.openMaterialFile(material)
     setOpenedLocally(true)
   })
   const ack = useLibraryMutation(() =>
@@ -470,6 +495,18 @@ function MaterialDialog({
               <ExternalLink className="h-4 w-4" />
               {material.kind === 'link' ? 'Открыть ссылку' : 'Открыть документ'}
             </Button>
+            {/* ОС 19.08 «документ скачивается вместо открытия»: PDF и картинки
+                теперь показываются в приложении, а скачивание — отдельным
+                действием для тех, кому нужен файл. */}
+            {material.kind === 'file' && viewerKind && material.current_version_no && (
+              <Button
+                variant="secondary"
+                disabled={download.isPending}
+                onClick={() => void download.mutateAsync(undefined as never)}
+              >
+                <Download className="h-4 w-4" /> Скачать
+              </Button>
+            )}
             {material.requires_acknowledgement &&
               material.status === 'published' &&
               !material.acked_by_me && (
@@ -613,6 +650,27 @@ function MaterialDialog({
         )}
         {reportOpen && (
           <AckReportDialog material={material} onClose={() => setReportOpen(false)} />
+        )}
+        {inlineUrl && viewerKind === 'pdf' && (
+          <Dialog open onOpenChange={(v) => !v && setInlineUrl(null)}>
+            <DialogContent className="max-h-[92vh] max-w-[900px] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="pr-8">{material.title}</DialogTitle>
+              </DialogHeader>
+              <Suspense fallback={<Skeleton className="h-[70vh] w-full rounded-lg" />}>
+                <PdfViewer src={inlineUrl} title={material.title} />
+              </Suspense>
+            </DialogContent>
+          </Dialog>
+        )}
+        {inlineUrl && viewerKind === 'image' && (
+          <ImageLightbox
+            images={[{ src: inlineUrl, caption: material.title }]}
+            index={0}
+            onIndexChange={() => undefined}
+            open
+            onOpenChange={(v) => !v && setInlineUrl(null)}
+          />
         )}
       </DialogContent>
     </Dialog>
@@ -976,7 +1034,10 @@ function SectionsDialog({
   const rename = useLibraryMutation((args: { id: string; title: string }) =>
     learnApi.renameSection(args.id, args.title),
   )
-  const remove = useLibraryMutation((id: string) => learnApi.deleteSection(id))
+  const remove = useLibraryMutation(
+    (id: string) => learnApi.deleteSection(id),
+    'Раздел не удалён',
+  )
 
   const commitRename = () => {
     const trimmed = editingTitle.trim()
@@ -1046,7 +1107,7 @@ function SectionsDialog({
               </button>
               <button
                 type="button"
-                title="Удалить (только пустой)"
+                title="Удалить — только пустой раздел, без материалов и подразделов"
                 className="rounded p-1.5 text-text3 hover:bg-glass hover:text-red"
                 onClick={() => void remove.mutateAsync(s.id)}
               >

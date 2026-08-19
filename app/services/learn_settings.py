@@ -36,6 +36,9 @@ DEFAULTS: dict[str, Any] = {
         "news.acknowledged": 0,
         "login.daily": 0,
     },
+    # Сертификаты (ОС 19.08: «сертификат должен быть в фирменном стиле»).
+    # id картинки-подложки в media_files; None — типографская рамка по умолчанию.
+    "certificate_background_media_id": None,
     # Медиа (Ф3a).
     "video_max_bytes": 300 * 1024 * 1024,
     "image_max_bytes": 10 * 1024 * 1024,
@@ -62,12 +65,19 @@ async def set_setting(db: AsyncSession, tenant_id: UUID, key: str, value: Any) -
     """UPSERT одного ключа через jsonb_set — не перезаписывает соседние."""
     if key not in _ALLOWED_KEYS:
         raise ValueError(f"Неизвестный ключ настройки: {key!r}")
+    # Явные CAST, а НЕ `:v::jsonb`: SQLAlchemy не признаёт биндом параметр, за
+    # которым сразу идёт двоеточие (regex-lookahead), и `:v` уезжал в SQL как
+    # литерал — «syntax error at or near ":"». Ключу CAST нужен отдельно:
+    # в `ARRAY[:k]` Postgres не выводит тип элемента. Функция была написана
+    # про запас и до сертификатов (ОС 19.08) не вызывалась ни разу — поэтому
+    # ошибка дожила до первого вызова.
     await db.execute(
         text(
             "INSERT INTO learning_settings (tenant_id, data) "
-            "VALUES (:t, jsonb_build_object(:k, :v::jsonb)) "
+            "VALUES (CAST(:t AS uuid), jsonb_build_object(CAST(:k AS text), CAST(:v AS jsonb))) "
             "ON CONFLICT (tenant_id) DO UPDATE SET "
-            "data = jsonb_set(learning_settings.data, ARRAY[:k], :v::jsonb, true), "
+            "data = jsonb_set(learning_settings.data, ARRAY[CAST(:k AS text)], "
+            "CAST(:v AS jsonb), true), "
             "updated_at = now()"
         ),
         {"t": str(tenant_id), "k": key, "v": _to_json(value)},

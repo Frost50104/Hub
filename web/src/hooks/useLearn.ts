@@ -136,10 +136,17 @@ export function useLibrary(manage: boolean, enabled = true): UseQueryResult<Libr
   })
 }
 
-export function useLibraryMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
+export function useLibraryMutation<TArgs, TResult>(
+  fn: (args: TArgs) => Promise<TResult>,
+  // Заголовок тоста при ошибке. Дефолт «Не удалось сохранить изменения» врёт
+  // на удалении раздела: сервер отвечает 409 «Раздел не пуст», а шапка тоста
+  // говорит про сохранение — причина отказа терялась.
+  errorMessage?: string,
+) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: fn,
+    meta: errorMessage ? { errorMessage } : undefined,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['learn-library'] })
     },
@@ -323,10 +330,15 @@ export function useProducts(manage: boolean, enabled = true): UseQueryResult<Pro
   })
 }
 
-export function useProductMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
+export function useProductMutation<TArgs, TResult>(
+  fn: (args: TArgs) => Promise<TResult>,
+  /** Заголовок тоста при ошибке — см. useLibraryMutation. */
+  errorMessage?: string,
+) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: fn,
+    meta: errorMessage ? { errorMessage } : undefined,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['learn-products'] })
     },

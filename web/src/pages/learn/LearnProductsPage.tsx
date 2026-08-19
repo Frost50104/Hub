@@ -1,6 +1,7 @@
 import {
   Archive,
   BookOpen,
+  FolderCog,
   ImagePlus,
   Pencil,
   Plus,
@@ -38,6 +39,7 @@ import {
   CONTENT_STATUS_LABEL,
   learnApi,
   type ProductCard,
+  type ProductCategory,
   type ProductUpsert,
 } from '@/lib/learn'
 
@@ -53,6 +55,7 @@ export function LearnProductsPage() {
   const [category, setCategory] = useState<string | 'all'>('all')
   const [openCard, setOpenCard] = useState<ProductCard | null>(null)
   const [editorCard, setEditorCard] = useState<ProductCard | 'new' | null>(null)
+  const [categoriesOpen, setCategoriesOpen] = useState(false)
 
   const probe = useProducts(false)
   const canManage =
@@ -86,9 +89,14 @@ export function LearnProductsPage() {
             <h1 className="font-display text-2xl font-bold text-text">Ассортимент</h1>
           )}
           {canManage && (
-            <Button onClick={() => setEditorCard('new')}>
-              <Plus className="h-4 w-4" /> Товар
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setCategoriesOpen(true)}>
+                <FolderCog className="h-4 w-4" /> Категории
+              </Button>
+              <Button onClick={() => setEditorCard('new')}>
+                <Plus className="h-4 w-4" /> Товар
+              </Button>
+            </div>
           )}
         </div>
 
@@ -193,7 +201,131 @@ export function LearnProductsPage() {
           onClose={() => setEditorCard(null)}
         />
       )}
+      {categoriesOpen && (
+        <CategoriesDialog
+          categories={data?.categories ?? []}
+          onClose={() => {
+            setCategoriesOpen(false)
+            // Удалённая категория могла быть выбрана фильтром.
+            setCategory('all')
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+// ─── Категории ───────────────────────────────────────────────────────────────
+
+/**
+ * ОС 19.08 «категории добавляются только через поддержку»: ручки
+ * POST/PATCH/DELETE /learn/product-categories были с Ф4, не хватало экрана.
+ * Устройство — как у разделов библиотеки: создание, переименование по месту,
+ * удаление только пустой категории (сервер отвечает 409 с причиной).
+ */
+function CategoriesDialog({
+  categories,
+  onClose,
+}: {
+  categories: ProductCategory[]
+  onClose: () => void
+}) {
+  const [name, setName] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
+  const create = useProductMutation((title: string) => learnApi.createProductCategory(title))
+  const rename = useProductMutation((args: { id: string; title: string }) =>
+    learnApi.renameProductCategory(args.id, args.title),
+  )
+  const remove = useProductMutation(
+    (id: string) => learnApi.deleteProductCategory(id),
+    'Категория не удалена',
+  )
+
+  const commitRename = () => {
+    const trimmed = editingTitle.trim()
+    if (editingId && trimmed) void rename.mutateAsync({ id: editingId, title: trimmed })
+    setEditingId(null)
+  }
+
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Категории ассортимента</DialogTitle>
+        </DialogHeader>
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!name.trim()) return
+            void create.mutateAsync(name.trim()).then(() => setName(''))
+          }}
+        >
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Новая категория…"
+            maxLength={120}
+          />
+          <Button type="submit" disabled={!name.trim() || create.isPending}>
+            <Plus className="h-4 w-4" />
+          </Button>
+        </form>
+        <ul className="divide-y divide-glass-border">
+          {categories.length === 0 && (
+            <li className="py-3 text-sm text-text3">Категорий пока нет.</li>
+          )}
+          {categories.map((c) => (
+            <li key={c.id} className="flex items-center gap-2 py-2">
+              {editingId === c.id ? (
+                <Input
+                  autoFocus
+                  className="h-8 flex-1"
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      commitRename()
+                    }
+                    if (e.key === 'Escape') setEditingId(null)
+                  }}
+                />
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-sm text-text">{c.title}</span>
+              )}
+              <button
+                type="button"
+                title="Переименовать"
+                className="rounded p-1.5 text-text3 hover:bg-glass hover:text-text"
+                onClick={() => {
+                  setEditingId(c.id)
+                  setEditingTitle(c.title)
+                }}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                title="Удалить — только пустую категорию, без карточек"
+                className="rounded p-1.5 text-text3 hover:bg-glass hover:text-red"
+                disabled={remove.isPending}
+                onClick={() => void remove.mutateAsync(c.id)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Закрыть
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -225,19 +357,9 @@ function ProductViewDialog({
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-h-[88vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center justify-between gap-2">
-            <span>{card.title}</span>
-            {canManage && (
-              <button
-                type="button"
-                title="Редактировать"
-                onClick={onEdit}
-                className="rounded p-1.5 text-text3 hover:bg-glass hover:text-text"
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
-            )}
-          </DialogTitle>
+          {/* Правка ушла в футер: карандаш стоял в том же углу, что и
+              absolute-кнопка закрытия Dialog, и они перекрывали друг друга. */}
+          <DialogTitle className="pr-8">{card.title}</DialogTitle>
         </DialogHeader>
 
         {card.photo_urls.length > 0 && (
@@ -245,7 +367,7 @@ function ProductViewDialog({
             <img
               src={card.photo_urls[photoIdx]}
               alt={card.title}
-              className="max-h-72 w-full rounded-lg border border-glass-border object-cover"
+              className="max-h-72 w-full rounded-lg border border-glass-border bg-surface object-contain"
             />
             {card.photo_urls.length > 1 && (
               <div className="flex gap-1.5 overflow-x-auto">
@@ -298,6 +420,14 @@ function ProductViewDialog({
             </div>
           )}
         </div>
+
+        {canManage && (
+          <DialogFooter>
+            <Button variant="secondary" size="sm" onClick={onEdit}>
+              <Pencil className="h-4 w-4" /> Редактировать
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   )

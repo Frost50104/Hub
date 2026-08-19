@@ -145,6 +145,16 @@ class ReorderBody(BaseModel):
     lesson_ids: list[UUID] = Field(min_length=1, max_length=200)
 
 
+class CourseReorderBody(BaseModel):
+    """Порядок каталога курсов: перенумеровываем ВЕСЬ список разом.
+
+    У всех курсов `position` с `server_default 0`, поэтому правка одного
+    значения ничего не упорядочила бы — клиент присылает полный порядок.
+    """
+
+    course_ids: list[UUID] = Field(min_length=1, max_length=500)
+
+
 class AssignBody(BaseModel):
     profile_ids: list[UUID] = Field(min_length=1, max_length=1000)
     due_at: datetime | None = None

@@ -28,6 +28,7 @@ import { useState, type CSSProperties, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
+import { coursesSectionTitle } from '@/components/layout/learnNav'
 import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
@@ -47,6 +48,7 @@ import { Select } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/Switch'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useCourse, useCourseMutation, useEmployees } from '@/hooks/useLearn'
+import { useMe } from '@/hooks/useMe'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import {
   CONTENT_STATUS_LABEL,
@@ -90,6 +92,12 @@ export function CourseBuilderPage() {
   const course = useCourse(courseId)
   const data = course.data
 
+  const me = useMe()
+  const coursesTitle = coursesSectionTitle(
+    me.data?.profile?.content_role,
+    me.data?.hub_role,
+  )
+
   const [editingLesson, setEditingLesson] = useState<LessonMeta | null>(null)
   const [audienceOpen, setAudienceOpen] = useState(false)
   const [assignOpen, setAssignOpen] = useState(false)
@@ -104,7 +112,7 @@ export function CourseBuilderPage() {
           to="/learn/courses"
           className="inline-flex items-center gap-1.5 text-sm text-text3 hover:text-text"
         >
-          <ArrowLeft className="h-4 w-4" /> Моё обучение
+          <ArrowLeft className="h-4 w-4" /> {coursesTitle}
         </Link>
 
         {course.isLoading && <SkeletonRows rows={6} />}
@@ -126,6 +134,7 @@ export function CourseBuilderPage() {
               <LessonEditor
                 key={editingLesson.id}
                 lessonMeta={editingLesson}
+                progressionMode={data.progression_mode}
                 onClose={() => setEditingLesson(null)}
               />
             )}
@@ -242,6 +251,16 @@ function CourseSettingsCard({
                 </option>
               ))}
             </Select>
+            {/* Свободный режим отключает замки уроков целиком: сервер
+                (`_lesson_blocker`) даже не смотрит на unlock_rule. Автор курса
+                об этом не знал и выставлял «После предыдущего», ожидая, что
+                тест откроет следующий урок. */}
+            {mode === 'free' && (
+              <p className="mt-1 text-[13px] leading-[1.45] text-text2">
+                Все уроки открыты сразу — правила доступа внутри уроков не
+                действуют.
+              </p>
+            )}
           </div>
         </div>
         <label className="flex items-center gap-2 pt-1 text-xs text-text2">

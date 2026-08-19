@@ -480,7 +480,7 @@ export interface Course {
 
 export interface CourseList {
   items: Course[]
-  content_role: string
+  content_role: 'admin' | 'publisher' | 'author' | 'none'
 }
 
 export interface CourseDetail extends Course {
@@ -649,6 +649,8 @@ export interface CertificateInfo {
   course_title: string
   full_name: string
   issued_at: string
+  /** Подписанный URL фирменной подложки; null — типографская рамка. */
+  background_url: string | null
 }
 
 // ─── Ассортимент + витрина + профиль (Ф4) ────────────────────────────────────
@@ -1340,6 +1342,9 @@ export const learnApi = {
     api.patch<LessonMeta>(`/learn/lessons/${id}`, body).then((r) => r.data),
   deleteLesson: (id: string): Promise<void> =>
     api.delete(`/learn/lessons/${id}`).then(() => undefined),
+  /** Порядок каталога курсов — перенумерация ВСЕГО списка (publisher+). */
+  reorderCourses: (courseIds: string[]): Promise<void> =>
+    api.put('/learn/courses/reorder', { course_ids: courseIds }).then(() => undefined),
   reorderLessons: (courseId: string, lessonIds: string[]): Promise<void> =>
     api
       .put(`/learn/courses/${courseId}/lessons/reorder`, { lesson_ids: lessonIds })
@@ -1425,6 +1430,13 @@ export const learnApi = {
     api.get<CertificateInfo[]>('/learn/certificates').then((r) => r.data),
   certificate: (id: string): Promise<CertificateInfo> =>
     api.get<CertificateInfo>(`/learn/certificates/${id}`).then((r) => r.data),
+  /** Подложка сертификата — общая для тенанта, ставит hub-admin. */
+  setCertificateBackground: (mediaId: string | null): Promise<{ background_url: string | null }> =>
+    api
+      .put<{ background_url: string | null }>('/learn/certificate-background', {
+        media_id: mediaId,
+      })
+      .then((r) => r.data),
 
   // ─── Ассортимент + витрина + профиль (Ф4) ──────────────────────────────────
   products: (manage: boolean): Promise<ProductListData> =>
@@ -1448,6 +1460,10 @@ export const learnApi = {
     api.post(`/learn/products/${id}/open`).then(() => undefined),
   createProductCategory: (title: string): Promise<ProductCategory> =>
     api.post<ProductCategory>('/learn/product-categories', { title }).then((r) => r.data),
+  renameProductCategory: (id: string, title: string): Promise<ProductCategory> =>
+    api
+      .patch<ProductCategory>(`/learn/product-categories/${id}`, { title })
+      .then((r) => r.data),
   deleteProductCategory: (id: string): Promise<void> =>
     api.delete(`/learn/product-categories/${id}`).then(() => undefined),
 
@@ -1575,6 +1591,20 @@ export const learnApi = {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       .then((r) => r.data)
+  },
+
+  /**
+   * Скачать файл материала как blob и вернуть object-URL.
+   *
+   * Тот же эндпоинт, что и «скачать»: он отмечает открытие (`_track_open`),
+   * а по этой отметке стоит гейт кнопки «Ознакомлен» — обходить его отдельной
+   * ручкой нельзя. Освобождать URL обязан вызывающий.
+   */
+  materialBlobUrl: async (materialId: string): Promise<string> => {
+    const resp = await api.get(`/learn/library/materials/${materialId}/download`, {
+      responseType: 'blob',
+    })
+    return URL.createObjectURL(resp.data as Blob)
   },
 
   /**

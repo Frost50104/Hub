@@ -23,6 +23,7 @@ from app.models.notification import Notification
 from app.schemas.quiz import AnswerBody, QuestionDraft, QuizUpsert, ReviewBody
 from app.services.certificate import issue_if_earned
 from app.services.points import award
+from tests.integration.conftest import make_principal
 from tests.integration.test_courses import _mk_course, _mk_member
 
 pytestmark = pytest.mark.integration
@@ -310,3 +311,70 @@ async def test_reset_attempts_unblocks(db: AsyncSession, tenant_id: uuid.UUID):
     await reset_attempts(quiz.id, ResetAttemptsBody(profile_id=profile.id), hr, db)
     fresh = await start_or_resume_attempt(quiz.id, member, db)
     assert fresh.attempt_no == 1
+
+
+async def test_certificate_background_admin_only_and_flows_into_certificate(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """ОС 19.08: фирменная подложка сертификата.
+
+    Проверяем три вещи разом: publisher её не ставит (настройка общая для
+    сети), hub-admin ставит, и после этого сертификат отдаёт подписанный URL —
+    иначе страница осталась бы с типографской рамкой, не сказав почему.
+    """
+    from app.api.quizzes import get_certificate, set_certificate_background
+    from app.models.course import MediaFile
+    from app.schemas.quiz import CertificateBackgroundBody
+
+    publisher, profile = await _mk_publisher(db, tenant_id)
+    media = MediaFile(
+        tenant_id=tenant_id,
+        kind="image",
+        storage_key="t/learn/media/bg.png",
+        file_name="bg.png",
+        mime="image/png",
+        size_bytes=10,
+        uploaded_by=publisher.employee_id,
+    )
+    db.add(media)
+    course, _ = await _mk_course(db, tenant_id, lesson_count=0)
+    cert = Certificate(
+        tenant_id=tenant_id,
+        profile_id=profile.id,
+        course_id=course.id,
+        serial="HUB-1",
+        course_title="Стандарты сервиса",
+        full_name="Продавец Тестовый",
+    )
+    db.add(cert)
+    await db.flush()
+
+    with pytest.raises(HTTPException) as exc:
+        await set_certificate_background(
+            CertificateBackgroundBody(media_id=media.id), principal=publisher, db=db
+        )
+    assert exc.value.status_code == 403
+
+    # Тот же человек, но с hub-ролью admin: resolve_content_role отдаёт
+    # "admin" по JWT, не заглядывая в профиль.
+    admin = make_principal(
+        tenant_id,
+        email="hr@t.ru",
+        tenant_slug=f"t-{tenant_id.hex[:12]}",
+        role="admin",
+    )
+    result = await set_certificate_background(
+        CertificateBackgroundBody(media_id=media.id), principal=admin, db=db
+    )
+    assert result["background_url"] is not None
+
+    payload = await get_certificate(cert.id, principal=publisher, db=db)
+    assert payload["background_url"] is not None
+    assert str(media.id) in payload["background_url"]
+
+    # Сброс возвращает страницу к рамке по умолчанию.
+    await set_certificate_background(
+        CertificateBackgroundBody(media_id=None), principal=admin, db=db
+    )
+    payload = await get_certificate(cert.id, principal=publisher, db=db)
+    assert payload["background_url"] is None

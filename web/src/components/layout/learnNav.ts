@@ -32,6 +32,27 @@ export interface LearnNavItem {
   soon?: boolean
 }
 
+/**
+ * Название раздела курсов: сотруднику — «Моё обучение», управляющему —
+ * «Учебные курсы» (ОС 19.08: «я не учусь, я веду курсы»). Один хелпер на все
+ * точки — заголовок страницы, пункт меню и обратные ссылки обязаны называться
+ * одинаково, иначе «назад» уводит в раздел с другим названием.
+ *
+ * Живёт здесь, а не в lib/learn.ts: тот модуль тянет за собой весь learn-API,
+ * а этот импортируют лэйаут-компоненты из главного бандла.
+ */
+export function coursesSectionTitle(
+  contentRole: 'none' | 'author' | 'publisher' | 'admin' | null | undefined,
+  hubRole?: 'admin' | 'member' | 'viewer' | null,
+): string {
+  const manages =
+    hubRole === 'admin' ||
+    contentRole === 'author' ||
+    contentRole === 'publisher' ||
+    contentRole === 'admin'
+  return manages ? 'Учебные курсы' : 'Моё обучение'
+}
+
 // Разделы включаются по мере этапов Ф1–Ф4; до готовности — «скоро» (disabled).
 export const LEARN_NAV: LearnNavItem[] = [
   { to: '/learn', label: 'Витрина', icon: Sparkles, end: true },
