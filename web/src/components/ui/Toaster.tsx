@@ -6,8 +6,21 @@ export function Toaster() {
   const theme = useTheme((s) => s.theme)
   return (
     <SonnerToaster
-      position="bottom-right"
+      // Сверху, а не снизу: на мобильном sonner растягивает тост на всю
+      // ширину и он садился ровно на таб-бар, перекрывая основную
+      // навигацию (ОС 19.08). Сверху перекрывается максимум заголовок
+      // страницы, и то на пару секунд.
+      position="top-right"
       theme={theme}
+      offset={{ top: '1rem', right: '1rem' }}
+      // Мобильные отступы у sonner СВОИ (ниже 600px). Без safe-area тост в
+      // PWA на iPhone уехал бы под часы — зеркало той же ошибки, только
+      // сверху.
+      mobileOffset={{
+        top: 'calc(env(safe-area-inset-top, 0px) + 0.75rem)',
+        left: '0.75rem',
+        right: '0.75rem',
+      }}
       toastOptions={{
         classNames: {
           toast: 'glass !bg-glass !border-glass-border !text-text',

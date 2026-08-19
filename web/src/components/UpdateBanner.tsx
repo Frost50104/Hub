@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
 import { Button } from '@/components/ui/Button'
+import { useIsDesktop } from '@/hooks/useMediaQuery'
 
 const UPDATE_CHECK_INTERVAL_MS = 60_000
 
@@ -18,6 +19,7 @@ const UPDATE_CHECK_INTERVAL_MS = 60_000
  * so users with an already-active SW would never get polled.
  */
 export function UpdateBanner() {
+  const isDesktop = useIsDesktop()
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
@@ -65,7 +67,19 @@ export function UpdateBanner() {
   if (!needRefresh) return null
 
   return (
-    <div className="glass fixed inset-x-4 bottom-4 z-40 flex flex-col gap-3 p-4 shadow-glass sm:left-auto sm:right-4 sm:w-96">
+    <div
+      className="glass fixed inset-x-4 bottom-4 z-40 flex flex-col gap-3 p-4 shadow-glass sm:left-auto sm:right-4 sm:w-96"
+      // Ниже lg таб-бар зафиксирован у нижнего края, и баннер садился прямо
+      // на него — в отличие от тоста, висел там до нажатия «Позже», то есть
+      // блокировал навигацию. Поднимаем по той же формуле safe-area, что у
+      // FAB и чипа окружения. Класс `bottom-4` остаётся для десктопа:
+      // инлайн-стиль перебил бы его на всех ширинах.
+      style={
+        !isDesktop
+          ? { bottom: 'calc(env(safe-area-inset-bottom, 0px) + 4.5rem)' }
+          : undefined
+      }
+    >
       <div>
         <p className="font-display text-sm font-semibold text-text">
           Доступно обновление
