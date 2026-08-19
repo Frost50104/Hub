@@ -1,9 +1,19 @@
-import { Award, Bell, ChevronRight, Globe, LogOut, Palette, Pencil } from 'lucide-react'
+import {
+  Award,
+  Bell,
+  ChevronRight,
+  Globe,
+  LogOut,
+  Palette,
+  Pencil,
+  RefreshCw,
+} from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { Avatar } from '@/components/ui/Avatar'
+import { useAppUpdate } from '@/hooks/useAppUpdate'
 import { useLearnProfile, useMyCertificates } from '@/hooks/useLearn'
 import { useMe } from '@/hooks/useMe'
 import { authClient } from '@/lib/auth'
@@ -215,6 +225,9 @@ export function ProfilePage() {
                 </span>
               </button>
             </li>
+            <li className="border-t border-glass-border/60">
+              <UpdateAppRow />
+            </li>
           </ul>
         </section>
 
@@ -233,6 +246,37 @@ export function ProfilePage() {
         </section>
       </div>
     </>
+  )
+}
+
+/**
+ * Ручное обновление приложения — на телефоне это ЕДИНСТВЕННАЯ доступная
+ * поверхность: футер с версией живёт в «Настройках», куда мобильный
+ * пользователь заходит только за уведомлениями и темой. Версию показываем
+ * рядом: её же просят назвать в баг-репортах.
+ */
+function UpdateAppRow() {
+  const { status, checkForUpdate } = useAppUpdate()
+  const busy = status !== 'idle'
+
+  return (
+    <button
+      type="button"
+      onClick={checkForUpdate}
+      disabled={busy}
+      className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-glass disabled:opacity-60"
+    >
+      <RefreshCw className={cn('h-5 w-5 text-text3', busy && 'animate-spin')} />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm text-text">
+          {status === 'applying' ? 'Применяем обновление…' : 'Обновить приложение'}
+        </span>
+        <span className="block truncate font-mono text-[11px] text-text3">
+          {__APP_VERSION__}
+          {__APP_MODE__ !== 'production' && ` · ${__APP_MODE__}`}
+        </span>
+      </span>
+    </button>
   )
 }
 

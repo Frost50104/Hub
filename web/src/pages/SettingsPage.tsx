@@ -1,6 +1,8 @@
-import { Bell, Palette } from 'lucide-react'
+import { Bell, Palette, RefreshCw } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
 
+import { Button } from '@/components/ui/Button'
+import { useAppUpdate } from '@/hooks/useAppUpdate'
 import { cn } from '@/lib/cn'
 
 const TABS = [
@@ -44,10 +46,30 @@ export function SettingsPage() {
         </section>
       </div>
 
-      <footer className="border-t border-glass-border pt-4 text-xs text-text3">
-        Версия <span className="font-mono text-text2">{__APP_VERSION__}</span>
-        {__APP_MODE__ !== 'production' && ` · ${__APP_MODE__}`}
+      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-glass-border pt-4 text-xs text-text3">
+        <span>
+          Версия <span className="font-mono text-text2">{__APP_VERSION__}</span>
+          {__APP_MODE__ !== 'production' && ` · ${__APP_MODE__}`}
+        </span>
+        <UpdateAppButton />
       </footer>
     </div>
+  )
+}
+
+/**
+ * Ручное обновление рядом с версией: баннер «Доступно обновление» можно
+ * пропустить или закрыть «Позже», и тогда вкладка неделями живёт на старом
+ * бандле. Зеркало этой кнопки — строка в Профиле (мобильная поверхность).
+ */
+function UpdateAppButton() {
+  const { status, checkForUpdate } = useAppUpdate()
+  const busy = status !== 'idle'
+
+  return (
+    <Button variant="ghost" size="sm" onClick={checkForUpdate} disabled={busy}>
+      <RefreshCw className={cn('h-4 w-4', busy && 'animate-spin')} />
+      {status === 'applying' ? 'Применяем…' : 'Обновить приложение'}
+    </Button>
   )
 }
