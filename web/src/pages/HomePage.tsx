@@ -139,7 +139,13 @@ function MobileHome() {
             </Link>
           }
         >
-          {projects.isError ? (
+          {/* Порядок веток: грузим → ошибка → пусто → список. Без первой
+              ветки экран во время загрузки утверждал «Проектов ещё нет» —
+              ровно то сообщение, из-за которого 18.08 искали пропавшие
+              проекты (а смотрели в другое окружение). */}
+          {projects.isLoading ? (
+            <SkeletonRows rows={3} className="p-4" />
+          ) : projects.isError ? (
             <QueryError
               error={projects.error}
               onRetry={() => void projects.refetch()}
@@ -304,7 +310,10 @@ function DesktopHome() {
               Все →
             </Link>
           </div>
-          {projects.isError ? (
+          {/* Тот же порядок веток, что и в мобильной витрине. */}
+          {projects.isLoading ? (
+            <SkeletonRows rows={4} className="py-2" />
+          ) : projects.isError ? (
             <QueryError
               error={projects.error}
               onRetry={() => void projects.refetch()}

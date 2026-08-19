@@ -4,8 +4,10 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 
 import { App } from './App'
+import { EnvChip } from './components/EnvChip'
 import { Toaster } from './components/ui/Toaster'
 import { UpdateBanner } from './components/UpdateBanner'
+import { setBackendEnv } from './lib/appEnv'
 import { queryClient } from './lib/queryClient'
 import { initSentry } from './lib/sentry'
 import { initTheme } from './lib/theme'
@@ -31,6 +33,9 @@ async function bootstrap(): Promise<void> {
     const res = await fetch('/api/env', { credentials: 'omit' })
     if (res.ok) {
       const env = (await res.json()) as BootstrapEnv
+      // ДО проверки на sentry_dsn: маркер окружения нужен независимо от того,
+      // заведён ли Sentry (а он пока выключен на обоих env).
+      setBackendEnv(env.environment)
       if (env.sentry_dsn) {
         initSentry({
           dsn: env.sentry_dsn,
@@ -50,6 +55,7 @@ async function bootstrap(): Promise<void> {
           <App />
           <Toaster />
           <UpdateBanner />
+          <EnvChip />
         </QueryClientProvider>
       </BrowserRouter>
     </StrictMode>,

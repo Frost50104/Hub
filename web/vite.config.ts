@@ -23,6 +23,51 @@ function readAppVersion(): string {
   return process.env.npm_package_version ?? '0.0.0-dev'
 }
 
+const SHORT_TAG: Record<string, string> = { staging: 'STG', development: 'DEV' }
+
+/**
+ * Имена приложения. Прод — как было; всё остальное ОБЯЗАНО отличаться на
+ * домашнем экране: две одинаковые иконки «Hub» — первопричина разбора 18.08
+ * (телефон смотрел staging, десктоп — прод, час ушёл на «пропавшие» проекты).
+ */
+function appNames(mode: string): { name: string; short: string } {
+  if (mode === 'production') return { name: 'Signaris Hub', short: 'Hub' }
+  return { name: `Hub ${mode.toUpperCase()}`, short: `Hub ${SHORT_TAG[mode] ?? mode.toUpperCase()}` }
+}
+
+/**
+ * Имя ярлыка на iOS берётся из `apple-mobile-web-app-title`, а НЕ из манифеста
+ * — правка одного манифеста была бы no-op ровно на том устройстве, из-за
+ * которого всё затевалось.
+ *
+ * Замена строго точечная, по двум полным строкам: рядом лежит анти-FOUC скрипт
+ * темы, его sha256 прописан в CSP (ops/nginx/hub-security-headers.conf), и
+ * любая правка тела скрипта молча ломает тему. Если якорь не найден (кто-то
+ * переформатировал index.html) — падаем на сборке, а не тихо ничего не делаем.
+ */
+function envTitlePlugin(mode: string) {
+  const { name, short } = appNames(mode)
+  return {
+    name: 'hub-env-title',
+    transformIndexHtml(html: string): string {
+      if (mode === 'production') return html
+      const anchors: [string, string][] = [
+        [
+          '<meta name="apple-mobile-web-app-title" content="Hub" />',
+          `<meta name="apple-mobile-web-app-title" content="${short}" />`,
+        ],
+        ['<title>Signaris Hub</title>', `<title>${name}</title>`],
+      ]
+      return anchors.reduce((acc, [from, to]) => {
+        if (!acc.includes(from)) {
+          throw new Error(`[hub-env-title] якорь не найден в index.html: ${from}`)
+        }
+        return acc.replace(from, to)
+      }, html)
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
@@ -48,6 +93,7 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     react(),
+    envTitlePlugin(mode),
     VitePWA({
       strategies: 'injectManifest',
       registerType: 'prompt',
@@ -75,8 +121,9 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       manifest: {
-        name: 'Signaris Hub',
-        short_name: 'Hub',
+        // Прод-манифест байт-в-байт прежний; отличается только не-прод.
+        name: appNames(mode).name,
+        short_name: appNames(mode).short,
         description: 'Корпоративный таск-трекер Signaris',
         theme_color: '#08080E',
         background_color: '#08080E',
