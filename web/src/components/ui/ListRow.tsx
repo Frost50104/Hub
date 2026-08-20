@@ -58,7 +58,7 @@ export function ListRow({
       onClick={onClick}
       onKeyDown={interactive ? onKey : undefined}
       className={cn(
-        'relative flex min-h-16 items-center gap-3 border-b border-hair py-[9px] pl-4 pr-3.5 transition-colors',
+        'group relative flex min-h-16 items-center gap-3 border-b border-hair py-[9px] pl-4 pr-3.5 transition-colors',
         interactive &&
           'cursor-pointer hover:bg-glass focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber',
         selected && 'bg-surface shadow-[inset_0_0_0_1px_rgb(var(--amber))]',

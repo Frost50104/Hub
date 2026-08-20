@@ -34,8 +34,10 @@ interface BoardViewProps {
 }
 
 /** Лента колонок: одна геометрия для карточек и для скелетона. */
+// pb-24 на телефоне: последняя карточка колонки иначе уходит под плавающую
+// пилюлю вида и таб-бар (макет: отступ 96px).
 const LANE_CLASS =
-  'flex snap-x snap-mandatory items-start gap-3 overflow-x-auto overscroll-x-contain pb-4 md:snap-none'
+  'flex snap-x snap-mandatory items-start gap-3 overflow-x-auto overscroll-x-contain pb-24 md:snap-none lg:pb-4'
 
 /**
  * Скелетон доски повторяет раскладку колонок. Без пульсации — то же правило,

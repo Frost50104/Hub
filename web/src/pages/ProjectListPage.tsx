@@ -695,7 +695,10 @@ export function ProjectListPage() {
         <div className="flex flex-col pb-6">
           <MobilePageHeader title="Проекты" trailing={createButtons} className="pb-2" />
           {countLine && <p className="px-4 pb-2 text-[14px] text-text2">{countLine}</p>}
-          <div className="flex flex-col gap-4 px-0">{body}</div>
+          {/* px-4 у карточек-состояний; строки папок тянутся во всю ширину сами. */}
+          <div className={cn('flex flex-col gap-4', (projects.isError || (data && data.length === 0) || foldersQuery.isError || projects.isLoading) && 'px-4')}>
+            {body}
+          </div>
         </div>
       )}
 

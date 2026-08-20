@@ -37,6 +37,7 @@ import {
   TaskEmptyState,
   TaskListSkeleton,
 } from '@/components/task/TaskListStates'
+import { CreateTaskDialog } from '@/components/task/CreateTaskDialog'
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { TaskRow } from '@/components/task/TaskRow'
 import { TimelineView } from '@/components/timeline/TimelineView'
@@ -509,6 +510,7 @@ function ListTab({
   filters,
   onResetFilters,
   onDropFilter,
+  onCreateTask,
 }: {
   projectId: string
   project: Project
@@ -517,6 +519,8 @@ function ListTab({
   filters: TaskViewFilters
   onResetFilters: () => void
   onDropFilter: (key: NarrowableFilter) => void
+  /** Создать задачу, когда инлайн-поля на экране нет (пустой проект). */
+  onCreateTask: () => void
 }) {
   const isDesktop = useIsDesktop()
   const sections = useProjectSections(projectId)
@@ -667,8 +671,14 @@ function ListTab({
         text="Секции появятся, когда задач станет больше десяти — до этого список плоский."
         cta={canEditFlag ? 'Создать задачу' : undefined}
         // Та же точка входа, что у «Новой задачи» в сайдбаре: курсор в
-        // инлайн-поле первого блока.
-        onCta={canEditFlag ? () => void requestInlineCreate(projectId) : undefined}
+        // инлайн-поле первого блока; в пустом проекте поля нет — диалог.
+        onCta={
+          canEditFlag
+            ? () => {
+                if (!requestInlineCreate(projectId)) onCreateTask()
+              }
+            : undefined
+        }
       />
     )
   }
@@ -802,6 +812,7 @@ export function ProjectPage() {
   const [fieldsOpen, setFieldsOpen] = useState(false)
   const [labelsOpen, setLabelsOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+  const [createTaskOpen, setCreateTaskOpen] = useState(false)
 
   const selectedTaskId = searchParams.get('task')
   const openTask = (taskId: string) => {
@@ -886,12 +897,13 @@ export function ProjectPage() {
         onOpenFields={() => setFieldsOpen(true)}
         onOpenLabels={() => setLabelsOpen(true)}
         onOpenShare={() => setShareOpen(true)}
+        // «Задача» в шапке — та же точка входа, что «Новая задача» в сайдбаре:
+        // курсор в инлайн-поле списка; если поля нет (пустой проект, другая
+        // вкладка ещё не перерисовалась) — диалог создания.
         onCreateTask={() => {
           setTab('list')
           setTimeout(() => {
-            document
-              .querySelector<HTMLInputElement>('input[aria-label="Новая задача"]')
-              ?.focus()
+            if (!requestInlineCreate(id)) setCreateTaskOpen(true)
           }, 0)
         }}
       />
@@ -913,6 +925,7 @@ export function ProjectPage() {
             filters={filters}
             onResetFilters={() => setFilters({ sort: filters.sort, order: filters.order })}
             onDropFilter={(key) => setFilters({ ...filters, [key]: undefined })}
+            onCreateTask={() => setCreateTaskOpen(true)}
           />
         </>
       )}
@@ -987,6 +1000,12 @@ export function ProjectPage() {
       />
 
       <LabelsManager projectId={id} open={labelsOpen} onOpenChange={setLabelsOpen} />
+
+      <CreateTaskDialog
+        open={createTaskOpen}
+        onOpenChange={setCreateTaskOpen}
+        initialProjectId={id}
+      />
 
       <ShareDialog
         scope="project"

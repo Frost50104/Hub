@@ -18,7 +18,9 @@ export function PropertyRows({
   return (
     <div
       className={cn(
-        'flex flex-col overflow-hidden rounded-[14px] border border-glass-border bg-tint',
+        // shrink-0 обязателен: блок — flex-item скроллящегося столбца карточки, и
+        // с overflow:hidden его min-height падает до 0 — схлопывался в 2px.
+        'flex shrink-0 flex-col overflow-hidden rounded-[14px] border border-glass-border bg-tint',
         className,
       )}
     >

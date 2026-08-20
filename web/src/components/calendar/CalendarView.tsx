@@ -150,8 +150,9 @@ export function CalendarView({ projectId, onTaskClick, filters }: CalendarViewPr
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
+  // «Август 2026», без « г.» — как в макете.
   const monthLabel = capitalizeFirst(
-    viewMonth.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }),
+    viewMonth.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }).replace(/\s?г\.$/, ''),
   )
   const monthGenitive = viewMonth.toLocaleDateString('ru-RU', { month: 'long', day: 'numeric' }).replace(/^\d+\s/, '')
 

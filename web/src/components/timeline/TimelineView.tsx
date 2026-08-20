@@ -217,7 +217,9 @@ export function TimelineView({ projectId, onTaskClick }: TimelineViewProps) {
   const todayLeft = todayIdx >= 0 && todayIdx < visibleDays ? todayIdx * pxPerDay : null
 
   const monthLabel = capitalizeFirst(
-    addDays(viewStart, 7).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }),
+    addDays(viewStart, 7)
+      .toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
+      .replace(/\s?г\.$/, ''),
   )
 
   const status = tl.isLoading ? (

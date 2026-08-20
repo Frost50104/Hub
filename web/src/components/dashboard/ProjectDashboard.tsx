@@ -8,6 +8,7 @@ import { ErrorBanner } from '@/components/ui/ErrorBanner'
 import { MeterRow } from '@/components/ui/MeterRow'
 import { MiniBarChart } from '@/components/ui/MiniBarChart'
 import { StatTile } from '@/components/ui/StatTile'
+import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useProjectStats } from '@/hooks/useProjectStats'
 import { cn } from '@/lib/cn'
 import { type CustomFieldStat, type ProjectStats } from '@/lib/stats'
@@ -171,17 +172,21 @@ function TrendBlock({ trend }: { trend: ProjectStats['completed_trend'] }) {
  * полоса уходит под строку, числа сводятся в одну подпись «9 · 3 просроч.».
  */
 function WorkloadTable({ workload }: { workload: ProjectStats['workload'] }) {
+  const isDesktop = useIsDesktop()
   const maxActive = Math.max(1, ...workload.map((w) => w.active_count))
   return (
     <section className="overflow-hidden rounded-[14px] border border-glass-border bg-tint">
-      <header className="hidden items-center gap-3 bg-surface px-4 py-2.5 text-[12px] font-bold uppercase tracking-[0.07em] text-text2 lg:grid lg:grid-cols-[minmax(0,1fr)_132px_92px]">
-        <span>Загрузка по людям</span>
-        <span>Открытые</span>
-        <span className="text-right">Просрочено</span>
-      </header>
-      <header className="flex items-center bg-surface px-4 py-2.5 text-[12px] font-bold uppercase tracking-[0.07em] text-text2 lg:hidden">
-        Загрузка по людям
-      </header>
+      {isDesktop ? (
+        <header className="grid grid-cols-[minmax(0,1fr)_132px_92px] items-center gap-3 bg-surface px-4 py-2.5 text-[12px] font-bold uppercase tracking-[0.07em] text-text2">
+          <span>Загрузка по людям</span>
+          <span>Открытые</span>
+          <span className="text-right">Просрочено</span>
+        </header>
+      ) : (
+        <header className="flex items-center bg-surface px-4 py-2.5 text-[12px] font-bold uppercase tracking-[0.07em] text-text2">
+          Загрузка по людям
+        </header>
+      )}
       {workload.length === 0 ? (
         <p className="px-4 py-4 text-[14px] text-text2">Нет назначенных задач.</p>
       ) : (
@@ -190,52 +195,67 @@ function WorkloadTable({ workload }: { workload: ProjectStats['workload'] }) {
             const label = w.full_name ?? w.email ?? 'Не назначено'
             const overdue = w.overdue_count ?? 0
             const pct = (w.active_count / maxActive) * 100
+            const avatar = w.employee_id ? (
+              <Avatar name={w.full_name} email={w.email} className="h-6 w-6 shrink-0 text-[12px]" />
+            ) : (
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-dashed border-glass-border text-[12px] text-text2">
+                —
+              </span>
+            )
+            const meter = (
+              <span className="block h-2 flex-1 overflow-hidden rounded-full bg-surface">
+                <span className="block h-full rounded-full bg-amber" style={{ width: `${pct}%` }} />
+              </span>
+            )
+            if (isDesktop) {
+              return (
+                <li
+                  key={w.employee_id ?? `unassigned-${idx}`}
+                  className={cn(
+                    'grid grid-cols-[minmax(0,1fr)_132px_92px] items-center gap-3 px-4 py-2.5 text-[14px]',
+                    idx % 2 === 1 && 'bg-tint',
+                  )}
+                >
+                  <span className="flex min-w-0 items-center gap-2.5">
+                    {avatar}
+                    <span className="min-w-0 truncate text-text">{label}</span>
+                  </span>
+                  <span className="flex items-center gap-2.5">
+                    {meter}
+                    <span className="w-6 shrink-0 text-right tabular-nums text-text">{w.active_count}</span>
+                  </span>
+                  <span
+                    className={cn(
+                      'text-right text-[14px] font-semibold tabular-nums',
+                      overdue > 0 ? 'text-red' : 'text-text2',
+                    )}
+                  >
+                    {overdue}
+                  </span>
+                </li>
+              )
+            }
+            // Телефон: три колонки не влезают — полоса под строкой, числа
+            // сводятся в одну подпись «9 · 3 просроч.».
             return (
               <li
                 key={w.employee_id ?? `unassigned-${idx}`}
-                className={cn(
-                  'grid items-center gap-x-3 gap-y-1.5 px-4 py-2.5 text-[14px]',
-                  'grid-cols-[24px_minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_132px_92px]',
-                  idx % 2 === 1 && 'bg-tint',
-                )}
+                className={cn('flex flex-col gap-1.5 px-4 py-2.5 text-[14px]', idx % 2 === 1 && 'bg-tint')}
               >
-                {/* моб.: аватар | имя + «9 · 3 просроч.» ; полоса ниже на всю ширину */}
-                <span className="flex items-center gap-2.5 lg:contents">
-                  {w.employee_id ? (
-                    <Avatar name={w.full_name} email={w.email} className="h-6 w-6 shrink-0 text-[12px]" />
-                  ) : (
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-dashed border-glass-border text-[12px] text-text2">
-                      —
-                    </span>
-                  )}
-                  <span className="hidden min-w-0 truncate text-text lg:inline">{label}</span>
-                </span>
-                <span className="min-w-0 truncate text-text lg:hidden">{label}</span>
-                <span className="text-right tabular-nums text-text2 lg:hidden">
-                  {w.active_count}
-                  {overdue > 0 && (
-                    <>
-                      {' · '}
-                      <span className="font-semibold text-red">{overdue} просроч.</span>
-                    </>
-                  )}
-                </span>
-                <span className="col-span-3 flex items-center gap-2.5 lg:col-span-1">
-                  <span className="block h-2 flex-1 overflow-hidden rounded-full bg-surface">
-                    <span className="block h-full rounded-full bg-amber" style={{ width: `${pct}%` }} />
-                  </span>
-                  <span className="hidden w-6 shrink-0 text-right tabular-nums text-text lg:inline">
+                <span className="flex items-center gap-2.5">
+                  {avatar}
+                  <span className="min-w-0 flex-1 truncate text-text">{label}</span>
+                  <span className="shrink-0 text-right tabular-nums text-text2">
                     {w.active_count}
+                    {overdue > 0 && (
+                      <>
+                        {' · '}
+                        <span className="font-semibold text-red">{overdue} просроч.</span>
+                      </>
+                    )}
                   </span>
                 </span>
-                <span
-                  className={cn(
-                    'hidden text-right text-[14px] font-semibold tabular-nums lg:block',
-                    overdue > 0 ? 'text-red' : 'text-text2',
-                  )}
-                >
-                  {overdue}
-                </span>
+                <span className="flex items-center">{meter}</span>
               </li>
             )
           })}
