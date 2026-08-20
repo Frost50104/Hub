@@ -38,6 +38,7 @@ import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select } from '@/components/ui/Select'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
+import { StatTile } from '@/components/ui/StatTile'
 import { useLibrary, useLibraryMutation } from '@/hooks/useLearn'
 import { cn } from '@/lib/cn'
 import { nbsp, plural } from '@/lib/typography'
@@ -170,6 +171,31 @@ export function LearnLibraryPage() {
   const urgent = useMemo(() => matching.filter((m) => m.ack_pending), [matching])
   const materials = useMemo(() => matching.filter((m) => !m.ack_pending), [matching])
 
+  /**
+   * Сводка над списком. Считается по УЖЕ ЗАГРУЖЕННОМУ ответу, и это сейчас
+   * честно: `GET /learn/library` отдаёт библиотеку целиком, без лимита и
+   * пагинации (app/api/library.py). Если пагинация когда-нибудь появится —
+   * «Всего документов» молча станет неправдой, и считать придётся на сервере.
+   */
+  const summary = useMemo(() => {
+    const pending = all.filter((m) => m.ack_pending)
+    const deadlines = pending
+      .map((m) => m.ack_deadline_at)
+      .filter((d): d is string => Boolean(d))
+      .sort()
+    const nearest = deadlines[0]
+    return {
+      total: all.length,
+      pending: pending.length,
+      nearest: nearest
+        ? new Date(nearest).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+        : '—',
+      // Именно «сколько документов переиздавались», а не «сколько версий
+      // всего»: вторая цифра ничего не говорит о работе с базой.
+      versioned: all.filter((m) => (m.current_version_no ?? 1) > 1).length,
+    }
+  }, [all])
+
   const searching = query.trim().length > 0 || sectionFilter !== ''
   const found = searching
     ? `${matching.length} из ${all.length}`
@@ -179,7 +205,12 @@ export function LearnLibraryPage() {
     <div className="mx-auto max-w-[680px]">
       <header className="flex items-end justify-between gap-3 px-5 pt-11">
         <div className="min-w-0">
-          <p className="mb-1 text-xs leading-[1.35] text-text2">{nbsp(found)}</p>
+          {/* Счётчик над заголовком нужен только при поиске («12 из 179»):
+              без фильтра то же число стоит в плашке «Всего документов», и
+              две одинаковые цифры подряд читаются как ошибка. */}
+          {searching && (
+            <p className="mb-1 text-xs leading-[1.35] text-text2">{nbsp(found)}</p>
+          )}
           <h1 className="font-display text-[28px] font-bold leading-[1.18] tracking-[0.01em] text-text lg:text-[34px] lg:leading-[1.15]">
             Библиотека
           </h1>
@@ -226,6 +257,21 @@ export function LearnLibraryPage() {
       <div className="flex flex-col gap-7 px-5 pb-8 pt-6">
         {probe.isLoading && <SkeletonRows rows={6} rowClassName="h-[56px]" />}
         {probe.isError && <QueryError onRetry={() => void probe.refetch()} />}
+
+        {/* Сводка прячется при поиске: числа считаются по всей библиотеке, и
+            рядом с отфильтрованным списком они читались бы как его итог. */}
+        {!searching && all.length > 0 && (
+          <div className="flex flex-wrap gap-2.5">
+            <StatTile label="Всего документов" value={String(summary.total)} />
+            <StatTile
+              label="Требуют ознакомления"
+              value={String(summary.pending)}
+              accent={summary.pending === 0}
+            />
+            <StatTile label="Ближайший срок" value={summary.nearest} />
+            <StatTile label="Переиздавались" value={String(summary.versioned)} />
+          </div>
+        )}
 
         {urgent.length > 0 && (
           <section className="flex flex-col gap-2.5">

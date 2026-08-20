@@ -4,6 +4,7 @@ import {
   activeFilterCount,
   applyFiltersToSearchParams,
   filtersFromSearchParams,
+  narrowableFilter,
   toCalendarFilters,
   toListFilters,
   type TaskViewFilters,
@@ -105,5 +106,32 @@ describe('toCalendarFilters', () => {
         sort: 'title',
       }),
     ).toEqual({ assignee: 'u1', status: 'done', priority: 'high' })
+  })
+})
+
+describe('narrowableFilter', () => {
+  it('предлагает снять единственный активный фильтр', () => {
+    expect(narrowableFilter({ priority: 'urgent' })).toEqual({
+      key: 'priority',
+      label: 'приоритет',
+    })
+  })
+
+  it('молчит, когда активных фильтров несколько', () => {
+    // Сняв один из двух, человек снова увидит пустой список — кнопка
+    // выглядела бы сломанной, поэтому предлагаем общее «Сбросить фильтры».
+    expect(narrowableFilter({ priority: 'urgent', assignee: 'me' })).toBeNull()
+  })
+
+  it('молчит, когда фильтров нет вовсе', () => {
+    expect(narrowableFilter({})).toBeNull()
+  })
+
+  it('не считает сортировку фильтром', () => {
+    expect(narrowableFilter({ sort: 'due_at', order: 'asc' })).toBeNull()
+    expect(narrowableFilter({ sort: 'due_at', label: 'l1' })).toEqual({
+      key: 'label',
+      label: 'метку',
+    })
   })
 })

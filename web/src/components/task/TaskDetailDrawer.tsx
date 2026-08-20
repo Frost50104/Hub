@@ -35,7 +35,7 @@ import {
 import { AutoGrowTextarea } from '@/components/ui/AutoGrowTextarea'
 import { Textarea } from '@/components/ui/Input'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
-import { useProject, useProjectSections } from '@/hooks/useProjects'
+import { useProject, useProjectMembers, useProjectSections } from '@/hooks/useProjects'
 import {
   useArchiveTask,
   useTask,
@@ -129,6 +129,11 @@ export function TaskDetailDrawer({
   const sections = useProjectSections(projectId)
   // Права считает сервер: viewer → read-only, hub:admin вне членства → правит.
   const readOnly = !project.data?.can_edit
+  // Наблюдателю мало сказать «нельзя» — надо назвать, кого просить.
+  // `GET /projects/{id}/members` открыт любой роли в проекте (включая
+  // viewer), поэтому имя владельца доступно и ему.
+  const members = useProjectMembers(readOnly ? projectId : undefined)
+  const owner = members.data?.find((m) => m.role === 'owner')
   const update = useUpdateTask(projectId)
   const toggleAssignee = useToggleAssignee(projectId)
   const archive = useArchiveTask(projectId)
@@ -323,8 +328,17 @@ export function TaskDetailDrawer({
             )}
 
             {readOnly && task && (
-              <p className="mt-2.5 flex items-center gap-2 rounded-[10px] border border-glass-border bg-tint px-[11px] py-[9px] text-[14px] leading-[1.45] text-text2">
-                Вы наблюдатель проекта: поля доступны только для чтения.
+              <p className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-[10px] border border-glass-border bg-tint px-[11px] py-[9px] text-[14px] leading-[1.45] text-text2">
+                <span>Вы наблюдатель проекта: поля доступны только для чтения.</span>
+                {/* Владельца может не быть вовсе — его могли разжаловать или
+                    убрать из проекта. Тогда строку про доступ не показываем:
+                    «обратитесь к undefined» хуже молчания. */}
+                {owner?.full_name && (
+                  <span>
+                    Запросить доступ — у владельца,{' '}
+                    <span className="text-text">{owner.full_name}</span>.
+                  </span>
+                )}
               </p>
             )}
           </header>

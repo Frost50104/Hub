@@ -12,12 +12,17 @@ export function TaskEmptyState({
   text,
   cta,
   onCta,
+  secondaryCta,
+  onSecondary,
   tone = 'neutral',
 }: {
   title: string
   text: string
   cta?: string
   onCta?: () => void
+  /** Точечное действие рядом с общим — например «снять приоритет». */
+  secondaryCta?: string
+  onSecondary?: () => void
   tone?: 'neutral' | 'error'
 }) {
   return (
@@ -37,7 +42,18 @@ export function TaskEmptyState({
         </h3>
         <p className="text-[16px] leading-[1.55] text-text2 [text-wrap:pretty]">{text}</p>
       </div>
-      {cta && onCta && <Button onClick={onCta}>{cta}</Button>}
+      {/* flex-wrap обязателен: то же пустое состояние рисуется в колонке
+          доски шириной 288px, где две кнопки в один ряд не помещаются. */}
+      {cta && onCta && (
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <Button onClick={onCta}>{cta}</Button>
+          {secondaryCta && onSecondary && (
+            <Button variant="ghost" onClick={onSecondary}>
+              {secondaryCta}
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

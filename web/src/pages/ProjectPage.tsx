@@ -73,6 +73,8 @@ import { formatCustomFieldValue } from '@/lib/formatCustomField'
 import { PROJECT_ROLE_LABEL, type Project, type Section } from '@/lib/projects'
 import {
   activeFilterCount,
+  narrowableFilter,
+  type NarrowableFilter,
   applyFiltersToSearchParams,
   filtersFromSearchParams,
   toListFilters,
@@ -518,6 +520,7 @@ function ListTab({
   selectedTaskId,
   filters,
   onResetFilters,
+  onDropFilter,
 }: {
   projectId: string
   project: Project
@@ -525,6 +528,7 @@ function ListTab({
   selectedTaskId: string | null
   filters: TaskViewFilters
   onResetFilters: () => void
+  onDropFilter: (key: NarrowableFilter) => void
 }) {
   const isDesktop = useIsDesktop()
   const sections = useProjectSections(projectId)
@@ -637,6 +641,7 @@ function ListTab({
 
   const visibleTasks = (tasks.data ?? []).filter((t) => !t.parent_task_id)
   const filtersActive = activeFilterCount(filters) > 0
+  const narrowable = narrowableFilter(filters)
 
   if (visibleTasks.length === 0) {
     return filtersActive ? (
@@ -649,6 +654,8 @@ function ListTab({
         }
         cta="Сбросить фильтры"
         onCta={onResetFilters}
+        secondaryCta={narrowable ? `Снять ${narrowable.label}` : undefined}
+        onSecondary={narrowable ? () => onDropFilter(narrowable.key) : undefined}
       />
     ) : (
       <TaskEmptyState
@@ -905,6 +912,7 @@ export function ProjectPage() {
             selectedTaskId={selectedTaskId}
             filters={filters}
             onResetFilters={() => setFilters({ sort: filters.sort, order: filters.order })}
+            onDropFilter={(key) => setFilters({ ...filters, [key]: undefined })}
           />
         </>
       )}

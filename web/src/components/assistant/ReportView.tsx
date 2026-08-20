@@ -8,6 +8,7 @@ import { QueryError } from '@/components/QueryError'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { SkeletonRows } from '@/components/ui/Skeleton'
+import { StatTile } from '@/components/ui/StatTile'
 import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
 import { reportsApi, type Report, type ReportKind } from '@/lib/assistant'
@@ -24,22 +25,6 @@ import { reportsApi, type Report, type ReportKind } from '@/lib/assistant'
  * дизайн-системе занят просрочкой и ошибками, иначе плохая неделя выглядела
  * бы как авария системы.
  */
-
-function StatCard({ label, value, positive }: { label: string; value: string; positive: boolean }) {
-  return (
-    <div className="flex min-w-[140px] flex-1 shrink-0 flex-col gap-1 rounded-xl border border-glass-border bg-tint px-3.5 py-3">
-      <span className="text-[13px] text-text2">{label}</span>
-      <span
-        className={cn(
-          'font-display text-[17px] font-bold leading-[1.2] lg:text-[20px]',
-          positive ? 'text-green-deep' : 'text-text',
-        )}
-      >
-        {value}
-      </span>
-    </div>
-  )
-}
 
 function Bars({ rows }: { rows: Report['bars'] }) {
   return (
@@ -231,7 +216,7 @@ export function ReportView({
 
           <div className="flex flex-wrap gap-2.5">
             {data.stats.map((s) => (
-              <StatCard key={s.label} {...s} />
+              <StatTile key={s.label} label={s.label} value={s.value} accent={s.positive} />
             ))}
           </div>
 

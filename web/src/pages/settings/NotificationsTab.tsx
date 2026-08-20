@@ -65,10 +65,36 @@ export function NotificationsSettingsTab() {
           </p>
         )}
         {permission === 'denied' && (
-          <p className="text-sm text-text2">
-            Push заблокирован в настройках браузера. Разрешите уведомления для{' '}
-            <code>hub.signaris.ru</code>, чтобы получать их на это устройство.
-          </p>
+          <div className="space-y-2">
+            <p className="text-sm text-text2">
+              Push заблокирован в настройках браузера. Разрешите уведомления для{' '}
+              <code>hub.signaris.ru</code>, чтобы получать их на это устройство.
+            </p>
+            {/* Инструкция намеренно общая. Точный путь в меню разный у Chrome,
+                Safari и Firefox, и назвать не тот пункт хуже, чем не называть
+                вовсе: человек пойдёт искать то, чего у него нет. Отдельной
+                строкой — iOS, там путь принципиально другой. */}
+            <details className="group">
+              <summary className="cursor-pointer list-none text-sm font-medium text-amber hover:opacity-80">
+                Как разрешить
+              </summary>
+              <ol className="mt-2 space-y-1.5 pl-4 text-sm leading-[1.5] text-text2">
+                <li className="list-decimal">
+                  Нажмите значок слева от адреса сайта — замок или ползунки.
+                </li>
+                <li className="list-decimal">
+                  Найдите «Уведомления» и переключите на «Разрешить».
+                </li>
+                <li className="list-decimal">
+                  Обновите страницу и вернитесь сюда — появится кнопка «Включить».
+                </li>
+                <li className="list-decimal">
+                  На iPhone Hub должен быть добавлен на главный экран: разрешение
+                  спрашивается только там, а сбрасывается в «Настройки → Уведомления».
+                </li>
+              </ol>
+            </details>
+          </div>
         )}
         {permission === 'default' && (
           <div className="flex items-center justify-between gap-3 rounded-lg border border-glass-border bg-surface p-3">

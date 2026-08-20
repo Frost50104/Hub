@@ -74,6 +74,35 @@ export function activeFilterCount(filters: TaskViewFilters): number {
   ].filter(Boolean).length
 }
 
+/** Человеческие названия фильтров — для строки контекста и кнопки снятия. */
+const FILTER_LABEL: Record<NarrowableFilter, string> = {
+  assignee: 'исполнителя',
+  status: 'статус',
+  priority: 'приоритет',
+  label: 'метку',
+  due: 'срок',
+}
+
+export type NarrowableFilter = 'assignee' | 'status' | 'priority' | 'label' | 'due'
+
+/**
+ * Какой ОДИН фильтр предложить снять, когда под фильтры не попало ничего.
+ *
+ * Предлагаем только когда активен ровно один: сняв один из трёх, человек с
+ * большой вероятностью снова увидит пустой список, и кнопка будет выглядеть
+ * сломанной. В этом случае честнее обычное «Сбросить фильтры».
+ */
+export function narrowableFilter(
+  filters: TaskViewFilters,
+): { key: NarrowableFilter; label: string } | null {
+  const active = (['assignee', 'status', 'priority', 'label', 'due'] as const).filter(
+    (k) => filters[k],
+  )
+  if (active.length !== 1) return null
+  const key = active[0]!
+  return { key, label: FILTER_LABEL[key] }
+}
+
 function startOfDay(d: Date): Date {
   const out = new Date(d)
   out.setHours(0, 0, 0, 0)
