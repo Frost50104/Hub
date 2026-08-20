@@ -38,6 +38,7 @@ import {
   TaskListSkeleton,
 } from '@/components/task/TaskListStates'
 import { CreateTaskDialog } from '@/components/task/CreateTaskDialog'
+import { ImportTasksDialog } from '@/components/task/ImportTasksDialog'
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { TaskRow } from '@/components/task/TaskRow'
 import { TimelineView } from '@/components/timeline/TimelineView'
@@ -111,6 +112,7 @@ function ProjectHeader({
   onOpenLabels,
   onOpenShare,
   onCreateTask,
+  onImport,
   tab,
   onTab,
 }: {
@@ -121,6 +123,7 @@ function ProjectHeader({
   onOpenLabels: () => void
   onOpenShare: () => void
   onCreateTask: () => void
+  onImport: () => void
   tab: TabKey
   onTab: (t: TabKey) => void
 }) {
@@ -216,6 +219,11 @@ function ProjectHeader({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    {/* Импорт и в непустой проект: из пустого состояния он
+                        достижим кнопкой, отсюда — всегда. */}
+                    {project.can_edit && !isArchived && (
+                      <DropdownMenuItem onSelect={onImport}>Импорт из CSV…</DropdownMenuItem>
+                    )}
                     <DropdownMenuItem onSelect={onArchive}>
                       {isArchived ? 'Разархивировать' : 'Архивировать'}
                     </DropdownMenuItem>
@@ -511,6 +519,7 @@ function ListTab({
   onResetFilters,
   onDropFilter,
   onCreateTask,
+  onImport,
 }: {
   projectId: string
   project: Project
@@ -521,6 +530,8 @@ function ListTab({
   onDropFilter: (key: NarrowableFilter) => void
   /** Создать задачу, когда инлайн-поля на экране нет (пустой проект). */
   onCreateTask: () => void
+  /** «Импорт из CSV» — вторая кнопка пустого состояния (макет). */
+  onImport: () => void
 }) {
   const isDesktop = useIsDesktop()
   const sections = useProjectSections(projectId)
@@ -679,6 +690,8 @@ function ListTab({
               }
             : undefined
         }
+        secondaryCta={canEditFlag ? 'Импорт из CSV' : undefined}
+        onSecondary={canEditFlag ? onImport : undefined}
       />
     )
   }
@@ -813,6 +826,7 @@ export function ProjectPage() {
   const [labelsOpen, setLabelsOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [createTaskOpen, setCreateTaskOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
 
   const selectedTaskId = searchParams.get('task')
   const openTask = (taskId: string) => {
@@ -897,6 +911,7 @@ export function ProjectPage() {
         onOpenFields={() => setFieldsOpen(true)}
         onOpenLabels={() => setLabelsOpen(true)}
         onOpenShare={() => setShareOpen(true)}
+        onImport={() => setImportOpen(true)}
         // «Задача» в шапке — та же точка входа, что «Новая задача» в сайдбаре:
         // курсор в инлайн-поле списка; если поля нет (пустой проект, другая
         // вкладка ещё не перерисовалась) — диалог создания.
@@ -926,6 +941,7 @@ export function ProjectPage() {
             onResetFilters={() => setFilters({ sort: filters.sort, order: filters.order })}
             onDropFilter={(key) => setFilters({ ...filters, [key]: undefined })}
             onCreateTask={() => setCreateTaskOpen(true)}
+            onImport={() => setImportOpen(true)}
           />
         </>
       )}
@@ -1006,6 +1022,7 @@ export function ProjectPage() {
         onOpenChange={setCreateTaskOpen}
         initialProjectId={id}
       />
+      <ImportTasksDialog open={importOpen} onOpenChange={setImportOpen} projectId={id} />
 
       <ShareDialog
         scope="project"

@@ -8,16 +8,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from signaris_auth import Principal
-from sqlalchemy import case, func, select, update
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import enforce_rate_limit, get_db, require_auth
-from app.models.project import Project
-from app.models.section import Section
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskLabelAssignment, TaskWatcher
 from app.schemas.task import (
@@ -32,11 +30,10 @@ from app.schemas.task import (
 from app.services.activity_writer import record_activity
 from app.services.notify import notify_status_changed
 from app.services.project_access import is_hub_admin, require_project_role
-from app.services.stages import next_position, resolve_stage, set_stage, stage_for_status
+from app.services.stages import next_position, resolve_stage, set_stage
 from app.services.task_assignees import (
     add_assignee,
     apply_assignee_side_effects,
-    assert_assignees_in_tenant,
     assignee_exists,
     load_assignees,
     remove_assignee,
@@ -44,7 +41,12 @@ from app.services.task_assignees import (
     set_task_assignees,
 )
 from app.services.task_counts import load_row_counts
-from app.services.task_watchers import ensure_watcher
+from app.services.tasks import (
+    allocate_task_seq,
+    assert_parent_one_level,
+    assert_section_in_project,
+    create_task_record,
+)
 
 router = APIRouter(tags=["tasks"])
 
@@ -60,22 +62,12 @@ async def _next_position(db: AsyncSession, project_id: UUID, status_: str) -> De
     return await next_position(db, project_id, stage_id=None, system_status=status_)
 
 
-async def _allocate_task_seq(db: AsyncSession, project_id: UUID) -> int:
-    """Атомарная выдача номера задачи («KEY-42»).
 
-    Row-lock строки проекта живёт до конца транзакции и сериализует
-    конкурентные создания — retry не нужен, UNIQUE(project_id, seq) остаётся
-    страховочной сеткой. Дыры в нумерации при rollback допустимы (как в Jira).
-    Звать ПОСЛЕДНИМ перед Task(...), чтобы не держать лок при 400/404.
-    """
-    row = await db.execute(
-        update(Project)
-        .where(Project.id == project_id)
-        .values(next_task_seq=Project.next_task_seq + 1)
-        .returning(Project.next_task_seq - 1)
-    )
-    return row.scalar_one()
 
+# Алиасы старых имён: update_task/тесты зовут их отсюда.
+_allocate_task_seq = allocate_task_seq
+_assert_section_in_project = assert_section_in_project
+_assert_parent_one_level = assert_parent_one_level
 
 _serialize = serialize_with_assignees
 
@@ -83,36 +75,6 @@ _serialize = serialize_with_assignees
 async def _serialize_one(db: AsyncSession, task: Task) -> TaskResponse:
     by_task = await load_assignees(db, [task.id])
     return _serialize(task, by_task.get(task.id, []))
-
-
-async def _assert_section_in_project(
-    db: AsyncSession, project_id: UUID, section_id: UUID | None
-) -> None:
-    if section_id is None:
-        return
-    row = await db.execute(
-        select(Section.id).where(Section.id == section_id, Section.project_id == project_id)
-    )
-    if row.scalar_one_or_none() is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Секция не принадлежит этому проекту",
-        )
-
-
-async def _assert_parent_one_level(db: AsyncSession, parent_task_id: UUID | None) -> None:
-    if parent_task_id is None:
-        return
-    parent = await db.get(Task, parent_task_id)
-    if parent is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Родительская задача не найдена"
-        )
-    if parent.parent_task_id is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Подзадачи поддерживаются только одного уровня",
-        )
 
 
 # ─── List & Create ──────────────────────────────────────────────────────────
@@ -218,99 +180,9 @@ async def create_task(
         window_sec=60,
     )
     await require_project_role(db, project_id, principal, allow=("owner", "editor"))
-    await _assert_section_in_project(db, project_id, body.section_id)
-    # Валидация ВСЕГО списка до любых записей и до _allocate_task_seq: тот
-    # держит row-lock проекта до конца транзакции, а 404 на третьем
-    # исполнителе не должен оставлять первых двух записанными.
-    assignee_ids = resolve_assignee_ids(body) or []
-    assignee_names = await assert_assignees_in_tenant(db, assignee_ids)
-    await _assert_parent_one_level(db, body.parent_task_id)
-    # Этап: явный stage_id либо первый этап присланного статуса (legacy).
-    # `status` в теле — всегда системный статус этапа (зеркало).
-    # `status` у TaskCreate имеет дефолт «todo» — учитываем его только если
-    # прислан явно, иначе stage_id=«Готово» конфликтовал бы с дефолтом.
-    explicit_status = body.status if "status" in body.model_fields_set else None
-    stage = await resolve_stage(
-        db, project_id, stage_id=body.stage_id, system_status=explicit_status
-    )
-    if stage is None:
-        # Ни stage_id, ни явного status — дефолт «todo» → первый этап этого
-        # статуса (None только у проекта без этапов, до backfill 0040).
-        stage = await stage_for_status(db, project_id, body.status)
-    task_status = stage.system_status if stage is not None else body.status
-
-    task = Task(
-        id=uuid4(),
-        tenant_id=principal.tenant_id,
-        project_id=project_id,
-        section_id=body.section_id,
-        stage_id=stage.id if stage is not None else None,
-        parent_task_id=body.parent_task_id,
-        title=body.title,
-        description=body.description,
-        status=task_status,
-        priority=body.priority,
-        created_by=principal.employee_id,
-        start_at=body.start_at,
-        due_at=body.due_at,
-        position=await next_position(
-            db,
-            project_id,
-            stage_id=stage.id if stage is not None else None,
-            system_status=task_status,
-        ),
-        seq=await _allocate_task_seq(db, project_id),
-    )
-    if task_status == "done":
-        task.completed_at = datetime.now(UTC)
-    db.add(task)
-    # Flush so the task INSERT actually hits Postgres before we record an
-    # activity row that references task.id (FK on task_activity.task_id).
-    # ORM's topological INSERT sort doesn't help here — record_activity uses
-    # `insert()` directly, bypassing the unit-of-work ordering.
-    await db.flush()
-    # Auto-watchers per INTEGRATION.md §14: creator + assignee subscribe on
-    # task creation. Reason is the *first* edge they joined through.
-    await ensure_watcher(
-        db,
-        task_id=task.id,
-        tenant_id=task.tenant_id,
-        employee_id=principal.employee_id,
-        reason="creator",
-    )
-    # Строго ПОСЛЕ flush(): FK task_assignees.task_id требует, чтобы строка
-    # задачи уже была в Postgres.
-    diff = await set_task_assignees(
-        db,
-        task=task,
-        employee_ids=assignee_ids,
-        actor_id=principal.employee_id,
-        validated_names=assignee_names,
-    )
-    if diff.changed:
-        # notify/record выключены: создание задачи с исполнителем и раньше не
-        # слало уведомлений, а лента начинается с «created».
-        await apply_assignee_side_effects(
-            db,
-            task=task,
-            diff=diff,
-            actor_id=principal.employee_id,
-            actor_name="",
-            notify=False,
-            record=False,
-        )
-    await record_activity(
-        db,
-        tenant_id=principal.tenant_id,
-        task_id=task.id,
-        actor_id=principal.employee_id,
-        kind="created",
-        payload={
-            "title": body.title,
-            "status": body.status,
-            "section_id": str(body.section_id) if body.section_id else None,
-        },
-    )
+    # Доменная работа — в services/tasks.py: тот же путь использует импорт из
+    # CSV (ему нельзя ходить через ручку из-за rate-limit).
+    task = await create_task_record(db, principal=principal, project_id=project_id, body=body)
     await db.commit()
     await db.refresh(task)
     return await _serialize_one(db, task)

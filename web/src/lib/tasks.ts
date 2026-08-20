@@ -132,6 +132,20 @@ export const tasksApi = {
   list: (projectId: string, filters?: TaskListFilters): Promise<Task[]> =>
     api.get<Task[]>(`/projects/${projectId}/tasks`, { params: filters }).then((r) => r.data),
   get: (id: string): Promise<Task> => api.get<Task>(`/tasks/${id}`).then((r) => r.data),
+  /** Импорт из CSV: dry_run — разбор и отчёт без записи. */
+  importCsv: (
+    projectId: string,
+    file: File,
+    opts: { dryRun: boolean },
+  ): Promise<TaskImportReport> => {
+    const form = new FormData()
+    form.append('file', file)
+    return api
+      .post<TaskImportReport>(`/projects/${projectId}/tasks/import`, form, {
+        params: { dry_run: opts.dryRun },
+      })
+      .then((r) => r.data)
+  },
   create: (projectId: string, body: TaskCreateBody): Promise<Task> =>
     api.post<Task>(`/projects/${projectId}/tasks`, body).then((r) => r.data),
   update: (id: string, body: TaskUpdateBody): Promise<Task> =>
@@ -162,6 +176,13 @@ export const tasksApi = {
         params: { ...range, ...filters },
       })
       .then((r) => r.data),
+}
+
+export interface TaskImportReport {
+  created: number
+  skipped: number
+  errors: string[]
+  dry_run: boolean
 }
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {

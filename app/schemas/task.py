@@ -144,3 +144,12 @@ def resolve_assignee_ids(body: TaskCreate | TaskUpdate) -> list[UUID] | None:
     if "assignee_id" in body.model_fields_set:
         return [body.assignee_id] if body.assignee_id else []
     return None
+
+
+class TaskImportReport(BaseModel):
+    """Отчёт импорта задач из CSV (тот же силуэт, что у импорта сотрудников)."""
+
+    created: int
+    skipped: int
+    errors: list[str]
+    dry_run: bool

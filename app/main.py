@@ -172,6 +172,7 @@ def create_app() -> FastAPI:
     from app.api import stats as stats_api
     from app.api import surveys as surveys_api
     from app.api import tasks as tasks_api
+    from app.api import tasks_import as tasks_import_api
     from app.api import tenant as tenant_api
     from app.api import timeline as timeline_api
     from app.api import watchers as watchers_api
@@ -184,6 +185,7 @@ def create_app() -> FastAPI:
     app.include_router(sections_api.router, prefix="/api")
     app.include_router(stages_api.router, prefix="/api")
     app.include_router(tasks_api.router, prefix="/api")
+    app.include_router(tasks_import_api.router, prefix="/api")
     app.include_router(calendar_api.router, prefix="/api")
     app.include_router(custom_fields_api.router, prefix="/api")
     app.include_router(labels_api.router, prefix="/api")
