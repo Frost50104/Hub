@@ -128,6 +128,26 @@ deploy_backend() {
 }
 
 # ─── Deploy frontend ───────────────────────────────────────────────────────
+# Сборка фронта на VPS требует ~1 ГБ, а машина всего 1,9 ГБ и на ней живёт
+# STT-юнит с моделью распознавания. Проверено 2026-08-20: `vite build` был
+# убит OOM'ом, deploy молча оставил старый dist, и только version.json выдал,
+# что выкатки не произошло. Поэтому на время сборки юнит останавливается и
+# поднимается обратно — в том числе если сборка упала.
+pause_stt() {
+  STT_WAS_ACTIVE=$($SSH_CMD "systemctl is-active ${SERVICE}-stt 2>/dev/null || echo inactive")
+  if [ "$STT_WAS_ACTIVE" = "active" ]; then
+    echo "==> Останавливаю ${SERVICE}-stt на время сборки (память)..."
+    $SSH_CMD "systemctl stop ${SERVICE}-stt"
+  fi
+}
+
+resume_stt() {
+  if [ "${STT_WAS_ACTIVE:-inactive}" = "active" ]; then
+    echo "==> Поднимаю ${SERVICE}-stt обратно..."
+    $SSH_CMD "systemctl start ${SERVICE}-stt"
+  fi
+}
+
 deploy_frontend() {
   echo "==> Deploying frontend to $ENV..."
 
@@ -142,13 +162,24 @@ deploy_frontend() {
     "$PROJECT_DIR/web/" \
     "${SERVER_USER}@${SERVER_HOST}:${REMOTE_BASE}/web_src/"
 
+  pause_stt
+  # `set -e` уронил бы скрипт до resume_stt, поэтому исход ловим явно:
+  # оставить прод без распознавания из-за упавшей сборки — хуже самой сборки.
+  BUILD_OK=0
   $SSH_CMD "cd ${REMOTE_BASE}/web_src && \
     npm install --no-audit --no-fund && \
     $BUILD_CMD && \
+    test -f dist/index.html && \
     mkdir -p ${REMOTE_BASE}/web/dist && \
     rm -rf ${REMOTE_BASE}/web/dist/* && \
-    cp -r dist/* ${REMOTE_BASE}/web/dist/"
+    cp -r dist/* ${REMOTE_BASE}/web/dist/" && BUILD_OK=1
+  resume_stt
 
+  if [ "$BUILD_OK" != "1" ]; then
+    echo "ERROR: сборка фронта не удалась — на сервере остался ПРЕЖНИЙ dist." >&2
+    echo "       Частая причина на этой машине — OOM: смотрите dmesg -T | tail." >&2
+    exit 1
+  fi
   echo "==> Frontend deployed."
 }
 
