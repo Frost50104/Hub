@@ -98,7 +98,12 @@ function Hours({ rows }: { rows: Report['hours'] }) {
 function ItemList({ title, rows, muted }: { title: string; rows: Report['top']; muted?: boolean }) {
   return (
     <div className="min-w-0 flex-1">
-      <p className="font-display text-[15px] font-semibold text-text">{title}</p>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="font-display text-[15px] font-semibold text-text">{title}</p>
+        {/* Подпись колонки, а не единица у каждого числа: iiko отдаёт в
+            одном поле и штуки, и килограммы. */}
+        <p className="shrink-0 text-[12px] text-text2">продано · доля</p>
+      </div>
       <ul className="mt-1.5">
         {rows.map((t, i) => (
           <li

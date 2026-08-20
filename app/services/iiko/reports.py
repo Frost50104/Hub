@@ -19,27 +19,45 @@ from typing import Any, Literal
 from app.services.iiko.client import IikoClient, IikoError
 
 # ─── Поля OLAP ──────────────────────────────────────────────────────────────
-# ПРОВЕРЕНО на живом API (uppetit-co.iiko.it, iiko 9.2, 2026-06-02 в проекте
-# Listen: выгрузка за 29.05 совпала с ручным xlsx до рубля).
+# ВСЕ имена сверены со списком колонок живого API (uppetit-co.iiko.it,
+# iiko 9.2, 2026-08-20: 279 колонок SALES, 116 TRANSACTIONS) и прогнаны
+# отчётами на реальных данных за 10–16 августа.
 F_DEPARTMENT = "Department"  # «Торговое предприятие» — точка
-F_OPEN_TIME = "OpenTime"
-F_ORDER_NUM = "OrderNum"
+F_OPEN_TIME = "OpenTime"  # «Время открытия»
+F_ORDER_NUM = "OrderNum"  # «Номер чека»
 F_AMOUNT = "DishDiscountSumInt"  # «Сумма со скидкой»
-F_DATE_FILTER = "OpenDate.Typed"  # фильтр периода, `to` эксклюзивна
-
-# НЕ ПРОВЕРЕНО — стандартные имена iiko OLAP. Сверяются `validate_fields`.
+F_DATE_FILTER = "OpenDate.Typed"  # «Учетный день», фильтр периода
 F_DATE = "OpenDate.Typed"
-F_DISH = "DishName"
-F_QTY = "DishAmountInt"
-F_ORDERS = "UniqOrderId.OrdersCount"
-F_HOUR = "HourOpen"
-F_TX_TYPE = "TransactionType"
-F_TX_PRODUCT_CAT = "Product.Category"
-F_TX_SUM = "Sum.ResignedSum"
+F_DISH = "DishName"  # «Блюдо»
+F_QTY = "DishAmountInt"  # «Количество блюд»
+F_ORDERS = "UniqOrderId.OrdersCount"  # «Заказов», только агрегат
+F_HOUR = "HourOpen"  # «Час открытия», STRING
+F_TX_TYPE = "TransactionType"  # ENUM, значения — КОДЫ, не русские названия
+F_TX_PRODUCT_CAT = "Product.Category"  # «Категория номенклатуры»
+# «Сумма расхода». НЕ `Sum.ResignedSum`: та отдавала нули на всех типах.
+F_TX_SUM = "Sum.Outgoing"
 F_TX_DATE = "DateTime.Typed"
+F_DISH_TYPE = "DishType"  # «Тип товара»: GOODS | DISH | MODIFIER
+
+# «Продажи по позициям меню» — про то, что человек выбирает, а не про
+# добавки к этому. Модификаторы («Обычное молоко», «Горячий») продаются
+# десятками тысяч штук при выручке 0,1 млн против 35 млн у товаров: не
+# отфильтровав их, отчёт ставит молоко на первое место меню, а доля «топ-5»
+# считается от мусорного знаменателя. Проверено на неделе 10–16.08.
+MENU_DISH_TYPES = ["GOODS", "DISH"]
+
+# Списания = потери. `SESSION_WRITEOFF` сюда НЕ входит: это автосписание
+# ингредиентов по факту продаж, то есть себестоимость проданного (21,6 млн
+# за неделю против 1,8 млн у WRITEOFF) — смешав их, отчёт о потерях показал
+# бы себестоимость и потерял смысл.
+TX_WRITEOFF_TYPES = ["WRITEOFF"]
 
 VERIFIED: frozenset[str] = frozenset(
-    {F_DEPARTMENT, F_OPEN_TIME, F_ORDER_NUM, F_AMOUNT, F_DATE_FILTER}
+    {
+        F_DEPARTMENT, F_OPEN_TIME, F_ORDER_NUM, F_AMOUNT, F_DATE_FILTER,
+        F_DATE, F_DISH, F_QTY, F_ORDERS, F_HOUR, F_DISH_TYPE,
+        F_TX_TYPE, F_TX_PRODUCT_CAT, F_TX_SUM, F_TX_DATE,
+    }
 )
 
 ReportKind = Literal["revenue", "avg", "items", "peak", "writeoff"]
@@ -88,6 +106,9 @@ SPECS: dict[str, ReportSpec] = {
         group_by=[F_DISH],
         aggregate=[F_QTY],
         optional_aggregate=[F_AMOUNT],
+        extra_filters={
+            F_DISH_TYPE: {"filterType": "IncludeValues", "values": MENU_DISH_TYPES}
+        },
     ),
     "peak": ReportSpec(
         key="peak",
@@ -99,7 +120,10 @@ SPECS: dict[str, ReportSpec] = {
     ),
     "writeoff": ReportSpec(
         key="writeoff",
-        title="Списания и себестоимость",
+        # В макете заголовок «Списания и себестоимость», но себестоимость
+        # (SESSION_WRITEOFF) сюда сознательно не входит — см. TX_WRITEOFF_TYPES.
+        # Название обязано описывать то, что в отчёте реально есть.
+        title="Списания и потери",
         chart="bars",
         report_type="TRANSACTIONS",
         group_by=[F_TX_PRODUCT_CAT],
@@ -107,7 +131,9 @@ SPECS: dict[str, ReportSpec] = {
         date_field=F_TX_DATE,
         # Тип проводки «Списание»: без фильтра в выгрузку попадут все
         # движения склада, и «списания» показали бы приход.
-        extra_filters={F_TX_TYPE: {"filterType": "IncludeValues", "values": ["Списание"]}},
+        extra_filters={
+            F_TX_TYPE: {"filterType": "IncludeValues", "values": TX_WRITEOFF_TYPES}
+        },
     ),
 }
 
@@ -125,9 +151,26 @@ _WEEKDAYS = (
 )
 
 
+def _int(value: float) -> str:
+    """Целое с неразрывными разделителями — как «85 312» в соседних плашках."""
+    return f"{round(value):,}".replace(",", "\u00a0")
+
+
+def fmt_qty(value: float) -> str:
+    """Количество БЕЗ единицы измерения.
+
+    В `DishAmountInt` iiko смешивает штуки и килограммы: «Тилапия филе кг»
+    продаётся долями. Подпись «шт» была бы прямой неправдой для таких строк,
+    а округление 0,3 → «0 шт» превращало реальную продажу в ноль.
+    """
+    if abs(value) < 10 and value != round(value):
+        return f"{value:.1f}".replace(".", ",")
+    return _int(value)
+
+
 def fmt_money(value: float) -> str:
     """«1 042 300 ₽» — неразрывные пробелы, чтобы сумма не рвалась по строкам."""
-    return f"{round(value):,}".replace(",", " ") + " ₽"
+    return _int(value) + " ₽"
 
 
 def fmt_big_money(value: float) -> str:
@@ -239,6 +282,7 @@ def build_payload(
     date_from: date,
     date_to: date,
     store_filter: str | None,
+    revenue: float | None = None,
 ) -> dict[str, Any]:
     spec = SPECS[kind]
     period = fmt_period(date_from, date_to)
@@ -268,7 +312,7 @@ def build_payload(
             _stat("Итог", fmt_big_money(total)),
             _stat("К прошлому периоду", delta, up),
             _stat("Средний чек", fmt_money(total / checks) if checks else "—"),
-            _stat("Чеков", f"{round(checks):,}".replace(",", " ") if checks else "—"),
+            _stat("Чеков", _int(checks) if checks else "—"),
         ]
         payload["bars"] = _bars(cur, prev)
         losing = [b["name"] for b in payload["bars"] if not b["up"] and b["delta"] != "—"]
@@ -310,23 +354,26 @@ def build_payload(
             _stat("Средний чек", fmt_money(avg) if avg else "—"),
             _stat("К прошлому периоду", delta, up),
             _stat("Лучший день", best.lower()),
-            _stat("Чеков", f"{round(checks_total):,}".replace(",", " ") if checks_total else "—"),
+            _stat("Чеков", _int(checks_total) if checks_total else "—"),
         ]
         ordered = {d: by_day[d] for d in _WEEKDAYS if d in by_day}
         payload["bars"] = _bars(ordered, prev_by_day, limit=7)
 
     elif kind == "items":
-        qty = _sum_by(rows, F_DISH, F_QTY)
+        # Строки с нулём и минусом — это возвраты и сторно, а не продажи:
+        # в антитопе «0 шт» выглядит как позиция-аутсайдер, хотя её просто
+        # не продавали.
+        qty = {k: v for k, v in _sum_by(rows, F_DISH, F_QTY).items() if v > 0}
         total_qty = sum(qty.values()) or 1.0
         ranked = sorted(qty.items(), key=lambda kv: kv[1], reverse=True)
         payload["subtitle"] = f"{period}{scope} · {len(qty)} позиций, показаны крайние"
         payload["top"] = [
-            {"name": n, "qty": f"{round(v):,}".replace(",", " ") + " шт",
+            {"name": n, "qty": fmt_qty(v),
              "share": f"{v / total_qty * 100:.1f}%".replace(".", ",")}
             for n, v in ranked[:5]
         ]
         payload["anti"] = [
-            {"name": n, "qty": f"{round(v):,}".replace(",", " ") + " шт",
+            {"name": n, "qty": fmt_qty(v),
              "share": f"{v / total_qty * 100:.1f}%".replace(".", ",")}
             for n, v in ranked[-3:][::-1]
         ]
@@ -336,7 +383,7 @@ def build_payload(
             _stat("Позиций в продаже", str(len(qty))),
             _stat("Топ-5 дают", f"{top5 / total_qty * 100:.0f}% продаж"),
             _stat("Ниже 0,4%", f"{len(weak)}"),
-            _stat("Продано", f"{round(total_qty):,}".replace(",", " ") + " шт"),
+            _stat("Продано", _int(total_qty)),
         ]
         if weak:
             payload["note"] = (
@@ -373,7 +420,7 @@ def build_payload(
                     f"{busiest[1][0]:02d}:00" if len(busiest) > 1 else "—",
                 ),
                 _stat("Доля после 19:00", f"{late / total_checks * 100:.1f}%".replace(".", ",")),
-                _stat("Чеков в пик/час", f"{round(peak_value)}"),
+                _stat("Чеков в пик/час", _int(peak_value)),
             ]
             if late / total_checks < 0.08:
                 payload["note"] = (
@@ -390,11 +437,16 @@ def build_payload(
         total, prev_total = sum(cur.values()), sum(prev.values())
         delta, up = fmt_delta(total, prev_total)
         main = max(cur.items(), key=lambda kv: kv[1], default=("—", 0.0))[0]
-        payload["subtitle"] = f"{period}{scope} · по категориям"
+        payload["subtitle"] = f"{period}{scope} · потери по категориям"
         payload["stats"] = [
             _stat("Списано", fmt_big_money(total)),
+            # Рост списаний — это ПЛОХО, поэтому «положительным» помечаем
+            # падение: иначе зелёным подсветилось бы увеличение потерь.
             _stat("К прошлому периоду", delta, not up),
-            _stat("Категорий", str(len(cur))),
+            _stat(
+                "Доля от выручки",
+                f"{total / revenue * 100:.1f}%".replace(".", ",") if revenue else "—",
+            ),
             _stat("Главная категория", main.lower()),
         ]
         payload["bars"] = _bars(cur, prev)
@@ -456,6 +508,27 @@ async def fetch_report(
         date_field=spec.date_field,
         extra_filters=filters,
     )
+    # «Доля от выручки» из макета требует знать выручку. Отдельный запрос в
+    # ТОЙ ЖЕ сессии: второй слот лицензии ради одной плашки недопустим.
+    revenue: float | None = None
+    if kind == "writeoff":
+        sales_filters = (
+            {F_DEPARTMENT: filters[F_DEPARTMENT]} if F_DEPARTMENT in filters else {}
+        )
+        try:
+            sales = await client.olap(
+                report_type="SALES",
+                date_from=date_from,
+                date_to=date_to,
+                group_by=[F_DEPARTMENT],
+                aggregate=[F_AMOUNT],
+                date_field=F_DATE_FILTER,
+                extra_filters=sales_filters,
+            )
+            revenue = sum(_num(r, F_AMOUNT) for r in sales) or None
+        except IikoError:
+            revenue = None  # плашка деградирует в «—», отчёт остаётся
+
     return build_payload(
         kind,
         rows,
@@ -463,4 +536,5 @@ async def fetch_report(
         date_from=date_from,
         date_to=date_to,
         store_filter=scope_label,
+        revenue=revenue,
     )

@@ -316,7 +316,10 @@ export function AssistantPage() {
           </aside>
         )}
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4">
+        {/* min-w-0 обязателен: у flex-элемента min-width по умолчанию auto,
+            и колонка отказывалась сжиматься под содержимое отчёта — вкладки
+            и списки раздвигали страницу за правый край. */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
           {view === 'reports' ? (
             <div className="min-h-0 flex-1 overflow-y-auto">
               <ReportView initialKind={reportKind} onBack={() => setView('journal')} />

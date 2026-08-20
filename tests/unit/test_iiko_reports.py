@@ -148,14 +148,32 @@ def test_period_label_is_human():
     assert fmt_period(date(2026, 7, 30), date(2026, 8, 2)) == "30 июля — 2 августа"
 
 
-def test_unverified_field_fails_loudly():
-    """Пустой график хуже внятной ошибки: непроверенные имена полей ловятся
-    сверкой с /columns до выгрузки."""
+def test_unknown_field_fails_loudly():
+    """Пустой график хуже внятной ошибки: поле, которого iiko не знает,
+    ловится сверкой с /columns ДО выгрузки.
+
+    Все поля реальных пресетов сверены с живым API (2026-08-20) и лежат в
+    VERIFIED, поэтому механизм проверяем синтетическим пресетом — он же
+    сработает, если iiko переименует колонку в новой версии.
+    """
+    from app.services.iiko.reports import ReportSpec
+
+    spec = ReportSpec(
+        key="synthetic",
+        title="Синтетика",
+        chart="bars",
+        report_type="SALES",
+        group_by=["ПоляТакогоНет"],
+        aggregate=["DishDiscountSumInt"],
+    )
     with pytest.raises(IikoError) as exc:
-        validate_fields(SPECS["items"], {"Department", "DishDiscountSumInt"})
-    assert "DishName" in str(exc.value)
+        validate_fields(spec, {"Department", "DishDiscountSumInt"})
+    assert "ПоляТакогоНет" in str(exc.value)
     # Пустой список колонок не мешает работать — сверка необязательна.
-    validate_fields(SPECS["items"], set())
+    validate_fields(spec, set())
+    # Реальные пресеты проходят сверку со списком колонок живого API.
+    for real in SPECS.values():
+        validate_fields(real, {"Department", "DishDiscountSumInt"})
 
 
 async def test_fetch_report_asks_previous_period_for_delta():
@@ -182,3 +200,37 @@ async def test_fetch_report_asks_previous_period_for_delta():
     assert periods[0] == ("2026-08-12", "2026-08-19")
     # Предыдущий период — ровно такой же длины, встык.
     assert periods[1] == ("2026-08-05", "2026-08-12")
+
+
+def test_quantity_never_invents_a_unit():
+    """iiko мешает штуки и килограммы в `DishAmountInt`: «Тилапия филе кг»
+    продаётся долями. Подпись «шт» была бы неправдой, а округление 0,3 → 0
+    превращало реальную продажу в ноль-аутсайдера."""
+    from app.services.iiko.reports import fmt_qty
+
+    assert fmt_qty(4632) == "4 632"
+    assert fmt_qty(0.3) == "0,3"
+    assert fmt_qty(1) == "1"
+    assert "шт" not in fmt_qty(0.3)
+
+
+def test_menu_report_excludes_modifiers():
+    """Модификаторы («Обычное молоко») продаются десятками тысяч штук при
+    выручке 0,1 млн против 35 млн у товаров — без фильтра молоко возглавляет
+    меню, а доля топ-5 считается от мусорного знаменателя."""
+    from app.services.iiko.reports import MENU_DISH_TYPES, SPECS
+
+    flt = SPECS["items"].extra_filters["DishType"]
+    assert flt["values"] == MENU_DISH_TYPES
+    assert "MODIFIER" not in flt["values"]
+
+
+def test_writeoff_excludes_cost_of_goods():
+    """`SESSION_WRITEOFF` — автосписание по факту продаж, то есть
+    себестоимость (21,6 млн за неделю против 1,8 млн у WRITEOFF). Смешав их,
+    отчёт о потерях показал бы себестоимость."""
+    from app.services.iiko.reports import SPECS, TX_WRITEOFF_TYPES
+
+    assert TX_WRITEOFF_TYPES == ["WRITEOFF"]
+    assert SPECS["writeoff"].extra_filters["TransactionType"]["values"] == ["WRITEOFF"]
+    assert SPECS["writeoff"].title == "Списания и потери"
