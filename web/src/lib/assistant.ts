@@ -202,6 +202,8 @@ export interface Report {
   top: ReportItem[]
   anti: ReportItem[]
   note: string | null
+  /** Скоуп неполный: часть точек не связана с iiko и в отчёт не вошла. */
+  warning?: string | null
   cached?: boolean
 }
 

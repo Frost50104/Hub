@@ -41,21 +41,28 @@ MAX_PERIOD_DAYS = 92
 
 async def _departments(
     db: AsyncSession, principal: Principal
-) -> tuple[list[str] | None, str | None]:
-    """(имена точек в iiko | None=вся сеть, подпись скоупа). 403 линейным."""
+) -> tuple[list[str] | None, str | None, list[str]]:
+    """(имена точек в iiko | None=вся сеть, подпись скоупа, точки БЕЗ привязки).
+
+    Третий элемент — не мелочь: если у руководителя часть точек не связана с
+    iiko, отчёт по остальным выглядит как полный, и недостача выручки читается
+    как падение продаж. Такие точки обязаны быть названы на экране.
+    """
     role = await resolve_content_role(db, principal)
     scope = await resolve_scope(db, principal)
     if lifecycle.can(role, "publisher") or scope.kind == "all":
-        return None, None
+        return None, None, []
     if scope.kind == "stores":
         rows = (
             await db.execute(
                 select(Store.name, Store.iiko_department).where(
-                    Store.id.in_(scope.store_ids or frozenset())
+                    Store.id.in_(scope.store_ids or frozenset()),
+                    Store.archived_at.is_(None),
                 )
             )
         ).all()
         names = [d for _, d in rows if d]
+        unmapped = [n for n, d in rows if not d]
         if not names:
             raise HTTPException(
                 status_code=409,
@@ -65,8 +72,13 @@ async def _departments(
                     "в карточке магазина"
                 ),
             )
-        label = ", ".join(sorted(n for n, _ in rows))
-        return names, (label if len(label) <= 80 else f"{len(names)} точек")
+        mapped_names = sorted(n for n, d in rows if d)
+        label = ", ".join(mapped_names)
+        return (
+            names,
+            (label if len(label) <= 80 else f"{len(names)} точек"),
+            sorted(unmapped),
+        )
     raise HTTPException(
         status_code=403, detail="Отчёты iiko доступны руководителям и публикаторам"
     )
@@ -116,10 +128,10 @@ async def _build(
     await enforce_rate_limit(
         bucket="ai:iiko", employee_id=str(principal.employee_id), limit=10, window_sec=60
     )
-    departments, label = await _departments(db, principal)
+    departments, label, unmapped = await _departments(db, principal)
     start, end = _period(date_from, date_to)
     try:
-        return await iiko_service.get_report(
+        payload = await iiko_service.get_report(
             tenant_id=principal.tenant_id,
             kind=kind,
             date_from=start,
@@ -133,6 +145,20 @@ async def _build(
         raise HTTPException(status_code=409, detail=str(e)) from None
     except IikoError as e:
         raise HTTPException(status_code=502, detail=str(e)) from None
+
+    if unmapped:
+        # Не в `note`: там выводы по цифрам, а это предупреждение о полноте
+        # данных, и смешивать их нельзя.
+        payload = {
+            **payload,
+            "warning": (
+                "Не связаны с iiko и в отчёт не вошли: "
+                + ", ".join(unmapped)
+                + ". Попросите администратора указать «Торговое предприятие» "
+                "в карточке магазина."
+            ),
+        }
+    return payload
 
 
 @router.get("/ai/reports/{kind}")

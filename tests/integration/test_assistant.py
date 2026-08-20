@@ -504,9 +504,10 @@ async def test_tu_scope_requires_iiko_mapping(db: AsyncSession, tenant_id: uuid.
 
     store.iiko_department = "Галерея, 1"
     await db.flush()
-    departments, label = await _departments(db, principal)
+    departments, label, missing = await _departments(db, principal)
     assert departments == ["Галерея, 1"]
     assert label == "Галерея"
+    assert missing == []
 
 
 async def test_admin_gets_whole_network(db: AsyncSession, tenant_id: uuid.UUID):
@@ -516,6 +517,46 @@ async def test_admin_gets_whole_network(db: AsyncSession, tenant_id: uuid.UUID):
         tenant_id, email="admin-rep@t.ru", role="admin", tenant_slug="arep3"
     )
     await _register(db, admin)
-    departments, label = await _departments(db, admin)
+    departments, label, missing = await _departments(db, admin)
     assert departments is None, "админу — вся сеть, фильтр не ставится"
     assert label is None
+    assert missing == []
+
+
+async def test_partial_iiko_mapping_is_announced(db: AsyncSession, tenant_id: uuid.UUID):
+    """У ТУ часть точек не связана с iiko — отчёт по остальным НЕ должен
+    выглядеть полным: недостача выручки читается как падение продаж."""
+    from app.api.reports import _departments
+    from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
+    from app.models.org import Store
+
+    principal = make_principal(
+        tenant_id, email="tu2@t.ru", role="member", tenant_slug="arep4"
+    )
+    await _register(db, principal)
+    profile = EmployeeProfile(
+        tenant_id=tenant_id,
+        employee_id=principal.employee_id,
+        email="tu2@t.ru",
+        full_name="Управляющий",
+        org_role="tu",
+        status="active",
+    )
+    db.add(profile)
+    await db.flush()
+    mapped = Store(tenant_id=tenant_id, name="Грибоедова 15", iiko_department="Грибоедова 15")
+    unmapped = Store(tenant_id=tenant_id, name="Новая точка")
+    db.add_all([mapped, unmapped])
+    await db.flush()
+    for store in (mapped, unmapped):
+        db.add(
+            TuStoreAssignment(
+                tenant_id=tenant_id, profile_id=profile.id, store_id=store.id
+            )
+        )
+    await db.flush()
+
+    departments, label, missing = await _departments(db, principal)
+    assert departments == ["Грибоедова 15"]
+    assert label == "Грибоедова 15", "подпись скоупа — только связанные точки"
+    assert missing == ["Новая точка"], "непривязанная точка обязана быть названа"
