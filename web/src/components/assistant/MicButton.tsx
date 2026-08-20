@@ -16,7 +16,8 @@ import { assistantApi } from '@/lib/assistant'
  * разные ситуации с разными действиями пользователя, и молчащая кнопка хуже
  * обеих.
  */
-type State = 'idle' | 'recording' | 'working'
+export type MicState = 'idle' | 'recording' | 'working'
+type State = MicState
 
 function pickMimeType(): string | undefined {
   // Chrome/Android отдают webm/opus, Safari — mp4/aac. Оба формата сервер
@@ -27,15 +28,20 @@ function pickMimeType(): string | undefined {
 
 export function MicButton({
   onText,
+  onStateChange,
   disabled,
 }: {
   onText: (text: string) => void
+  /** Композер показывает «Слушаю…» — на телефоне цвета кнопки мало. */
+  onStateChange?: (state: State) => void
   disabled?: boolean
 }) {
   const [state, setState] = useState<State>('idle')
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
+
+  useEffect(() => onStateChange?.(state), [state, onStateChange])
 
   // Микрофон нужно отпускать: иначе в Chrome остаётся красная точка записи,
   // а на телефоне — включённый датчик.

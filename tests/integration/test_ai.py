@@ -16,6 +16,7 @@ from app.models.audience import Audience, AudienceMember
 from app.services.llm.base import ChatMessage
 from app.services.rag_indexer import reconcile, reindex_document
 from app.services.search_indexer import upsert_document
+from tests.integration.conftest import make_principal
 from tests.integration.test_courses import _mk_member
 
 pytestmark = pytest.mark.integration
@@ -286,3 +287,59 @@ async def test_lexical_fallback_when_no_embeddings(
     # Контекст модели не содержит закрытый текст.
     system = provider.chat_calls[-1][0]
     assert "только управляющим" not in system.content
+
+
+# ─── Ассистент поверх retrieval Ф6 (волна 1) ────────────────────────────────
+
+
+async def test_assistant_knowledge_tool_keeps_audience_filter(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """ИНВАРИАНТ: ассистент физически не достаёт контент чужой аудитории.
+
+    Фильтр покрыт тестом на самом retrieval, но ассистент ходит туда своим
+    инструментом — и именно этот путь должен быть закреплён: подменить
+    вызов на «поиск по всему» легко и незаметно.
+    """
+    from app.services.assistant.context import ToolContext
+    from app.services.assistant.tools import KnowledgeArgs, t_search_knowledge
+
+    provider = FakeProvider()
+    member, profile = await _mk_member(db, tenant_id, email="assist-kb@t.ru")
+
+    # Документ ЗАКРЫТОЙ аудитории, в которую сотрудник не входит.
+    closed = Audience(tenant_id=tenant_id, object_hint="test:closed")
+    db.add(closed)
+    await db.flush()
+    await _index_doc(
+        db, tenant_id, provider,
+        title="Секретный регламент возврата",
+        body="Возврат оформляется через старшего смены",
+        audience_id=closed.id,
+    )
+    # И открытый — его видеть можно.
+    await _index_doc(
+        db, tenant_id, provider,
+        title="Открытый стандарт приветствия",
+        body="Здороваемся до слов гостя",
+    )
+    await db.flush()
+
+    ctx = ToolContext(db=db, principal=member, profile=profile)
+    found = await t_search_knowledge(ctx, KnowledgeArgs(query="возврат регламент приветствие"))
+    titles = [d["title"] for d in found["documents"]]
+    assert "Секретный регламент возврата" not in titles, "утечка чужой аудитории"
+    assert "Открытый стандарт приветствия" in titles
+
+
+async def test_assistant_without_profile_says_so(db: AsyncSession, tenant_id: uuid.UUID):
+    """У пользователя-только-трекера нет учебного профиля — база знаний
+    недоступна, но инструмент обязан ответить понятно, а не упасть."""
+    from app.services.assistant.context import ToolContext
+    from app.services.assistant.tools import KnowledgeArgs, t_search_knowledge
+
+    principal = make_principal(tenant_id, email="tracker-only@t.ru")
+    ctx = ToolContext(db=db, principal=principal, profile=None)
+    found = await t_search_knowledge(ctx, KnowledgeArgs(query="что угодно"))
+    assert found["documents"] == []
+    assert "профил" in found["error"]

@@ -1,7 +1,7 @@
 import { Send, Sparkles } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import { MicButton } from './MicButton'
+import { MicButton, type MicState } from './MicButton'
 import { AutoGrowTextarea } from '@/components/ui/AutoGrowTextarea'
 import { Button } from '@/components/ui/Button'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
@@ -36,6 +36,7 @@ export function Composer({
 }) {
   const isDesktop = useIsDesktop()
   const ref = useRef<HTMLTextAreaElement>(null)
+  const [mic, setMic] = useState<MicState>('idle')
 
   useEffect(() => {
     if (isDesktop) ref.current?.focus()
@@ -59,6 +60,28 @@ export function Composer({
           ))}
         </div>
       )}
+      {mic !== 'idle' && (
+        // Состояние записи — В ПОЛЕ, а не только цветом кнопки: на телефоне
+        // палец закрывает кнопку, и понять, идёт ли запись, больше нечем.
+        <div className="flex items-center gap-2.5 px-1">
+          {mic === 'recording' && (
+            <span className="flex h-3.5 items-end gap-[2px]" aria-hidden>
+              {[6, 13, 9, 14, 7, 11].map((h, i) => (
+                <span
+                  key={i}
+                  className="block w-[3px] rounded-sm bg-amber"
+                  style={{ height: `${h}px` }}
+                />
+              ))}
+            </span>
+          )}
+          <span className="text-[13px] leading-[1.45] text-text2">
+            {mic === 'recording'
+              ? 'Слушаю — отпустите, чтобы вставить текст и поправить перед отправкой'
+              : 'Расшифровываю…'}
+          </span>
+        </div>
+      )}
       <div className="flex items-end gap-2.5 rounded-2xl border border-glass-border bg-surface p-3 pl-4">
         {/* Обёртка держит ширину: сам AutoGrowTextarea — это grid-двойник,
             и flex-1 на textarea внутри него не сработал бы. */}
@@ -80,6 +103,7 @@ export function Composer({
         {voice && (
           <MicButton
             disabled={busy}
+            onStateChange={setMic}
             onText={(text) => onChange(value ? `${value} ${text}` : text)}
           />
         )}

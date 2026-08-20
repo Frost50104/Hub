@@ -34,13 +34,30 @@ const GROUPS = [
   },
 ]
 
+/** Группа появляется, только когда iiko подключён: предлагать спросить
+ *  выручку там, где спрашивать не у кого, — обещание, которое не сдержим. */
+const REPORTS_GROUP = {
+  title: 'iiko',
+  tag: 'Отчёты',
+  tone: 'green' as const,
+  items: [
+    'Выручка по точкам за неделю',
+    'Средний чек и динамика',
+    'Часы пик по чекам',
+    'Списания за прошлый месяц',
+  ],
+}
+
 export function EmptyState({
   canAct,
+  reports,
   onPick,
 }: {
   canAct: boolean
+  reports: boolean
   onPick: (text: string) => void
 }) {
+  const groups = reports ? [...GROUPS, REPORTS_GROUP] : GROUPS
   return (
     <div className="mx-auto w-full max-w-3xl">
       <h2 className="font-display text-[22px] font-bold leading-[1.25] text-text lg:text-[26px]">
@@ -53,7 +70,7 @@ export function EmptyState({
       </p>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2">
-        {GROUPS.map((group) => (
+        {groups.map((group) => (
           <div
             key={group.title}
             className="shrink-0 rounded-[14px] border border-glass-border bg-tint p-3.5"
@@ -66,6 +83,7 @@ export function EmptyState({
                 className={cn(
                   'whitespace-nowrap',
                   group.tone === 'blue' && 'bg-blue-deep text-bg',
+                  group.tone === 'green' && 'bg-green-deep text-bg',
                 )}
               >
                 {group.tag}

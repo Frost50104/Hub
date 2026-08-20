@@ -87,18 +87,36 @@ export function DeniedBlock({ data }: { data: TurnData }) {
 
 export function ErrorBlock({
   content,
+  data,
   onRetry,
+  onNarrow,
 }: {
   content: string
+  data?: TurnData | null
   onRetry: () => void
+  onNarrow: () => void
 }) {
+  const failure = data?.report_error
   return (
     <div className={BLOCK}>
       <div className="px-4 py-3.5">
         <p className="text-[15px] leading-[1.5] text-text2">{content}</p>
-        <Button size="sm" variant="secondary" className="mt-3" onClick={onRetry}>
-          Повторить
-        </Button>
+        {failure?.nothing_changed && (
+          // Главное, что нужно знать после сбоя: данные не тронуты.
+          <p className="mt-1.5 text-[13px] leading-[1.45] text-text2">
+            Ничего не изменено — можно повторить или сузить период.
+          </p>
+        )}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" onClick={onRetry}>
+            Повторить
+          </Button>
+          {failure?.can_narrow && (
+            <Button size="sm" variant="ghost" onClick={onNarrow}>
+              Сузить до недели
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   )

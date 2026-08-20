@@ -56,6 +56,7 @@ function Turn({
   conversationId,
   isLast,
   onRetry,
+  onNarrow,
   onExpandReport,
 }: {
   question: AssistantMessage
@@ -63,6 +64,7 @@ function Turn({
   conversationId: string
   isLast: boolean
   onRetry: (text: string) => void
+  onNarrow: (text: string) => void
   onExpandReport: (kind: ReportKind) => void
 }) {
   const kind = answer?.kind ?? 'answer'
@@ -99,7 +101,12 @@ function Turn({
       )}
       {kind === 'denied' && answer?.data && <DeniedBlock data={answer.data} />}
       {kind === 'error' && answer && (
-        <ErrorBlock content={answer.content} onRetry={() => onRetry(question.content)} />
+        <ErrorBlock
+          content={answer.content}
+          data={answer.data}
+          onRetry={() => onRetry(question.content)}
+          onNarrow={() => onNarrow(question.content)}
+        />
       )}
 
       {answer?.sources?.length ? (
@@ -330,6 +337,7 @@ export function AssistantPage() {
             {empty && (
               <EmptyState
                 canAct={status.data?.can_act ?? false}
+                reports={status.data?.reports ?? false}
                 onPick={(text) => submit(text)}
               />
             )}
@@ -345,6 +353,7 @@ export function AssistantPage() {
                 conversationId={conversationId!}
                 isLast={i === turns.length - 1 && !pending}
                 onRetry={(text) => submit(text)}
+                onNarrow={(text) => submit(`${text} за последнюю неделю`)}
                 onExpandReport={expandReport}
               />
             ))}

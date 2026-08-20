@@ -32,6 +32,7 @@ from app.models.ai import AiConversation, AiMessage, AiPlan
 from app.services.assistant import plans as plan_service
 from app.services.assistant.context import ToolContext
 from app.services.assistant.runner import Turn, run
+from app.services.iiko import service as iiko_service
 from app.services.llm import (
     ChatMessage,
     LLMError,
@@ -92,6 +93,9 @@ class StatusResponse(BaseModel):
     # Голосовой ввод настроен. Неактивный микрофон выглядит как сломанный,
     # поэтому кнопки просто нет, пока STT не подключён.
     voice: bool = False
+    # Отчёты iiko подключены. Без этого пустой экран предлагал бы спросить
+    # выручку там, где спрашивать не у кого.
+    reports: bool = False
 
 
 async def _hydrate(db: AsyncSession, data: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -125,12 +129,17 @@ async def status(_principal: Principal = Depends(require_auth())) -> StatusRespo
     try:
         provider = get_provider()
     except LLMNotConfigured:
-        return StatusResponse(configured=False, voice=get_settings().stt_enabled)
+        return StatusResponse(
+            configured=False,
+            voice=get_settings().stt_enabled,
+            reports=iiko_service.is_configured(),
+        )
     return StatusResponse(
         configured=True,
         provider=provider.name,
         can_act=getattr(provider, "supports_tools", False),
         voice=get_settings().stt_enabled,
+        reports=iiko_service.is_configured(),
     )
 
 

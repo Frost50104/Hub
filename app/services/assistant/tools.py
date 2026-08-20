@@ -425,7 +425,19 @@ async def t_iiko_report(ctx: ToolContext, a: IikoReportArgs) -> dict[str, Any]:
                 "отчёты iiko доступны офису, территориальным управляющим и "
                 "владельцам франчайзи"
             )
-        return {"error": str(e.detail)}
+        # Сбой сбору отчёта — не проза, а блок с действиями: «Повторить» и
+        # «Сузить до недели». Длинный период — самая частая причина, по
+        # которой iiko не отвечает, и предложить сузить его полезнее, чем
+        # пересказать ошибку.
+        return {
+            "error": str(e.detail),
+            "__report_error__": {
+                "text": str(e.detail),
+                "kind": a.kind,
+                "can_narrow": bool(a.date_from and a.date_to),
+                "nothing_changed": True,
+            },
+        }
     except ValueError:
         return {"error": "Не понял период — нужен вид 2026-08-18"}
     # Модели отдаём ЦИФРЫ, а блок с графиком журнал соберёт сам из того же

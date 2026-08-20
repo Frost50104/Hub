@@ -553,3 +553,82 @@ async def test_tu_and_franchisee_get_reports(db: AsyncSession, tenant_id: uuid.U
         )
         await db.flush()
         await _require_report_access(db, principal)  # не бросает
+
+
+async def test_provider_without_tools_degrades_to_answers(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """Смена AI-провайдера не должна ронять ассистента.
+
+    Yandex и GigaChat не умеют вызывать инструменты. Ассистент обязан
+    продолжить отвечать по базе знаний (поведение Ф6), а не отдать 502 —
+    иначе одна строка в .env выключает фичу целиком и молча.
+    """
+    from app.api import assistant as api
+    from app.services.llm import ChatMessage, LLMToolsUnsupported, ToolSpec
+
+    class NoToolsProvider:
+        name = "fake-no-tools"
+        embed_model = "fake"
+        supports_tools = False
+        seen: list[str] = []
+
+        async def chat_with_tools(
+            self, messages: list[ChatMessage], tools: list[ToolSpec]
+        ):
+            raise LLMToolsUnsupported("не умею инструменты")
+
+        async def chat(self, messages: list[ChatMessage]) -> str:
+            NoToolsProvider.seen.append(messages[-1].content)
+            return "Отвечаю по базе знаний [1]."
+
+    owner, _project = await _seed(db, tenant_id, "anot")
+    monkeypatch.setattr(api, "get_provider", lambda: NoToolsProvider())
+
+    async def no_rate_limit(**kwargs):
+        return None
+
+    monkeypatch.setattr(api, "enforce_rate_limit", no_rate_limit)
+
+    turn = await api.ask(
+        api.AskBody(question="Как приветствовать гостя в час пик?"), owner, db
+    )
+    assert turn.kind == "answer"
+    assert "базе знаний" in turn.content
+    assert NoToolsProvider.seen, "фолбэк не дошёл до провайдера"
+
+
+async def test_iiko_failure_becomes_actionable_error(db: AsyncSession, tenant_id: uuid.UUID):
+    """Сбой сбора отчёта — блок с действиями, а не строчка прозы.
+
+    Длинный период — самая частая причина, по которой iiko не отвечает, и
+    предложить сузить его полезнее, чем пересказать ошибку.
+    """
+    from fastapi import HTTPException
+
+    from app.services.assistant.tools import IikoReportArgs, t_iiko_report
+
+    admin = make_principal(
+        tenant_id, email="iiko-fail@t.ru", role="admin", tenant_slug="aerr"
+    )
+    await _register(db, admin)
+
+    async def boom(*a, **kw):
+        raise HTTPException(status_code=502, detail="iiko не ответил за 30 секунд")
+
+    import app.api.reports as reports_api
+
+    original = reports_api._build
+    reports_api._build = boom
+    try:
+        result = await t_iiko_report(
+            _ctx(db, admin),
+            IikoReportArgs(kind="revenue", date_from="2026-07-01", date_to="2026-07-31"),
+        )
+    finally:
+        reports_api._build = original
+
+    block = result["__report_error__"]
+    assert block["can_narrow"] is True, "период задан — сузить есть что"
+    assert block["nothing_changed"] is True
+    assert "30 секунд" in block["text"]

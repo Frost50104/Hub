@@ -60,6 +60,13 @@ export interface TurnData {
   who_can?: { name: string; role: string }[]
   /** Снимок отчёта iiko на момент запроса. */
   report?: Report
+  /** Сбор отчёта не удался — блок с «Повторить» и «Сузить до недели». */
+  report_error?: {
+    text: string
+    kind: ReportKind
+    can_narrow: boolean
+    nothing_changed: boolean
+  }
 }
 
 export interface AssistantMessage {
@@ -94,6 +101,8 @@ export interface AssistantStatus {
   can_act: boolean
   /** Голосовой ввод настроен на сервере. */
   voice: boolean
+  /** Отчёты iiko подключены. */
+  reports: boolean
 }
 
 export interface PlanPatchBody {
