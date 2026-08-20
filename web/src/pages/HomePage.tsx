@@ -34,15 +34,18 @@ function todayLabel(): string {
     .replace('.', '')
 }
 
+// Те же четыре окна, что на «Моих задачах»: панель — её срез, а не другой фильтр.
 const TASK_TABS: { key: DueWindow; label: string }[] = [
   { key: 'upcoming', label: 'Предстоит' },
   { key: 'overdue', label: 'Просрочено' },
   { key: 'today', label: 'Сегодня' },
+  { key: 'all', label: 'Все' },
 ]
 
 function emptyText(tab: DueWindow): string {
   if (tab === 'overdue') return 'Нет просроченных — отлично!'
   if (tab === 'today') return 'На сегодня задач нет.'
+  if (tab === 'all') return 'Задач на вас пока нет.'
   return 'Свободно — задач в ближайшее время нет.'
 }
 

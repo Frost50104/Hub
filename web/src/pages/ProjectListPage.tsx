@@ -2,29 +2,24 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import {
   DndContext,
   PointerSensor,
-  TouchSensor,
   useDraggable,
   useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
-import {
-  ChevronDown,
-  ChevronRight,
-  Folder,
-  FolderPlus,
-  MoreHorizontal,
-  Plus,
-} from 'lucide-react'
-import { useMemo, useState, type CSSProperties } from 'react'
+import { Folder, FolderPlus, MoreHorizontal, Plus, Star } from 'lucide-react'
+import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { useForm } from 'react-hook-form'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { z } from 'zod'
 
+import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { CreateFolderDialog } from '@/components/project/CreateFolderDialog'
+import { ProjectKeyChip } from '@/components/project/ProjectKeyChip'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import {
@@ -42,9 +37,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
+import { dropZoneClass } from '@/components/ui/DropZone'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorBanner } from '@/components/ui/ErrorBanner'
+import { GroupHeader } from '@/components/ui/GroupHeader'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
-import { SkeletonRows } from '@/components/ui/Skeleton'
+import { ListRow } from '@/components/ui/ListRow'
+import { SheetPicker } from '@/components/ui/SheetPicker'
+import { useIsDesktop } from '@/hooks/useMediaQuery'
 import {
   useCreateProject,
   useDeleteFolder,
@@ -52,18 +53,16 @@ import {
   useProjects,
   useRenameFolder,
   useReorderFolders,
+  useSetFavorite,
   useSetProjectFolder,
 } from '@/hooks/useProjects'
-import { ProjectKeyChip, projectMeta } from '@/components/project/ProjectKeyChip'
 import { cn } from '@/lib/cn'
+import { dataAgeLabel } from '@/lib/dates'
 import { groupProjectsByFolder, UNFILED, type ProjectGroup } from '@/lib/groupProjects'
-import {
-  folderDropId,
-  resolveFolderMove,
-  type ProjectDragData,
-} from '@/lib/projectDnd'
+import { folderDropId, resolveFolderMove, type ProjectDragData } from '@/lib/projectDnd'
 import { type ProjectFolder } from '@/lib/projectFolders'
 import { PROJECT_ROLE_LABEL, type Project } from '@/lib/projects'
+import { NBSP, plural } from '@/lib/typography'
 import { useFolderCollapse } from '@/stores/projectFolders'
 
 const createSchema = z.object({
@@ -73,164 +72,158 @@ const createSchema = z.object({
 
 type CreateFormValues = z.infer<typeof createSchema>
 
-function ProjectCard({
+/** «312 задач · 48 закрыто · описание» — вторая строка проекта. */
+function projectContext(project: Project): string {
+  const parts: string[] = []
+  if (project.task_count != null) {
+    if (project.task_count === 0) parts.push('Пока нет задач')
+    else {
+      parts.push(plural(project.task_count, 'задача', 'задачи', 'задач'))
+      if ((project.done_count ?? 0) > 0) parts.push(`${project.done_count}${NBSP}закрыто`)
+    }
+  }
+  if (project.description) parts.push(project.description)
+  return parts.join(' · ')
+}
+
+// ─── Строка проекта ──────────────────────────────────────────────────────────
+
+function ProjectRow({
   project,
   folders,
+  dndEnabled,
+  isDesktop,
   onMove,
 }: {
   project: Project
   folders: ProjectFolder[]
+  dndEnabled: boolean
+  isDesktop: boolean
   onMove: (folderId: string | null) => void
 }) {
+  const navigate = useNavigate()
+  const setFavorite = useSetFavorite(project.id)
   const [moveOpen, setMoveOpen] = useState(false)
   // Перетаскивать может только тот, кто может и переложить через меню.
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: project.id,
-    disabled: !project.can_manage,
-    data: { projectId: project.id, folderId: project.folder_id },
+    disabled: !dndEnabled || !project.can_manage,
+    data: { projectId: project.id, folderId: project.folder_id } satisfies ProjectDragData,
   })
-  // transform ОБЯЗАТЕЛЕН (паттерн CalendarTaskBar): без него карточка не
-  // едет за курсором, а её rect не смещается — collision detection не видит
-  // папку под указателем и дроп молча не срабатывает.
+  // transform ОБЯЗАТЕЛЕН (паттерн CalendarTaskBar): без него строка не едет
+  // за курсором, а её rect не смещается — collision detection не видит папку
+  // под указателем и дроп молча не срабатывает.
   const style: CSSProperties = {
     transform: CSS.Translate.toString(transform),
     zIndex: isDragging ? 20 : undefined,
+    position: isDragging ? 'relative' : undefined,
   }
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={cn('group relative', isDragging && 'opacity-60')}
+      {...(dndEnabled ? attributes : {})}
+      {...(dndEnabled ? listeners : {})}
+      className={cn(isDragging && 'opacity-60')}
     >
-      <Link
-        to={`/projects/${project.id}`}
-        // У <a href> есть нативный HTML5-drag, конфликтующий с dnd-kit.
-        draggable={false}
-        {...attributes}
-        {...listeners}
-        className="glass flex flex-col gap-2 p-5 transition-colors hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-amber"
-      >
-        <div className="flex items-center gap-3">
-          <ProjectKeyChip project={project} size="lg" />
-          <div className="min-w-0 flex-1">
-            <h3 className="truncate font-display text-base font-semibold text-text">
-              {project.name}
-            </h3>
-            <p className="truncate text-[13px] text-text2">
-              {projectMeta(project) ?? project.key}
-            </p>
-          </div>
-          {project.archived_at && <Badge variant="secondary">архив</Badge>}
-          {project.my_role && project.my_role !== 'viewer' && (
-            <Badge variant="secondary">{PROJECT_ROLE_LABEL[project.my_role]}</Badge>
-          )}
-        </div>
-        {project.description && (
-          <p className="line-clamp-2 text-sm text-text2">{project.description}</p>
-        )}
-      </Link>
+      <ListRow
+        onClick={() => navigate(`/projects/${project.id}`)}
+        ariaLabel={project.name}
+        lead={<ProjectKeyChip project={project} size="md" />}
+        className={cn('last:border-b-0', isDesktop ? 'pl-4 pr-3.5' : 'pl-4 pr-1.5')}
+        title={
+          <>
+            <span className="min-w-0 truncate">{project.name}</span>
+            {/* Звезда прямо в строке: избранное переключается там, где список,
+                а не только в шапке проекта. Иконка-кнопка гасит клик строки. */}
+            <button
+              type="button"
+              aria-label={project.is_favorite ? 'Убрать из избранного' : 'В избранное'}
+              aria-pressed={project.is_favorite}
+              onClick={(e) => {
+                e.stopPropagation()
+                setFavorite.mutate(!project.is_favorite)
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+              className={cn(
+                '-m-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+                project.is_favorite ? 'text-amber' : 'text-text2 opacity-0 hover:text-text group-hover:opacity-100 focus-visible:opacity-100',
+                !isDesktop && 'opacity-100',
+              )}
+            >
+              <Star className={cn('h-[15px] w-[15px]', project.is_favorite && 'fill-current')} />
+            </button>
+            {project.archived_at && <Badge variant="secondary">архив</Badge>}
+            {project.my_role && project.my_role !== 'viewer' && (
+              <Badge variant="secondary" className="hidden sm:inline-flex">
+                {PROJECT_ROLE_LABEL[project.my_role]}
+              </Badge>
+            )}
+          </>
+        }
+        context={<span className="min-w-0 truncate">{projectContext(project)}</span>}
+        trailing={
+          project.can_manage ? (
+            <button
+              type="button"
+              aria-label={`Действия с проектом «${project.name}»`}
+              onClick={(e) => {
+                e.stopPropagation()
+                setMoveOpen(true)
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+              className={cn(
+                'flex shrink-0 items-center justify-center rounded-lg text-text2 transition-colors hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+                isDesktop ? 'h-8 w-8' : 'h-11 w-11',
+              )}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+          ) : null
+        }
+      />
 
-      {project.can_manage && (
-        <div className="absolute right-2 top-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                // Иначе клик всплывёт в <Link> и уведёт со страницы.
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-                className="rounded p-1 text-text2 transition-opacity hover:bg-glass hover:text-text focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 md:opacity-0 md:group-hover:opacity-100"
-                aria-label="Действия с проектом"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => setMoveOpen(true)}>
-                <Folder className="mr-2 h-4 w-4" />
-                Переместить в папку…
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      )}
-
-      <MoveToFolderDialog
+      {/* Меню-путь перемещения — ОСНОВНОЙ, drag-n-drop поверх него дополнение:
+          на мобильном TouchSensor конкурирует со скроллом, а с клавиатуры DnD
+          в проекте недоступен вовсе. */}
+      <SheetPicker
         open={moveOpen}
         onOpenChange={setMoveOpen}
-        folders={folders}
-        current={project.folder_id}
-        onPick={(folderId) => {
-          onMove(folderId)
-          setMoveOpen(false)
-        }}
+        title={`Переместить «${project.name}»`}
+        description="Папки общие на тенант, один уровень. Проекты можно и перетаскивать мышью."
+        items={[{ id: UNFILED, name: 'Без папки' }, ...folders].map((f) => ({
+          id: f.id,
+          label: f.name,
+          icon: <Folder className="h-[18px] w-[18px]" />,
+          selected: (f.id === UNFILED ? null : f.id) === project.folder_id,
+        }))}
+        onSelect={(id) => onMove(id === UNFILED ? null : id)}
       />
     </div>
   )
 }
 
-/**
- * Меню-путь перемещения — ОСНОВНОЙ, drag-n-drop поверх него дополнение:
- * на мобильном TouchSensor конкурирует со скроллом, а KeyboardSensor в
- * проекте не используется нигде, то есть DnD недоступен с клавиатуры.
- */
-function MoveToFolderDialog({
-  open,
-  onOpenChange,
-  folders,
-  current,
-  onPick,
-}: {
-  open: boolean
-  onOpenChange: (v: boolean) => void
-  folders: ProjectFolder[]
-  current: string | null
-  onPick: (folderId: string | null) => void
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Переместить в папку</DialogTitle>
-          <DialogDescription>
-            Папки общие для компании — раскладку увидят все участники.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-1">
-          {[{ id: null, name: 'Без папки' }, ...folders].map((f) => (
-            <button
-              key={f.id ?? UNFILED}
-              type="button"
-              onClick={() => onPick(f.id)}
-              className={cn(
-                'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-glass',
-                (f.id ?? null) === current ? 'text-amber' : 'text-text2',
-              )}
-            >
-              <Folder className="h-4 w-4 shrink-0" />
-              <span className="flex-1 truncate">{f.name}</span>
-              {(f.id ?? null) === current && <span className="text-xs">текущая</span>}
-            </button>
-          ))}
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
+// ─── Группа-папка ────────────────────────────────────────────────────────────
 
 function FolderSection({
   group,
   folders,
   canManage,
+  drag,
+  dndEnabled,
+  isDesktop,
   onMoveProject,
 }: {
   group: ProjectGroup
   folders: ProjectFolder[]
   canManage: boolean
+  /** null — перетаскивания сейчас нет. */
+  drag: ProjectDragData | null
+  dndEnabled: boolean
+  isDesktop: boolean
   onMoveProject: (projectId: string, folderId: string | null) => void
 }) {
   const folder = group.folder
@@ -247,9 +240,11 @@ function FolderSection({
   const [draft, setDraft] = useState(folder?.name ?? '')
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  // Тенант без папок видит ровно сегодняшний плоский список — без заголовков.
+  // Тенант без папок видит плоский список — без заголовков.
   const headless = folder === null && folders.length === 0
   if (headless && group.projects.length === 0) return null
+  // Подсветку гасим над собственной папкой проекта — переноса там не будет.
+  const isTarget = isOver && drag !== null && drag.folderId !== (folder?.id ?? null)
 
   const move = (dir: -1 | 1) => {
     if (!folder) return
@@ -270,16 +265,91 @@ function FolderSection({
     }
   }
 
-  return (
-    <section ref={setNodeRef} className="space-y-3">
-      {!headless && (
-        <div
+  const rows =
+    group.projects.length > 0 ? (
+      <div
+        className={cn(
+          'flex flex-col',
+          isDesktop && 'overflow-hidden rounded-xl border border-glass-border bg-tint',
+        )}
+      >
+        {group.projects.map((p) => (
+          <ProjectRow
+            key={p.id}
+            project={p}
+            folders={folders}
+            dndEnabled={dndEnabled}
+            isDesktop={isDesktop}
+            onMove={(folderId) => onMoveProject(p.id, folderId)}
+          />
+        ))}
+      </div>
+    ) : (
+      !headless && (
+        <p
           className={cn(
-            'flex items-center gap-2 rounded-md px-1 py-1 transition-colors',
-            isOver && 'bg-amber/5 ring-1 ring-amber/40',
+            'px-4 py-5 text-center text-[14px] text-text2',
+            isDesktop && 'rounded-xl border border-glass-border bg-tint',
           )}
         >
-          {renaming && folder ? (
+          {isDesktop
+            ? 'Пусто — перетащите сюда проект или переложите через меню строки.'
+            : 'Пусто — переложите проект через меню строки.'}
+        </p>
+      )
+    )
+
+  const folderMenu: ReactNode =
+    // «Без папки» — не папка: её нельзя переименовать, передвинуть или удалить,
+    // поэтому меню только у настоящих папок и только при can_manage.
+    folder && canManage && !renaming ? (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              'flex items-center justify-center rounded-lg text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+              isDesktop ? 'h-8 w-8' : 'h-11 w-11',
+            )}
+            aria-label={`Действия с папкой «${folder.name}»`}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onSelect={() => {
+              setDraft(folder.name)
+              // Radix возвращает фокус на триггер после закрытия —
+              // без отложенного монтирования autoFocus не сработает.
+              setTimeout(() => setRenaming(true), 0)
+            }}
+          >
+            Переименовать
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => move(-1)}>Выше</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => move(1)}>Ниже</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
+            Удалить папку
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    ) : null
+
+  return (
+    // Зона приёма — вся группа; пунктир amber/50 + фон 5%, как у колонки
+    // канбана: одна модель дроп-зоны на весь трекер.
+    <section
+      ref={setNodeRef}
+      className={cn(
+        'flex flex-col',
+        isDesktop ? cn('gap-1.5 rounded-xl p-0.5', dropZoneClass(isTarget)) : dropZoneClass(isTarget, 'rounded-none border-x-0'),
+      )}
+    >
+      {!headless &&
+        (renaming && folder ? (
+          <div className="px-1.5 py-1">
             <input
               autoFocus
               value={draft}
@@ -289,82 +359,22 @@ function FolderSection({
                 if (e.key === 'Enter') submitRename()
                 if (e.key === 'Escape') setRenaming(false)
               }}
-              className="rounded border border-glass-border bg-glass px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+              className="h-8 rounded-md border border-glass-border bg-glass px-2 text-[14px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
             />
-          ) : (
-            <button
-              type="button"
-              onClick={() => folder && toggle(folder.id)}
-              disabled={!folder}
-              className="flex flex-1 items-center gap-1.5 text-left text-sm font-semibold text-text2 disabled:cursor-default"
-            >
-              {folder &&
-                (collapsed ? (
-                  <ChevronRight className="h-4 w-4 shrink-0 text-text2" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 shrink-0 text-text2" />
-                ))}
-              <Folder className="h-4 w-4 shrink-0 text-text2" />
-              <span className="truncate">{folder?.name ?? 'Без папки'}</span>
-              <span className="text-xs font-normal text-text2">
-                {group.projects.length}
-              </span>
-            </button>
-          )}
-
-          {folder && canManage && !renaming && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="rounded p-1 text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
-                  aria-label={`Действия с папкой ${folder.name}`}
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onSelect={() => {
-                    setDraft(folder.name)
-                    // Radix возвращает фокус на триггер после закрытия —
-                    // без отложенного монтирования autoFocus не сработает.
-                    setTimeout(() => setRenaming(true), 0)
-                  }}
-                >
-                  Переименовать
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => move(-1)}>Выше</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => move(1)}>Ниже</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
-                  Удалить папку
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-      )}
-
-      {!collapsed &&
-        (group.projects.length > 0 ? (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {group.projects.map((p) => (
-              <ProjectCard
-                key={p.id}
-                project={p}
-                folders={folders}
-                onMove={(folderId) => onMoveProject(p.id, folderId)}
-              />
-            ))}
           </div>
         ) : (
-          !headless && (
-            <p className="rounded-lg border border-dashed border-glass-border px-4 py-6 text-center text-sm text-text2">
-              Пусто — перетащите сюда проект
-            </p>
-          )
+          <GroupHeader
+            variant={isDesktop ? 'desktop' : 'mobile'}
+            title={folder?.name ?? 'Без папки'}
+            count={group.projects.length}
+            collapsed={collapsed}
+            onToggle={folder ? () => toggle(folder.id) : undefined}
+            dropActive={isTarget}
+            actions={folderMenu}
+          />
         ))}
+
+      {!collapsed && rows}
 
       {folder && (
         <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
@@ -395,6 +405,8 @@ function FolderSection({
     </section>
   )
 }
+
+// ─── Создание проекта ────────────────────────────────────────────────────────
 
 function CreateProjectDialog({
   open,
@@ -480,27 +492,61 @@ function CreateProjectDialog({
   )
 }
 
+/** Скелетон: 5 строк 64px, ширины чередуются, без пульсации. */
+const SKELETON_WIDTHS = [88, 64, 76, 52, 84]
+
+function ProjectsSkeleton({ isDesktop }: { isDesktop: boolean }) {
+  return (
+    <div
+      aria-hidden
+      className={cn(isDesktop && 'overflow-hidden rounded-xl border border-glass-border bg-tint')}
+    >
+      {SKELETON_WIDTHS.map((w, i) => (
+        <div key={i} className="flex h-16 items-center gap-3 border-b border-hair px-4 last:border-b-0">
+          <span className="h-9 w-9 shrink-0 rounded-[9px] bg-surface" />
+          <span className="flex min-w-0 flex-1 flex-col gap-[7px]">
+            <span className="h-3.5 rounded-[5px] bg-surface" style={{ width: `${w}%` }} />
+            <span className="h-[11px] w-[140px] rounded bg-surface" />
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─── Страница ────────────────────────────────────────────────────────────────
+
+/**
+ * `/projects` — строки 64px по папкам (не плитки): то же решение, что в
+ * списке задач — вертикальное сканирование по одной колонке вместо чтения
+ * плитки за плиткой. Перетаскивание — только на десктопе (на телефоне
+ * TouchSensor конкурирует со скроллом, путь — меню строки).
+ */
 export function ProjectListPage() {
+  const isDesktop = useIsDesktop()
   const [createOpen, setCreateOpen] = useState(false)
   const [createFolderOpen, setCreateFolderOpen] = useState(false)
-  const { data, isLoading, error } = useProjects()
+  const projects = useProjects()
   const foldersQuery = useProjectFolders()
   const setFolder = useSetProjectFolder()
+  const [drag, setDrag] = useState<ProjectDragData | null>(null)
 
+  const data = projects.data
   const folders = useMemo(() => foldersQuery.data?.folders ?? [], [foldersQuery.data])
   const groups = useMemo(
     () => groupProjectsByFolder(data ?? [], folders),
     [data, folders],
   )
+  const canManageFolders = foldersQuery.data?.can_manage ?? false
+  const dndEnabled = isDesktop && folders.length > 0
 
-  // distance:5 — благодаря ему обычный клик по карточке по-прежнему
-  // открывает проект, а не начинает перетаскивание.
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
-  )
+  // distance:5 — обычный клик по строке по-прежнему открывает проект.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
+  const onDragStart = (e: DragStartEvent) =>
+    setDrag((e.active.data.current as ProjectDragData | undefined) ?? null)
   const onDragEnd = (e: DragEndEvent) => {
+    setDrag(null)
     const move = resolveFolderMove(
       e.active.data.current as ProjectDragData | undefined,
       e.over?.id,
@@ -508,85 +554,102 @@ export function ProjectListPage() {
     if (move) setFolder.mutate(move)
   }
 
-  return (
-    <div className="mx-auto max-w-5xl space-y-6 p-6">
-      <div className="flex items-center justify-between gap-4">
-        {/* min-w-0 + truncate: сжиматься должен заголовок, а не кнопки —
-            иначе на узком экране текст внутри кнопок переносится при
-            фиксированной высоте h-9 и вылезает за их границы. */}
-        <div className="min-w-0">
-          <h1 className="font-display text-2xl">Проекты</h1>
-          <p className="truncate text-sm text-text2">
-            Командные пространства с задачами, секциями и участниками.
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {foldersQuery.data?.can_manage && (
-            <>
-              {/* До sm — иконка: две текстовые кнопки в 390px не помещаются. */}
-              <Button
-                variant="secondary"
-                size="icon"
-                className="sm:hidden"
-                onClick={() => setCreateFolderOpen(true)}
-                aria-label="Новая папка"
-              >
-                <FolderPlus className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="secondary"
-                className="hidden whitespace-nowrap sm:inline-flex"
-                onClick={() => setCreateFolderOpen(true)}
-              >
-                <FolderPlus className="h-4 w-4" />
-                Новая папка
-              </Button>
-            </>
-          )}
-          <Button
-            className="whitespace-nowrap"
-            onClick={() => setCreateOpen(true)}
-          >
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">Новый проект</span>
-            <span className="sm:hidden">Проект</span>
-          </Button>
-        </div>
-      </div>
+  const countLine =
+    data && data.length > 0
+      ? [
+          plural(data.length, 'проект', 'проекта', 'проектов'),
+          folders.length > 0 ? plural(folders.length, 'папка', 'папки', 'папок') : null,
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      : null
 
+  const createButtons = isDesktop ? (
+    <div className="flex shrink-0 items-center gap-2">
+      {canManageFolders && (
+        <Button variant="secondary" size="sm" onClick={() => setCreateFolderOpen(true)}>
+          <FolderPlus className="h-[15px] w-[15px]" />
+          Новая папка
+        </Button>
+      )}
+      <Button size="sm" onClick={() => setCreateOpen(true)}>
+        <Plus className="h-[15px] w-[15px]" strokeWidth={2.4} />
+        Новый проект
+      </Button>
+    </div>
+  ) : (
+    // На 390px две текстовые кнопки не помещаются — иконки 44px.
+    <div className="flex shrink-0 items-center gap-1">
+      {canManageFolders && (
+        <button
+          type="button"
+          onClick={() => setCreateFolderOpen(true)}
+          aria-label="Новая папка"
+          className="-m-1 flex h-11 w-11 items-center justify-center rounded-lg text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+        >
+          <FolderPlus className="h-[21px] w-[21px]" strokeWidth={1.8} />
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => setCreateOpen(true)}
+        aria-label="Новый проект"
+        className="-m-1 flex h-11 w-11 items-center justify-center rounded-lg text-text hover:bg-glass focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+      >
+        <Plus className="h-[22px] w-[22px]" strokeWidth={2.2} />
+      </button>
+    </div>
+  )
+
+  const body = (
+    <>
+      {/* Ошибка папок и ошибка проектов независимы: если папки не загрузились,
+          список остаётся плоским, а не пустым. */}
       {foldersQuery.isError && (
-        <p className="text-sm text-red">
-          Не удалось загрузить папки — раскладка по папкам временно недоступна.{' '}
-          <button
-            type="button"
-            onClick={() => void foldersQuery.refetch()}
-            className="underline hover:text-red/80"
-          >
-            Повторить
-          </button>
-        </p>
+        <ErrorBanner
+          title="Не удалось загрузить папки"
+          text="Раскладка по папкам временно недоступна — проекты ниже показаны одним списком."
+          actionLabel="Повторить"
+          onAction={() => void foldersQuery.refetch()}
+        />
       )}
 
-      {isLoading && <SkeletonRows rows={5} rowClassName="h-14" />}
-      {error && (
-        <p className="text-red">
-          Не удалось загрузить проекты — {(error as Error).message}
-        </p>
+      {projects.isLoading && <ProjectsSkeleton isDesktop={isDesktop} />}
+
+      {projects.isError && (
+        <EmptyState
+          tone="error"
+          layout="card"
+          title="Не удалось загрузить проекты"
+          text={(projects.error as Error).message || 'Сервер ответил ошибкой.'}
+          meta={dataAgeLabel(projects.dataUpdatedAt)}
+          cta="Повторить"
+          onCta={() => void projects.refetch()}
+        />
       )}
+
       {data && data.length === 0 && (
-        <div className="glass flex flex-col items-center gap-3 p-12 text-center">
-          <p className="text-text2">У вас пока нет проектов в Hub.</p>
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" />
-            Создать первый проект
-          </Button>
-        </div>
+        <EmptyState
+          layout="card"
+          icon={<Folder className="h-[26px] w-[26px]" strokeWidth={1.6} />}
+          title="У вас пока нет проектов в Hub"
+          text="Проект — это задачи, секции и участники. Папки появятся, когда проектов станет много."
+          cta="Создать первый проект"
+          onCta={() => setCreateOpen(true)}
+        />
       )}
+
       {data && data.length > 0 && (
-        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+        <DndContext
+          sensors={sensors}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onDragCancel={() => setDrag(null)}
+        >
           <div
             className={cn(
-              'space-y-6',
+              'flex flex-col',
+              isDesktop ? 'gap-[18px]' : 'gap-0',
               setFolder.isPending && 'pointer-events-none opacity-60',
             )}
           >
@@ -595,7 +658,10 @@ export function ProjectListPage() {
                 key={group.folder?.id ?? UNFILED}
                 group={group}
                 folders={folders}
-                canManage={foldersQuery.data?.can_manage ?? false}
+                canManage={canManageFolders}
+                drag={drag}
+                dndEnabled={dndEnabled}
+                isDesktop={isDesktop}
                 onMoveProject={(projectId, folderId) =>
                   setFolder.mutate({ projectId, folderId })
                 }
@@ -604,9 +670,37 @@ export function ProjectListPage() {
           </div>
         </DndContext>
       )}
+    </>
+  )
+
+  return (
+    <>
+      {isDesktop ? (
+        <div className="mx-auto flex max-w-[960px] flex-col gap-[18px] px-6 pb-10 pt-7">
+          <header className="flex flex-wrap items-end justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="font-display text-[24px] font-bold leading-[1.2] text-text">
+                Проекты
+              </h1>
+              <p className="mt-[5px] text-[15px] text-text2">
+                Командные пространства с задачами, секциями и участниками.
+              </p>
+            </div>
+            {createButtons}
+          </header>
+          {countLine && <p className="-mt-2 text-[13px] text-text2">{countLine}</p>}
+          {body}
+        </div>
+      ) : (
+        <div className="flex flex-col pb-6">
+          <MobilePageHeader title="Проекты" trailing={createButtons} className="pb-2" />
+          {countLine && <p className="px-4 pb-2 text-[14px] text-text2">{countLine}</p>}
+          <div className="flex flex-col gap-4 px-0">{body}</div>
+        </div>
+      )}
 
       <CreateProjectDialog open={createOpen} onOpenChange={setCreateOpen} />
       <CreateFolderDialog open={createFolderOpen} onOpenChange={setCreateFolderOpen} />
-    </div>
+    </>
   )
 }

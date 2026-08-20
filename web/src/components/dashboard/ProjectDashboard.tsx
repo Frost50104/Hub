@@ -1,152 +1,124 @@
-import { AlertCircle, Loader2 } from 'lucide-react'
-import { useMemo } from 'react'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { BarChart3, Loader2 } from 'lucide-react'
+import { type ReactNode } from 'react'
 
 import { Avatar } from '@/components/ui/Avatar'
+import { Donut, type DonutSegment } from '@/components/ui/Donut'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorBanner } from '@/components/ui/ErrorBanner'
+import { MeterRow } from '@/components/ui/MeterRow'
+import { MiniBarChart } from '@/components/ui/MiniBarChart'
+import { StatTile } from '@/components/ui/StatTile'
 import { useProjectStats } from '@/hooks/useProjectStats'
+import { cn } from '@/lib/cn'
 import { type CustomFieldStat, type ProjectStats } from '@/lib/stats'
-import { useTheme } from '@/lib/theme'
+import { STATUS_LABEL, type TaskPriority, type TaskStatus } from '@/lib/tasks'
+import { PRIORITY_COLOR, STATUS_COLOR } from '@/lib/tone'
+import { plural } from '@/lib/typography'
 
 interface ProjectDashboardProps {
   projectId: string
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  todo: 'К выполнению',
-  in_progress: 'В работе',
-  in_review: 'На проверке',
-  done: 'Готово',
-}
-
-const PRIORITY_LABEL: Record<string, string> = {
-  low: 'низкий',
-  medium: 'средний',
-  high: 'высокий',
-  urgent: 'срочно',
-}
-
-/** `rgb(...)` из канального CSS-токена (`--amber: 255 178 0`), опц. с альфой. */
-function cssColor(name: string, alpha?: number): string {
-  const raw = getComputedStyle(document.documentElement)
-    .getPropertyValue(name)
-    .trim()
-  if (!raw) return alpha !== undefined ? `rgba(128,128,128,${alpha})` : '#888888'
-  return alpha !== undefined ? `rgb(${raw} / ${alpha})` : `rgb(${raw})`
-}
-
-interface ChartPalette {
-  status: Record<string, string>
-  priority: Record<string, string>
-  select: string[]
-  fallback: string
-  axis: string
-  grid: string
-  bar: string
-  cursor: string
-  tooltip: React.CSSProperties
+/** Порядок и подписи срезов — из макета: статусы в рабочем порядке, приоритеты от частого к редкому. */
+const STATUS_ORDER: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done']
+const PRIORITY_ORDER: TaskPriority[] = ['medium', 'high', 'urgent', 'low']
+const PRIORITY_TITLE: Record<TaskPriority, string> = {
+  medium: 'Обычный',
+  high: 'Высокий',
+  urgent: 'Срочно',
+  low: 'Низкий',
 }
 
 /**
- * recharts не умеет CSS-переменные в SVG-заливках — читаем токены темы в
- * конкретные rgb() и пересчитываем при переключении Light/Dark.
+ * Дашборд проекта без recharts: кольца — `conic-gradient`, тренд и полосы —
+ * `div`'ы. Один словарь тонов на все три вкладки (`lib/tone.ts`): статус —
+ * как в списке и на доске, приоритет — планка/полоса. Ни один график не
+ * изобретает свой цвет. Значения всегда продублированы текстом — на телефоне
+ * нет hover, а тап по столбику 8px невозможен.
  */
-function useChartPalette(): ChartPalette {
-  const theme = useTheme((s) => s.theme)
-  return useMemo(() => {
-    void theme // зависимость: getComputedStyle читает уже применённую тему
-    const amber = cssColor('--amber')
-    const green = cssColor('--green')
-    const red = cssColor('--red')
-    const text = cssColor('--text')
-    const text2 = cssColor('--text2')
-    const text3 = cssColor('--text3')
-    return {
-      status: { todo: text3, in_progress: amber, in_review: text2, done: green },
-      priority: { low: text3, medium: text2, high: amber, urgent: red },
-      select: [amber, green, text2, red, text3, text],
-      fallback: text2,
-      axis: text2,
-      grid: cssColor('--text', 0.07),
-      bar: amber,
-      cursor: cssColor('--amber', 0.08),
-      tooltip: {
-        background: cssColor('--bg-alt', 0.97),
-        border: `1px solid ${cssColor('--text', 0.12)}`,
-        borderRadius: 8,
-        fontSize: 12,
-        color: text,
-      },
-    }
-  }, [theme])
-}
-
 function ProjectDashboard({ projectId }: ProjectDashboardProps) {
   const stats = useProjectStats(projectId)
-  const palette = useChartPalette()
 
   if (stats.isLoading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-text2">
+      <div className="flex items-center gap-2 p-2 text-[14px] text-text2">
         <Loader2 className="h-4 w-4 animate-spin" /> Загружаем агрегаты…
       </div>
     )
   }
   if (stats.isError || !stats.data) {
     return (
-      <p className="text-sm text-red">
-        Не удалось загрузить статистику. Обновите страницу.
-      </p>
+      <ErrorBanner
+        title="Не удалось загрузить статистику"
+        text="Агрегаты считаются на сервере — обновите страницу."
+        actionLabel="Обновить"
+        onAction={() => void stats.refetch()}
+      />
     )
   }
 
   const d = stats.data
+  if (d.total_active + d.total_archived === 0) {
+    return (
+      <EmptyState
+        layout="card"
+        icon={<BarChart3 className="h-[26px] w-[26px]" strokeWidth={1.6} />}
+        title="Считать пока нечего"
+        text="Дашборд оживает с первыми задачами: разрезы по статусу и приоритету, тренд закрытий, загрузка по людям."
+      />
+    )
+  }
+
+  const statusSegments: DonutSegment[] = STATUS_ORDER.map((s) => ({
+    key: s,
+    label: STATUS_LABEL[s],
+    value: d.status_breakdown[s] ?? 0,
+    color: STATUS_COLOR[s],
+  }))
+  const prioritySegments: DonutSegment[] = PRIORITY_ORDER.map((p) => ({
+    key: p,
+    label: PRIORITY_TITLE[p],
+    value: d.priority_breakdown[p] ?? 0,
+    color: PRIORITY_COLOR[p],
+  }))
+  const done30 = d.completed_trend.reduce((s, p) => s + p.count, 0)
 
   return (
-    <div className="space-y-5">
-      <KpiRow stats={d} />
+    <div className="flex flex-col gap-4">
+      {/* KPI: подпись 12/700 uppercase, значение Unbounded 26 tabular; краска по
+          смыслу — архив приглушён, готово зелёное, просрочка красная. */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile variant="kpi" label="Активных" value={String(d.total_active)} />
+        <StatTile variant="kpi" label="В архиве" value={String(d.total_archived)} tone="muted" />
+        <StatTile variant="kpi" label="Готово 30 д" value={String(done30)} tone="success" />
+        <StatTile
+          variant="kpi"
+          label="Просрочено"
+          value={String(d.overdue_count)}
+          tone={d.overdue_count > 0 ? 'danger' : 'muted'}
+        />
+      </div>
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card title="По статусу">
-          <PieFromCounts
-            counts={d.status_breakdown}
-            colorBy={(k) => palette.status[k] ?? palette.fallback}
-            labelBy={(k) => STATUS_LABEL[k] ?? k}
-            tooltipStyle={palette.tooltip}
-          />
+          <Donut segments={statusSegments} />
         </Card>
         <Card title="По приоритету">
-          <PieFromCounts
-            counts={d.priority_breakdown}
-            colorBy={(k) => palette.priority[k] ?? palette.fallback}
-            labelBy={(k) => PRIORITY_LABEL[k] ?? k}
-            tooltipStyle={palette.tooltip}
-          />
+          <Donut segments={prioritySegments} />
         </Card>
       </div>
 
       <Card title="Готово за 30 дней">
-        <TrendBars trend={d.completed_trend} palette={palette} />
+        <TrendBlock trend={d.completed_trend} />
       </Card>
 
-      <Card title="Загрузка по людям">
-        <WorkloadTable workload={d.workload} />
-      </Card>
+      <WorkloadTable workload={d.workload} />
 
       {d.custom_field_stats.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {d.custom_field_stats.map((s) => (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {d.custom_field_stats.map((s, i) => (
             <Card key={s.field_id} title={s.name}>
-              <CustomFieldStatBlock stat={s} selectPalette={palette.select} />
+              <CustomFieldStatBlock stat={s} tone={i % 2 === 0 ? 'amber' : 'blue'} />
             </Card>
           ))}
         </div>
@@ -157,286 +129,158 @@ function ProjectDashboard({ projectId }: ProjectDashboardProps) {
 
 // ─── Pieces ─────────────────────────────────────────────────────────────────
 
-function KpiRow({ stats }: { stats: ProjectStats }) {
+function Card({ title, children, trailing }: { title: string; children: ReactNode; trailing?: ReactNode }) {
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-      <Kpi label="Активных" value={stats.total_active} />
-      <Kpi label="В архиве" value={stats.total_archived} tone="muted" />
-      <Kpi label="Готово 30д" value={sumTrend(stats.completed_trend)} tone="green" />
-      <Kpi
-        label="Просрочено"
-        value={stats.overdue_count}
-        tone={stats.overdue_count > 0 ? 'red' : 'muted'}
-        icon={stats.overdue_count > 0 ? <AlertCircle className="h-3.5 w-3.5" /> : undefined}
-      />
-    </div>
-  )
-}
-
-function Kpi({
-  label,
-  value,
-  tone = 'default',
-  icon,
-}: {
-  label: string
-  value: number
-  tone?: 'default' | 'muted' | 'green' | 'red'
-  icon?: React.ReactNode
-}) {
-  const toneCn =
-    tone === 'red'
-      ? 'text-red'
-      : tone === 'green'
-        ? 'text-green'
-        : tone === 'muted'
-          ? 'text-text3'
-          : 'text-text'
-  return (
-    <div className="glass space-y-1 p-4">
-      <p className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-text3">
-        {icon}
-        {label}
-      </p>
-      <p className={`font-display text-2xl font-bold ${toneCn}`}>{value}</p>
-    </div>
-  )
-}
-
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="glass space-y-3 p-4">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text3">
-        {title}
-      </h3>
+    <section className="flex flex-col gap-3.5 rounded-[14px] border border-glass-border bg-tint p-4">
+      <header className="flex items-center justify-between gap-3">
+        <h3 className="font-body text-[12px] font-bold uppercase tracking-[0.07em] text-text2">{title}</h3>
+        {trailing}
+      </header>
       {children}
     </section>
   )
 }
 
-function PieFromCounts({
-  counts,
-  colorBy,
-  labelBy,
-  tooltipStyle,
-}: {
-  counts: Record<string, number>
-  colorBy: (key: string) => string
-  labelBy: (key: string) => string
-  tooltipStyle: React.CSSProperties
-}) {
-  const data = Object.entries(counts)
-    .filter(([, count]) => count > 0)
-    .map(([key, count]) => ({ name: labelBy(key), key, count }))
-  if (data.length === 0) {
-    return <p className="text-sm text-text3">Нет данных.</p>
-  }
+function fmtDay(iso: string): string {
+  return new Date(iso + 'T12:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+}
+
+function TrendBlock({ trend }: { trend: ProjectStats['completed_trend'] }) {
+  const max = Math.max(0, ...trend.map((t) => t.count))
+  const first = trend[0]
+  const last = trend[trend.length - 1]
   return (
-    <div className="h-56">
-      <ResponsiveContainer width="100%" height="100%">
-        <PieChart>
-          <Tooltip contentStyle={tooltipStyle} />
-          <Pie
-            data={data}
-            dataKey="count"
-            nameKey="name"
-            innerRadius={48}
-            outerRadius={80}
-            paddingAngle={2}
-          >
-            {data.map((d) => (
-              <Cell key={d.key} fill={colorBy(d.key)} stroke="none" />
-            ))}
-          </Pie>
-        </PieChart>
-      </ResponsiveContainer>
-      <div className="-mt-2 flex flex-wrap justify-center gap-3 text-xs">
-        {data.map((d) => (
-          <span key={d.key} className="flex items-center gap-1.5 text-text2">
-            <span
-              className="inline-block h-2 w-2 rounded-full"
-              style={{ background: colorBy(d.key) }}
-            />
-            {d.name} <span className="text-text3">({d.count})</span>
-          </span>
-        ))}
-      </div>
-    </div>
+    <MiniBarChart
+      points={trend.map((t) => ({
+        key: t.day,
+        value: t.count,
+        title: `${fmtDay(t.day)} — ${plural(t.count, 'закрыта', 'закрыто', 'закрыто')}`,
+      }))}
+      height={104}
+      maxLabel={`Максимум за день — ${max}`}
+      startLabel={first ? fmtDay(first.day) : undefined}
+      endLabel={last ? fmtDay(last.day) : undefined}
+    />
   )
 }
 
-function TrendBars({
-  trend,
-  palette,
-}: {
-  trend: ProjectStats['completed_trend']
-  palette: ChartPalette
-}) {
-  const data = trend.map((t) => ({
-    day: t.day.slice(5), // MM-DD
-    count: t.count,
-  }))
-  return (
-    <div className="h-48">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 5, right: 10, left: -16, bottom: 0 }}>
-          <CartesianGrid stroke={palette.grid} vertical={false} />
-          <XAxis
-            dataKey="day"
-            stroke={palette.axis}
-            fontSize={10}
-            tickLine={false}
-            interval={4}
-          />
-          <YAxis
-            stroke={palette.axis}
-            fontSize={10}
-            tickLine={false}
-            allowDecimals={false}
-          />
-          <Tooltip
-            cursor={{ fill: palette.cursor }}
-            contentStyle={palette.tooltip}
-          />
-          <Bar dataKey="count" fill={palette.bar} radius={[3, 3, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  )
-}
-
-function WorkloadTable({
-  workload,
-}: {
-  workload: ProjectStats['workload']
-}) {
-  if (workload.length === 0) {
-    return <p className="text-sm text-text3">Нет назначенных задач.</p>
-  }
+/**
+ * Загрузка по людям — таблица `1fr 132 92` с шапкой на `--surface`, зебра,
+ * полоса 8px амбер + число, колонка «Просрочено» 14/600 (красная при >0 —
+ * это просрочка, ей красный и положен). На телефоне три колонки не влезают:
+ * полоса уходит под строку, числа сводятся в одну подпись «9 · 3 просроч.».
+ */
+function WorkloadTable({ workload }: { workload: ProjectStats['workload'] }) {
   const maxActive = Math.max(1, ...workload.map((w) => w.active_count))
   return (
-    <ul className="space-y-1.5">
-      {workload.map((w, idx) => {
-        const label = w.full_name ?? w.email ?? 'Без исполнителя'
-        const widthPct = (w.active_count / maxActive) * 100
-        return (
-          <li
-            key={w.employee_id ?? `unassigned-${idx}`}
-            className="flex items-center gap-3"
-          >
-            <Avatar
-              name={w.full_name}
-              email={w.email}
-              className="h-7 w-7 shrink-0 text-[10px]"
-            />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="truncate text-sm text-text">{label}</span>
-                <span className="shrink-0 text-xs text-text3">
-                  {w.active_count} активных · {w.done_count} готово
+    <section className="overflow-hidden rounded-[14px] border border-glass-border bg-tint">
+      <header className="hidden items-center gap-3 bg-surface px-4 py-2.5 text-[12px] font-bold uppercase tracking-[0.07em] text-text2 lg:grid lg:grid-cols-[minmax(0,1fr)_132px_92px]">
+        <span>Загрузка по людям</span>
+        <span>Открытые</span>
+        <span className="text-right">Просрочено</span>
+      </header>
+      <header className="flex items-center bg-surface px-4 py-2.5 text-[12px] font-bold uppercase tracking-[0.07em] text-text2 lg:hidden">
+        Загрузка по людям
+      </header>
+      {workload.length === 0 ? (
+        <p className="px-4 py-4 text-[14px] text-text2">Нет назначенных задач.</p>
+      ) : (
+        <ul>
+          {workload.map((w, idx) => {
+            const label = w.full_name ?? w.email ?? 'Не назначено'
+            const overdue = w.overdue_count ?? 0
+            const pct = (w.active_count / maxActive) * 100
+            return (
+              <li
+                key={w.employee_id ?? `unassigned-${idx}`}
+                className={cn(
+                  'grid items-center gap-x-3 gap-y-1.5 px-4 py-2.5 text-[14px]',
+                  'grid-cols-[24px_minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_132px_92px]',
+                  idx % 2 === 1 && 'bg-tint',
+                )}
+              >
+                {/* моб.: аватар | имя + «9 · 3 просроч.» ; полоса ниже на всю ширину */}
+                <span className="flex items-center gap-2.5 lg:contents">
+                  {w.employee_id ? (
+                    <Avatar name={w.full_name} email={w.email} className="h-6 w-6 shrink-0 text-[12px]" />
+                  ) : (
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-dashed border-glass-border text-[12px] text-text2">
+                      —
+                    </span>
+                  )}
+                  <span className="hidden min-w-0 truncate text-text lg:inline">{label}</span>
                 </span>
-              </div>
-              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-glass">
-                <div
-                  className="h-full rounded-full bg-amber/70"
-                  style={{ width: `${widthPct}%` }}
-                />
-              </div>
-            </div>
-          </li>
-        )
-      })}
-    </ul>
+                <span className="min-w-0 truncate text-text lg:hidden">{label}</span>
+                <span className="text-right tabular-nums text-text2 lg:hidden">
+                  {w.active_count}
+                  {overdue > 0 && (
+                    <>
+                      {' · '}
+                      <span className="font-semibold text-red">{overdue} просроч.</span>
+                    </>
+                  )}
+                </span>
+                <span className="col-span-3 flex items-center gap-2.5 lg:col-span-1">
+                  <span className="block h-2 flex-1 overflow-hidden rounded-full bg-surface">
+                    <span className="block h-full rounded-full bg-amber" style={{ width: `${pct}%` }} />
+                  </span>
+                  <span className="hidden w-6 shrink-0 text-right tabular-nums text-text lg:inline">
+                    {w.active_count}
+                  </span>
+                </span>
+                <span
+                  className={cn(
+                    'hidden text-right text-[14px] font-semibold tabular-nums lg:block',
+                    overdue > 0 ? 'text-red' : 'text-text2',
+                  )}
+                >
+                  {overdue}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
   )
 }
 
-function CustomFieldStatBlock({
-  stat,
-  selectPalette,
-}: {
-  stat: CustomFieldStat
-  selectPalette: string[]
-}) {
+function CustomFieldStatBlock({ stat, tone }: { stat: CustomFieldStat; tone: 'amber' | 'blue' }) {
   if (stat.type === 'number' && stat.number) {
     const n = stat.number
-    if (n.count === 0) {
-      return <p className="text-sm text-text3">Пусто.</p>
-    }
+    if (n.count === 0) return <p className="text-[14px] text-text2">Пусто.</p>
+    const fmt = (v: number | null, fraction?: boolean) =>
+      v === null ? '—' : fraction || !Number.isInteger(v) ? v.toFixed(1) : String(v)
     return (
-      <div className="grid grid-cols-4 gap-2 text-center">
-        <NumStat label="Сумма" value={n.sum} />
-        <NumStat label="Среднее" value={n.avg} fraction />
-        <NumStat label="Мин" value={n.min} fraction />
-        <NumStat label="Макс" value={n.max} fraction />
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <StatTile label="Сумма" value={fmt(n.sum)} className="min-w-0" />
+        <StatTile label="Среднее" value={fmt(n.avg, true)} className="min-w-0" />
+        <StatTile label="Мин" value={fmt(n.min, true)} className="min-w-0" />
+        <StatTile label="Макс" value={fmt(n.max, true)} className="min-w-0" />
       </div>
     )
   }
-  if (
-    (stat.type === 'select' || stat.type === 'multi_select') &&
-    stat.select
-  ) {
+  if ((stat.type === 'select' || stat.type === 'multi_select') && stat.select) {
     const opts = stat.select.options
-    if (opts.length === 0) {
-      return <p className="text-sm text-text3">Никто не выбрал опцию.</p>
-    }
+    if (opts.length === 0) return <p className="text-[14px] text-text2">Никто не выбрал опцию.</p>
     const total = opts.reduce((s, o) => s + o.count, 0) || 1
     return (
-      <ul className="space-y-1.5">
-        {opts.map((o, i) => {
-          const color = selectPalette[i % selectPalette.length]!
-          const pct = (o.count / total) * 100
-          return (
-            <li key={o.id} className="text-xs">
-              <div className="flex items-baseline justify-between">
-                <span className="truncate text-text">{o.label}</span>
-                <span className="shrink-0 text-text3">
-                  {o.count} ({pct.toFixed(0)}%)
-                </span>
-              </div>
-              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-glass">
-                <div
-                  className="h-full rounded-full"
-                  style={{ width: `${pct}%`, background: color }}
-                />
-              </div>
-            </li>
-          )
-        })}
-      </ul>
+      <div className="flex flex-col gap-2">
+        {opts.map((o) => (
+          <MeterRow
+            key={o.id}
+            label={o.label}
+            pct={(o.count / total) * 100}
+            value={o.count}
+            tone={tone}
+            labelWidth={88}
+          />
+        ))}
+      </div>
     )
   }
-  return <p className="text-sm text-text3">Тип не агрегируется.</p>
-}
-
-function NumStat({
-  label,
-  value,
-  fraction,
-}: {
-  label: string
-  value: number | null
-  fraction?: boolean
-}) {
-  return (
-    <div className="rounded-md border border-glass-border bg-surface p-2">
-      <p className="text-[10px] uppercase tracking-wider text-text3">{label}</p>
-      <p className="font-display text-sm font-semibold text-text">
-        {value === null
-          ? '—'
-          : fraction
-            ? value.toFixed(1)
-            : Number.isInteger(value)
-              ? value
-              : value.toFixed(1)}
-      </p>
-    </div>
-  )
-}
-
-function sumTrend(trend: ProjectStats['completed_trend']): number {
-  return trend.reduce((s, p) => s + p.count, 0)
+  return <p className="text-[14px] text-text2">Тип не агрегируется.</p>
 }
 
 // Default export — required so `React.lazy(() => import(...))` works.
 export default ProjectDashboard
-

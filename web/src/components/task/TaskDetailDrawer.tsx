@@ -34,12 +34,15 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { AutoGrowTextarea } from '@/components/ui/AutoGrowTextarea'
 import { Textarea } from '@/components/ui/Input'
+import { PropertyRow, PropertyRows } from '@/components/ui/PropertyRows'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
+import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useProject, useProjectMembers, useProjectSections } from '@/hooks/useProjects'
 import {
   useArchiveTask,
   useTask,
   useToggleAssignee,
+  useToggleDone,
   useUpdateTask,
 } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
@@ -113,6 +116,10 @@ function Dt({ icon: Icon, children }: { icon?: typeof Flag; children: React.Reac
   )
 }
 
+/** Прозрачный контрол справа в мобильной строке свойств: 16px, по правому краю. */
+const MOBILE_CONTROL =
+  'min-h-[46px] max-w-full appearance-none bg-transparent pr-2.5 text-right font-body text-[16px] text-text focus-visible:outline-none disabled:opacity-100'
+
 /** Дата — значение поля, а не статус: силуэт чипа 26px, не бейджа. */
 const DATE_INPUT =
   'inline-flex h-[26px] items-center rounded-md bg-surface px-2 font-body text-[12px] font-semibold text-text2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 disabled:cursor-default'
@@ -123,6 +130,7 @@ export function TaskDetailDrawer({
   onClose,
   onOpenTask,
 }: TaskDetailDrawerProps) {
+  const isDesktop = useIsDesktop()
   const taskQuery = useTask(taskId ?? undefined)
   const { data: task, isLoading } = taskQuery
   const project = useProject(projectId)
@@ -136,6 +144,7 @@ export function TaskDetailDrawer({
   const owner = members.data?.find((m) => m.role === 'owner')
   const update = useUpdateTask(projectId)
   const toggleAssignee = useToggleAssignee(projectId)
+  const toggleDone = useToggleDone(projectId)
   const archive = useArchiveTask(projectId)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -359,38 +368,113 @@ export function TaskDetailDrawer({
               />
             )}
 
+            {task && !isDesktop && (
+              // Мобильный блок свойств: один компактный контейнер строк
+              // «свойство → значение», контрол справа, строка 48px. Ряды чипов
+              // на телефоне превращались в стену из шести разнородных блоков.
+              <PropertyRows>
+                <PropertyRow label="Статус">
+                  <select
+                    value={task.status}
+                    disabled={readOnly}
+                    aria-label="Статус"
+                    onChange={(e) => update.mutate({ id: task.id, status: e.target.value as TaskStatus })}
+                    className={MOBILE_CONTROL}
+                  >
+                    {STATUSES.map((s) => (
+                      <option key={s} value={s}>
+                        {STATUS_LABEL[s]}
+                      </option>
+                    ))}
+                  </select>
+                </PropertyRow>
+                <PropertyRow label="Приоритет">
+                  <select
+                    value={task.priority}
+                    disabled={readOnly}
+                    aria-label="Приоритет"
+                    onChange={(e) => update.mutate({ id: task.id, priority: e.target.value as TaskPriority })}
+                    className={MOBILE_CONTROL}
+                  >
+                    {PRIORITIES.map((p) => (
+                      <option key={p} value={p}>
+                        {PRIORITY_LABEL[p]}
+                      </option>
+                    ))}
+                  </select>
+                </PropertyRow>
+                <PropertyRow label="Старт">
+                  <input
+                    type="date"
+                    value={startAt}
+                    disabled={readOnly}
+                    aria-label="Дата старта"
+                    onChange={(e) => {
+                      setStartAt(e.target.value)
+                      void saveDate('start_at', e.target.value)
+                    }}
+                    className={MOBILE_CONTROL}
+                  />
+                </PropertyRow>
+                <PropertyRow label="Срок">
+                  <span className="flex items-center gap-2">
+                    {overdue && task.due_at && (
+                      <span className="text-[13px] font-semibold text-red">
+                        −{overdueDays(task.due_at)} дн
+                      </span>
+                    )}
+                    <input
+                      type="date"
+                      value={dueAt}
+                      disabled={readOnly}
+                      aria-label="Срок"
+                      onChange={(e) => {
+                        setDueAt(e.target.value)
+                        void saveDate('due_at', e.target.value)
+                      }}
+                      className={cn(MOBILE_CONTROL, overdue && 'font-semibold text-red')}
+                    />
+                  </span>
+                </PropertyRow>
+              </PropertyRows>
+            )}
+
             {task && (
               <>
                 <dl className="m-0 grid grid-cols-1 items-start gap-x-3.5 gap-y-3 lg:grid-cols-[112px_1fr] lg:items-center lg:gap-y-2.5">
-                  <Dt icon={Flag}>Статус</Dt>
-                  <dd className="m-0 flex flex-wrap gap-1">
-                    {STATUSES.map((s) => (
-                      <OptionButton
-                        key={s}
-                        active={task.status === s}
-                        disabled={readOnly}
-                        tone="solid"
-                        onClick={() => update.mutate({ id: task.id, status: s })}
-                      >
-                        {STATUS_LABEL[s]}
-                      </OptionButton>
-                    ))}
-                  </dd>
+                  {isDesktop && (
+                    <>
+                      <Dt icon={Flag}>Статус</Dt>
+                      <dd className="m-0 flex flex-wrap gap-1">
+                        {STATUSES.map((s) => (
+                          <OptionButton
+                            key={s}
+                            active={task.status === s}
+                            disabled={readOnly}
+                            tone="solid"
+                            onClick={() => update.mutate({ id: task.id, status: s })}
+                          >
+                            {STATUS_LABEL[s]}
+                          </OptionButton>
+                        ))}
+                      </dd>
 
-                  <Dt icon={Tag}>Приоритет</Dt>
-                  <dd className="m-0 flex flex-wrap gap-1">
-                    {PRIORITIES.map((p) => (
-                      <OptionButton
-                        key={p}
-                        active={task.priority === p}
-                        disabled={readOnly}
-                        tone="tint"
-                        onClick={() => update.mutate({ id: task.id, priority: p })}
-                      >
-                        {PRIORITY_LABEL[p]}
-                      </OptionButton>
-                    ))}
-                  </dd>
+                      <Dt icon={Tag}>Приоритет</Dt>
+                      <dd className="m-0 flex flex-wrap gap-1">
+                        {PRIORITIES.map((p) => (
+                          <OptionButton
+                            key={p}
+                            active={task.priority === p}
+                            disabled={readOnly}
+                            tone="tint"
+                            onClick={() => update.mutate({ id: task.id, priority: p })}
+                          >
+                            {PRIORITY_LABEL[p]}
+                          </OptionButton>
+                        ))}
+                      </dd>
+                    </>
+                  )}
 
                   <Dt icon={Users}>Исполнители</Dt>
                   <dd className="m-0 min-w-0">
@@ -420,43 +504,47 @@ export function TaskDetailDrawer({
                     />
                   </dd>
 
-                  <Dt icon={Calendar}>Старт</Dt>
-                  <dd className="m-0">
-                    <input
-                      type="date"
-                      value={startAt}
-                      disabled={readOnly}
-                      aria-label="Дата старта"
-                      onChange={(e) => {
-                        setStartAt(e.target.value)
-                        void saveDate('start_at', e.target.value)
-                      }}
-                      className={DATE_INPUT}
-                    />
-                  </dd>
+                  {isDesktop && (
+                    <>
+                      <Dt icon={Calendar}>Старт</Dt>
+                      <dd className="m-0">
+                        <input
+                          type="date"
+                          value={startAt}
+                          disabled={readOnly}
+                          aria-label="Дата старта"
+                          onChange={(e) => {
+                            setStartAt(e.target.value)
+                            void saveDate('start_at', e.target.value)
+                          }}
+                          className={DATE_INPUT}
+                        />
+                      </dd>
 
-                  <Dt icon={Calendar}>Срок</Dt>
-                  <dd className="m-0 flex flex-wrap items-center gap-2">
-                    <input
-                      type="date"
-                      value={dueAt}
-                      disabled={readOnly}
-                      aria-label="Срок"
-                      onChange={(e) => {
-                        setDueAt(e.target.value)
-                        void saveDate('due_at', e.target.value)
-                      }}
-                      className={cn(
-                        DATE_INPUT,
-                        overdue && 'bg-red font-bold text-bg',
-                      )}
-                    />
-                    {overdue && task.due_at && (
-                      <span className="text-[14px] text-red">
-                        просрочено на {plural(overdueDays(task.due_at), 'день', 'дня', 'дней')}
-                      </span>
-                    )}
-                  </dd>
+                      <Dt icon={Calendar}>Срок</Dt>
+                      <dd className="m-0 flex flex-wrap items-center gap-2">
+                        <input
+                          type="date"
+                          value={dueAt}
+                          disabled={readOnly}
+                          aria-label="Срок"
+                          onChange={(e) => {
+                            setDueAt(e.target.value)
+                            void saveDate('due_at', e.target.value)
+                          }}
+                          className={cn(
+                            DATE_INPUT,
+                            overdue && 'bg-red font-bold text-bg',
+                          )}
+                        />
+                        {overdue && task.due_at && (
+                          <span className="text-[14px] text-red">
+                            просрочено на {plural(overdueDays(task.due_at), 'день', 'дня', 'дней')}
+                          </span>
+                        )}
+                      </dd>
+                    </>
+                  )}
 
                   <Dt icon={Tag}>Метки</Dt>
                   <dd className="m-0 min-w-0">
@@ -544,6 +632,53 @@ export function TaskDetailDrawer({
               </>
             )}
           </div>
+
+          {/* Мобильный футер: «Комментарий…» ставит курсор в композер треда,
+              «Готово» закрывает задачу (или возвращает). Sticky, не fixed:
+              fixed под клавиатурой iOS уезжает вместе с visual viewport. */}
+          {task && !isDesktop && (
+            <footer
+              className="sticky bottom-0 z-10 flex shrink-0 items-center gap-2 border-t border-hair bg-bg-alt px-4 pt-2.5"
+              style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 10px)' }}
+            >
+              {readOnly ? (
+                <>
+                  <span className="min-w-0 flex-1 text-[14px] text-text2">
+                    Комментировать может участник проекта.
+                  </span>
+                  <WatchControl taskId={task.id} />
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const el = document.querySelector<HTMLTextAreaElement>(
+                        '#task-thread-composer textarea',
+                      )
+                      el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                      el?.focus()
+                    }}
+                    className="flex h-12 min-w-0 flex-1 items-center rounded-xl border border-glass-border bg-tint px-4 text-left text-[15px] text-text2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                  >
+                    Комментарий…
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleDone(task)}
+                    className={cn(
+                      'flex h-12 shrink-0 items-center justify-center rounded-xl px-5 text-[15px] font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+                      task.status === 'done'
+                        ? 'border border-glass-border text-text'
+                        : 'bg-amber text-on-amber',
+                    )}
+                  >
+                    {task.status === 'done' ? 'Вернуть' : 'Готово'}
+                  </button>
+                </>
+              )}
+            </footer>
+          )}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
       {task && (

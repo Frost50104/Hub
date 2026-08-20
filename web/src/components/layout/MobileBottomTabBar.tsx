@@ -33,7 +33,8 @@ const TASK_TABS: TabDef[] = [
   { kind: 'link', to: '/my', label: 'Мои задачи', icon: CheckCircle2 },
   { kind: 'link', to: '/inbox', label: 'Входящие', icon: Bell, showUnreadDot: true },
   { kind: 'link', to: '/search', label: 'Поиск', icon: Search },
-  { kind: 'link', to: '/profile', label: 'Профиль', icon: User },
+  // Таб ведёт на объединённый экран «Профиль и настройки» (/settings).
+  { kind: 'link', to: '/settings', label: 'Профиль', icon: User },
 ]
 
 // В learn-наборе вкладку «Профиль» заменяет «Меню» (sheet со всеми разделами);
@@ -52,7 +53,7 @@ const LEARN_TABS: TabDef[] = [
 // и до этой доработки.
 const MENU_DESTINATIONS = [
   ...LEARN_MENU_ITEMS.map((i) => i.to),
-  '/profile',
+  '/settings',
   ...ADMIN_NAV.map((i) => i.to),
 ]
 

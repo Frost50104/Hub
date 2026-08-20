@@ -66,9 +66,10 @@ export function KanbanColumn({
           : 'border-transparent bg-transparent',
       )}
     >
+      {/* Имя колонки — пользовательское, 14/600 обычным шрифтом, без точки и
+          без цветовой кодировки: цвет принадлежит приоритету и просрочке. */}
       <header className="flex items-center gap-2 px-1.5 pb-2.5 pt-1.5">
-        <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-text2" />
-        <h3 className="min-w-0 truncate font-display text-[14px] font-bold text-text">
+        <h3 className="min-w-0 truncate font-body text-[14px] font-semibold text-text">
           {column.name}
         </h3>
         <span className="ml-auto font-mono text-[13px] text-text2">

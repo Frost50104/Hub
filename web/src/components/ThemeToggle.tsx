@@ -13,7 +13,7 @@ const OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
  * container) so it works in both the desktop sidebar footer and the mobile
  * profile page. Active segment uses the amber accent with fixed-dark ink.
  */
-export function ThemeToggle({ className }: { className?: string }) {
+export function ThemeToggle({ className, size = 'sm' }: { className?: string; size?: 'sm' | 'lg' }) {
   const theme = useTheme((s) => s.theme)
   const setTheme = useTheme((s) => s.setTheme)
 
@@ -37,7 +37,8 @@ export function ThemeToggle({ className }: { className?: string }) {
             onClick={() => setTheme(value)}
             title={label}
             className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+              'flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+              size === 'lg' ? 'min-h-11 text-[14px]' : 'min-h-[30px] text-[12px]',
               active
                 ? 'bg-amber text-on-amber'
                 : 'text-text2 hover:text-text',

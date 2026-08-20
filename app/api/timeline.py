@@ -3,6 +3,9 @@
 `GET /api/projects/{project_id}/timeline?from=YYYY-MM-DD&to=YYYY-MM-DD`
 returns:
 - tasks that overlap the window (same overlap rule as `/calendar`)
+- with `include_undated=1` — also tasks WITHOUT a due date: the Gantt draws
+  a row for them without a bar and counts «N без срока» (redesign 2026-08).
+  The parameter is new, so older PWA bundles keep getting dated tasks only.
 - dependencies among them (edges where BOTH endpoints land in the window)
 - sections (UI groups bars by section)
 
@@ -66,6 +69,7 @@ async def get_timeline(
     project_id: UUID,
     from_: str = Query(..., alias="from"),
     to: str = Query(...),
+    include_undated: bool = Query(False),
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> TimelineResponse:
@@ -88,21 +92,17 @@ async def get_timeline(
     to_dt = datetime.combine(to_date + timedelta(days=1), time(0, 0, 0), tzinfo=UTC)
 
     # ─── Tasks overlapping the window ───────────────────────────────────────
+    overlaps = (Task.due_at.is_not(None)) & or_(
+        (Task.start_at.is_(None)) & (Task.due_at >= from_dt) & (Task.due_at < to_dt),
+        (Task.start_at.is_not(None)) & (Task.start_at < to_dt) & (Task.due_at >= from_dt),
+    )
+    # Задачи без срока — только по явной просьбе: строка есть, полосы нет.
+    window = or_(overlaps, Task.due_at.is_(None)) if include_undated else overlaps
     task_stmt = (
         # Без JOIN на исполнителей — размножил бы задачу по их числу
         # (дубли полос на диаграмме). Исполнители едут батчем ниже.
         select(Task)
-        .where(
-            Task.project_id == project_id,
-            Task.archived_at.is_(None),
-            Task.due_at.is_not(None),
-            or_(
-                (Task.start_at.is_(None)) & (Task.due_at >= from_dt) & (Task.due_at < to_dt),
-                (Task.start_at.is_not(None))
-                & (Task.start_at < to_dt)
-                & (Task.due_at >= from_dt),
-            ),
-        )
+        .where(Task.project_id == project_id, Task.archived_at.is_(None), window)
         .order_by(Task.section_id.nulls_first(), Task.position)
     )
 

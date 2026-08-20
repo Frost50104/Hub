@@ -83,7 +83,9 @@ export function TaskRow({
         <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
           <span
             className={cn(
-              'min-w-0 truncate text-[17px] font-medium leading-[1.35]',
+              // 17/600 — шкала спеки: заголовок — единственный элемент строки,
+              // который читают целиком.
+              'min-w-0 truncate text-[17px] font-semibold leading-[1.35]',
               done ? 'text-text2 line-through' : 'text-text',
             )}
           >

@@ -1,4 +1,4 @@
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Filter } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -232,12 +232,15 @@ function MobileMyTasks() {
     <>
       <MobilePageHeader title="Мои задачи" withOverflowMenu />
 
-      <div className="border-b border-hair px-4 py-2.5">
+      {/* Полоса на --tint с одной пилюлей-фильтром (иконка Filter): это
+          фильтр выборки, а не вкладка — и выглядит как фильтр. */}
+      <div className="border-b border-glass-border bg-tint px-4 py-2">
         <button
           type="button"
           onClick={() => setPickerOpen(true)}
-          className="inline-flex min-h-11 items-center gap-1.5 rounded-[11px] border border-glass-border px-4 text-[14px] font-semibold text-text active:bg-surface"
+          className="inline-flex min-h-11 items-center gap-2 rounded-full border border-glass-border px-4 text-[14px] font-semibold text-text active:bg-surface"
         >
+          <Filter className="h-[15px] w-[15px] text-text2" strokeWidth={2} />
           {current.label}
           <ChevronDown className="h-3.5 w-3.5 text-text2" />
         </button>

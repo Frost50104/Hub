@@ -21,9 +21,6 @@ const InboxPage = lazy(() =>
 const MyTasksPage = lazy(() =>
   import('@/pages/MyTasksPage').then((m) => ({ default: m.MyTasksPage })),
 )
-const ProfilePage = lazy(() =>
-  import('@/pages/ProfilePage').then((m) => ({ default: m.ProfilePage })),
-)
 const ProjectListPage = lazy(() =>
   import('@/pages/ProjectListPage').then((m) => ({ default: m.ProjectListPage })),
 )
@@ -38,6 +35,9 @@ const SearchPage = lazy(() =>
 )
 const SettingsPage = lazy(() =>
   import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+)
+const AccountTab = lazy(() =>
+  import('@/pages/settings/AccountTab').then((m) => ({ default: m.AccountTab })),
 )
 const AppearanceTab = lazy(() =>
   import('@/pages/settings/AppearanceTab').then((m) => ({
@@ -144,7 +144,9 @@ export function App() {
           <Route path="/projects" element={<ProjectListPage />} />
           <Route path="/projects/:id" element={<ProjectPage />} />
           <Route path="/search" element={<SearchPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
+          {/* Профиль слит с настройками (редизайн 2026-08): старый путь живёт
+              редиректом — на него ведут таб-бар старых бандлов и закладки. */}
+          <Route path="/profile" element={<Navigate to="/settings/account" replace />} />
           <Route path="/learn" element={<LearnHomePage />} />
           <Route path="/learn/library" element={<LearnLibraryPage />} />
           <Route path="/learn/news" element={<LearnNewsPage />} />
@@ -200,7 +202,8 @@ export function App() {
             }
           />
           <Route path="/settings" element={<SettingsPage />}>
-            <Route index element={<Navigate to="notifications" replace />} />
+            <Route index element={<Navigate to="account" replace />} />
+            <Route path="account" element={<AccountTab />} />
             <Route path="notifications" element={<NotificationsSettingsTab />} />
             <Route path="appearance" element={<AppearanceTab />} />
           </Route>

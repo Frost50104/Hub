@@ -33,9 +33,20 @@ export interface TaskDependencies {
 }
 
 export const timelineApi = {
-  get: (projectId: string, range: { from: string; to: string }): Promise<TimelineResponse> =>
+  /**
+   * `include_undated` — задачи без срока тоже приходят (строка в Ганте есть,
+   * полосы нет). Параметр новый: старые бандлы его не шлют и получают только
+   * датированные задачи, как раньше.
+   */
+  get: (
+    projectId: string,
+    range: { from: string; to: string },
+    opts?: { includeUndated?: boolean },
+  ): Promise<TimelineResponse> =>
     api
-      .get<TimelineResponse>(`/projects/${projectId}/timeline`, { params: range })
+      .get<TimelineResponse>(`/projects/${projectId}/timeline`, {
+        params: { ...range, ...(opts?.includeUndated ? { include_undated: 1 } : {}) },
+      })
       .then((r) => r.data),
 
   taskDependencies: (taskId: string): Promise<TaskDependencies> =>

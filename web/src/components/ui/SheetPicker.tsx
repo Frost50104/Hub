@@ -18,6 +18,8 @@ interface SheetPickerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   title: ReactNode
+  /** Подзаголовок: «Папки общие на тенант, один уровень…». */
+  description?: ReactNode
   items: SheetPickerItem[]
   onSelect: (id: string) => void
   /** Поле поиска 44px над списком (фильтр по label/meta на клиенте). */
@@ -39,6 +41,7 @@ export function SheetPicker({
   open,
   onOpenChange,
   title,
+  description,
   items,
   onSelect,
   searchable = false,
@@ -66,6 +69,7 @@ export function SheetPicker({
       open={open}
       onOpenChange={onOpenChange}
       title={title}
+      description={description}
       dismissLabel={multi ? 'Готово' : 'Отмена'}
       desktopWidth={400}
       bodyClassName="gap-2 px-2 lg:px-3"

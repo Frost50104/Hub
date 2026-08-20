@@ -11,6 +11,8 @@ export interface WorkloadEntry {
   email: string | null
   active_count: number
   done_count: number
+  /** Просроченных у исполнителя. Optional: объект из кэша старого бандла поля не несёт. */
+  overdue_count?: number
 }
 
 export interface NumberStats {

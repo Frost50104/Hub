@@ -73,10 +73,10 @@ export function LearnMenuSheet({
       <div className="mx-3 my-1 h-px bg-hair" />
       <BottomSheetItem
         icon={<User className="h-5 w-5" />}
-        onClick={() => go('/profile')}
+        onClick={() => go('/settings')}
         trailing={<ChevronRight className="h-[18px] w-[18px]" />}
       >
-        Профиль
+        Профиль и настройки
       </BottomSheetItem>
 
       {isAdmin && (

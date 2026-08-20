@@ -496,3 +496,50 @@ async def test_deleted_employee_hidden_from_response_but_row_survives(
     assert fetched.assignee_id is None
     # Строка назначения жива — история не переписывается.
     assert await _assignee_rows(db, task.id) == [a.employee_id]
+
+
+async def test_workload_counts_overdue_per_assignee(db: AsyncSession, tenant_id: uuid.UUID):
+    """Колонка «Просрочено» дашборда (редизайн): просроченная задача на двоих
+    горит у обоих, «без исполнителя» — своим бакетом, закрытая просрочка не
+    считается."""
+    from datetime import UTC, datetime, timedelta
+
+    owner, project, (a, b) = await _seed(db, tenant_id, "md7")
+    past = datetime.now(UTC) - timedelta(days=3)
+    await create_task(
+        project.id,
+        TaskCreate(
+            title="Горит на двоих", assignee_ids=[a.employee_id, b.employee_id], due_at=past
+        ),
+        owner,
+        db,
+    )
+    await create_task(project.id, TaskCreate(title="Ничья и горит", due_at=past), owner, db)
+    await create_task(
+        project.id,
+        TaskCreate(
+            title="Закрытая просрочка",
+            assignee_ids=[a.employee_id],
+            due_at=past,
+            status="done",
+        ),
+        owner,
+        db,
+    )
+    await create_task(
+        project.id,
+        TaskCreate(
+            title="В срок",
+            assignee_ids=[b.employee_id],
+            due_at=datetime.now(UTC) + timedelta(days=3),
+        ),
+        owner,
+        db,
+    )
+
+    stats = await get_stats(project.id, principal=owner, db=db)
+    by_id = {w.employee_id: w for w in stats.workload}
+    assert by_id[a.employee_id].overdue_count == 1
+    assert by_id[b.employee_id].overdue_count == 1
+    assert by_id[None].overdue_count == 1
+    assert by_id[b.employee_id].active_count == 2

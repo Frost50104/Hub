@@ -63,6 +63,7 @@ import {
   useProjectSections,
   useSetFavorite,
   useUpdateSection,
+  useProjectMembers,
 } from '@/hooks/useProjects'
 import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
 import { useTasks, useToggleDone } from '@/hooks/useTasks'
@@ -79,9 +80,12 @@ import {
   filtersFromSearchParams,
   toListFilters,
   type TaskViewFilters,
+  describeFilters,
 } from '@/lib/taskFilters'
 import { projectTaskGrid } from '@/lib/taskGrid'
-import { type Task } from '@/lib/tasks'
+import { dataAgeLabel } from '@/lib/dates'
+import { requestInlineCreate } from '@/lib/quickCreate'
+import { type Task, PRIORITY_LABEL, STATUS_LABEL } from '@/lib/tasks'
 import { plural } from '@/lib/typography'
 import { ORPHAN_SECTION_KEY, useViewConfig } from '@/stores/viewConfig'
 
@@ -558,6 +562,8 @@ function ListTab({
 
   const labels = useLabels(projectId)
   const labelAssignments = useLabelAssignments(projectId)
+  // Имена для строки «Исполнитель: … · Метка: …» в пустом состоянии фильтров.
+  const members = useProjectMembers(projectId)
   const labelsByTask = useMemo(() => {
     const byId = new Map((labels.data ?? []).map((l) => [l.id, l]))
     const m = new Map<string, Label[]>()
@@ -614,6 +620,7 @@ function ListTab({
         tone="error"
         title="Не удалось загрузить задачи"
         text="Проверьте соединение и попробуйте ещё раз."
+        meta={dataAgeLabel(tasks.dataUpdatedAt)}
         cta="Повторить"
         onCta={() => {
           if (tasks.isError) void tasks.refetch()
@@ -631,11 +638,24 @@ function ListTab({
     return filtersActive ? (
       <TaskEmptyState
         title="Под фильтры не попала ни одна задача"
-        text={
+        // Перечисляем, ЧТО отсекло: «Исполнитель: Дмитрий Фёдоров · Приоритет:
+        // срочно. Из 312 задач — ни одной.»
+        text={[
+          describeFilters(
+            filters,
+            {
+              assignee: members.data?.find((m) => m.employee_id === filters.assignee)
+                ?.full_name,
+              label: labels.data?.find((l) => l.id === filters.label)?.name,
+            },
+            { status: STATUS_LABEL, priority: PRIORITY_LABEL },
+          ),
           project.task_count
             ? `Из ${project.task_count} задач проекта — ни одной.`
-            : 'В проекте пока нет задач.'
-        }
+            : 'В проекте пока нет задач.',
+        ]
+          .filter(Boolean)
+          .join('. ')}
         cta="Сбросить фильтры"
         onCta={onResetFilters}
         secondaryCta={narrowable ? `Снять ${narrowable.label}` : undefined}
@@ -644,18 +664,11 @@ function ListTab({
     ) : (
       <TaskEmptyState
         title="Пока нет задач. Создайте первую."
-        text="Секции появятся, когда задач станет больше: до этого список плоский."
+        text="Секции появятся, когда задач станет больше десяти — до этого список плоский."
         cta={canEditFlag ? 'Создать задачу' : undefined}
-        onCta={
-          canEditFlag
-            ? () => {
-                const el = document.querySelector<HTMLInputElement>(
-                  'input[aria-label="Новая задача"]',
-                )
-                el?.focus()
-              }
-            : undefined
-        }
+        // Та же точка входа, что у «Новой задачи» в сайдбаре: курсор в
+        // инлайн-поле первого блока.
+        onCta={canEditFlag ? () => void requestInlineCreate(projectId) : undefined}
       />
     )
   }
@@ -922,13 +935,15 @@ export function ProjectPage() {
       {tab === 'calendar' && (
         <>
           {toolbar(undefined, false, false)}
-          <div className="min-w-0 flex-1 p-4 lg:overflow-auto lg:p-6">
+          {/* На мобильном календарь — список дней со своими отступами, поэтому
+              обёртка без padding; на десктопе — сетка в 24px. */}
+          <div className="min-w-0 flex-1 pb-24 pt-2 lg:overflow-auto lg:p-6">
             <CalendarView projectId={id} onTaskClick={openTask} filters={filters} />
           </div>
         </>
       )}
       {tab === 'timeline' && (
-        <div className="min-w-0 flex-1 p-4 lg:overflow-auto lg:p-6">
+        <div className="min-w-0 flex-1 pb-24 pt-2 lg:overflow-auto lg:p-6">
           <TimelineView projectId={id} onTaskClick={openTask} />
         </div>
       )}

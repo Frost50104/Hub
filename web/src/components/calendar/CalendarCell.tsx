@@ -20,6 +20,12 @@ interface CalendarCellProps {
 
 const MAX_CHIPS_DEFAULT = 3
 
+/**
+ * Ячейка месяца: min-height 96, номер — чип 22px моноширинный («сегодня» —
+ * амбер), фон `--bg-alt` внутри месяца и `--tint` вне. Вне месяца гасим
+ * ФОНОМ, а не `opacity`: opacity душит и число, и плашки задач.
+ * Приём при перетаскивании — amber 8% + inset-контур 50%.
+ */
 export function CalendarCell({
   day,
   dayNumber,
@@ -37,18 +43,16 @@ export function CalendarCell({
     <div
       ref={setNodeRef}
       className={cn(
-        'flex min-h-[88px] flex-col gap-1 border border-glass-border/40 p-1.5 transition-colors md:min-h-[112px]',
-        isOver && 'bg-amber/5 ring-1 ring-amber/40',
-        !isCurrentMonth && 'bg-bg-alt/40',
+        'flex min-h-[96px] flex-col gap-[3px] p-[5px] pb-1.5 transition-colors',
+        isCurrentMonth ? 'bg-bg-alt' : 'bg-tint',
+        isOver && 'bg-amber/[0.08] shadow-[inset_0_0_0_1px_rgb(var(--amber)/0.5)]',
       )}
     >
       <div className="flex items-center justify-between">
         <span
           className={cn(
-            'inline-flex h-5 w-5 items-center justify-center text-xs',
-            isToday && 'rounded-full bg-amber font-semibold text-on-amber',
-            !isToday && isCurrentMonth && 'text-text2',
-            !isCurrentMonth && 'text-text2',
+            'inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-md px-1 font-mono text-[12px]',
+            isToday ? 'bg-amber font-bold text-on-amber' : 'text-text2',
           )}
           aria-current={isToday ? 'date' : undefined}
         >
@@ -56,7 +60,7 @@ export function CalendarCell({
         </span>
       </div>
 
-      <div className="flex flex-col gap-0.5">
+      <div className="flex flex-col gap-[3px]">
         {visibleTasks.map((task) => (
           <CalendarTaskBar
             key={`${task.id}|${day}`}

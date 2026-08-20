@@ -213,7 +213,9 @@ export function TaskThread({ taskId }: TaskThreadProps) {
           )}
         </div>
 
-        <form onSubmit={submit} className="flex flex-col gap-2 pt-1">
+        {/* id — якорь для мобильного футера карточки («Комментарий…» ставит
+            сюда курсор). */}
+        <form id="task-thread-composer" onSubmit={submit} className="flex flex-col gap-2 pt-1">
           <MentionTextarea
             rows={3}
             value={draft}

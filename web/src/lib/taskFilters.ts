@@ -166,3 +166,32 @@ export function toCalendarFilters(filters: TaskViewFilters): CalendarFilters {
   if (filters.priority) out.priority = filters.priority
   return out
 }
+
+const DUE_LABEL: Record<DuePreset, string> = {
+  today: 'сегодня',
+  week: 'неделя',
+  overdue: 'просрочено',
+}
+
+/**
+ * «Исполнитель: Дмитрий Фёдоров · Приоритет: срочно» — перечень применённых
+ * фильтров для пустого состояния: человек должен видеть, ЧТО отсекло задачи,
+ * а не только что «ни одной». Имена исполнителя/метки передаёт вызывающий
+ * (в URL лежат id); без них поле подписывается «выбран», а не id.
+ */
+export function describeFilters(
+  filters: TaskViewFilters,
+  names: { assignee?: string | null; label?: string | null } = {},
+  labels: {
+    status: Record<TaskStatus, string>
+    priority: Record<TaskPriority, string>
+  },
+): string {
+  const parts: string[] = []
+  if (filters.assignee) parts.push(`Исполнитель: ${names.assignee ?? 'выбран'}`)
+  if (filters.status) parts.push(`Статус: ${labels.status[filters.status]}`)
+  if (filters.priority) parts.push(`Приоритет: ${labels.priority[filters.priority]}`)
+  if (filters.label) parts.push(`Метка: ${names.label ?? 'выбрана'}`)
+  if (filters.due) parts.push(`Срок: ${DUE_LABEL[filters.due]}`)
+  return parts.join(' · ')
+}

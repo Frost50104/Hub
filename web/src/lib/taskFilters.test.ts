@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  describeFilters,
   activeFilterCount,
   applyFiltersToSearchParams,
   filtersFromSearchParams,
@@ -133,5 +134,26 @@ describe('narrowableFilter', () => {
       key: 'label',
       label: 'метку',
     })
+  })
+})
+
+describe('describeFilters', () => {
+  const labels = {
+    status: { todo: 'К выполнению', in_progress: 'В работе', in_review: 'На проверке', done: 'Готово' },
+    priority: { low: 'низкий', medium: 'средний', high: 'высокий', urgent: 'срочно' },
+  } as const
+  it('перечисляет применённые фильтры с именами', () => {
+    expect(
+      describeFilters(
+        { assignee: 'u1', priority: 'urgent', due: 'week' },
+        { assignee: 'Дмитрий Фёдоров' },
+        labels,
+      ),
+    ).toBe('Исполнитель: Дмитрий Фёдоров · Приоритет: срочно · Срок: неделя')
+  })
+  it('без имени пишет «выбран», а не id', () => {
+    expect(describeFilters({ assignee: 'u1', label: 'l1' }, {}, labels)).toBe(
+      'Исполнитель: выбран · Метка: выбрана',
+    )
   })
 })

@@ -55,6 +55,9 @@ class WorkloadEntry(BaseModel):
     email: str | None
     active_count: int
     done_count: int
+    # Просроченные у исполнителя (дашборд редизайна, колонка «Просрочено»).
+    # Дефолт 0 — старые клиенты поля не ждут, новые читают.
+    overdue_count: int = 0
 
 
 class NumberStats(BaseModel):
@@ -159,6 +162,18 @@ _ACTIVE_SUM = func.sum(
 _DONE_SUM = func.sum(cast(Task.status == "done", Integer)).label("done_count")
 
 
+def _overdue_sum(now: datetime):
+    """Просроченные (тот же критерий, что `_overdue_count`): активные, не
+    закрытые, срок в прошлом. Считается в том же фан-ауте по исполнителям —
+    задача на двоих горит у обоих."""
+    return func.sum(
+        cast(
+            and_(Task.archived_at.is_(None), Task.status != "done", Task.due_at < now),
+            Integer,
+        )
+    ).label("overdue_count")
+
+
 async def _workload(
     session: AsyncSession, project_id: UUID
 ) -> list[WorkloadEntry]:
@@ -172,6 +187,8 @@ async def _workload(
     исполнителя» считается отдельным запросом и склеивается ПОСЛЕ, иначе
     limit(_WORKLOAD_TOP) мог бы его отсечь.
     """
+    now = datetime.now(UTC)
+    overdue_sum = _overdue_sum(now)
     rows = await session.execute(
         select(
             TaskAssignee.employee_id,
@@ -179,6 +196,7 @@ async def _workload(
             ShadowUser.email,
             _ACTIVE_SUM,
             _DONE_SUM,
+            overdue_sum,
         )
         .select_from(Task)
         .join(TaskAssignee, TaskAssignee.task_id == Task.id)
@@ -200,13 +218,14 @@ async def _workload(
             email=row.email,
             active_count=int(row.active_count or 0),
             done_count=int(row.done_count or 0),
+            overdue_count=int(row.overdue_count or 0),
         )
         for row in rows.all()
     ]
 
     unassigned = (
         await session.execute(
-            select(_ACTIVE_SUM, _DONE_SUM).where(
+            select(_ACTIVE_SUM, _DONE_SUM, overdue_sum).where(
                 Task.project_id == project_id, has_no_assignees()
             )
         )
@@ -219,6 +238,7 @@ async def _workload(
                 email=None,
                 active_count=int(unassigned.active_count or 0),
                 done_count=int(unassigned.done_count or 0),
+                overdue_count=int(unassigned.overdue_count or 0),
             )
         )
         out.sort(key=lambda e: e.active_count, reverse=True)

@@ -291,8 +291,7 @@ function DesktopInbox() {
 // ─── Мобильный ──────────────────────────────────────────────────────────────
 
 function MobileInbox() {
-  const { notifications, markAll, markOne, items, unread, groups, unreadOnly, setUnreadOnly } =
-    useInbox()
+  const { notifications, markAll, markOne, items, unread, groups } = useInbox()
   const space = useResolvedSpace()
 
   return (
@@ -313,15 +312,8 @@ function MobileInbox() {
         }
       />
 
-      <div className="flex items-center gap-2 border-b border-hair px-4 py-2.5">
-        <FilterChip active={!unreadOnly} onClick={() => setUnreadOnly(false)}>
-          Все
-        </FilterChip>
-        <FilterChip active={unreadOnly} onClick={() => setUnreadOnly(true)}>
-          Непрочитанные
-        </FilterChip>
-      </div>
-
+      {/* Чипов «Все/Непрочитанные» на телефоне нет (макет): окно выборки —
+          десктопный контрол, на телефоне достаточно «Прочитать всё» и счётчика. */}
       {notifications.isLoading && <SkeletonRows rows={5} className="p-4" />}
       {notifications.isError && (
         <QueryError
