@@ -97,6 +97,18 @@ class Settings(BaseSettings):
     # трогая обычные ответы по базе знаний. Пусто → та же ai_chat_model.
     ai_tool_model: str | None = Field(default=None)
 
+    # iiko OLAP (волна 2 ассистента). Без хоста/кредов отчёты отвечают 503 и
+    # фронт показывает экран «Ассистент ещё не подключён».
+    # ВАЖНО: каждое подключение занимает слот лицензии iiko — клиент обязан
+    # разлогиниваться, а сервис кэширует и сериализует запросы per-tenant.
+    iiko_base_url: str | None = Field(default=None)
+    iiko_login: str | None = Field(default=None)
+    iiko_password: str | None = Field(default=None)
+    iiko_verify_ssl: bool = Field(default=True)
+    # Ниже nginx-потолка локации /api/ai/ (120s) и бюджета витка ассистента.
+    iiko_timeout_sec: float = Field(default=30.0)
+    iiko_cache_ttl_sec: int = Field(default=900)
+
     # Public links (3.6.12) — view-only no-auth deep-links to a task/project.
     # Feature-flag so we can kill-switch the entire surface without a redeploy.
     public_links_enabled: bool = Field(default=True)

@@ -435,3 +435,87 @@ async def test_action_turn_leaves_trace_in_history(db: AsyncSession, tenant_id: 
     await plan_service.execute(db, plan, owner)
     after = await _history(db, conversation.id)
     assert "Действие выполнено" in after[1].content
+
+
+# ─── Отчёты iiko: гейт доступа и скоуп точек (волна 2) ──────────────────────
+
+
+async def test_reports_denied_for_line_employee(db: AsyncSession, tenant_id: uuid.UUID):
+    """Линейный сотрудник не получает отчёты по сети — как и в learn-аналитике."""
+    from app.api.reports import get_report
+    from app.models.employee_profile import EmployeeProfile
+
+    principal = make_principal(
+        tenant_id, email="line@t.ru", role="member", tenant_slug="arep1"
+    )
+    await _register(db, principal)
+    db.add(
+        EmployeeProfile(
+            tenant_id=tenant_id,
+            employee_id=principal.employee_id,
+            email="line@t.ru",
+            full_name="Линейный",
+            org_role="employee",
+        )
+    )
+    await db.flush()
+
+    with pytest.raises(HTTPException) as exc:
+        await get_report("revenue", None, None, principal, db)
+    assert exc.value.status_code == 403
+
+
+async def test_tu_scope_requires_iiko_mapping(db: AsyncSession, tenant_id: uuid.UUID):
+    """У ТУ без сопоставления точек с iiko отчёт обязан падать ВНЯТНО.
+
+    Иначе фильтр OLAP ушёл бы пустым и управляющий увидел бы всю сеть —
+    ровно та утечка, ради которой заведено `stores.iiko_department`.
+    """
+    from app.api.reports import _departments
+    from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
+    from app.models.org import Store
+
+    principal = make_principal(
+        tenant_id, email="tu@t.ru", role="member", tenant_slug="arep2"
+    )
+    await _register(db, principal)
+    profile = EmployeeProfile(
+        tenant_id=tenant_id,
+        employee_id=principal.employee_id,
+        email="tu@t.ru",
+        full_name="Управляющий",
+        org_role="tu",
+        status="active",
+    )
+    db.add(profile)
+    await db.flush()
+    store = Store(tenant_id=tenant_id, name="Галерея")
+    db.add(store)
+    await db.flush()
+    db.add(
+        TuStoreAssignment(tenant_id=tenant_id, profile_id=profile.id, store_id=store.id)
+    )
+    await db.flush()
+
+    with pytest.raises(HTTPException) as exc:
+        await _departments(db, principal)
+    assert exc.value.status_code == 409
+    assert "iiko" in str(exc.value.detail)
+
+    store.iiko_department = "Галерея, 1"
+    await db.flush()
+    departments, label = await _departments(db, principal)
+    assert departments == ["Галерея, 1"]
+    assert label == "Галерея"
+
+
+async def test_admin_gets_whole_network(db: AsyncSession, tenant_id: uuid.UUID):
+    from app.api.reports import _departments
+
+    admin = make_principal(
+        tenant_id, email="admin-rep@t.ru", role="admin", tenant_slug="arep3"
+    )
+    await _register(db, admin)
+    departments, label = await _departments(db, admin)
+    assert departments is None, "админу — вся сеть, фильтр не ставится"
+    assert label is None

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -156,6 +156,18 @@ class UpdateTasksArgs(BaseModel):
     priority: TaskPriorityArg | None = None
     due_at: str | None = None
     assignees: list[str] | None = Field(default=None, max_length=10)
+
+
+class IikoReportArgs(BaseModel):
+    kind: Literal["revenue", "avg", "items", "peak", "writeoff"] = Field(
+        description=(
+            "revenue — выручка по точкам; avg — средний чек и динамика; "
+            "items — продажи по позициям меню; peak — часы пик по чекам; "
+            "writeoff — списания и себестоимость"
+        )
+    )
+    date_from: str | None = Field(default=None, description="Начало периода YYYY-MM-DD")
+    date_to: str | None = Field(default=None, description="Конец периода YYYY-MM-DD")
 
 
 class CommentArgs(BaseModel):
@@ -384,6 +396,44 @@ async def t_search_knowledge(ctx: ToolContext, a: KnowledgeArgs) -> dict[str, An
         "documents": [
             {"title": c.title, "url": c.url_path, "text": c.content[:1500]} for c in chunks
         ]
+    }
+
+
+async def t_iiko_report(ctx: ToolContext, a: IikoReportArgs) -> dict[str, Any]:
+    """Отчёт iiko. Read-инструмент: выполняется сразу, ничего не меняет.
+
+    Скоуп точек и лимит периода считает тот же код, что и ручка отчётов —
+    ассистент не имеет привилегий по сравнению с экраном.
+    """
+    from fastapi import HTTPException
+
+    from app.api.reports import _build
+
+    try:
+        payload = await _build(
+            a.kind,
+            date.fromisoformat(a.date_from) if a.date_from else None,
+            date.fromisoformat(a.date_to) if a.date_to else None,
+            ctx.principal,
+            ctx.db,
+        )
+    except HTTPException as e:
+        if e.status_code == 503:
+            return {"error": "Отчёты iiko не подключены — нужен доступ от администратора"}
+        if e.status_code == 403:
+            return denied("отчёты iiko доступны руководителям и публикаторам")
+        return {"error": str(e.detail)}
+    except ValueError:
+        return {"error": "Не понял период — нужен вид 2026-08-18"}
+    # Модели отдаём ЦИФРЫ, а блок с графиком журнал соберёт сам из того же
+    # payload: пересказывать полосы словами модель не должна.
+    return {
+        "__report__": payload,
+        "title": payload["title"],
+        "period": payload["subtitle"],
+        "stats": payload["stats"],
+        "rows": payload["bars"][:6] or payload["top"][:5],
+        "note": payload.get("note"),
     }
 
 
@@ -652,6 +702,9 @@ TOOLS: list[Tool] = [
          t_find_people, "read"),
     Tool("search_knowledge", "Ответ по базе знаний: регламенты, стандарты, учебные "
          "материалы и карточки товаров.", KnowledgeArgs, t_search_knowledge, "read"),
+    Tool("iiko_report", "Отчёт из iiko: выручка по точкам, средний чек, продажи по "
+         "позициям меню, часы пик, списания. Период по умолчанию — прошлая неделя.",
+         IikoReportArgs, t_iiko_report, "read"),
     Tool("create_task", "Создать задачу. Требует подтверждения человеком.",
          CreateTaskArgs, t_create_task, "write"),
     Tool("update_task", "Изменить ОДНУ задачу: статус, срок, приоритет, исполнителей, "

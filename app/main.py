@@ -163,6 +163,7 @@ def create_app() -> FastAPI:
     from app.api import public as public_api
     from app.api import push as push_api
     from app.api import quizzes as quizzes_api
+    from app.api import reports as reports_api
     from app.api import search as search_api
     from app.api import sections as sections_api
     from app.api import share as share_api
@@ -217,6 +218,8 @@ def create_app() -> FastAPI:
     # Ассистент (волна 1). Старые /api/learn/ai/* остаются в ai_api
     # алиасами: PWA живёт вчерашним бандлом ещё несколько дней.
     app.include_router(assistant_api.router, prefix="/api")
+    # Отчёты iiko — под /api/ai/, где nginx держит proxy_read_timeout 120s.
+    app.include_router(reports_api.router, prefix="/api")
     app.include_router(shifts_api.router, prefix="/api")
     app.include_router(assessments_api.router, prefix="/api")
 

@@ -58,6 +58,8 @@ export interface TurnData {
   lines?: string[]
   reason?: string
   who_can?: { name: string; role: string }[]
+  /** Снимок отчёта iiko на момент запроса. */
+  report?: Report
 }
 
 export interface AssistantMessage {
@@ -149,4 +151,86 @@ export function turnTime(iso: string): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+// ─── Отчёты iiko (волна 2) ──────────────────────────────────────────────────
+
+export type ReportKind = 'revenue' | 'avg' | 'items' | 'peak' | 'writeoff'
+export type ReportChart = 'bars' | 'hours' | 'lists'
+
+export interface ReportStat {
+  label: string
+  value: string
+  /** Значение — рост: набирается `--green-deep`, а не нейтралью. */
+  positive: boolean
+}
+
+export interface ReportBar {
+  name: string
+  sum: string
+  /** Доля от самой длинной полосы, 0..100. */
+  pct: number
+  delta: string
+  /** Рост. Падение красным НЕ красится — красный занят просрочкой и ошибками. */
+  up: boolean
+}
+
+export interface ReportHour {
+  label: string
+  pct: number
+}
+
+export interface ReportItem {
+  name: string
+  qty: string
+  share: string
+}
+
+export interface Report {
+  kind: ReportKind
+  title: string
+  chart: ReportChart
+  subtitle: string
+  period: { from: string; to: string }
+  stats: ReportStat[]
+  bars: ReportBar[]
+  hours: ReportHour[]
+  top: ReportItem[]
+  anti: ReportItem[]
+  note: string | null
+  cached?: boolean
+}
+
+export interface ReportCatalog {
+  configured: boolean
+  reports: { key: ReportKind; title: string; chart: ReportChart }[]
+}
+
+export const reportsApi = {
+  catalog: (): Promise<ReportCatalog> =>
+    api.get<ReportCatalog>('/ai/reports').then((r) => r.data),
+
+  get: (kind: ReportKind, from?: string, to?: string): Promise<Report> =>
+    api
+      .get<Report>(`/ai/reports/${kind}`, { params: { from, to } })
+      .then((r) => r.data),
+
+  /**
+   * Тег <a href> не несёт Bearer — качаем blob через axios и отдаём
+   * object-URL. Тот же приём, что у выгрузки learn-аналитики.
+   */
+  downloadCsv: async (kind: ReportKind, from?: string, to?: string): Promise<void> => {
+    const resp = await api.get(`/ai/reports/${kind}/csv`, {
+      params: { from, to },
+      responseType: 'blob',
+    })
+    const url = URL.createObjectURL(resp.data as Blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `iiko-${kind}-${from ?? 'период'}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  },
 }

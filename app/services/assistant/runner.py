@@ -102,6 +102,7 @@ async def run(
     ]
     sources: list[dict[str, Any]] = []
     denied_payload: dict[str, Any] | None = None
+    report_payload: dict[str, Any] | None = None
     used_summary_tool = False
 
     for _ in range(MAX_ITERATIONS):
@@ -116,6 +117,12 @@ async def run(
             content = result.content.strip()
             if denied_payload is not None:
                 return Turn(kind="denied", content=content, data=denied_payload)
+            if report_payload is not None:
+                # Отчёт — СНИМОК факта на момент запроса (в отличие от плана,
+                # который живёт и меняется): храним его в журнале целиком.
+                return Turn(
+                    kind="report", content=content, data={"report": report_payload}
+                )
             bullets = _extract_bullets(content)
             if used_summary_tool and len(bullets) >= 3:
                 return Turn(kind="summary", content=content, data={"lines": bullets})
@@ -131,6 +138,8 @@ async def run(
             else:
                 payload = await _run_tool(ctx, tool, call.arguments)
 
+            if "__report__" in payload:
+                report_payload = payload.pop("__report__")
             if "__plan__" in payload:
                 # Обрыв цикла: дальше решает человек.
                 return Turn(kind="action", content="", plan=payload["__plan__"])

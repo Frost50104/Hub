@@ -1,13 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, MessageSquarePlus, Trash2 } from 'lucide-react'
+import { BarChart3, Bot, MessageSquarePlus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { DeniedBlock, ErrorBlock, SummaryBlock } from '@/components/assistant/Blocks'
+import {
+  DeniedBlock,
+  ErrorBlock,
+  ReportBlock,
+  SummaryBlock,
+} from '@/components/assistant/Blocks'
 import { Composer } from '@/components/assistant/Composer'
 import { EmptyState } from '@/components/assistant/EmptyState'
 import { PlanCard } from '@/components/assistant/PlanCard'
+import { ReportView } from '@/components/assistant/ReportView'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { Markdown } from '@/components/Markdown'
 import { QueryError } from '@/components/QueryError'
@@ -17,11 +23,13 @@ import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMe } from '@/hooks/useMe'
 import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
+import { plural } from '@/lib/typography'
 import {
   assistantApi,
   TURN_LABEL,
   turnTime,
   type AssistantMessage,
+  type ReportKind,
 } from '@/lib/assistant'
 
 /**
@@ -48,12 +56,14 @@ function Turn({
   conversationId,
   isLast,
   onRetry,
+  onExpandReport,
 }: {
   question: AssistantMessage
   answer: AssistantMessage | null
   conversationId: string
   isLast: boolean
   onRetry: (text: string) => void
+  onExpandReport: (kind: ReportKind) => void
 }) {
   const kind = answer?.kind ?? 'answer'
   return (
@@ -83,6 +93,9 @@ function Turn({
       )}
       {kind === 'action' && answer?.data?.plan && (
         <PlanCard plan={answer.data.plan} conversationId={conversationId} />
+      )}
+      {kind === 'report' && answer?.data?.report && (
+        <ReportBlock report={answer.data.report} onExpand={onExpandReport} />
       )}
       {kind === 'denied' && answer?.data && <DeniedBlock data={answer.data} />}
       {kind === 'error' && answer && (
@@ -147,7 +160,14 @@ export function AssistantPage() {
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState<string | null>(null)
+  const [view, setView] = useState<'journal' | 'reports'>('journal')
+  const [reportKind, setReportKind] = useState<ReportKind>('revenue')
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  const expandReport = (kind: ReportKind) => {
+    setReportKind(kind)
+    setView('reports')
+  }
 
   const status = useQuery({ queryKey: ['assistant-status'], queryFn: assistantApi.status })
   const conversations = useQuery({
@@ -185,8 +205,16 @@ export function AssistantPage() {
   })
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.data, pending])
+    if (view === 'journal') bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages.data, pending, view])
+
+  // Переключение вида — в начало. На мобильном скроллится документ, и без
+  // сброса экран отчётов открывался прокрученным на позицию журнала.
+  // Хелпера useScrollProgress тут не нужно: на десктопе прокручивается
+  // внутренний контейнер, который при смене вида монтируется заново.
+  useEffect(() => {
+    window.scrollTo({ top: 0 })
+  }, [view])
 
   const submit = (text?: string) => {
     const question = (text ?? draft).trim()
@@ -198,9 +226,10 @@ export function AssistantPage() {
 
   const turns = toTurns(messages.data ?? [])
   const empty = !conversationId && !pending
+  // Регистр задаём здесь: шапка его не трогает (preserveEyebrowCase).
   const opCount = empty
-    ? 'новый разговор'
-    : `сегодня, ${turns.length} ${turns.length === 1 ? 'операция' : 'операций'}`
+    ? 'Новый разговор'
+    : `Сегодня, ${turns.length} ${plural(turns.length, 'операция', 'операции', 'операций')}`
 
   if (status.data && !status.data.configured) {
     return (
@@ -215,7 +244,26 @@ export function AssistantPage() {
 
   return (
     <div className="mx-auto flex h-[calc(100vh-2rem)] max-w-6xl flex-col lg:h-[calc(100vh-3rem)]">
-      {!isDesktop && <MobilePageHeader eyebrow={opCount} title="Ассистент" />}
+      {!isDesktop && (
+        <MobilePageHeader
+          eyebrow={view === 'reports' ? 'Отчёты iiko' : opCount}
+          preserveEyebrowCase
+          title="Ассистент"
+          // Вход в отчёты обязан быть и на мобильном: Sidebar рендерится
+          // только от 1024px, и без этой кнопки экран отчётов был бы
+          // недостижим с телефона — то есть у большинства сотрудников.
+          trailing={
+            <Button
+              size="sm"
+              variant={view === 'reports' ? 'default' : 'secondary'}
+              onClick={() => setView(view === 'reports' ? 'journal' : 'reports')}
+            >
+              <BarChart3 className="h-4 w-4" />
+              {view === 'reports' ? 'Журнал' : 'Отчёты'}
+            </Button>
+          }
+        />
+      )}
       <div className="flex min-h-0 flex-1 gap-6 p-4 lg:p-8">
         {isDesktop && (
           <aside className="w-60 shrink-0 space-y-2 overflow-y-auto">
@@ -223,9 +271,20 @@ export function AssistantPage() {
               size="sm"
               variant="secondary"
               className="w-full"
-              onClick={() => setConversationId(null)}
+              onClick={() => {
+                setConversationId(null)
+                setView('journal')
+              }}
             >
               <MessageSquarePlus className="h-4 w-4" /> Новый разговор
+            </Button>
+            <Button
+              size="sm"
+              variant={view === 'reports' ? 'default' : 'ghost'}
+              className="w-full justify-start"
+              onClick={() => setView(view === 'reports' ? 'journal' : 'reports')}
+            >
+              <BarChart3 className="h-4 w-4" /> Отчёты iiko
             </Button>
             {(conversations.data ?? []).map((c) => (
               <div
@@ -258,6 +317,12 @@ export function AssistantPage() {
         )}
 
         <div className="flex min-h-0 flex-1 flex-col gap-4">
+          {view === 'reports' ? (
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <ReportView initialKind={reportKind} onBack={() => setView('journal')} />
+            </div>
+          ) : (
+          <>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {empty && (
               <EmptyState
@@ -277,6 +342,7 @@ export function AssistantPage() {
                 conversationId={conversationId!}
                 isLast={i === turns.length - 1 && !pending}
                 onRetry={(text) => submit(text)}
+                onExpandReport={expandReport}
               />
             ))}
             {pending && (
@@ -299,6 +365,8 @@ export function AssistantPage() {
             busy={ask.isPending}
             showHints={!empty}
           />
+          </>
+          )}
         </div>
       </div>
     </div>

@@ -4,8 +4,9 @@ import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/Button'
 import { CreateTaskDialog } from '@/components/task/CreateTaskDialog'
+import { cn } from '@/lib/cn'
 import { plural } from '@/lib/typography'
-import { type TurnData } from '@/lib/assistant'
+import { type Report, type ReportKind, type TurnData } from '@/lib/assistant'
 
 /**
  * Блоки журнала. Общий силуэт — `--tint` + `--glass-border`, радиус 14,
@@ -99,6 +100,83 @@ export function ErrorBlock({
           Повторить
         </Button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Компактный отчёт в журнале. Чип источника — `--blue-deep`: синий в
+ * ассистенте закреплён за «откуда данные», к сравнению периодов он
+ * отношения не имеет.
+ *
+ * Данные — снимок на момент запроса (в отличие от плана, который живёт):
+ * отчёт это зафиксированный факт, и пересобирать его при открытии журнала
+ * было бы и дорого (слот лицензии iiko), и неверно.
+ */
+export function ReportBlock({
+  report,
+  onExpand,
+}: {
+  report: Report
+  onExpand: (kind: ReportKind) => void
+}) {
+  const rows = report.bars.slice(0, 3)
+  const items = rows.length ? [] : report.top.slice(0, 3)
+  return (
+    <div className={BLOCK}>
+      <div className="flex flex-wrap items-center gap-2.5 border-b border-hair px-4 py-3">
+        <span className="inline-flex h-[22px] shrink-0 items-center rounded-md bg-blue-deep px-2 text-[11px] font-bold uppercase tracking-[0.06em] text-bg">
+          iiko
+        </span>
+        <p className="min-w-0 flex-1 truncate text-[15px] font-semibold text-text">
+          {report.title} · {report.subtitle.split(' · ')[0]}
+        </p>
+        <button
+          type="button"
+          onClick={() => onExpand(report.kind)}
+          className="shrink-0 text-[14px] font-semibold text-amber hover:opacity-80"
+        >
+          Развернуть отчёт →
+        </button>
+      </div>
+      <ul className="px-4 py-1">
+        {rows.map((b, i) => (
+          <li
+            key={b.name}
+            className={cn(
+              'flex min-h-[38px] items-center gap-2.5',
+              i > 0 && 'border-t border-hair',
+            )}
+          >
+            <span className="min-w-0 flex-1 truncate text-[15px] text-text">{b.name}</span>
+            <span className="shrink-0 font-mono text-[14px] font-semibold text-text">
+              {b.sum}
+            </span>
+            <span
+              className={cn(
+                'w-14 shrink-0 text-right font-mono text-[14px] font-semibold',
+                b.up ? 'text-green-deep' : 'text-text2',
+              )}
+            >
+              {b.delta}
+            </span>
+          </li>
+        ))}
+        {items.map((t, i) => (
+          <li
+            key={t.name}
+            className={cn(
+              'flex min-h-[38px] items-center gap-2.5',
+              i > 0 && 'border-t border-hair',
+            )}
+          >
+            <span className="min-w-0 flex-1 truncate text-[15px] text-text">{t.name}</span>
+            <span className="shrink-0 font-mono text-[14px] font-semibold text-text">
+              {t.share}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

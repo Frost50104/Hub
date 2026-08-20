@@ -8,6 +8,12 @@ interface MobilePageHeaderProps {
   topSlot?: ReactNode
   /** Pre-title sub-line — typically the date or a small label. */
   eyebrow?: string
+  /**
+   * Не применять `capitalize` к eyebrow. Нужно там, где в строке есть имя
+   * собственное в нижнем регистре: «Отчёты iiko» иначе превращается в
+   * «Отчёты Iiko» — CSS-capitalize поднимает первую букву КАЖДОГО слова.
+   */
+  preserveEyebrowCase?: boolean
   /** Big page title (rendered as `<h1>`). */
   title: string
   /** Optional trailing action — a button group, icon button, etc. */
@@ -26,6 +32,7 @@ interface MobilePageHeaderProps {
 export function MobilePageHeader({
   topSlot,
   eyebrow,
+  preserveEyebrowCase,
   title,
   trailing,
   withOverflowMenu,
@@ -39,7 +46,14 @@ export function MobilePageHeader({
     >
       {topSlot && <div className="mb-3">{topSlot}</div>}
       {eyebrow && (
-        <p className="mb-1 text-xs text-text2 capitalize">{eyebrow}</p>
+        <p
+          className={cn(
+            'mb-1 text-xs text-text2',
+            !preserveEyebrowCase && 'capitalize',
+          )}
+        >
+          {eyebrow}
+        </p>
       )}
       <div className="flex items-end justify-between gap-2">
         <h1 className="font-display text-3xl font-bold leading-tight text-text">
