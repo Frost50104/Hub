@@ -3,11 +3,22 @@
 Живут под `/api/ai/`, потому что именно эта локация nginx держит
 `proxy_read_timeout 120s`: OLAP за месяц — самый долгий запрос продукта.
 
-Доступ — тот же гейт, что у learn-аналитики (Ф5): publisher+/hub-admin видят
-всю сеть, ТУ и владелец франчайзи — свои точки, линейный сотрудник получает
-403. Скоуп выражается через `stores.iiko_department`: в iiko точка
-адресуется строкой-именем, и без сопоставления управляющий увидел бы сеть
-целиком.
+Кто что видит (решение владельца 2026-08-20):
+
+- **вся сеть** — hub-admin, publisher+ и ВЕСЬ офис (`org_role = office`):
+  управляющая компания к конкретной точке не привязана;
+- **свои точки** — ТУ (закреплённые) и владелец франчайзи (точки его
+  франчайзи);
+- **403** — линейный сотрудник на точке. Выручка и списания сети не входят в
+  его работу.
+
+Офис приходится разрешать здесь явно: `org_scope.resolve_scope` возвращает
+для него `self` — этот скоуп заведён под «аналитику о себе», а не под «ничего
+не видит».
+
+Скоуп по точкам выражается через `stores.iiko_department`: в iiko точка
+адресуется СТРОКОЙ-именем, в Hub — UUID, и без сопоставления фильтр OLAP
+собрать не из чего.
 """
 
 from __future__ import annotations
@@ -29,7 +40,7 @@ from app.services.content_access import resolve_content_role
 from app.services.iiko import service as iiko_service
 from app.services.iiko.client import IikoError, IikoNotConfigured
 from app.services.iiko.reports import REPORT_ORDER, SPECS
-from app.services.org_scope import resolve_scope
+from app.services.org_scope import get_profile, resolve_scope
 
 router = APIRouter(tags=["iiko-reports"])
 
@@ -50,7 +61,13 @@ async def _departments(
     """
     role = await resolve_content_role(db, principal)
     scope = await resolve_scope(db, principal)
-    if lifecycle.can(role, "publisher") or scope.kind == "all":
+    profile = await get_profile(db, principal)
+    is_office = (
+        profile is not None
+        and profile.org_role == "office"
+        and profile.status == "active"
+    )
+    if lifecycle.can(role, "publisher") or scope.kind == "all" or is_office:
         return None, None, []
     if scope.kind == "stores":
         rows = (
@@ -80,7 +97,11 @@ async def _departments(
             sorted(unmapped),
         )
     raise HTTPException(
-        status_code=403, detail="Отчёты iiko доступны руководителям и публикаторам"
+        status_code=403,
+        detail=(
+            "Отчёты iiko доступны офису, территориальным управляющим и "
+            "владельцам франчайзи"
+        ),
     )
 
 

@@ -560,3 +560,58 @@ async def test_partial_iiko_mapping_is_announced(db: AsyncSession, tenant_id: uu
     assert departments == ["Грибоедова 15"]
     assert label == "Грибоедова 15", "подпись скоупа — только связанные точки"
     assert missing == ["Новая точка"], "непривязанная точка обязана быть названа"
+
+
+async def test_office_sees_whole_network(db: AsyncSession, tenant_id: uuid.UUID):
+    """Решение владельца: офис — управляющая компания, к точке не привязан и
+    видит сеть целиком. `resolve_scope` отдаёт ему `self` (тот скоуп заведён
+    под «аналитику о себе»), поэтому разрешение выдаётся здесь явно."""
+    from app.api.reports import _departments
+    from app.models.employee_profile import EmployeeProfile
+
+    principal = make_principal(
+        tenant_id, email="office@t.ru", role="member", tenant_slug="arep5"
+    )
+    await _register(db, principal)
+    db.add(
+        EmployeeProfile(
+            tenant_id=tenant_id,
+            employee_id=principal.employee_id,
+            email="office@t.ru",
+            full_name="Офис",
+            org_role="office",
+            status="active",
+        )
+    )
+    await db.flush()
+
+    departments, label, missing = await _departments(db, principal)
+    assert departments is None, "офису — вся сеть, фильтр по точкам не ставится"
+    assert label is None
+    assert missing == []
+
+
+async def test_archived_office_profile_loses_access(db: AsyncSession, tenant_id: uuid.UUID):
+    """Уволенный офисный сотрудник не должен продолжать видеть выручку сети."""
+    from app.api.reports import _departments
+    from app.models.employee_profile import EmployeeProfile
+
+    principal = make_principal(
+        tenant_id, email="ex-office@t.ru", role="member", tenant_slug="arep6"
+    )
+    await _register(db, principal)
+    db.add(
+        EmployeeProfile(
+            tenant_id=tenant_id,
+            employee_id=principal.employee_id,
+            email="ex-office@t.ru",
+            full_name="Бывший офис",
+            org_role="office",
+            status="archived",
+        )
+    )
+    await db.flush()
+
+    with pytest.raises(HTTPException) as exc:
+        await _departments(db, principal)
+    assert exc.value.status_code == 403

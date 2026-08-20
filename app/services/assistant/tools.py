@@ -421,7 +421,10 @@ async def t_iiko_report(ctx: ToolContext, a: IikoReportArgs) -> dict[str, Any]:
         if e.status_code == 503:
             return {"error": "Отчёты iiko не подключены — нужен доступ от администратора"}
         if e.status_code == 403:
-            return denied("отчёты iiko доступны руководителям и публикаторам")
+            return denied(
+                "отчёты iiko доступны офису, территориальным управляющим и "
+                "владельцам франчайзи"
+            )
         return {"error": str(e.detail)}
     except ValueError:
         return {"error": "Не понял период — нужен вид 2026-08-18"}
