@@ -88,6 +88,9 @@ class CustomFieldStat(BaseModel):
 
 class ProjectStatsResponse(BaseModel):
     status_breakdown: dict[str, int]
+    # Срез по этапам проекта: ключ — id этапа (строкой), «None» — без этапа
+    # (окно деплоя 0040). Имена этапов фронт берёт из /stages.
+    stage_breakdown: dict[str, int] = {}
     priority_breakdown: dict[str, int]
     completed_trend: list[TrendPoint]
     overdue_count: int
@@ -394,6 +397,7 @@ async def get_stats(
     status_breakdown = await _status_or_priority_breakdown(
         db, project_id, Task.status
     )
+    stage_breakdown = await _status_or_priority_breakdown(db, project_id, Task.stage_id)
     priority_breakdown = await _status_or_priority_breakdown(
         db, project_id, Task.priority
     )
@@ -415,6 +419,7 @@ async def get_stats(
 
     return ProjectStatsResponse(
         status_breakdown=status_breakdown,
+        stage_breakdown=stage_breakdown,
         priority_breakdown=priority_breakdown,
         completed_trend=completed_trend,
         overdue_count=overdue_count,

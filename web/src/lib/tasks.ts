@@ -17,6 +17,8 @@ export interface Task {
   title: string
   description: string | null
   status: TaskStatus
+  /** Этап (колонка доски). Optional: объект из кэша старого бандла поля не несёт. */
+  stage_id?: string | null
   priority: TaskPriority
   /** Источник истины по исполнителям. Optional: объекта из кэша, пережившего
    *  деплой (или из ответа откаченного бэка) поля не будет — читать ТОЛЬКО
@@ -88,6 +90,8 @@ export interface CalendarFilters {
 }
 
 export interface TaskCreateBody {
+  /** Этап; без него сервер берёт первый этап статуса. */
+  stage_id?: string | null
   title: string
   description?: string
   section_id?: string | null
@@ -101,6 +105,8 @@ export interface TaskCreateBody {
 }
 
 export interface TaskUpdateBody {
+  /** Этап; без него сервер берёт первый этап статуса. */
+  stage_id?: string | null
   title?: string
   description?: string
   section_id?: string | null

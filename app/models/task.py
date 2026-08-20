@@ -76,6 +76,14 @@ class Task(Base):
         nullable=True,
         index=True,
     )
+    # Этап (колонка доски, 0040). NULL только в окне деплоя и после SET NULL
+    # при удалении этапа; зеркало `status` = stage.system_status — пишется
+    # ТОЛЬКО через services/stages.py.
+    stage_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("project_stages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

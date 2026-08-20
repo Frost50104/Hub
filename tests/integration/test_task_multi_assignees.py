@@ -74,6 +74,7 @@ async def _list(db, project_id, principal, *, assignee_id=None):
         due_to=None,
         sort="position",
         order="asc",
+        stage_id=None,
         principal=principal,
         db=db,
     )

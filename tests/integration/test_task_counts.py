@@ -39,6 +39,7 @@ async def _list(db: AsyncSession, project_id: uuid.UUID, principal):
         due_to=None,
         sort="position",
         order="asc",
+        stage_id=None,
         principal=principal,
         db=db,
     )

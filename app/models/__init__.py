@@ -48,6 +48,7 @@ from app.models.section import Section
 from app.models.shadow import ShadowTenant, ShadowUser
 from app.models.share import PublicShareToken
 from app.models.shift import ShiftApplication, ShiftPosting
+from app.models.stage import ProjectStage
 from app.models.survey import (
     Survey,
     SurveyAnswer,
@@ -102,6 +103,7 @@ __all__ = [
     "Project",
     "ProjectFolder",
     "ProjectMember",
+    "ProjectStage",
     "PublicShareToken",
     "PushSubscription",
     "RateLimit",

@@ -34,6 +34,7 @@ from app.services.project_access import (
     require_project_role,
 )
 from app.services.project_key import generate_unique_key
+from app.services.stages import create_default_stages
 
 router = APIRouter(tags=["projects"])
 
@@ -203,6 +204,10 @@ async def create_project(
         created_by=principal.employee_id,
     )
     db.add(project)
+    await db.flush()
+    # Четыре этапа по умолчанию — в той же транзакции: проект без этапов не
+    # знает, куда класть задачи (инвариант «≥1 этап на системный статус»).
+    await create_default_stages(db, tenant_id=principal.tenant_id, project_id=project.id)
     db.add(
         ProjectMember(
             id=uuid4(),

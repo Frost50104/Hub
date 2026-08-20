@@ -38,6 +38,7 @@ import { PropertyRow, PropertyRows } from '@/components/ui/PropertyRows'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useProject, useProjectMembers, useProjectSections } from '@/hooks/useProjects'
+import { useStages } from '@/hooks/useStages'
 import {
   useArchiveTask,
   useTask,
@@ -116,6 +117,10 @@ function Dt({ icon: Icon, children }: { icon?: typeof Flag; children: React.Reac
   )
 }
 
+/** Select этапа в карточке: max-width 320, 36px, r9, --surface (макет). */
+const STAGE_SELECT =
+  'h-9 max-w-[320px] rounded-[9px] border border-glass-border bg-surface px-3 font-body text-[14px] text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 disabled:cursor-default'
+
 /** Прозрачный контрол справа в мобильной строке свойств: 16px, по правому краю. */
 const MOBILE_CONTROL =
   'min-h-[46px] max-w-full appearance-none bg-transparent pr-2.5 text-right font-body text-[16px] text-text focus-visible:outline-none disabled:opacity-100'
@@ -135,6 +140,9 @@ export function TaskDetailDrawer({
   const { data: task, isLoading } = taskQuery
   const project = useProject(projectId)
   const sections = useProjectSections(projectId)
+  // Этапы проекта: статус в карточке — раскрывающийся список с их именами
+  // (имена пользовательские, этапов сколько угодно — ряд чипов не годится).
+  const stages = useStages(projectId)
   // Права считает сервер: viewer → read-only, hub:admin вне членства → правит.
   const readOnly = !project.data?.can_edit
   // Наблюдателю мало сказать «нельзя» — надо назвать, кого просить.
@@ -373,20 +381,37 @@ export function TaskDetailDrawer({
               // «свойство → значение», контрол справа, строка 48px. Ряды чипов
               // на телефоне превращались в стену из шести разнородных блоков.
               <PropertyRows>
-                <PropertyRow label="Статус">
-                  <select
-                    value={task.status}
-                    disabled={readOnly}
-                    aria-label="Статус"
-                    onChange={(e) => update.mutate({ id: task.id, status: e.target.value as TaskStatus })}
-                    className={MOBILE_CONTROL}
-                  >
-                    {STATUSES.map((s) => (
-                      <option key={s} value={s}>
-                        {STATUS_LABEL[s]}
-                      </option>
-                    ))}
-                  </select>
+                <PropertyRow label="Этап">
+                  {stages.data && stages.data.length > 0 ? (
+                    <select
+                      value={task.stage_id ?? ''}
+                      disabled={readOnly}
+                      aria-label="Этап"
+                      onChange={(e) => update.mutate({ id: task.id, stage_id: e.target.value })}
+                      className={MOBILE_CONTROL}
+                    >
+                      {!task.stage_id && <option value="">—</option>}
+                      {stages.data.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <select
+                      value={task.status}
+                      disabled={readOnly}
+                      aria-label="Статус"
+                      onChange={(e) => update.mutate({ id: task.id, status: e.target.value as TaskStatus })}
+                      className={MOBILE_CONTROL}
+                    >
+                      {STATUSES.map((s) => (
+                        <option key={s} value={s}>
+                          {STATUS_LABEL[s]}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </PropertyRow>
                 <PropertyRow label="Приоритет">
                   <select
@@ -444,19 +469,41 @@ export function TaskDetailDrawer({
                 <dl className="m-0 grid grid-cols-1 items-start gap-x-3.5 gap-y-3 lg:grid-cols-[112px_1fr] lg:items-center lg:gap-y-2.5">
                   {isDesktop && (
                     <>
-                      <Dt icon={Flag}>Статус</Dt>
-                      <dd className="m-0 flex flex-wrap gap-1">
-                        {STATUSES.map((s) => (
-                          <OptionButton
-                            key={s}
-                            active={task.status === s}
+                      <Dt icon={Flag}>Этап</Dt>
+                      <dd className="m-0">
+                        {/* Статус = колонка доски: имена этапов пользовательские
+                            и их сколько угодно — раскрывающийся список, а не ряд
+                            чипов. Проект без этапов (окно деплоя) — 4 системных. */}
+                        {stages.data && stages.data.length > 0 ? (
+                          <select
+                            value={task.stage_id ?? ''}
                             disabled={readOnly}
-                            tone="solid"
-                            onClick={() => update.mutate({ id: task.id, status: s })}
+                            aria-label="Этап"
+                            onChange={(e) => update.mutate({ id: task.id, stage_id: e.target.value })}
+                            className={STAGE_SELECT}
                           >
-                            {STATUS_LABEL[s]}
-                          </OptionButton>
-                        ))}
+                            {!task.stage_id && <option value="">—</option>}
+                            {stages.data.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="flex flex-wrap gap-1">
+                            {STATUSES.map((s) => (
+                              <OptionButton
+                                key={s}
+                                active={task.status === s}
+                                disabled={readOnly}
+                                tone="solid"
+                                onClick={() => update.mutate({ id: task.id, status: s })}
+                              >
+                                {STATUS_LABEL[s]}
+                              </OptionButton>
+                            ))}
+                          </span>
+                        )}
                       </dd>
 
                       <Dt icon={Tag}>Приоритет</Dt>

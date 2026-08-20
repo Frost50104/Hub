@@ -7,6 +7,8 @@ import { useInlineCreateTarget } from '@/lib/quickCreate'
 interface TaskInlineCreateProps {
   projectId: string
   sectionId: string | null
+  /** Этап (колонка доски); без него сервер кладёт в первый этап «К выполнению». */
+  stageId?: string | null
   /** Создаёт подзадачу указанной задачи (секция при этом не назначается). */
   parentTaskId?: string
   placeholder?: string
@@ -22,6 +24,7 @@ interface TaskInlineCreateProps {
 export function TaskInlineCreate({
   projectId,
   sectionId,
+  stageId,
   parentTaskId,
   placeholder = '+ Новая задача',
   quickCreateTarget = false,
@@ -38,6 +41,7 @@ export function TaskInlineCreate({
       await create.mutateAsync({
         title: trimmed,
         section_id: sectionId,
+        stage_id: stageId ?? undefined,
         parent_task_id: parentTaskId,
       })
       setTitle('')

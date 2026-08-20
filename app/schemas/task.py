@@ -46,6 +46,9 @@ class TaskCreate(BaseModel):
     description: str | None = Field(default=None, max_length=20_000)
     section_id: UUID | None = None
     parent_task_id: UUID | None = None
+    # Этап (колонка доски). `status` — legacy-вход: без stage_id задача идёт в
+    # первый этап этого статуса (старые бандлы, ассистент, тесты).
+    stage_id: UUID | None = None
     status: TaskStatus = "todo"
     priority: TaskPriority = "medium"
     # DEPRECATED-вход: держим ради PWA-бандлов, которые живут днями после
@@ -60,6 +63,9 @@ class TaskUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=20_000)
     section_id: UUID | None = None
+    # stage_id побеждает status; оба и не согласованы → 422. Явный null для
+    # stage_id не принимается (этап задаче нужен всегда).
+    stage_id: UUID | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
     assignee_id: UUID | None = None  # DEPRECATED-вход, см. TaskCreate
@@ -89,6 +95,9 @@ class TaskResponse(BaseModel):
     title: str
     description: str | None
     status: TaskStatus
+    # Этап — колонка доски. Имя/системный статус фронт берёт из
+    # GET /projects/{id}/stages (один запрос на проект, кэш), не из JOIN'а.
+    stage_id: UUID | None = None
     priority: TaskPriority
     # Источник истины для UI. Уволенные (shadow_users.deleted_at) сюда не
     # попадают, поэтому легаси-поля ниже с ним всегда согласованы — раньше

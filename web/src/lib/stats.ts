@@ -39,6 +39,8 @@ export interface CustomFieldStat {
 
 export interface ProjectStats {
   status_breakdown: Record<string, number>
+  /** Срез по этапам: ключ — id этапа, «None» — без этапа. Optional для старых ответов. */
+  stage_breakdown?: Record<string, number>
   priority_breakdown: Record<string, number>
   completed_trend: TrendPoint[]
   overdue_count: number

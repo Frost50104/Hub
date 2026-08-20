@@ -56,8 +56,10 @@ async def notify_status_changed(
     new_status: str,
     actor_name: str,
     recipient_id: UUID,
+    label: str | None = None,
 ) -> None:
-    label = STATUS_LABEL_RU.get(new_status, new_status)
+    """`label` — имя этапа («Проверка ТУ»); без него — системная подпись."""
+    label = label or STATUS_LABEL_RU.get(new_status, new_status)
     await dispatch(
         session,
         tenant_id=task.tenant_id,

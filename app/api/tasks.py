@@ -32,6 +32,7 @@ from app.schemas.task import (
 from app.services.activity_writer import record_activity
 from app.services.notify import notify_status_changed
 from app.services.project_access import is_hub_admin, require_project_role
+from app.services.stages import next_position, resolve_stage, set_stage, stage_for_status
 from app.services.task_assignees import (
     add_assignee,
     apply_assignee_side_effects,
@@ -54,13 +55,9 @@ TaskSortField = Literal["position", "due_at", "priority", "created_at", "title"]
 
 
 async def _next_position(db: AsyncSession, project_id: UUID, status_: str) -> Decimal:
-    """Append: next position = max(position in the same project/status) + 1."""
-    row = await db.execute(
-        select(func.coalesce(func.max(Task.position) + 1, 1)).where(
-            Task.project_id == project_id, Task.status == status_
-        )
-    )
-    return Decimal(row.scalar_one())
+    """Append в хвост колонки статуса — legacy-обёртка над `stages.next_position`
+    для задач без этапа (окно деплоя 0040)."""
+    return await next_position(db, project_id, stage_id=None, system_status=status_)
 
 
 async def _allocate_task_seq(db: AsyncSession, project_id: UUID) -> int:
@@ -136,6 +133,8 @@ async def list_tasks(
     order: Literal["asc", "desc"] = Query(default="asc"),
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
+    # keyword-only и последним: тесты зовут list_tasks позиционными kwargs.
+    stage_id: UUID | None = Query(default=None),
 ) -> list[TaskResponse]:
     await require_project_role(db, project_id, principal)
 
@@ -167,6 +166,8 @@ async def list_tasks(
         stmt = stmt.where(assignee_exists(assignee_id))
     if section_id is not None:
         stmt = stmt.where(Task.section_id == section_id)
+    if stage_id is not None:
+        stmt = stmt.where(Task.stage_id == stage_id)
     if priority is not None:
         stmt = stmt.where(Task.priority == priority)
     if label is not None:
@@ -224,24 +225,43 @@ async def create_task(
     assignee_ids = resolve_assignee_ids(body) or []
     assignee_names = await assert_assignees_in_tenant(db, assignee_ids)
     await _assert_parent_one_level(db, body.parent_task_id)
+    # Этап: явный stage_id либо первый этап присланного статуса (legacy).
+    # `status` в теле — всегда системный статус этапа (зеркало).
+    # `status` у TaskCreate имеет дефолт «todo» — учитываем его только если
+    # прислан явно, иначе stage_id=«Готово» конфликтовал бы с дефолтом.
+    explicit_status = body.status if "status" in body.model_fields_set else None
+    stage = await resolve_stage(
+        db, project_id, stage_id=body.stage_id, system_status=explicit_status
+    )
+    if stage is None:
+        # Ни stage_id, ни явного status — дефолт «todo» → первый этап этого
+        # статуса (None только у проекта без этапов, до backfill 0040).
+        stage = await stage_for_status(db, project_id, body.status)
+    task_status = stage.system_status if stage is not None else body.status
 
     task = Task(
         id=uuid4(),
         tenant_id=principal.tenant_id,
         project_id=project_id,
         section_id=body.section_id,
+        stage_id=stage.id if stage is not None else None,
         parent_task_id=body.parent_task_id,
         title=body.title,
         description=body.description,
-        status=body.status,
+        status=task_status,
         priority=body.priority,
         created_by=principal.employee_id,
         start_at=body.start_at,
         due_at=body.due_at,
-        position=await _next_position(db, project_id, body.status),
+        position=await next_position(
+            db,
+            project_id,
+            stage_id=stage.id if stage is not None else None,
+            system_status=task_status,
+        ),
         seq=await _allocate_task_seq(db, project_id),
     )
-    if body.status == "done":
+    if task_status == "done":
         task.completed_at = datetime.now(UTC)
     db.add(task)
     # Flush so the task INSERT actually hits Postgres before we record an
@@ -406,22 +426,48 @@ async def update_task(
                 actor_name=actor_name,
             )
 
-    if body.status is not None and body.status != task.status:
+    # Этап/статус — через services.stages: stage_id побеждает, status —
+    # legacy-вход (первый этап этого статуса). Смена этапа внутри одного
+    # системного статуса («В работе» → «Проверка ТУ») — тоже событие.
+    if "stage_id" in body.model_fields_set and body.stage_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="stage_id не может быть пустым: у задачи всегда есть этап",
+        )
+    target_stage = await resolve_stage(
+        db, task.project_id, stage_id=body.stage_id, system_status=body.status
+    )
+    stage_changed = target_stage is not None and target_stage.id != task.stage_id
+    status_changed_legacy = (
+        target_stage is None and body.status is not None and body.status != task.status
+    )
+    if stage_changed or status_changed_legacy:
         old_status = task.status
-        task.status = body.status
-        if body.status == "done":
-            task.completed_at = datetime.now(UTC)
-        elif old_status == "done":
-            task.completed_at = None
-        # When status changes, re-bucket position to the tail of the new column.
-        task.position = await _next_position(db, task.project_id, body.status)
+        if target_stage is not None:
+            old_status = await set_stage(db, task, target_stage)
+            new_status = target_stage.system_status
+        else:
+            # Проект без этапов (до backfill) — прежний путь по статусу.
+            new_status = body.status  # type: ignore[assignment]
+            task.status = new_status
+            if new_status == "done":
+                task.completed_at = datetime.now(UTC)
+            elif old_status == "done":
+                task.completed_at = None
+            task.position = await _next_position(db, task.project_id, new_status)
         await record_activity(
             db,
             tenant_id=principal.tenant_id,
             task_id=task.id,
             actor_id=principal.employee_id,
             kind="status_changed",
-            payload={"old": old_status, "new": body.status},
+            # old/new — системные статусы (их парсит TaskThread у старых
+            # записей); stage_to — имя этапа для новых.
+            payload={
+                "old": old_status,
+                "new": new_status,
+                "stage_to": target_stage.name if target_stage is not None else None,
+            },
         )
         # Notify watchers (except the actor) about the status change.
         watcher_rows = await db.execute(
@@ -434,9 +480,10 @@ async def update_task(
             await notify_status_changed(
                 db,
                 task=task,
-                new_status=body.status,
+                new_status=new_status,
                 actor_name=actor_name,
                 recipient_id=emp_id,
+                label=target_stage.name if target_stage is not None else None,
             )
 
     if body.position is not None:

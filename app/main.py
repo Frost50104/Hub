@@ -168,6 +168,7 @@ def create_app() -> FastAPI:
     from app.api import sections as sections_api
     from app.api import share as share_api
     from app.api import shifts as shifts_api
+    from app.api import stages as stages_api
     from app.api import stats as stats_api
     from app.api import surveys as surveys_api
     from app.api import tasks as tasks_api
@@ -181,6 +182,7 @@ def create_app() -> FastAPI:
     app.include_router(projects_api.router, prefix="/api")
     app.include_router(project_folders_api.router, prefix="/api")
     app.include_router(sections_api.router, prefix="/api")
+    app.include_router(stages_api.router, prefix="/api")
     app.include_router(tasks_api.router, prefix="/api")
     app.include_router(calendar_api.router, prefix="/api")
     app.include_router(custom_fields_api.router, prefix="/api")

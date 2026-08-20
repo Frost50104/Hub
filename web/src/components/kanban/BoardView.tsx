@@ -10,18 +10,23 @@ import {
   type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
+import { Plus } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { TaskEmptyState } from '@/components/task/TaskListStates'
 import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
-import { useProjectSections } from '@/hooks/useProjects'
+import { useStages, useUpdateStage } from '@/hooks/useStages'
 import { useTasks, useToggleDone, useUpdateTask } from '@/hooks/useTasks'
+import { dataAgeLabel } from '@/lib/dates'
 import { type Label } from '@/lib/labels'
+import { type TaskStage } from '@/lib/stages'
 import { activeFilterCount, toListFilters, type TaskViewFilters } from '@/lib/taskFilters'
 import { type Task } from '@/lib/tasks'
 
 import { KanbanCard } from './KanbanCard'
 import { KanbanColumn, type ColumnDef } from './KanbanColumn'
+import { DeleteStageDialog, StageFormDialog } from './StageDialogs'
+import { DropdownMenuItem } from '@/components/ui/DropdownMenu'
 
 interface BoardViewProps {
   projectId: string
@@ -43,10 +48,10 @@ const LANE_CLASS =
  * Скелетон доски повторяет раскладку колонок. Без пульсации — то же правило,
  * что в списке: мигание читается как поломка, а не как загрузка.
  */
-function BoardSkeleton() {
+function BoardSkeleton({ columns = 4 }: { columns?: number }) {
   return (
     <div className={LANE_CLASS} aria-hidden>
-      {Array.from({ length: 4 }, (_, i) => (
+      {Array.from({ length: Math.max(1, columns) }, (_, i) => (
         <div key={i} className="flex w-72 shrink-0 flex-col gap-2 p-1">
           <span className="mx-1.5 mb-1 mt-1.5 h-3.5 w-[120px] rounded-[5px] bg-surface" />
           {[78, 96, 84].map((h, j) => (
@@ -64,6 +69,13 @@ function BoardSkeleton() {
 
 const ORPHAN_ID = '__orphan__'
 
+/**
+ * Доска: колонка = ЭТАП задачи (`project_stages`), имена пользовательские,
+ * этапов сколько угодно; справа ленту замыкает «+ Этап». Перетаскивание
+ * патчит `stage_id` — сервер ставит зеркало `status`, completed_at и
+ * позицию в хвост. «Без этапа» появляется только если такие задачи есть
+ * (окно деплоя 0040 / SET NULL после удаления этапа).
+ */
 export function BoardView({
   projectId,
   canEdit,
@@ -71,13 +83,14 @@ export function BoardView({
   filters,
   onResetFilters,
 }: BoardViewProps) {
-  const sections = useProjectSections(projectId)
+  const stages = useStages(projectId)
   // forBoard: доска всегда в position-порядке, иначе ломается drag.
   // При активных фильтрах позиция drag считается между видимыми соседями —
   // допустимый компромисс (так же ведёт себя Asana).
   const listFilters = useMemo(() => toListFilters(filters ?? {}, { forBoard: true }), [filters])
   const tasks = useTasks(projectId, listFilters)
   const update = useUpdateTask(projectId)
+  const updateStage = useUpdateStage(projectId)
   const toggleDone = useToggleDone(projectId)
   const [activeId, setActiveId] = useState<string | null>(null)
   // Колонка-приёмник считается ЗДЕСЬ, а не из useDroppable в самой колонке:
@@ -85,6 +98,11 @@ export function BoardView({
   // карточки, из-за чего `isOver` у колонки не поднимался и подсветка приёма
   // не появлялась нигде, кроме пустого места под последней карточкой.
   const [overColumnId, setOverColumnId] = useState<string | null>(null)
+  const [stageForm, setStageForm] = useState<{ open: boolean; stage: TaskStage | null }>({
+    open: false,
+    stage: null,
+  })
+  const [stageDelete, setStageDelete] = useState<TaskStage | null>(null)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -128,34 +146,36 @@ export function BoardView({
     for (const t of tasks.data ?? []) {
       // Подзадачи живут в карточке родителя, а не отдельными карточками.
       if (t.parent_task_id) continue
-      if (t.section_id === null) {
+      if (!t.stage_id) {
         orphan.push(t)
       } else {
-        const list = map.get(t.section_id) ?? []
+        const list = map.get(t.stage_id) ?? []
         list.push(t)
-        map.set(t.section_id, list)
+        map.set(t.stage_id, list)
       }
     }
-    const cols: ColumnDef[] = [
-      {
-        dndId: ORPHAN_ID,
-        sectionId: null,
-        name: 'Без секции',
-        tasks: orphan.sort((a, b) => Number(a.position) - Number(b.position)),
-      },
-    ]
-    for (const s of sections.data ?? []) {
+    const byPos = (a: Task, b: Task) => Number(a.position) - Number(b.position)
+    const cols: ColumnDef[] = []
+    if (orphan.length > 0) {
       cols.push({
-        dndId: `section-${s.id}`,
-        sectionId: s.id,
+        dndId: ORPHAN_ID,
+        stage: null,
+        name: 'Без этапа',
+        tasks: orphan.sort(byPos),
+        total: null,
+      })
+    }
+    for (const s of stages.data ?? []) {
+      cols.push({
+        dndId: `stage-${s.id}`,
+        stage: s,
         name: s.name,
-        tasks: (map.get(s.id) ?? []).sort(
-          (a, b) => Number(a.position) - Number(b.position),
-        ),
+        tasks: (map.get(s.id) ?? []).sort(byPos),
+        total: s.task_count ?? null,
       })
     }
     return cols
-  }, [tasks.data, sections.data])
+  }, [tasks.data, stages.data])
 
   const activeTask = (tasks.data ?? []).find((t) => t.id === activeId) ?? null
 
@@ -191,6 +211,8 @@ export function BoardView({
       overTaskIndex = targetColumn?.tasks.findIndex((t) => t.id === overId)
     }
     if (!targetColumn) return
+    // В «Без этапа» бросать нельзя — это не этап, а остаток.
+    if (!targetColumn.stage) return
 
     // No-op if hovering over the same task without moving anywhere new.
     if (sourceColumn.dndId === targetColumn.dndId && overId === taskId) return
@@ -217,32 +239,39 @@ export function BoardView({
     }
 
     const sourceTask = sourceColumn.tasks.find((t) => t.id === taskId)!
-    const samePosition =
-      Math.abs(newPosition - Number(sourceTask.position)) < 1e-6
-    const sameSection = sourceColumn.sectionId === targetColumn.sectionId
-    if (samePosition && sameSection) return
+    const samePosition = Math.abs(newPosition - Number(sourceTask.position)) < 1e-6
+    const sameStage = sourceColumn.stage?.id === targetColumn.stage.id
+    if (samePosition && sameStage) return
 
-    update.mutate({
-      id: taskId,
-      section_id: targetColumn.sectionId,
-      position: newPosition,
-    })
+    update.mutate(
+      sameStage
+        ? { id: taskId, position: newPosition }
+        : {
+            id: taskId,
+            stage_id: targetColumn.stage.id,
+            position: newPosition,
+            __optimistic: { status: targetColumn.stage.system_status },
+          },
+    )
   }
 
-  if (tasks.isLoading || sections.isLoading) return <BoardSkeleton />
+  if (tasks.isLoading || stages.isLoading) {
+    return <BoardSkeleton columns={stages.data?.length ?? 4} />
+  }
 
   // Пусто / фильтр / ошибка — ОДИН блок на всю область: четыре одинаковых
   // сообщения в колонках читались бы как четыре разные проблемы.
-  if (tasks.isError || sections.isError) {
+  if (tasks.isError || stages.isError) {
     return (
       <TaskEmptyState
         tone="error"
         title="Не удалось загрузить задачи"
         text="Проверьте соединение и попробуйте ещё раз."
+        meta={dataAgeLabel(tasks.dataUpdatedAt)}
         cta="Повторить"
         onCta={() => {
           if (tasks.isError) void tasks.refetch()
-          if (sections.isError) void sections.refetch()
+          if (stages.isError) void stages.refetch()
         }}
       />
     )
@@ -259,9 +288,17 @@ export function BoardView({
     ) : (
       <TaskEmptyState
         title="Пока нет задач. Создайте первую."
-        text="Колонки появятся вместе с первой задачей: доска группирует по секциям."
+        text="Доска группирует по этапам: колонки оживут с первой задачей."
       />
     )
+  }
+
+  const stageList = stages.data ?? []
+  const moveStage = (stage: TaskStage, dir: -1 | 1) => {
+    const idx = stageList.findIndex((s) => s.id === stage.id)
+    const next = idx + dir
+    if (idx < 0 || next < 0 || next >= stageList.length) return
+    updateStage.mutate({ stageId: stage.id, position: next })
   }
 
   return (
@@ -289,12 +326,50 @@ export function BoardView({
             labelsByTask={labelsByTask}
             onTaskClick={onTaskClick}
             onToggleDone={toggleDone}
+            onRenameStage={(s) => setStageForm({ open: true, stage: s })}
+            onDeleteStage={(s) => setStageDelete(s)}
+            extraMenu={
+              col.stage ? (
+                <>
+                  <DropdownMenuItem onSelect={() => moveStage(col.stage!, -1)}>Левее</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => moveStage(col.stage!, 1)}>Правее</DropdownMenuItem>
+                </>
+              ) : null
+            }
           />
         ))}
+        {/* «+ Этап» — призрачная колонка той же ширины, что соседи. */}
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => setStageForm({ open: true, stage: null })}
+            className="flex min-h-12 w-[85%] max-w-[320px] shrink-0 snap-start items-center justify-center gap-2 rounded-xl border border-dashed border-glass-border text-[14px] font-semibold text-text2 transition-colors hover:border-amber hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 sm:w-72 sm:max-w-none lg:min-h-11"
+          >
+            <Plus className="h-4 w-4" strokeWidth={2.2} />
+            Этап
+          </button>
+        )}
       </div>
       <DragOverlay>
         {activeTask && <KanbanCard task={activeTask} overlay />}
       </DragOverlay>
+
+      <StageFormDialog
+        open={stageForm.open}
+        onOpenChange={(v) => setStageForm((s) => ({ ...s, open: v }))}
+        projectId={projectId}
+        stage={stageForm.stage}
+      />
+      <DeleteStageDialog
+        open={stageDelete !== null}
+        onOpenChange={(v) => {
+          if (!v) setStageDelete(null)
+        }}
+        projectId={projectId}
+        stage={stageDelete}
+        stages={stageList}
+        taskCount={stageDelete ? (stageDelete.task_count ?? 0) : 0}
+      />
     </DndContext>
   )
 }

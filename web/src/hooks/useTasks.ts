@@ -15,6 +15,7 @@ import {
   type TaskListFilters,
   type TaskUpdateBody,
 } from '@/lib/tasks'
+import { type TaskStage } from '@/lib/stages'
 
 export const taskKeys = {
   all: ['tasks'] as const,
@@ -76,7 +77,20 @@ export function useUpdateTask(projectId: string) {
         qc.cancelQueries({ queryKey: ['me-tasks'] }),
         qc.cancelQueries({ queryKey: taskKeys.detail(id) }),
       ])
-      const patch = { ...(body as Partial<Task>), ...__optimistic }
+      const patch: Partial<Task> = { ...(body as Partial<Task>), ...__optimistic }
+      // Зеркало этапа: патч {stage_id} без status оставил бы иконку статуса и
+      // зачёркивание старыми до рефетча — дополняем из кэша этапов проекта.
+      // И наоборот: legacy {status} кладёт в первый этап этого статуса.
+      const stages = qc.getQueryData<TaskStage[]>(['stages', projectId])
+      if (stages) {
+        if (patch.stage_id && patch.status === undefined) {
+          const st = stages.find((s) => s.id === patch.stage_id)
+          if (st) patch.status = st.system_status
+        } else if (patch.status && patch.stage_id === undefined) {
+          const st = stages.find((s) => s.system_status === patch.status)
+          if (st) patch.stage_id = st.id
+        }
+      }
       const apply = (old: Task[] | undefined) =>
         old?.map((t) => (t.id === id ? { ...t, ...patch } : t))
 
@@ -107,6 +121,10 @@ export function useUpdateTask(projectId: string) {
       qc.invalidateQueries({ queryKey: ['me-tasks'] })
       qc.invalidateQueries({ queryKey: taskKeys.detail(vars.id) })
       qc.invalidateQueries({ queryKey: ['task', vars.id, 'activity'] })
+      // «N из M» в шапках колонок живёт в кэше этапов.
+      if (vars.stage_id !== undefined || vars.status !== undefined) {
+        qc.invalidateQueries({ queryKey: ['stages', projectId] })
+      }
     },
   })
 }
@@ -189,16 +207,30 @@ export function useToggleAssignee(projectId: string) {
  * чекбоксов в списках/карточках; предыдущий статус восстанавливается
  * кнопкой «Отменить».
  */
+/**
+ * «Закрыть»/«вернуть» задачу — в ПЕРВЫЙ этап статуса done/todo; отмена
+ * возвращает исходный ЭТАП (не только статус): у проекта может быть
+ * несколько этапов одного статуса, и «Проверка ТУ» после undo не должна
+ * превращаться в «На проверке».
+ */
 export function useToggleDone(projectId: string) {
   const update = useUpdateTask(projectId)
-  return (task: Pick<Task, 'id' | 'status'>) => {
+  const qc = useQueryClient()
+  return (task: Pick<Task, 'id' | 'status'> & { stage_id?: string | null }) => {
+    const stages = qc.getQueryData<TaskStage[]>(['stages', projectId])
     const next = task.status === 'done' ? 'todo' : 'done'
-    update.mutate({ id: task.id, status: next })
+    const target = stages?.find((s) => s.system_status === next)
+    update.mutate(target ? { id: task.id, stage_id: target.id } : { id: task.id, status: next })
     if (next === 'done') {
       toast.success('Задача завершена', {
         action: {
           label: 'Отменить',
-          onClick: () => update.mutate({ id: task.id, status: task.status }),
+          onClick: () =>
+            update.mutate(
+              task.stage_id
+                ? { id: task.id, stage_id: task.stage_id }
+                : { id: task.id, status: task.status },
+            ),
         },
       })
     }
