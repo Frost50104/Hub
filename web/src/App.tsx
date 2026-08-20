@@ -101,10 +101,8 @@ const LearnAssessmentsPage = lazy(() =>
 const LearnShiftsPage = lazy(() =>
   import('@/pages/learn/LearnShiftsPage').then((m) => ({ default: m.LearnShiftsPage })),
 )
-const LearnAssistantPage = lazy(() =>
-  import('@/pages/learn/LearnAssistantPage').then((m) => ({
-    default: m.LearnAssistantPage,
-  })),
+const AssistantPage = lazy(() =>
+  import('@/pages/AssistantPage').then((m) => ({ default: m.AssistantPage })),
 )
 const LearnAnalyticsPage = lazy(() =>
   import('@/pages/learn/LearnAnalyticsPage').then((m) => ({ default: m.LearnAnalyticsPage })),
@@ -157,7 +155,13 @@ export function App() {
           <Route path="/learn/lessons/:lessonId" element={<LearnLessonPage />} />
           <Route path="/learn/products" element={<LearnProductsPage />} />
           <Route path="/learn/rating" element={<LearnRatingPage />} />
-          <Route path="/learn/assistant" element={<LearnAssistantPage />} />
+          {/* Ассистент общий для двух пространств. Старый learn-путь —
+              редирект, а не 404: PWA живёт вчерашним бандлом. */}
+          <Route path="/assistant" element={<AssistantPage />} />
+          <Route
+            path="/learn/assistant"
+            element={<Navigate to="/assistant" replace />}
+          />
           <Route path="/learn/shifts" element={<LearnShiftsPage />} />
           <Route path="/learn/assessments" element={<LearnAssessmentsPage />} />
           <Route path="/learn/admin/review" element={<LearnReviewPage />} />

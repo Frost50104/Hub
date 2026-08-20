@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     ai_base_url: str | None = Field(default=None)
     ai_chat_model: str | None = Field(default=None)
     ai_embed_model: str | None = Field(default=None)
+    # Модель для витков с инструментами (ассистент). Разведена с ai_chat_model
+    # намеренно: разбор «поставь Дмитрию на пятницу, срочно» в валидный JSON —
+    # самое хрупкое место фичи, и его можно увести на модель посильнее, не
+    # трогая обычные ответы по базе знаний. Пусто → та же ai_chat_model.
+    ai_tool_model: str | None = Field(default=None)
 
     # Public links (3.6.12) — view-only no-auth deep-links to a task/project.
     # Feature-flag so we can kill-switch the entire surface without a redeploy.

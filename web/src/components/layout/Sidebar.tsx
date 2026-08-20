@@ -11,6 +11,7 @@ import {
   LogOut,
   Plus,
   Settings,
+  Sparkles,
   Star,
 } from 'lucide-react'
 import {
@@ -83,6 +84,7 @@ import { useFolderCollapse } from '@/stores/projectFolders'
 const NAV_ITEMS = [
   { to: '/', label: 'Главная', icon: Home, end: true, badge: false },
   { to: '/my', label: 'Мои задачи', icon: CheckSquare, end: false, badge: false },
+  { to: '/assistant', label: 'Ассистент', icon: Sparkles, end: false, badge: false },
   { to: '/inbox', label: 'Входящие', icon: Inbox, end: false, badge: true },
 ] as const
 

@@ -14,7 +14,13 @@ import uuid
 import httpx
 import structlog
 
-from app.services.llm.base import ChatMessage, LLMError
+from app.services.llm.base import (
+    ChatMessage,
+    ChatResult,
+    LLMError,
+    LLMToolsUnsupported,
+    ToolSpec,
+)
 
 log = structlog.get_logger("llm.gigachat")
 
@@ -24,6 +30,7 @@ _API_BASE = "https://gigachat.devices.sberbank.ru/api/v1"
 
 class GigaChatProvider:
     name = "gigachat"
+    supports_tools = False
 
     def __init__(
         self,
@@ -90,3 +97,13 @@ class GigaChatProvider:
             return resp.json()["choices"][0]["message"]["content"]
         except (KeyError, IndexError) as e:
             raise LLMError(f"gigachat chat: неожиданный ответ ({e})") from None
+
+    async def chat_with_tools(
+        self, messages: list[ChatMessage], tools: list[ToolSpec]
+    ) -> ChatResult:
+        """GigaChat здесь без function-calling: ассистент деградирует в
+        read-only ответы по базе знаний, а не падает 502."""
+        raise LLMToolsUnsupported(
+            "GigaChat не поддерживает вызов инструментов — "
+            "ассистент отвечает только на вопросы, действия недоступны"
+        )

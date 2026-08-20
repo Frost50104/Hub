@@ -12,7 +12,13 @@ import asyncio
 import httpx
 import structlog
 
-from app.services.llm.base import ChatMessage, LLMError
+from app.services.llm.base import (
+    ChatMessage,
+    ChatResult,
+    LLMError,
+    LLMToolsUnsupported,
+    ToolSpec,
+)
 
 log = structlog.get_logger("llm.yandex")
 
@@ -21,6 +27,7 @@ _BASE = "https://llm.api.cloud.yandex.net/foundationModels/v1"
 
 class YandexProvider:
     name = "yandex"
+    supports_tools = False
 
     def __init__(
         self,
@@ -76,3 +83,13 @@ class YandexProvider:
             return resp.json()["result"]["alternatives"][0]["message"]["text"]
         except (KeyError, IndexError) as e:
             raise LLMError(f"yandex chat: неожиданный ответ ({e})") from None
+
+    async def chat_with_tools(
+        self, messages: list[ChatMessage], tools: list[ToolSpec]
+    ) -> ChatResult:
+        """YandexGPT здесь без function-calling: ассистент деградирует в
+        read-only ответы по базе знаний, а не падает 502."""
+        raise LLMToolsUnsupported(
+            "YandexGPT не поддерживает вызов инструментов — "
+            "ассистент отвечает только на вопросы, действия недоступны"
+        )

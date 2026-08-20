@@ -7,18 +7,26 @@ from functools import lru_cache
 from app.config import get_settings
 from app.services.llm.base import (
     ChatMessage,
+    ChatResult,
     LLMEmbeddingsUnsupported,
     LLMError,
     LLMNotConfigured,
     LLMProvider,
+    LLMToolsUnsupported,
+    ToolCall,
+    ToolSpec,
 )
 
 __all__ = [
     "ChatMessage",
+    "ChatResult",
     "LLMEmbeddingsUnsupported",
     "LLMError",
     "LLMNotConfigured",
     "LLMProvider",
+    "LLMToolsUnsupported",
+    "ToolCall",
+    "ToolSpec",
     "get_provider",
 ]
 
@@ -61,5 +69,6 @@ def get_provider() -> LLMProvider:
             base_url=settings.ai_base_url,
             chat_model=settings.ai_chat_model,
             embed_model=settings.ai_embed_model,
+            tool_model=settings.ai_tool_model,
         )
     raise LLMNotConfigured(f"Неизвестный AI-провайдер: {provider!r}")

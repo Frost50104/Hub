@@ -1,5 +1,11 @@
 """AI-помощник API (Ф6, ТЗ §19): RAG-чат по знаниям компании.
 
+С волной 1 ассистента эти пути — АЛИАСЫ для старых PWA-бандлов
+(`registerType: 'prompt'` держит вчерашний бандл на устройстве несколько
+дней). Новый вход — `app/api/assistant.py` (`/api/ai/*`). Диалог здесь тоже
+принадлежит `employee_id`, иначе алиас перестал бы видеть диалоги, заведённые
+новой ручкой.
+
 ИНВАРИАНТ (план, тест обязателен): retrieval фильтрует чанки по
 audience_members — ассистент физически не достаёт контент чужой аудитории
 (rag_chunks.audience_id денормализован из search_documents).
@@ -217,11 +223,12 @@ async def ask(
     conversation: AiConversation | None = None
     if body.conversation_id is not None:
         conversation = await db.get(AiConversation, body.conversation_id)
-        if conversation is None or conversation.profile_id != profile.id:
+        if conversation is None or conversation.employee_id != principal.employee_id:
             raise HTTPException(status_code=404, detail="Диалог не найден")
     if conversation is None:
         conversation = AiConversation(
             tenant_id=principal.tenant_id,
+            employee_id=principal.employee_id,
             profile_id=profile.id,
             title=body.question[:80],
         )
@@ -298,14 +305,11 @@ async def list_conversations(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> list[ConversationResponse]:
-    profile = await get_profile(db, principal)
-    if profile is None:
-        return []
     rows = (
         (
             await db.execute(
                 select(AiConversation)
-                .where(AiConversation.profile_id == profile.id)
+                .where(AiConversation.employee_id == principal.employee_id)
                 .order_by(AiConversation.updated_at.desc())
                 .limit(20)
             )
@@ -328,9 +332,8 @@ async def conversation_messages(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> list[MessageResponse]:
-    profile = await get_profile(db, principal)
     conversation = await db.get(AiConversation, conversation_id)
-    if profile is None or conversation is None or conversation.profile_id != profile.id:
+    if conversation is None or conversation.employee_id != principal.employee_id:
         raise HTTPException(status_code=404, detail="Диалог не найден")
     rows = (
         (
@@ -361,9 +364,8 @@ async def delete_conversation(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    profile = await get_profile(db, principal)
     conversation = await db.get(AiConversation, conversation_id)
-    if profile is None or conversation is None or conversation.profile_id != profile.id:
+    if conversation is None or conversation.employee_id != principal.employee_id:
         raise HTTPException(status_code=404, detail="Диалог не найден")
     await db.delete(conversation)
     await db.commit()

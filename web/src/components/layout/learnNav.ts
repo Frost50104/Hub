@@ -62,7 +62,7 @@ export const LEARN_NAV: LearnNavItem[] = [
   { to: '/learn/surveys', label: 'Опросы', icon: ClipboardList },
   { to: '/learn/products', label: 'Ассортимент', icon: ShoppingBag },
   { to: '/learn/rating', label: 'Рейтинг', icon: Trophy },
-  { to: '/learn/assistant', label: 'AI-помощник', icon: Bot },
+  { to: '/assistant', label: 'Ассистент', icon: Bot },
   { to: '/learn/shifts', label: 'Биржа смен', icon: Handshake },
   { to: '/learn/assessments', label: 'Аттестации', icon: BadgeCheck },
   { to: '/inbox', label: 'Входящие', icon: Inbox, badge: true },
