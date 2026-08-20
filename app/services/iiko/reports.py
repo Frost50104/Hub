@@ -281,12 +281,10 @@ def build_payload(
     *,
     date_from: date,
     date_to: date,
-    store_filter: str | None,
     revenue: float | None = None,
 ) -> dict[str, Any]:
     spec = SPECS[kind]
     period = fmt_period(date_from, date_to)
-    scope = f" · {store_filter}" if store_filter else ""
     payload: dict[str, Any] = {
         "kind": kind,
         "title": spec.title,
@@ -307,7 +305,7 @@ def build_payload(
         total, total_prev = sum(cur.values()), sum(prev.values())
         checks = sum(_num(r, F_ORDERS) for r in rows)
         delta, up = fmt_delta(total, total_prev)
-        payload["subtitle"] = f"{period}{scope} · точки с наибольшей выручкой"
+        payload["subtitle"] = f"{period} · точки с наибольшей выручкой"
         payload["stats"] = [
             _stat("Итог", fmt_big_money(total)),
             _stat("К прошлому периоду", delta, up),
@@ -349,7 +347,7 @@ def build_payload(
         prev_avg = prev_total / prev_checks if prev_checks else 0.0
         delta, up = fmt_delta(avg, prev_avg)
         best = max(by_day.items(), key=lambda kv: kv[1], default=("—", 0.0))[0]
-        payload["subtitle"] = f"{period}{scope} · по дням недели"
+        payload["subtitle"] = f"{period} · по дням недели"
         payload["stats"] = [
             _stat("Средний чек", fmt_money(avg) if avg else "—"),
             _stat("К прошлому периоду", delta, up),
@@ -366,7 +364,7 @@ def build_payload(
         qty = {k: v for k, v in _sum_by(rows, F_DISH, F_QTY).items() if v > 0}
         total_qty = sum(qty.values()) or 1.0
         ranked = sorted(qty.items(), key=lambda kv: kv[1], reverse=True)
-        payload["subtitle"] = f"{period}{scope} · {len(qty)} позиций, показаны крайние"
+        payload["subtitle"] = f"{period} · {len(qty)} позиций, показаны крайние"
         payload["top"] = [
             {"name": n, "qty": fmt_qty(v),
              "share": f"{v / total_qty * 100:.1f}%".replace(".", ",")}
@@ -427,7 +425,7 @@ def build_payload(
                     "После 19:00 меньше 8% чеков — там имеет смысл сокращать смену, "
                     "а не усиливать."
                 )
-        payload["subtitle"] = f"{period}{scope} · распределение чеков по часам"
+        payload["subtitle"] = f"{period} · распределение чеков по часам"
 
     elif kind == "writeoff":
         cur = _sum_by(rows, F_TX_PRODUCT_CAT, F_TX_SUM)
@@ -437,7 +435,7 @@ def build_payload(
         total, prev_total = sum(cur.values()), sum(prev.values())
         delta, up = fmt_delta(total, prev_total)
         main = max(cur.items(), key=lambda kv: kv[1], default=("—", 0.0))[0]
-        payload["subtitle"] = f"{period}{scope} · потери по категориям"
+        payload["subtitle"] = f"{period} · потери по категориям"
         payload["stats"] = [
             _stat("Списано", fmt_big_money(total)),
             # Рост списаний — это ПЛОХО, поэтому «положительным» помечаем
@@ -460,8 +458,6 @@ async def fetch_report(
     *,
     date_from: date,
     date_to: date,
-    departments: list[str] | None = None,
-    scope_label: str | None = None,
     check_columns: bool = True,
 ) -> dict[str, Any]:
     """Собрать отчёт: текущий период + предыдущий равной длины для дельты."""
@@ -483,11 +479,9 @@ async def fetch_report(
         f for f in spec.optional_aggregate if not available or f in available
     ]
 
+    # Фильтра по точкам нет: сущности Hub и iiko сознательно не связаны, отчёт
+    # всегда по сети, и названия точек берутся такими, как их ведёт iiko.
     filters = dict(spec.extra_filters)
-    if departments:
-        # Один фильтр со списком, а не запрос на точку: у ТУ их до десятка,
-        # и каждый лишний вызов — это время внутри одного слота лицензии.
-        filters[F_DEPARTMENT] = {"filterType": "IncludeValues", "values": departments}
 
     rows = await client.olap(
         report_type=spec.report_type,
@@ -512,9 +506,6 @@ async def fetch_report(
     # ТОЙ ЖЕ сессии: второй слот лицензии ради одной плашки недопустим.
     revenue: float | None = None
     if kind == "writeoff":
-        sales_filters = (
-            {F_DEPARTMENT: filters[F_DEPARTMENT]} if F_DEPARTMENT in filters else {}
-        )
         try:
             sales = await client.olap(
                 report_type="SALES",
@@ -523,7 +514,6 @@ async def fetch_report(
                 group_by=[F_DEPARTMENT],
                 aggregate=[F_AMOUNT],
                 date_field=F_DATE_FILTER,
-                extra_filters=sales_filters,
             )
             revenue = sum(_num(r, F_AMOUNT) for r in sales) or None
         except IikoError:
@@ -535,6 +525,5 @@ async def fetch_report(
         prev_rows,
         date_from=date_from,
         date_to=date_to,
-        store_filter=scope_label,
         revenue=revenue,
     )

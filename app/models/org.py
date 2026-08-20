@@ -132,10 +132,6 @@ class Store(Base):
     # Короткий код точки («П14») — используется в отчётах и в UI-чипах.
     code: Mapped[str | None] = mapped_column(String(32), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Имя «Торгового предприятия» в iiko (поле OLAP `Department`). В iiko
-    # точка адресуется строкой, в Hub — UUID; без этого поля скоуп ТУ по
-    # отчётам невыразим, а в графике стояли бы имена из iiko.
-    iiko_department: Mapped[str | None] = mapped_column(String(255), nullable=True)
     franchisee_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("franchisees.id", ondelete="SET NULL"),

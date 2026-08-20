@@ -57,17 +57,8 @@ def _client() -> IikoClient:
     )
 
 
-def _cache_key(
-    tenant_id: UUID,
-    kind: str,
-    date_from: date,
-    date_to: date,
-    departments: list[str] | None,
-) -> str:
-    # Скоуп в ключе ОБЯЗАТЕЛЕН и сортируется: иначе ТУ прочитал бы из кэша
-    # сетевой отчёт, собранный админом, и увидел бы чужие точки.
-    scope = ",".join(sorted(departments)) if departments else "*"
-    return f"iiko:report:{tenant_id}:{kind}:{date_from}:{date_to}:{scope}"
+def _cache_key(tenant_id: UUID, kind: str, date_from: date, date_to: date) -> str:
+    return f"iiko:report:{tenant_id}:{kind}:{date_from}:{date_to}"
 
 
 async def get_report(
@@ -76,11 +67,9 @@ async def get_report(
     kind: str,
     date_from: date,
     date_to: date,
-    departments: list[str] | None = None,
-    scope_label: str | None = None,
 ) -> dict[str, Any]:
     redis = get_redis()
-    key = _cache_key(tenant_id, kind, date_from, date_to, departments)
+    key = _cache_key(tenant_id, kind, date_from, date_to)
     cached = await redis.get(key)
     if cached:
         payload = json.loads(cached)
@@ -116,8 +105,6 @@ async def get_report(
                 kind,
                 date_from=date_from,
                 date_to=date_to,
-                departments=departments,
-                scope_label=scope_label,
             )
         await redis.set(
             key, json.dumps(payload, ensure_ascii=False), ex=get_settings().iiko_cache_ttl_sec

@@ -252,14 +252,6 @@ export function ReportView({
             )}
           </div>
 
-          {/* Предупреждение о ПОЛНОТЕ данных идёт выше выводов по цифрам и
-              отбивается рамкой: недостача выручки из-за непривязанной точки
-              иначе читается как падение продаж. */}
-          {data.warning && (
-            <p className="max-w-[760px] rounded-[14px] border border-amber/45 bg-tint px-4 py-3 text-[15px] leading-[1.5] text-text">
-              {data.warning}
-            </p>
-          )}
           {data.note && (
             <p className="max-w-[760px] text-[15px] leading-[1.5] text-text2">{data.note}</p>
           )}

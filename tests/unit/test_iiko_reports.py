@@ -112,7 +112,7 @@ async def test_revenue_report_shapes_bars_and_delta():
     ]
     p = build_payload(
         "revenue", rows, prev,
-        date_from=date(2026, 8, 12), date_to=date(2026, 8, 18), store_filter=None,
+        date_from=date(2026, 8, 12), date_to=date(2026, 8, 18),
     )
     bars = {b["name"]: b for b in p["bars"]}
     assert bars["Галерея"]["pct"] == 100  # самая длинная полоса
@@ -130,7 +130,7 @@ async def test_revenue_report_shapes_bars_and_delta():
 async def test_empty_report_is_not_a_crash():
     p = build_payload(
         "revenue", [], [],
-        date_from=date(2026, 8, 12), date_to=date(2026, 8, 18), store_filter=None,
+        date_from=date(2026, 8, 12), date_to=date(2026, 8, 18),
     )
     assert p["bars"] == []
     assert p["stats"][3]["value"] == "—", "нет чеков — прочерк, а не ноль"

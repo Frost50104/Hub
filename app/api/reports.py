@@ -5,20 +5,19 @@
 
 Кто что видит (решение владельца 2026-08-20):
 
-- **вся сеть** — hub-admin, publisher+ и ВЕСЬ офис (`org_role = office`):
-  управляющая компания к конкретной точке не привязана;
-- **свои точки** — ТУ (закреплённые) и владелец франчайзи (точки его
-  франчайзи);
+- **вся сеть** — hub-admin, publisher+, офис, ТУ и владельцы франчайзи;
 - **403** — линейный сотрудник на точке. Выручка и списания сети не входят в
   его работу.
 
-Офис приходится разрешать здесь явно: `org_scope.resolve_scope` возвращает
-для него `self` — этот скоуп заведён под «аналитику о себе», а не под «ничего
-не видит».
+**Сущности точек НЕ связываются.** Отчёт показывает названия точек так, как их
+ведёт iiko, и никакого моста к `stores` не строит: сопоставление по имени —
+это перевод, который однажды ошибётся и покажет управляющему чужую выручку,
+а имя из iiko человек и так узнаёт. Прямое следствие, принятое владельцем:
+сузить отчёт до «своих» точек нечем, поэтому владелец франчайзи видит и чужие.
 
-Скоуп по точкам выражается через `stores.iiko_department`: в iiko точка
-адресуется СТРОКОЙ-именем, в Hub — UUID, и без сопоставления фильтр OLAP
-собрать не из чего.
+Офис, ТУ и франчайзи приходится разрешать здесь явно: `resolve_scope` заведён
+под аналитику по СОТРУДНИКАМ и отдаёт им скоуп по своим людям, а тут вопрос
+только «пускать или нет».
 """
 
 from __future__ import annotations
@@ -30,17 +29,16 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from signaris_auth import Principal
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import enforce_rate_limit, get_db, require_auth
-from app.models.org import Store
 from app.services import lifecycle
 from app.services.content_access import resolve_content_role
 from app.services.iiko import service as iiko_service
 from app.services.iiko.client import IikoError, IikoNotConfigured
 from app.services.iiko.reports import REPORT_ORDER, SPECS
-from app.services.org_scope import get_profile, resolve_scope
+from app.services.org_scope import get_profile
+from app.services.project_access import is_hub_admin
 
 router = APIRouter(tags=["iiko-reports"])
 
@@ -50,52 +48,23 @@ router = APIRouter(tags=["iiko-reports"])
 MAX_PERIOD_DAYS = 92
 
 
-async def _departments(
-    db: AsyncSession, principal: Principal
-) -> tuple[list[str] | None, str | None, list[str]]:
-    """(имена точек в iiko | None=вся сеть, подпись скоупа, точки БЕЗ привязки).
+# Роли оргструктуры, которым отчёты положены. Линейного сотрудника здесь нет
+# намеренно: выручка и списания сети не входят в его работу.
+REPORT_ORG_ROLES = frozenset({"office", "tu", "franchisee_owner"})
 
-    Третий элемент — не мелочь: если у руководителя часть точек не связана с
-    iiko, отчёт по остальным выглядит как полный, и недостача выручки читается
-    как падение продаж. Такие точки обязаны быть названы на экране.
-    """
+
+async def _require_report_access(db: AsyncSession, principal: Principal) -> None:
+    """Пустить или отказать. Скоупа по точкам нет — отчёт всегда по сети."""
     role = await resolve_content_role(db, principal)
-    scope = await resolve_scope(db, principal)
+    if lifecycle.can(role, "publisher") or is_hub_admin(principal):
+        return
     profile = await get_profile(db, principal)
-    is_office = (
+    if (
         profile is not None
-        and profile.org_role == "office"
         and profile.status == "active"
-    )
-    if lifecycle.can(role, "publisher") or scope.kind == "all" or is_office:
-        return None, None, []
-    if scope.kind == "stores":
-        rows = (
-            await db.execute(
-                select(Store.name, Store.iiko_department).where(
-                    Store.id.in_(scope.store_ids or frozenset()),
-                    Store.archived_at.is_(None),
-                )
-            )
-        ).all()
-        names = [d for _, d in rows if d]
-        unmapped = [n for n, d in rows if not d]
-        if not names:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "У ваших точек не заполнено соответствие с iiko — "
-                    "попросите администратора указать «Торговое предприятие» "
-                    "в карточке магазина"
-                ),
-            )
-        mapped_names = sorted(n for n, d in rows if d)
-        label = ", ".join(mapped_names)
-        return (
-            names,
-            (label if len(label) <= 80 else f"{len(names)} точек"),
-            sorted(unmapped),
-        )
+        and profile.org_role in REPORT_ORG_ROLES
+    ):
+        return
     raise HTTPException(
         status_code=403,
         detail=(
@@ -149,7 +118,7 @@ async def _build(
     await enforce_rate_limit(
         bucket="ai:iiko", employee_id=str(principal.employee_id), limit=10, window_sec=60
     )
-    departments, label, unmapped = await _departments(db, principal)
+    await _require_report_access(db, principal)
     start, end = _period(date_from, date_to)
     try:
         payload = await iiko_service.get_report(
@@ -157,8 +126,6 @@ async def _build(
             kind=kind,
             date_from=start,
             date_to=end,
-            departments=departments,
-            scope_label=label,
         )
     except IikoNotConfigured as e:
         raise HTTPException(status_code=503, detail=str(e)) from None
@@ -167,18 +134,6 @@ async def _build(
     except IikoError as e:
         raise HTTPException(status_code=502, detail=str(e)) from None
 
-    if unmapped:
-        # Не в `note`: там выводы по цифрам, а это предупреждение о полноте
-        # данных, и смешивать их нельзя.
-        payload = {
-            **payload,
-            "warning": (
-                "Не связаны с iiko и в отчёт не вошли: "
-                + ", ".join(unmapped)
-                + ". Попросите администратора указать «Торговое предприятие» "
-                "в карточке магазина."
-            ),
-        }
     return payload
 
 

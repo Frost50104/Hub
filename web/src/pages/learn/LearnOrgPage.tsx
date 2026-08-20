@@ -330,14 +330,12 @@ function StoreEditForm({
     name: string
     code: string | null
     franchisee_id: string | null
-    iiko_department: string | null
   }) => Promise<void>
   onCancel: () => void
 }) {
   const [name, setName] = useState(store.name)
   const [code, setCode] = useState(store.code ?? '')
   const [franchiseeId, setFranchiseeId] = useState(store.franchisee_id ?? '')
-  const [iikoDepartment, setIikoDepartment] = useState(store.iiko_department ?? '')
   return (
     <form
       onSubmit={(e) => {
@@ -347,7 +345,6 @@ function StoreEditForm({
           name: name.trim(),
           code: code.trim() || null,
           franchisee_id: franchiseeId || null,
-          iiko_department: iikoDepartment.trim() || null,
         })
       }}
     >
@@ -358,20 +355,6 @@ function StoreEditForm({
         <div className="space-y-1.5">
           <Label htmlFor="store-name">Название</Label>
           <Input id="store-name" value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="store-iiko">Название в iiko</Label>
-          <Input
-            id="store-iiko"
-            value={iikoDepartment}
-            onChange={(e) => setIikoDepartment(e.target.value)}
-            placeholder="Например, Ветеранов д.185 к2"
-          />
-          <p className="text-[13px] leading-[1.45] text-text2">
-            «Торговое предприятие» из iiko — пишется точно так же, как там. Без
-            него отчёты не смогут отделить эту точку, и у управляющего она в
-            выручку не попадёт.
-          </p>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="store-code">Код (для отчётов, например П14)</Label>

@@ -81,9 +81,6 @@ ignore = [
 # в stdout (T201), разбор СВОИХ же xlsx через stdlib-xml (S314), ffmpeg из
 # PATH (S607), краткий алиас модуля маппинга (N812).
 "tools/import_lms/*" = ["T201", "S314", "S607", "N812"]
-# Разовый CLI сопоставления точек с iiko: печатает отчёт в stdout, потому что
-# запускается руками и результат читает человек (T201).
-"app/jobs/map_iiko_departments.py" = ["T201"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -465,108 +465,23 @@ async def test_reports_denied_for_line_employee(db: AsyncSession, tenant_id: uui
     assert exc.value.status_code == 403
 
 
-async def test_tu_scope_requires_iiko_mapping(db: AsyncSession, tenant_id: uuid.UUID):
-    """У ТУ без сопоставления точек с iiko отчёт обязан падать ВНЯТНО.
-
-    Иначе фильтр OLAP ушёл бы пустым и управляющий увидел бы всю сеть —
-    ровно та утечка, ради которой заведено `stores.iiko_department`.
-    """
-    from app.api.reports import _departments
-    from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
-    from app.models.org import Store
-
-    principal = make_principal(
-        tenant_id, email="tu@t.ru", role="member", tenant_slug="arep2"
-    )
-    await _register(db, principal)
-    profile = EmployeeProfile(
-        tenant_id=tenant_id,
-        employee_id=principal.employee_id,
-        email="tu@t.ru",
-        full_name="Управляющий",
-        org_role="tu",
-        status="active",
-    )
-    db.add(profile)
-    await db.flush()
-    store = Store(tenant_id=tenant_id, name="Галерея")
-    db.add(store)
-    await db.flush()
-    db.add(
-        TuStoreAssignment(tenant_id=tenant_id, profile_id=profile.id, store_id=store.id)
-    )
-    await db.flush()
-
-    with pytest.raises(HTTPException) as exc:
-        await _departments(db, principal)
-    assert exc.value.status_code == 409
-    assert "iiko" in str(exc.value.detail)
-
-    store.iiko_department = "Галерея, 1"
-    await db.flush()
-    departments, label, missing = await _departments(db, principal)
-    assert departments == ["Галерея, 1"]
-    assert label == "Галерея"
-    assert missing == []
-
-
-async def test_admin_gets_whole_network(db: AsyncSession, tenant_id: uuid.UUID):
-    from app.api.reports import _departments
+async def test_admin_gets_reports(db: AsyncSession, tenant_id: uuid.UUID):
+    from app.api.reports import _require_report_access
 
     admin = make_principal(
         tenant_id, email="admin-rep@t.ru", role="admin", tenant_slug="arep3"
     )
     await _register(db, admin)
-    departments, label, missing = await _departments(db, admin)
-    assert departments is None, "админу — вся сеть, фильтр не ставится"
-    assert label is None
-    assert missing == []
-
-
-async def test_partial_iiko_mapping_is_announced(db: AsyncSession, tenant_id: uuid.UUID):
-    """У ТУ часть точек не связана с iiko — отчёт по остальным НЕ должен
-    выглядеть полным: недостача выручки читается как падение продаж."""
-    from app.api.reports import _departments
-    from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
-    from app.models.org import Store
-
-    principal = make_principal(
-        tenant_id, email="tu2@t.ru", role="member", tenant_slug="arep4"
-    )
-    await _register(db, principal)
-    profile = EmployeeProfile(
-        tenant_id=tenant_id,
-        employee_id=principal.employee_id,
-        email="tu2@t.ru",
-        full_name="Управляющий",
-        org_role="tu",
-        status="active",
-    )
-    db.add(profile)
-    await db.flush()
-    mapped = Store(tenant_id=tenant_id, name="Грибоедова 15", iiko_department="Грибоедова 15")
-    unmapped = Store(tenant_id=tenant_id, name="Новая точка")
-    db.add_all([mapped, unmapped])
-    await db.flush()
-    for store in (mapped, unmapped):
-        db.add(
-            TuStoreAssignment(
-                tenant_id=tenant_id, profile_id=profile.id, store_id=store.id
-            )
-        )
-    await db.flush()
-
-    departments, label, missing = await _departments(db, principal)
-    assert departments == ["Грибоедова 15"]
-    assert label == "Грибоедова 15", "подпись скоупа — только связанные точки"
-    assert missing == ["Новая точка"], "непривязанная точка обязана быть названа"
+    await _require_report_access(db, admin)  # не бросает — доступ есть
 
 
 async def test_office_sees_whole_network(db: AsyncSession, tenant_id: uuid.UUID):
-    """Решение владельца: офис — управляющая компания, к точке не привязан и
-    видит сеть целиком. `resolve_scope` отдаёт ему `self` (тот скоуп заведён
-    под «аналитику о себе»), поэтому разрешение выдаётся здесь явно."""
-    from app.api.reports import _departments
+    """Решение владельца: отчёты видят офис, ТУ и владельцы франчайзи.
+
+    Сущности точек Hub и iiko НЕ связаны — отчёт всегда по сети, названия
+    точек берутся из iiko. Значит вопрос только «пускать или нет».
+    """
+    from app.api.reports import _require_report_access
     from app.models.employee_profile import EmployeeProfile
 
     principal = make_principal(
@@ -585,15 +500,12 @@ async def test_office_sees_whole_network(db: AsyncSession, tenant_id: uuid.UUID)
     )
     await db.flush()
 
-    departments, label, missing = await _departments(db, principal)
-    assert departments is None, "офису — вся сеть, фильтр по точкам не ставится"
-    assert label is None
-    assert missing == []
+    await _require_report_access(db, principal)  # не бросает
 
 
 async def test_archived_office_profile_loses_access(db: AsyncSession, tenant_id: uuid.UUID):
     """Уволенный офисный сотрудник не должен продолжать видеть выручку сети."""
-    from app.api.reports import _departments
+    from app.api.reports import _require_report_access
     from app.models.employee_profile import EmployeeProfile
 
     principal = make_principal(
@@ -613,5 +525,31 @@ async def test_archived_office_profile_loses_access(db: AsyncSession, tenant_id:
     await db.flush()
 
     with pytest.raises(HTTPException) as exc:
-        await _departments(db, principal)
+        await _require_report_access(db, principal)
     assert exc.value.status_code == 403
+
+
+async def test_tu_and_franchisee_get_reports(db: AsyncSession, tenant_id: uuid.UUID):
+    """ТУ и владелец франчайзи видят отчёты. Сузить их до «своих» точек нечем
+    и не нужно: сущности Hub и iiko сознательно не связаны — следствие,
+    принятое владельцем, franchisee видит и чужие точки."""
+    from app.api.reports import _require_report_access
+    from app.models.employee_profile import EmployeeProfile
+
+    for i, org_role in enumerate(("tu", "franchisee_owner")):
+        principal = make_principal(
+            tenant_id, email=f"{org_role}@t.ru", role="member", tenant_slug=f"arep7{i}"
+        )
+        await _register(db, principal)
+        db.add(
+            EmployeeProfile(
+                tenant_id=tenant_id,
+                employee_id=principal.employee_id,
+                email=f"{org_role}@t.ru",
+                full_name=org_role,
+                org_role=org_role,
+                status="active",
+            )
+        )
+        await db.flush()
+        await _require_report_access(db, principal)  # не бросает

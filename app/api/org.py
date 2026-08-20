@@ -321,7 +321,6 @@ async def create_store(
         code=body.code,
         address=body.address,
         franchisee_id=body.franchisee_id,
-        iiko_department=body.iiko_department,
     )
     db.add(store)
     try:

@@ -15,8 +15,6 @@ export interface OrgStore {
   code: string | null
   address: string | null
   franchisee_id: string | null
-  /** «Торговое предприятие» в iiko — мост к отчётам, см. docs/TECH_DEBT.md. */
-  iiko_department: string | null
   archived_at: string | null
 }
 

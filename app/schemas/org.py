@@ -46,15 +46,6 @@ class StoreCreate(BaseModel):
     code: str | None = Field(default=None, max_length=32)
     address: str | None = Field(default=None, max_length=2000)
     franchisee_id: UUID | None = None
-    # Имя «Торгового предприятия» в iiko. Без него отчёты не знают, какие
-    # строки OLAP относятся к этой точке, и скоуп руководителя невыразим.
-    iiko_department: str | None = Field(default=None, max_length=255)
-
-    @field_validator("iiko_department")
-    @classmethod
-    def _blank_to_none(cls, v: str | None) -> str | None:
-        """Пустая строка из формы = «не привязано», а не имя из пробелов."""
-        return (v or "").strip() or None
 
     @field_validator("name")
     @classmethod
@@ -67,14 +58,7 @@ class StoreUpdate(BaseModel):
     code: str | None = Field(default=None, max_length=32)
     address: str | None = Field(default=None, max_length=2000)
     franchisee_id: UUID | None = None
-    # Пустая строка = «отвязать»; None = «не трогать».
-    iiko_department: str | None = Field(default=None, max_length=255)
     archived: bool | None = None
-
-    @field_validator("iiko_department")
-    @classmethod
-    def _blank_to_none_upd(cls, v: str | None) -> str | None:
-        return None if v is None else ((v or "").strip() or None)
     model_config = ConfigDict(extra="forbid")
 
     @field_validator("name")
@@ -125,7 +109,6 @@ class StoreResponse(BaseModel):
     code: str | None
     address: str | None
     franchisee_id: UUID | None
-    iiko_department: str | None = None
     archived_at: datetime | None
 
 
