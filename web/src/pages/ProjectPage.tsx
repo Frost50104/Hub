@@ -22,6 +22,7 @@ const ProjectDashboard = lazy(
 import { CalendarView } from '@/components/calendar/CalendarView'
 import { BoardView } from '@/components/kanban/BoardView'
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
+import { MobileViewControlBar } from '@/components/layout/MobileViewControlBar'
 import { ColumnsMenu } from '@/components/project/ColumnsMenu'
 import { CustomFieldsManager } from '@/components/project/CustomFieldsManager'
 import { LabelsManager } from '@/components/project/LabelsManager'
@@ -39,7 +40,6 @@ import {
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { TaskRow } from '@/components/task/TaskRow'
 import { TimelineView } from '@/components/timeline/TimelineView'
-import { BottomSheet, BottomSheetItem } from '@/components/ui/BottomSheet'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import {
@@ -233,8 +233,6 @@ function ProjectHeader({
 }
 
 function ViewTabs({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
-  const [sheet, setSheet] = useState(false)
-  const current = TABS.find((t) => t.key === tab)!
   return (
     <>
       <nav className="mt-3.5 hidden gap-0.5 lg:flex">
@@ -255,32 +253,14 @@ function ViewTabs({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
           </button>
         ))}
       </nav>
-      {/* На мобильном переключатель видов — основной контрол, поэтому кнопка
-          44px и шторка со строками 52px, а не плавающая пилюля 32px. */}
-      <div className="mt-3 flex lg:hidden">
-        <button
-          type="button"
-          onClick={() => setSheet(true)}
-          className="inline-flex min-h-11 items-center gap-1.5 rounded-[11px] border border-glass-border px-4 text-[14px] font-semibold text-text"
-        >
-          {current.label}
-          <ChevronDown className="h-3.5 w-3.5 text-text2" />
-        </button>
-      </div>
-      <BottomSheet open={sheet} onOpenChange={setSheet} title="Выберите вид">
-        {TABS.map(({ key, label }) => (
-          <BottomSheetItem
-            key={key}
-            onClick={() => {
-              onTab(key)
-              setSheet(false)
-            }}
-            trailing={tab === key ? '✓' : null}
-          >
-            {label}
-          </BottomSheetItem>
-        ))}
-      </BottomSheet>
+      {/* Мобильный выбор представления — плавающая пилюля по центру над
+          таб-баром (MobileViewControlBar), а не кнопка в шапке: стоит на всех
+          представлениях, из календаря/Ганта/дашборда можно вернуться. */}
+      <MobileViewControlBar
+        options={TABS.map(({ key, label }) => ({ key, label }))}
+        value={tab}
+        onChange={onTab}
+      />
     </>
   )
 }
@@ -339,6 +319,7 @@ function SectionBlock({
   isDesktop,
   selectedTaskId,
   onTaskClick,
+  quickCreateTarget = false,
 }: {
   section: Section | null
   projectId: string
@@ -353,6 +334,8 @@ function SectionBlock({
   isDesktop: boolean
   selectedTaskId: string | null
   onTaskClick: (id: string) => void
+  /** Первый блок на экране принимает фокус от «Новая задача» в сайдбаре. */
+  quickCreateTarget?: boolean
 }) {
   const key = section ? section.id : ORPHAN_SECTION_KEY
   const collapsed = useViewConfig(
@@ -502,6 +485,7 @@ function SectionBlock({
               <TaskInlineCreate
                 projectId={projectId}
                 sectionId={section ? section.id : null}
+                quickCreateTarget={quickCreateTarget}
               />
             </div>
           )}
@@ -677,9 +661,10 @@ function ListTab({
   }
 
   const orphanTasks = tasksBySection.get(null) ?? []
+  const showOrphanBlock = orphanTasks.length > 0 || canEditFlag
   const blocks = (
     <>
-      {(orphanTasks.length > 0 || canEditFlag) && (
+      {showOrphanBlock && (
         <SectionBlock
           section={null}
           projectId={projectId}
@@ -694,11 +679,13 @@ function ListTab({
           isDesktop={isDesktop}
           selectedTaskId={selectedTaskId}
           onTaskClick={onTaskClick}
+          quickCreateTarget
         />
       )}
-      {sections.data?.map((s) => (
+      {sections.data?.map((s, i) => (
         <SectionBlock
           key={s.id}
+          quickCreateTarget={!showOrphanBlock && i === 0}
           section={s}
           projectId={projectId}
           tasks={tasksBySection.get(s.id) ?? []}
@@ -964,7 +951,12 @@ export function ProjectPage() {
         </div>
       )}
 
-      <FloatingActionButton bottomOffset={4.5} />
+      {/* FAB над пилюлей вида (132px); только там, где есть куда создавать
+          задачу: на дашборде и участниках создание не живёт, в read-only — тоже. */}
+      <FloatingActionButton
+        bottomOffset={8.25}
+        hidden={tab === 'dashboard' || tab === 'members' || !p.can_edit || isArchived}
+      />
 
       <TaskDetailDrawer
         taskId={selectedTaskId}

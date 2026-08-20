@@ -26,6 +26,8 @@ import { cn } from '@/lib/cn'
 interface FloatingActionButtonProps {
   /** Position above the bottom tab bar — extra offset in rem. */
   bottomOffset?: number
+  /** Не рисовать вовсе: на дашборде и без прав создавать некуда. */
+  hidden?: boolean
   className?: string
 }
 
@@ -42,6 +44,7 @@ interface FloatingActionButtonProps {
  */
 export function FloatingActionButton({
   bottomOffset = 4.5,
+  hidden = false,
   className,
 }: FloatingActionButtonProps) {
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -52,6 +55,7 @@ export function FloatingActionButton({
   // TanStack дедуплицирует, лишнего запроса нет.
   const foldersCanManage = useProjectFolders().data?.can_manage ?? false
 
+  if (hidden) return null
   return (
     <>
       <button
@@ -61,8 +65,8 @@ export function FloatingActionButton({
         className={cn(
           // Главное действие пространства — амбер с фиксированной тёмной краской.
           // Красный в редизайне занят просрочкой и ошибками: кнопка создания,
-          // покрашенная в него, читалась как предупреждение.
-          'fixed right-4 z-30 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-amber text-on-amber shadow-lg transition-transform hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 lg:hidden',
+          // покрашенная в него, читалась как предупреждение. Круг 56px — как в макете.
+          'fixed right-4 z-30 inline-flex h-14 w-14 items-center justify-center rounded-full bg-amber text-on-amber shadow-[0_8px_24px_rgba(0,0,0,0.4)] transition-transform hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 lg:hidden',
           className,
         )}
         style={{

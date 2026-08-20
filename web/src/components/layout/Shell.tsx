@@ -94,8 +94,12 @@ export function Shell() {
   return (
     <div className="min-h-screen lg:flex lg:h-screen lg:gap-3 lg:overflow-hidden lg:p-3">
       {isDesktop && (space === 'learn' ? <LearnSidebar /> : <Sidebar />)}
+      {/* На десктопе рабочая область — ПАНЕЛЬ (как <main> в макете): скругление
+          20px и фон --bg закрывают точечную сетку, а overflow-y:auto заодно
+          подрезает контент под форму. На мобильном панели нет — там скроллится
+          документ, и скругление было бы лишним. */}
       <main
-        className="min-w-0 flex-1 overflow-y-auto pb-20 lg:pb-0 lg:overflow-y-auto"
+        className="min-w-0 flex-1 overflow-y-auto pb-20 lg:rounded-[20px] lg:bg-bg lg:pb-0 lg:overflow-y-auto"
         style={
           !isDesktop
             ? { paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 4rem)' }

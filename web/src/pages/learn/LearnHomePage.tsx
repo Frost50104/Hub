@@ -248,7 +248,7 @@ export function LearnHomePage() {
       <header className="px-5 pt-11">
         {/* Симметрично HomePage: на мобильном это единственный видимый способ
             вернуться в «Задачи» — десктопный сайдбар тут не рендерится. */}
-        <SpaceSwitcher className="mb-4 lg:hidden" />
+        <SpaceSwitcher size="lg" className="mb-4 lg:hidden" />
         <p className="mb-1 text-xs leading-[1.35] text-text2 first-letter:uppercase">
           {today}
         </p>

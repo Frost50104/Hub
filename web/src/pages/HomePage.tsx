@@ -253,7 +253,7 @@ function MobileHome() {
   return (
     <>
       <MobilePageHeader
-        topSlot={<SpaceSwitcher />}
+        topSlot={<SpaceSwitcher size="lg" />}
         eyebrow={todayLabel()}
         title={greetingText}
         trailing={

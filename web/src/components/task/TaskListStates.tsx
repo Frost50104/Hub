@@ -1,11 +1,9 @@
-import { CircleAlert, ListTree } from 'lucide-react'
-
-import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 
 /**
- * Пустые состояния списка и доски. Пустое и почти пустое — сегодняшний
- * основной режим трекера (семь проектов, из них живой один), поэтому это
- * полноценные экраны с одним действием, а не заглушки.
+ * Пустые состояния списка и доски — обёртка над общим `EmptyState`
+ * (`components/ui/EmptyState.tsx`): силуэт один на трекер и обучение.
+ * Оставлена, чтобы не трогать 11 точек вызова.
  */
 export function TaskEmptyState({
   title,
@@ -15,6 +13,7 @@ export function TaskEmptyState({
   secondaryCta,
   onSecondary,
   tone = 'neutral',
+  meta,
 }: {
   title: string
   text: string
@@ -24,37 +23,20 @@ export function TaskEmptyState({
   secondaryCta?: string
   onSecondary?: () => void
   tone?: 'neutral' | 'error'
+  /** «Последние данные — 3 минуты назад». */
+  meta?: React.ReactNode
 }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-4 p-10 text-center">
-      {tone === 'error' ? (
-        <span className="flex h-[52px] w-[52px] items-center justify-center rounded-full bg-red/[0.16] text-red">
-          <CircleAlert className="h-6 w-6" strokeWidth={2} />
-        </span>
-      ) : (
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-surface text-text2">
-          <ListTree className="h-[26px] w-[26px]" strokeWidth={1.7} />
-        </span>
-      )}
-      <div className="flex max-w-[440px] flex-col gap-2">
-        <h3 className="font-display text-[20px] font-bold leading-[1.25] text-text">
-          {title}
-        </h3>
-        <p className="text-[16px] leading-[1.55] text-text2 [text-wrap:pretty]">{text}</p>
-      </div>
-      {/* flex-wrap обязателен: то же пустое состояние рисуется в колонке
-          доски шириной 288px, где две кнопки в один ряд не помещаются. */}
-      {cta && onCta && (
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          <Button onClick={onCta}>{cta}</Button>
-          {secondaryCta && onSecondary && (
-            <Button variant="ghost" onClick={onSecondary}>
-              {secondaryCta}
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
+    <EmptyState
+      title={title}
+      text={text}
+      cta={cta}
+      onCta={onCta}
+      secondaryCta={secondaryCta}
+      onSecondary={onSecondary}
+      tone={tone}
+      meta={meta}
+    />
   )
 }
 

@@ -13,8 +13,20 @@ const SPACES: { key: Space; label: string; icon: typeof CheckSquare; to: string 
  * Переключатель пространств «Задачи | Обучение» (segmented control).
  * Активное пространство выводится из URL; клик — навигация в корень
  * пространства + запоминание выбора для будущих сессий.
+ *
+ * Активный сегмент — нейтральный: рамка `--text2` и краска `--text`, без
+ * амбера. `text-amber` на композите surface+bg-alt/60 давал в светлой теме
+ * 1,65:1 — тот же дефект, что амбер-на-амбере в бейджах. Переключение
+ * пространства — навигация «раз в день», амбер остаётся единственным акцентом
+ * сайдбара — у кнопки создания. `size='lg'` — 44px для мобильной шапки и шторки.
  */
-export function SpaceSwitcher({ className }: { className?: string }) {
+export function SpaceSwitcher({
+  className,
+  size = 'sm',
+}: {
+  className?: string
+  size?: 'sm' | 'lg'
+}) {
   const location = useLocation()
   const navigate = useNavigate()
   const rememberSpace = useWorkspace((s) => s.rememberSpace)
@@ -46,14 +58,15 @@ export function SpaceSwitcher({ className }: { className?: string }) {
             }
           }}
           className={cn(
-            'flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition-colors',
+            'flex flex-1 items-center justify-center gap-1.5 rounded-md border px-2 font-semibold transition-colors',
+            size === 'lg' ? 'min-h-11 text-[14px]' : 'min-h-[30px] text-[12px]',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
             active === key
-              ? 'bg-surface text-amber shadow-sm'
-              : 'text-text3 hover:text-text2',
+              ? 'border-text2 bg-transparent text-text'
+              : 'border-transparent text-text2 hover:text-text',
           )}
         >
-          <Icon className="h-3.5 w-3.5" />
+          <Icon className={size === 'lg' ? 'h-4 w-4' : 'h-3.5 w-3.5'} />
           {label}
         </button>
       ))}

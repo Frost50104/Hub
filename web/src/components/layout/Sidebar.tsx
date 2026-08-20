@@ -2,7 +2,6 @@ import {
   CheckSquare,
   ChevronDown,
   ChevronRight,
-  CircleCheck,
   Folder,
   FolderKanban,
   FolderPlus,
@@ -28,7 +27,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { useState } from 'react'
-import { NavLink, Link, useNavigate } from 'react-router-dom'
+import { NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { SidebarSearch } from './SidebarSearch'
@@ -79,6 +78,7 @@ import {
   type ProjectDragData,
 } from '@/lib/projectDnd'
 import { type Project } from '@/lib/projects'
+import { requestInlineCreate } from '@/lib/quickCreate'
 import { useFolderCollapse } from '@/stores/projectFolders'
 
 const NAV_ITEMS = [
@@ -436,6 +436,7 @@ export interface SidebarProps {
 
 export function Sidebar({ onItemClick }: SidebarProps = {}) {
   const theme = useTheme((s) => s.theme)
+  const location = useLocation()
   const me = useMe()
   const unread = useUnreadCount()
   const unreadCount = unread.data?.count ?? 0
@@ -488,21 +489,26 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
       onDragCancel={() => setDrag(null)}
     >
     <aside className="glass flex h-screen w-[280px] shrink-0 flex-col gap-4 p-4 md:h-[calc(100vh-1.5rem)] md:w-[260px]">
-      <Link to="/" onClick={onItemClick} className="flex items-center gap-2 px-1">
-        <img
-          src={
-            theme === 'light'
-              ? '/brand/signaris-horizontal-on-light.svg'
-              : '/brand/signaris-horizontal-on-dark.svg'
-          }
-          alt="Signaris"
-          className="h-6"
-        />
-        <span className="font-display text-lg font-black leading-none tracking-tight">
-          Hub
+      {/* Роль — ВТОРОЙ строкой, а не рядом с локапом: локап + «Hub» + роль не
+          влезают в 226px ни при каком кегле («Управляющий сетью»), поэтому не
+          уменьшаем 12px, а переносим. */}
+      <Link to="/" onClick={onItemClick} className="flex flex-col gap-1 px-1">
+        <span className="flex items-center gap-2">
+          <img
+            src={
+              theme === 'light'
+                ? '/brand/signaris-horizontal-on-light.svg'
+                : '/brand/signaris-horizontal-on-dark.svg'
+            }
+            alt="Signaris"
+            className="h-6"
+          />
+          <span className="font-display text-lg font-black leading-none tracking-tight">
+            Hub
+          </span>
         </span>
         {me.data?.hub_role && (
-          <span className="ml-1 text-[12px] font-semibold uppercase tracking-widest text-text2">
+          <span className="truncate text-[12px] font-semibold uppercase tracking-[0.16em] text-text2">
             {HUB_ROLE_BADGE[me.data.hub_role]}
           </span>
         )}
@@ -510,31 +516,22 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
 
       <SpaceSwitcher />
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button className="w-full justify-center">
-            <Plus className="h-4 w-4" />
-            Создать
-            <ChevronDown className="h-3.5 w-3.5 opacity-70" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-[228px]">
-          <DropdownMenuItem onSelect={() => setCreateTaskOpen(true)}>
-            <CircleCheck className="mr-2 h-4 w-4" />
-            Задача
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setCreateProjectOpen(true)}>
-            <FolderKanban className="mr-2 h-4 w-4" />
-            Проект
-          </DropdownMenuItem>
-          {foldersCanManage && (
-            <DropdownMenuItem onSelect={() => setCreateFolderOpen(true)}>
-              <FolderPlus className="mr-2 h-4 w-4" />
-              Папка
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {/* Единственная плотная амбер-кнопка сайдбара. На странице проекта она
+          ставит курсор в инлайн-поле «+ Новая задача» — одна точка входа, а не
+          второй способ создать задачу; вне проекта открывает диалог. Проект и
+          папка создаются через «+» у блока «Проекты». Скрыта в read-only
+          (кнопка без прав «отсутствует, а не заблокирована»). */}
+      <Button
+        className="h-[38px] w-full justify-center rounded-[10px] text-[14px] font-bold"
+        onClick={() => {
+          const m = /^\/projects\/([^/]+)/.exec(location.pathname)
+          if (m?.[1] && requestInlineCreate(m[1])) return
+          setCreateTaskOpen(true)
+        }}
+      >
+        <Plus className="h-4 w-4" strokeWidth={2.4} />
+        Новая задача
+      </Button>
 
       <SidebarSearch />
 
@@ -547,19 +544,22 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
             onClick={onItemClick}
             className={({ isActive }) =>
               cn(
-                'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium transition-colors',
+                'flex h-[34px] items-center gap-[9px] rounded-[9px] px-2 text-[14px] transition-colors',
                 isActive
-                  ? 'bg-surface text-text'
-                  : 'text-text2 hover:bg-glass hover:text-text',
+                  ? 'bg-surface font-semibold text-text'
+                  : 'font-medium text-text2 hover:bg-glass hover:text-text',
               )
             }
           >
             <Icon className="h-4 w-4" />
             <span className="flex-1">{label}</span>
+            {/* Точка 6px, а не счётчик: число непрочитанных уже есть во
+                «Входящих», в навигации достаточно факта «есть новое». */}
             {badge && unreadCount > 0 && (
-              <span className="rounded-full bg-amber px-1.5 py-0.5 text-[12px] font-semibold text-on-amber">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
+              <span
+                aria-label={`${unreadCount} непрочитанных`}
+                className="h-1.5 w-1.5 shrink-0 rounded-full bg-red"
+              />
             )}
           </NavLink>
         ))}

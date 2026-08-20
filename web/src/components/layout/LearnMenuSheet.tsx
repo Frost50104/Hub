@@ -53,7 +53,7 @@ export function LearnMenuSheet({
           раньше, чем отработает onClick самой кнопки, и навигация не
           происходила вовсе. */}
       <div className="px-3 pb-1" onClick={() => onOpenChange(false)}>
-        <SpaceSwitcher />
+        <SpaceSwitcher size="lg" />
       </div>
       <div className="mx-3 mb-1 h-px bg-hair" />
 

@@ -1,5 +1,6 @@
 import { cn } from '@/lib/cn'
 import { type TaskPriority } from '@/lib/tasks'
+import { PRIORITY_BAR } from '@/lib/tone'
 
 /**
  * Приоритет — планка 3px у левого края, а не бейдж в потоке.
@@ -14,13 +15,6 @@ import { type TaskPriority } from '@/lib/tasks'
  * «выбрано» выглядело бы по-разному на разных приоритетах.
  */
 
-const TONE: Record<TaskPriority, string | null> = {
-  urgent: 'bg-red',
-  high: 'bg-amber',
-  low: 'bg-blue-deep',
-  medium: null,
-}
-
 interface PriorityBarProps {
   priority: TaskPriority
   /** Вертикальные отступы от краёв контейнера: 9px в строке, 10px на карточке. */
@@ -28,7 +22,7 @@ interface PriorityBarProps {
 }
 
 export function PriorityBar({ priority, className }: PriorityBarProps) {
-  const tone = TONE[priority]
+  const tone = PRIORITY_BAR[priority]
   if (!tone) return null
   return (
     <span

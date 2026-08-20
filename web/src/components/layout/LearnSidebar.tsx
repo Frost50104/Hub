@@ -42,15 +42,17 @@ function NavEntry({
       onClick={onItemClick}
       className={({ isActive }) =>
         cn(
-          'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium transition-colors',
-          isActive ? 'bg-surface text-text' : 'text-text2 hover:bg-glass hover:text-text',
+          'flex h-[34px] items-center gap-[9px] rounded-[9px] px-2 text-[14px] transition-colors',
+          isActive
+            ? 'bg-surface font-semibold text-text'
+            : 'font-medium text-text2 hover:bg-glass hover:text-text',
         )
       }
     >
       <Icon className="h-4 w-4" />
       <span className="flex-1">{label}</span>
       {badge && unreadCount > 0 && (
-        <span className="rounded-full bg-amber px-1.5 py-0.5 text-[10px] font-semibold text-on-amber">
+        <span className="rounded-full bg-amber px-1.5 py-0.5 text-[12px] font-semibold leading-none text-on-amber">
           {unreadCount > 99 ? '99+' : unreadCount}
         </span>
       )}
@@ -71,21 +73,25 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
 
   return (
     <aside className="glass flex h-screen w-[280px] shrink-0 flex-col gap-4 p-4 md:h-[calc(100vh-1.5rem)] md:w-[260px]">
-      <Link to="/learn" onClick={onItemClick} className="flex items-center gap-2 px-1">
-        <img
-          src={
-            theme === 'light'
-              ? '/brand/signaris-horizontal-on-light.svg'
-              : '/brand/signaris-horizontal-on-dark.svg'
-          }
-          alt="Signaris"
-          className="h-6"
-        />
-        <span className="font-display text-lg font-black leading-none tracking-tight">
-          Hub
+      {/* Роль второй строкой — та же причина, что в Sidebar: локап + «Hub» +
+          роль не влезают в 226px. 12px/--text2, не 10px/--text3 (2,75:1). */}
+      <Link to="/learn" onClick={onItemClick} className="flex flex-col gap-1 px-1">
+        <span className="flex items-center gap-2">
+          <img
+            src={
+              theme === 'light'
+                ? '/brand/signaris-horizontal-on-light.svg'
+                : '/brand/signaris-horizontal-on-dark.svg'
+            }
+            alt="Signaris"
+            className="h-6"
+          />
+          <span className="font-display text-lg font-black leading-none tracking-tight">
+            Hub
+          </span>
         </span>
         {me.data?.hub_role && (
-          <span className="ml-1 text-[10px] font-semibold uppercase tracking-widest text-text3">
+          <span className="truncate text-[12px] font-semibold uppercase tracking-[0.16em] text-text2">
             {HUB_ROLE_BADGE[me.data.hub_role]}
           </span>
         )}
@@ -112,7 +118,7 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
 
         {isAdmin && (
           <div className="flex flex-col gap-0.5">
-            <p className="px-2 pb-0.5 pt-2 text-[11px] font-semibold uppercase tracking-wider text-text3">
+            <p className="px-2 pb-0.5 pt-2 text-[12px] font-semibold uppercase tracking-wider text-text2">
               Управление
             </p>
             {ADMIN_NAV.map((item) => (
@@ -133,20 +139,20 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
             name={me.data?.full_name}
             email={me.data?.email}
             src={me.data?.avatar_url}
-            className="h-7 w-7 text-[10px]"
+            className="h-7 w-7 text-[13px]"
           />
           <div className="min-w-0">
-            <p className="truncate text-xs font-medium text-text">
+            <p className="truncate text-[13px] font-medium leading-[1.35] text-text">
               {me.data?.full_name || me.data?.email || '—'}
             </p>
-            <p className="truncate text-[10px] text-text3">{me.data?.email ?? ''}</p>
+            <p className="truncate text-[12px] leading-[1.35] text-text2">{me.data?.email ?? ''}</p>
           </div>
         </div>
         <div className="flex items-center gap-1">
           <Link
             to="/settings/notifications"
             onClick={onItemClick}
-            className="rounded p-1.5 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+            className="rounded p-1.5 text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
             aria-label="Настройки"
             title="Настройки"
           >
@@ -156,7 +162,7 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
             onClick={() => {
               void authClient.logout()
             }}
-            className="rounded p-1.5 text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+            className="rounded p-1.5 text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
             aria-label="Выйти"
             title="Выйти"
           >

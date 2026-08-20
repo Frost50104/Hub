@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { Input } from '@/components/ui/Input'
 import { useCreateTask } from '@/hooks/useTasks'
+import { useInlineCreateTarget } from '@/lib/quickCreate'
 
 interface TaskInlineCreateProps {
   projectId: string
@@ -9,6 +10,12 @@ interface TaskInlineCreateProps {
   /** Создаёт подзадачу указанной задачи (секция при этом не назначается). */
   parentTaskId?: string
   placeholder?: string
+  /**
+   * Принимать фокус от кнопки «Новая задача» в сайдбаре. Ставится ровно у
+   * одного поля на экране (первая секция списка / первая колонка доски):
+   * одна точка входа, а не второй способ создать задачу.
+   */
+  quickCreateTarget?: boolean
 }
 
 /** Inline `+ Add task` row. Enter creates, Esc cancels (clears input). */
@@ -17,9 +24,12 @@ export function TaskInlineCreate({
   sectionId,
   parentTaskId,
   placeholder = '+ Новая задача',
+  quickCreateTarget = false,
 }: TaskInlineCreateProps) {
   const [title, setTitle] = useState('')
   const create = useCreateTask(projectId)
+  const inputRef = useRef<HTMLInputElement>(null)
+  useInlineCreateTarget(inputRef, projectId, quickCreateTarget)
 
   const submit = async () => {
     const trimmed = title.trim()
@@ -38,6 +48,7 @@ export function TaskInlineCreate({
 
   return (
     <Input
+      ref={inputRef}
       value={title}
       onChange={(e) => setTitle(e.target.value)}
       onKeyDown={(e) => {

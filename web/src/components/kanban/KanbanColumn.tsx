@@ -28,6 +28,8 @@ interface KanbanColumnProps {
   /** Колонка под курсором. Считает BoardView: собственный `isOver` droppable'а
    *  почти всегда false — ближайшей целью оказывается карточка, а не колонка. */
   isOver?: boolean
+  /** Первая колонка принимает фокус от «Новая задача» в сайдбаре. */
+  quickCreateTarget?: boolean
 }
 
 /**
@@ -49,6 +51,7 @@ export function KanbanColumn({
   onTaskClick,
   onToggleDone,
   isOver: isOverColumn = false,
+  quickCreateTarget = false,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column.dndId })
   const receiving = isOver || isOverColumn
@@ -101,7 +104,11 @@ export function KanbanColumn({
         )}
 
         {canEdit && (
-          <TaskInlineCreate projectId={projectId} sectionId={column.sectionId} />
+          <TaskInlineCreate
+            projectId={projectId}
+            sectionId={column.sectionId}
+            quickCreateTarget={quickCreateTarget}
+          />
         )}
       </div>
     </div>

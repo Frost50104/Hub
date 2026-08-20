@@ -56,7 +56,9 @@ export function MobilePageHeader({
         </p>
       )}
       <div className="flex items-end justify-between gap-2">
-        <h1 className="font-display text-3xl font-bold leading-tight text-text">
+        {/* 24px, не 30: шкала мобильных шапок из макета (Главная 23, представления
+            проекта 22 — задаётся className у вызывающего). */}
+        <h1 className="font-display text-[24px] font-bold leading-[1.2] text-text">
           {title}
         </h1>
         {trailing ??
@@ -64,7 +66,7 @@ export function MobilePageHeader({
             <button
               type="button"
               onClick={onOverflowClick}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-text3 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+              className="-m-1.5 inline-flex h-11 w-11 items-center justify-center rounded-lg text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
               aria-label="Меню"
             >
               <MoreHorizontal className="h-5 w-5" />

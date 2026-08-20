@@ -2,21 +2,13 @@ import { CheckCircle2, Circle, ClipboardCheck, Clock } from 'lucide-react'
 
 import { cn } from '@/lib/cn'
 import { STATUS_LABEL, type TaskStatus } from '@/lib/tasks'
+import { STATUS_INK } from '@/lib/tone'
 
 const STATUS_ICON: Record<TaskStatus, typeof Circle> = {
   todo: Circle,
   in_progress: Clock,
   in_review: ClipboardCheck,
   done: CheckCircle2,
-}
-
-// `todo` набирается --text2, а не --text3: в трекере --text3 больше не носит
-// функциональный смысл (шкала редизайна). Зелёный зарезервирован за «сделано».
-const STATUS_TONE: Record<TaskStatus, string> = {
-  todo: 'text-text2',
-  in_progress: 'text-amber',
-  in_review: 'text-amber',
-  done: 'text-green',
 }
 
 const BOX = {
@@ -59,7 +51,7 @@ export function TaskStatusControl({
   const shell = cn(
     'flex shrink-0 items-center justify-center',
     BOX[size],
-    STATUS_TONE[status],
+    STATUS_INK[status],
     className,
   )
 

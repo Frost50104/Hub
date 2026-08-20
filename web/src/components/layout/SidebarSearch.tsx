@@ -42,7 +42,7 @@ export function SidebarSearch() {
 
   return (
     <div className="relative">
-      <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text3" />
+      <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text2" />
       <input
         ref={inputRef}
         type="search"
@@ -57,7 +57,7 @@ export function SidebarSearch() {
           }
         }}
         placeholder="Поиск…  ⌘K"
-        className="w-full rounded-md border border-glass-border bg-glass px-7 py-1.5 text-sm text-text placeholder:text-text3 focus:border-amber focus:outline-none"
+        className="h-9 w-full rounded-lg border border-glass-border bg-glass pl-7 pr-3 text-[14px] text-text placeholder:text-text2 focus:border-amber focus:outline-none"
       />
       {show && (
         <div
@@ -67,14 +67,14 @@ export function SidebarSearch() {
           )}
         >
           {isLoading && (
-            <p className="px-2 py-2 text-xs text-text3">Ищем…</p>
+            <p className="px-2 py-2 text-xs text-text2">Ищем…</p>
           )}
           {data && data.projects.length === 0 && data.tasks.length === 0 && (
-            <p className="px-2 py-2 text-xs text-text3">Ничего не найдено</p>
+            <p className="px-2 py-2 text-xs text-text2">Ничего не найдено</p>
           )}
           {data && data.projects.length > 0 && (
             <div className="mb-1">
-              <p className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-text3">
+              <p className="px-2 pb-0.5 pt-1 text-[12px] font-semibold uppercase tracking-wider text-text2">
                 Проекты
               </p>
               {data.projects.map((p) => (
@@ -86,7 +86,7 @@ export function SidebarSearch() {
                 >
                   <span className="truncate">{p.title}</span>
                   {p.subtitle && (
-                    <span className="ml-2 shrink-0 text-xs text-text3">
+                    <span className="ml-2 shrink-0 text-xs text-text2">
                       {p.subtitle}
                     </span>
                   )}
@@ -96,7 +96,7 @@ export function SidebarSearch() {
           )}
           {data && data.tasks.length > 0 && (
             <div>
-              <p className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-text3">
+              <p className="px-2 pb-0.5 pt-1 text-[12px] font-semibold uppercase tracking-wider text-text2">
                 Задачи
               </p>
               {data.tasks.map((t) => (
@@ -110,14 +110,14 @@ export function SidebarSearch() {
                 >
                   <span className="flex min-w-0 items-center gap-1.5">
                     {t.project_key && t.seq != null && (
-                      <span className="shrink-0 font-mono text-[10px] text-text3">
+                      <span className="shrink-0 font-mono text-[12px] text-text2">
                         {t.project_key}-{t.seq}
                       </span>
                     )}
                     <span className="truncate text-sm text-text">{t.title}</span>
                   </span>
                   {t.subtitle && (
-                    <span className="truncate text-xs text-text3">
+                    <span className="truncate text-xs text-text2">
                       {t.subtitle}
                     </span>
                   )}

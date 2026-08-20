@@ -275,9 +275,10 @@ export function BoardView({
       }}
     >
       <div className={LANE_CLASS}>
-        {columns.map((col) => (
+        {columns.map((col, i) => (
           <KanbanColumn
             key={col.dndId}
+            quickCreateTarget={i === 0}
             column={col}
             projectId={projectId}
             canEdit={canEdit}
