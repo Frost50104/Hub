@@ -1200,6 +1200,8 @@ export const learnApi = {
       allow_comments: boolean
       allow_reactions: boolean
       requires_acknowledgement: boolean
+      /** Закрепление: ISO-дата «до» или null = открепить (сортировка — на сервере). */
+      pinned_until: string | null
     }>,
   ): Promise<NewsPost> => api.patch<NewsPost>(`/learn/news/${id}`, body).then((r) => r.data),
   deleteNews: (id: string): Promise<void> =>
