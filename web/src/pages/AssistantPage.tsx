@@ -367,6 +367,7 @@ export function AssistantPage() {
             onSubmit={() => submit()}
             busy={ask.isPending}
             showHints={!empty}
+            voice={status.data?.voice ?? false}
           />
           </>
           )}

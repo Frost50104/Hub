@@ -1,0 +1,38 @@
+# Распознавание речи для ассистента (волна 3).
+#
+# Отдельный юнит, а не поток в API: модель `small` даёт пик 759 МБ на машине
+# с ~1.1 ГБ свободных (замерено 2026-08-20). MemoryMax превращает нехватку
+# памяти в перезапуск ОДНОЙ фичи вместо выбора жертвы OOM-killer'ом среди
+# Postgres, Redis и двух приложений.
+#
+# staging: скопировать как signaris-hub-staging-stt.service, заменив пути
+# /opt/signaris-hub → /opt/signaris-hub-staging и порт 5071 → 5072.
+[Unit]
+Description=Signaris Hub — распознавание речи (faster-whisper)
+After=network.target
+
+[Service]
+Type=simple
+User=signaris
+Group=signaris
+WorkingDirectory=/opt/signaris-hub
+EnvironmentFile=/opt/signaris-hub/.env
+# Кэш весов — рядом с приложением, а не в /root: юнит бежит от signaris.
+Environment=HF_HOME=/opt/signaris-hub/stt-cache
+Environment=OMP_NUM_THREADS=2
+ExecStart=/opt/signaris-hub/.venv/bin/uvicorn app.stt_service:app \
+  --host 127.0.0.1 --port 5071 --workers 1
+Restart=always
+RestartSec=10
+# Расшифровка занимает оба ядра на несколько секунд — не даём ей душить API.
+CPUWeight=30
+# Память. RSS модели small — 759 МБ (замерено), но cgroup считает ЕЩЁ и
+# страничный кэш от чтения 500-мегабайтного файла весов: одного MemoryMax=900M
+# хватило ровно на то, чтобы OOM-killer снёс юнит сразу после загрузки.
+# MemoryHigh — мягкий порог: ядро сначала вытесняет кэш и тормозит процесс,
+# и только MemoryMax убивает. Разрыв между ними и есть место под кэш.
+MemoryHigh=800M
+MemoryMax=1100M
+
+[Install]
+WantedBy=multi-user.target

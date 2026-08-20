@@ -39,6 +39,13 @@ dev = [
 sentry = [
     "sentry-sdk[fastapi]>=2.0",
 ]
+# Голосовой ввод ассистента. Ставится в тот же venv, но импортируется ТОЛЬКО
+# отдельным юнитом `app.stt_service` — веса модели не должны попадать в
+# API-процесс. Тянет ctranslate2 + PyAV (декодер webm/opus и mp4/aac), torch
+# НЕ требуется.
+stt = [
+    "faster-whisper>=1.0",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

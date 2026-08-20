@@ -109,6 +109,31 @@ class Settings(BaseSettings):
     iiko_timeout_sec: float = Field(default=30.0)
     iiko_cache_ttl_sec: int = Field(default=900)
 
+    # Голосовой ввод ассистента (волна 3). `local` — faster-whisper в
+    # ОТДЕЛЬНОМ systemd-юните: замерено на VPS 2026-08-20, модель `small`
+    # даёт пик 759 МБ и ~5.5с на команду, поэтому её вес не должен жить в
+    # API-процессе. `base` вдвое легче, но слышит «на пятницу» как «на 5
+    # ниццу» — неверный срок задачи дороже трёх секунд ожидания.
+    stt_enabled: bool = Field(default=False)
+    stt_provider: str = Field(default="local")
+    stt_model: str = Field(default="small")
+    stt_language: str = Field(default="ru")
+    stt_compute_type: str = Field(default="int8")
+    stt_cpu_threads: int = Field(default=2)
+    # Куда основное приложение проксирует запись при provider=local.
+    stt_url: str = Field(default="http://127.0.0.1:5071")
+    # Выгрузка модели по простою — на этой машине держать 759 МБ занятыми
+    # круглые сутки нельзя.
+    stt_idle_unload_sec: float = Field(default=300.0)
+    # 2 МБ ≈ десять минут opus: команда голосом — это секунды.
+    stt_max_bytes: int = Field(default=2 * 1024 * 1024)
+    # Ниже nginx-потолка /api/ai/ (120с): первый запрос после простоя платит
+    # ~9с за загрузку модели плюс ~6с на расшифровку.
+    stt_timeout_sec: float = Field(default=60.0)
+    # Платная альтернатива (provider=openai).
+    stt_api_key: str | None = Field(default=None)
+    stt_base_url: str | None = Field(default=None)
+
     # Public links (3.6.12) — view-only no-auth deep-links to a task/project.
     # Feature-flag so we can kill-switch the entire surface without a redeploy.
     public_links_enabled: bool = Field(default=True)

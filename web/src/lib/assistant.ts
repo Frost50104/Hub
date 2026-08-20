@@ -92,6 +92,8 @@ export interface AssistantStatus {
   provider: string | null
   /** Провайдер умеет вызывать инструменты — значит доступны действия. */
   can_act: boolean
+  /** Голосовой ввод настроен на сервере. */
+  voice: boolean
 }
 
 export interface PlanPatchBody {
@@ -134,6 +136,8 @@ export const assistantApi = {
 
   patchPlan: (planId: string, body: PlanPatchBody): Promise<Plan> =>
     api.patch<Plan>(`/ai/plans/${planId}`, body).then((r) => r.data),
+
+  transcribe: (blob: Blob): Promise<string> => transcribeBlob(blob),
 }
 
 /** Подпись оборота в журнале: «09:14 · действие». */
@@ -233,4 +237,12 @@ export const reportsApi = {
     a.remove()
     setTimeout(() => URL.revokeObjectURL(url), 60_000)
   },
+}
+
+/** Голосовой ввод: запись → текст. Отправку делает пользователь отдельно. */
+export async function transcribeBlob(blob: Blob): Promise<string> {
+  const resp = await api.post<{ text: string }>('/ai/transcribe', blob, {
+    headers: { 'Content-Type': blob.type || 'application/octet-stream' },
+  })
+  return resp.data.text ?? ''
 }

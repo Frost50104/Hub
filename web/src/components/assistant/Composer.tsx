@@ -1,15 +1,17 @@
 import { Send, Sparkles } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
+import { MicButton } from './MicButton'
 import { AutoGrowTextarea } from '@/components/ui/AutoGrowTextarea'
 import { Button } from '@/components/ui/Button'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 
 /**
- * Поле команды. Микрофон появится волной 3 — до тех пор кнопки нет вовсе:
- * неактивная кнопка микрофона выглядит как сломанная, а не как «скоро».
- * (Плюс `Permissions-Policy: microphone=()` на nginx всё равно глушит запись
- * до правки конфига — см. план.)
+ * Поле команды. Микрофона нет вовсе, пока STT не настроен на сервере:
+ * неактивная кнопка выглядит как сломанная, а не как «скоро».
+ *
+ * Расшифровка попадает В ПОЛЕ, а не отправляется: голос не должен запускать
+ * действие мимо глаз.
  */
 const HINTS = [
   'Что просрочено у меня',
@@ -23,12 +25,14 @@ export function Composer({
   onSubmit,
   busy,
   showHints,
+  voice,
 }: {
   value: string
   onChange: (v: string) => void
   onSubmit: () => void
   busy: boolean
   showHints: boolean
+  voice: boolean
 }) {
   const isDesktop = useIsDesktop()
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -73,6 +77,12 @@ export function Composer({
             className="border-0 bg-transparent p-0 text-[16px] leading-[1.45] text-text placeholder:text-text2 focus-visible:outline-none focus-visible:ring-0"
           />
         </div>
+        {voice && (
+          <MicButton
+            disabled={busy}
+            onText={(text) => onChange(value ? `${value} ${text}` : text)}
+          />
+        )}
         <Button
           size={isDesktop ? 'lg' : 'icon'}
           className="h-11 shrink-0 rounded-[11px]"

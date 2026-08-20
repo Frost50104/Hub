@@ -18,13 +18,15 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+import httpx
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from signaris_auth import Principal
 from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.ai import AiConversation, AiMessage, AiPlan
 from app.services.assistant import plans as plan_service
@@ -38,6 +40,7 @@ from app.services.llm import (
     get_provider,
 )
 from app.services.org_scope import get_profile
+from app.services.stt import STTError, STTNotConfigured, get_stt
 
 router = APIRouter(tags=["assistant"])
 log = structlog.get_logger("assistant.api")
@@ -86,6 +89,9 @@ class StatusResponse(BaseModel):
     provider: str | None = None
     # Провайдер без function-calling: ассистент отвечает, но не действует.
     can_act: bool = False
+    # Голосовой ввод настроен. Неактивный микрофон выглядит как сломанный,
+    # поэтому кнопки просто нет, пока STT не подключён.
+    voice: bool = False
 
 
 async def _hydrate(db: AsyncSession, data: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -119,11 +125,12 @@ async def status(_principal: Principal = Depends(require_auth())) -> StatusRespo
     try:
         provider = get_provider()
     except LLMNotConfigured:
-        return StatusResponse(configured=False)
+        return StatusResponse(configured=False, voice=get_settings().stt_enabled)
     return StatusResponse(
         configured=True,
         provider=provider.name,
         can_act=getattr(provider, "supports_tools", False),
+        voice=get_settings().stt_enabled,
     )
 
 
@@ -315,6 +322,76 @@ async def _fallback_answer(
         content=answer.strip(),
         sources=[{"title": d["title"], "url_path": d["url"]} for d in docs],
     )
+
+
+# ─── Голосовой ввод ─────────────────────────────────────────────────────────
+
+
+class TranscriptResponse(BaseModel):
+    text: str
+
+
+@router.post("/ai/transcribe", response_model=TranscriptResponse)
+async def transcribe(
+    request: Request,
+    principal: Principal = Depends(require_auth()),
+) -> TranscriptResponse:
+    """Запись из браузера → текст В ПОЛЕ ВВОДА.
+
+    Расшифровка НЕ отправляется как команда: голос не должен запускать
+    действие мимо глаз — сотрудник читает и правит текст, отправка остаётся
+    отдельной кнопкой (спека макета).
+
+    При `stt_provider=local` считает отдельный юнит на 127.0.0.1: веса модели
+    не должны жить в API-процессе (см. `app/stt_service.py`).
+    """
+    settings = get_settings()
+    if not settings.stt_enabled:
+        raise HTTPException(
+            status_code=503, detail="Голосовой ввод не подключён"
+        )
+    await enforce_rate_limit(
+        bucket="ai:stt", employee_id=str(principal.employee_id), limit=20, window_sec=60
+    )
+    audio = await request.body()
+    if not audio:
+        raise HTTPException(status_code=422, detail="Пустая запись")
+    if len(audio) > settings.stt_max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail="Запись слишком длинная — скажите короче",
+        )
+    content_type = request.headers.get("content-type", "application/octet-stream")
+
+    if settings.stt_provider != "local":
+        try:
+            provider = get_stt()
+            result = await provider.transcribe(audio, content_type=content_type)
+        except STTNotConfigured as e:
+            raise HTTPException(status_code=503, detail=str(e)) from None
+        except STTError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from None
+        return TranscriptResponse(text=result.text)
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.stt_timeout_sec) as client:
+            resp = await client.post(
+                f"{settings.stt_url.rstrip('/')}/transcribe",
+                content=audio,
+                headers={"Content-Type": content_type},
+            )
+    except httpx.HTTPError as e:
+        log.warning("stt.unreachable", error=str(e))
+        raise HTTPException(
+            status_code=503,
+            detail="Распознавание речи сейчас недоступно — наберите команду текстом",
+        ) from None
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502 if resp.status_code >= 500 else resp.status_code,
+            detail="Не удалось распознать запись — попробуйте ещё раз или наберите текстом",
+        )
+    return TranscriptResponse(text=str(resp.json().get("text") or "").strip())
 
 
 # ─── Диалоги ────────────────────────────────────────────────────────────────
