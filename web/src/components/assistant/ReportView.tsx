@@ -64,25 +64,39 @@ function Bars({ rows }: { rows: Report['bars'] }) {
 function Hours({ rows }: { rows: Report['hours'] }) {
   return (
     <div className="flex items-end gap-1.5 overflow-x-auto pb-1">
-      {rows.map((h) => (
+      {rows.map((h, i) => (
         <div key={h.label} className="flex min-w-[18px] flex-1 flex-col items-center gap-1.5">
           <span
             className={cn(
               'block w-full rounded-t-[4px]',
               h.pct >= 82 ? 'bg-amber' : 'bg-text2',
             )}
-            style={{ height: `${Math.max(Math.round(h.pct * 1.35), 3)}px` }}
+            style={{ height: `${Math.max(Math.round(h.pct * 1.3), 3)}px` }}
           />
-          <span className="text-[12px] text-text2">{h.label}</span>
+          {/* На телефоне подписан каждый второй час — 24 подписи в 358px
+              слипаются; на десктопе — все. */}
+          <span className={cn('text-[12px] text-text2', i % 2 === 1 && 'invisible lg:visible')}>
+            {h.label}
+          </span>
         </div>
       ))}
     </div>
   )
 }
 
-function ItemList({ title, rows, muted }: { title: string; rows: Report['top']; muted?: boolean }) {
+function ItemList({
+  title,
+  rows,
+  muted,
+  className,
+}: {
+  title: string
+  rows: Report['top']
+  muted?: boolean
+  className?: string
+}) {
   return (
-    <div className="min-w-0 flex-1">
+    <div className={cn('min-w-0 flex-1', className)}>
       <div className="flex items-baseline justify-between gap-2">
         <p className="font-display text-[15px] font-semibold text-text">{title}</p>
         {/* Подпись колонки, а не единица у каждого числа: iiko отдаёт в
@@ -249,7 +263,7 @@ export function ReportView({
             {data.chart === 'hours' && <Hours rows={data.hours} />}
             {data.chart === 'lists' && (
               <div className="flex flex-col gap-5 lg:flex-row lg:gap-8">
-                <ItemList title="Топ продаж" rows={data.top} />
+                <ItemList title="Топ продаж" rows={data.top} className="lg:border-r lg:border-hair lg:pr-8" />
                 <ItemList title="Тянут вниз" rows={data.anti} muted />
               </div>
             )}
