@@ -12,10 +12,10 @@ import {
 } from '@/lib/taskFilters'
 import {
   PRIORITY_LABEL,
-  STATUS_LABEL,
+  STATUS_FILTER_LABEL,
   type TaskPriority,
   type TaskSortField,
-  type TaskStatus,
+  type TaskStatusFilter,
 } from '@/lib/tasks'
 
 const DUE_LABEL: Record<DuePreset, string> = {
@@ -172,14 +172,14 @@ export function TaskFilterBar({
       <FilterSelect
         stack={stack}
         ariaLabel="Фильтр по статусу"
-        label={value.status ? STATUS_LABEL[value.status] : 'Статус: все'}
+        label={value.status ? STATUS_FILTER_LABEL[value.status] : 'Статус: все'}
         value={value.status ?? ''}
-        onChange={(v) => set({ status: (v || undefined) as TaskStatus | undefined })}
+        onChange={(v) => set({ status: (v || undefined) as TaskStatusFilter | undefined })}
       >
         <option value="">Статус: все</option>
-        {(Object.keys(STATUS_LABEL) as TaskStatus[]).map((s) => (
+        {(Object.keys(STATUS_FILTER_LABEL) as TaskStatusFilter[]).map((s) => (
           <option key={s} value={s}>
-            {STATUS_LABEL[s]}
+            {STATUS_FILTER_LABEL[s]}
           </option>
         ))}
       </FilterSelect>

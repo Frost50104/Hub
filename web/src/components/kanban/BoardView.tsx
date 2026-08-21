@@ -301,6 +301,7 @@ export function BoardView({
     updateStage.mutate({ stageId: stage.id, position: next })
   }
 
+  const firstStageIdx = columns.findIndex((c) => c.stage !== null)
   return (
     <DndContext
       sensors={sensors}
@@ -317,7 +318,9 @@ export function BoardView({
         {columns.map((col, i) => (
           <KanbanColumn
             key={col.dndId}
-            quickCreateTarget={i === 0}
+            // Первая колонка С ЭТАПОМ: у «Без этапа» (индекс 0, если есть)
+            // инпута нет — «Новая задача» из сайдбара молча падала в диалог.
+            quickCreateTarget={i === firstStageIdx}
             column={col}
             projectId={projectId}
             canEdit={canEdit}

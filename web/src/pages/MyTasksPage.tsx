@@ -15,6 +15,7 @@ import { useMyTasks, type DueWindow } from '@/hooks/useMyTasks'
 import { useProjects } from '@/hooks/useProjects'
 import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
+import { addDaysKey, dayKey, todayKey } from '@/lib/taskDates'
 import { MY_TASKS_GRID } from '@/lib/taskGrid'
 import { type Task } from '@/lib/tasks'
 
@@ -40,24 +41,21 @@ const GROUP_LABEL: Record<GroupKey, string> = {
 const GROUP_ORDER: GroupKey[] = ['overdue', 'today', 'week', 'later', 'nodate']
 
 function groupTasksByDue(tasks: Task[]): { key: GroupKey; items: Task[] }[] {
-  const now = new Date()
-  const startToday = new Date(now)
-  startToday.setHours(0, 0, 0, 0)
-  const endToday = new Date(now)
-  endToday.setHours(23, 59, 59, 999)
-  const endWeek = new Date(endToday)
-  endWeek.setDate(endWeek.getDate() + 7)
+  // Ключи дней display tz (lib/taskDates) — та же семантика, что у окон
+  // сервера: день срока, а не мгновение.
+  const today = todayKey()
+  const weekEnd = addDaysKey(today, 7)
 
   const buckets = new Map<GroupKey, Task[]>(GROUP_ORDER.map((k) => [k, []]))
   for (const t of tasks) {
     let key: GroupKey
     if (!t.due_at) key = 'nodate'
     else {
-      const due = new Date(t.due_at)
+      const day = dayKey(t.due_at)
       // Готовые задачи не считаем просроченными — оставляем в своей дате.
-      if (due < startToday && t.status !== 'done') key = 'overdue'
-      else if (due <= endToday) key = 'today'
-      else if (due <= endWeek) key = 'week'
+      if (day < today && t.status !== 'done') key = 'overdue'
+      else if (day <= today) key = 'today'
+      else if (day <= weekEnd) key = 'week'
       else key = 'later'
     }
     buckets.get(key)!.push(t)
@@ -111,7 +109,7 @@ function useMyTasksData(tab: DueWindow) {
 
 function emptyText(tab: DueWindow): string {
   if (tab === 'overdue') return 'Нет просроченных — отлично!'
-  if (tab === 'today') return 'На сегодня задач нет.'
+  if (tab === 'today') return 'На сегодня задач нет — и просроченных тоже.'
   return 'Здесь пока пусто.'
 }
 

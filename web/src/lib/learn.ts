@@ -221,6 +221,28 @@ export interface MaterialVersion {
   size_bytes: number
   note: string | null
   created_at: string
+  /** Есть извлечённый текст — «Просмотреть текст» для docx/xlsx. */
+  has_text: boolean
+}
+
+export interface MaterialText {
+  version_no: number
+  mime: string
+  text: string
+  truncated: boolean
+}
+
+/** Тупик «лимит попыток обязательного теста исчерпан» (GET /learn/quizzes/blocked). */
+export interface BlockedQuizItem {
+  quiz_id: string
+  quiz_title: string
+  course_id: string | null
+  lesson_id: string | null
+  profile_id: string
+  employee_name: string
+  attempts_used: number
+  attempts_limit: number
+  last_attempt_at: string | null
 }
 
 export interface LibraryMaterial {
@@ -510,6 +532,17 @@ export interface LessonContent {
   prev_lesson_id: string | null
   next_lesson_id: string | null
   next_locked: boolean
+  /** Обязательный опубликованный тест урока и его состояние (сервер, quiz_gate):
+   *  без `passed` урок не завершить. */
+  quiz_required: boolean
+  quiz_state:
+    | 'none'
+    | 'not_started'
+    | 'in_progress'
+    | 'failed'
+    | 'pending_review'
+    | 'limit_exhausted'
+    | 'passed'
 }
 
 export interface LessonTemplate {
@@ -1161,8 +1194,13 @@ export const learnApi = {
     api.post<LibrarySection>('/learn/library/sections', body).then((r) => r.data),
   renameSection: (id: string, title: string): Promise<LibrarySection> =>
     api.patch<LibrarySection>(`/learn/library/sections/${id}`, { title }).then((r) => r.data),
-  deleteSection: (id: string): Promise<void> =>
-    api.delete(`/learn/library/sections/${id}`).then(() => undefined),
+  // force — перенести материалы/подразделы в «Без раздела» и удалить.
+  deleteSection: (id: string, force = false): Promise<void> =>
+    api
+      .delete(`/learn/library/sections/${id}`, { params: { force: force || undefined } })
+      .then(() => undefined),
+  materialText: (id: string): Promise<MaterialText> =>
+    api.get<MaterialText>(`/learn/library/materials/${id}/text`).then((r) => r.data),
 
   createMaterial: (
     body: MaterialUpsert & { title: string; kind: 'file' | 'link' },
@@ -1447,6 +1485,8 @@ export const learnApi = {
   submitQuizAttempt: (attemptId: string): Promise<QuizAttempt> =>
     api.post<QuizAttempt>(`/learn/quiz-attempts/${attemptId}/submit`).then((r) => r.data),
 
+  blockedQuizzes: (): Promise<BlockedQuizItem[]> =>
+    api.get<BlockedQuizItem[]>('/learn/quizzes/blocked').then((r) => r.data),
   reviewQueue: (): Promise<ReviewQueueItem[]> =>
     api.get<ReviewQueueItem[]>('/learn/review-queue').then((r) => r.data),
   reviewQuizAttempt: (

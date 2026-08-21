@@ -8,6 +8,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
 import {
@@ -23,13 +24,22 @@ interface TaskLabelsProps {
   canEdit: boolean
   /** Без заголовка секции: карточка задачи кладёт метки строкой в <dl>. */
   bare?: boolean
+  /** Открыть управление метками проекта (только `can_manage` — гейт бэкенда
+   *  owner/admin); без него в пустом меню только подсказка. */
+  onManageLabels?: () => void
 }
 
 /**
  * Секция «Метки» в карточке задачи: чипы (цветная точка + имя — тема-безопасно
  * для произвольного hex) + мультиселект-меню.
  */
-export function TaskLabels({ taskId, projectId, canEdit, bare }: TaskLabelsProps) {
+export function TaskLabels({
+  taskId,
+  projectId,
+  canEdit,
+  bare,
+  onManageLabels,
+}: TaskLabelsProps) {
   const labels = useLabels(projectId)
   const assignments = useLabelAssignments(projectId)
   const assign = useAssignLabel(projectId)
@@ -46,8 +56,11 @@ export function TaskLabels({ taskId, projectId, canEdit, bare }: TaskLabelsProps
   )
   const active = (labels.data ?? []).filter((l) => mine.has(l.id))
 
-  // Без меток в проекте и без прав секция не нужна.
-  if ((labels.data?.length ?? 0) === 0 && active.length === 0) return null
+  // Редактору «+ Метка» показываем всегда — иначе в проекте без меток никто не
+  // узнаёт, что метки существуют (ОС тестировщика 2026-08). Наблюдателю без
+  // меток на задаче строка не нужна.
+  if (!canEdit && active.length === 0) return null
+  const hasLabels = (labels.data?.length ?? 0) > 0
 
   const row = (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -78,6 +91,11 @@ export function TaskLabels({ taskId, projectId, canEdit, bare }: TaskLabelsProps
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-[220px]">
+            {!hasLabels && (
+              <p className="px-2 py-1.5 text-xs text-text2">
+                {labels.isLoading ? 'Загружаем…' : 'Меток в проекте пока нет'}
+              </p>
+            )}
             {(labels.data ?? []).map((l) => {
               const isOn = mine.has(l.id)
               return (
@@ -99,6 +117,19 @@ export function TaskLabels({ taskId, projectId, canEdit, bare }: TaskLabelsProps
                 </DropdownMenuItem>
               )
             })}
+            {onManageLabels && (
+              <>
+                {hasLabels && <DropdownMenuSeparator />}
+                <DropdownMenuItem
+                  // setTimeout: возврат фокуса закрывающегося меню перебил бы
+                  // autofocus открывающегося диалога.
+                  onSelect={() => setTimeout(onManageLabels, 0)}
+                >
+                  <Plus className="mr-2 h-3.5 w-3.5" strokeWidth={2.2} />
+                  {hasLabels ? 'Управлять метками…' : 'Создать метку…'}
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}

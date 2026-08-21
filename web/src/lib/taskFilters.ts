@@ -1,9 +1,11 @@
+import { addDaysKey, dayEndIso, dayStartIso, todayKey } from './taskDates'
 import {
   type CalendarFilters,
+  type Task,
   type TaskListFilters,
   type TaskPriority,
   type TaskSortField,
-  type TaskStatus,
+  type TaskStatusFilter,
 } from './tasks'
 
 export type DuePreset = 'today' | 'week' | 'overdue'
@@ -11,7 +13,7 @@ export type DuePreset = 'today' | 'week' | 'overdue'
 /** Состояние фильтр-бара проекта. Живёт в URL searchParams (переживает F5 и шарится ссылкой). */
 export interface TaskViewFilters {
   assignee?: string
-  status?: TaskStatus
+  status?: TaskStatusFilter
   priority?: TaskPriority
   /** id метки проекта. */
   label?: string
@@ -20,7 +22,7 @@ export interface TaskViewFilters {
   order?: 'asc' | 'desc'
 }
 
-const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done']
+const STATUSES: TaskStatusFilter[] = ['open', 'todo', 'in_progress', 'in_review', 'done']
 const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
 const DUE_PRESETS: DuePreset[] = ['today', 'week', 'overdue']
 const SORTS: TaskSortField[] = ['position', 'due_at', 'priority', 'created_at', 'title']
@@ -103,39 +105,41 @@ export function narrowableFilter(
   return { key, label: FILTER_LABEL[key] }
 }
 
-function startOfDay(d: Date): Date {
-  const out = new Date(d)
-  out.setHours(0, 0, 0, 0)
-  return out
-}
-
-function endOfDay(d: Date): Date {
-  const out = new Date(d)
-  out.setHours(23, 59, 59, 999)
-  return out
-}
-
+/** Границы пресетов — календарные дни display tz (lib/taskDates), как у бэкенда. */
 function dueRange(preset: DuePreset): { due_from?: string; due_to?: string } {
-  const now = new Date()
+  const today = todayKey()
   switch (preset) {
     case 'today':
-      return {
-        due_from: startOfDay(now).toISOString(),
-        due_to: endOfDay(now).toISOString(),
-      }
-    case 'week': {
-      const weekEnd = new Date(now)
-      weekEnd.setDate(weekEnd.getDate() + 7)
-      return {
-        due_from: startOfDay(now).toISOString(),
-        due_to: endOfDay(weekEnd).toISOString(),
-      }
-    }
+      return { due_from: dayStartIso(today), due_to: dayEndIso(today) }
+    case 'week':
+      return { due_from: dayStartIso(today), due_to: dayEndIso(addDaysKey(today, 7)) }
     case 'overdue':
-      // Начало дня, а не now(): значение стабильно в течение дня —
+      // Конец вчерашнего дня, а не now(): значение стабильно в течение дня —
       // queryKey не меняется на каждом рендере.
-      return { due_to: startOfDay(now).toISOString() }
+      return { due_to: dayEndIso(addDaysKey(today, -1)) }
   }
+}
+
+/**
+ * Выполненные — в конец списка секции (стабильная партиция: порядок внутри
+ * групп сохраняется). Решение владельца 2026-08-21: не скрывать по умолчанию,
+ * а утопить; скрытие — явным фильтром «Статус: Не выполнено».
+ */
+export function sinkDone<T extends Pick<Task, 'status'>>(tasks: readonly T[]): T[] {
+  const open: T[] = []
+  const done: T[] = []
+  for (const t of tasks) (t.status === 'done' ? done : open).push(t)
+  return open.length && done.length ? [...open, ...done] : [...tasks]
+}
+
+/** Счётчик шапки секции: «N · M выполнено». */
+export function countOpenDone(tasks: readonly Pick<Task, 'status'>[]): {
+  open: number
+  done: number
+} {
+  let done = 0
+  for (const t of tasks) if (t.status === 'done') done += 1
+  return { open: tasks.length - done, done }
 }
 
 /**
@@ -152,6 +156,9 @@ export function toListFilters(
   if (filters.priority) out.priority = filters.priority
   if (filters.label) out.label = filters.label
   if (filters.due) Object.assign(out, dueRange(filters.due))
+  // «Просрочено» без явного статуса — только незавершённые: закрытая с
+  // опозданием задача не просрочена.
+  if (filters.due === 'overdue' && !filters.status) out.status = 'open'
   if (!opts.forBoard && filters.sort && filters.sort !== 'position') {
     out.sort = filters.sort
     out.order = filters.order ?? 'asc'
@@ -183,7 +190,7 @@ export function describeFilters(
   filters: TaskViewFilters,
   names: { assignee?: string | null; label?: string | null } = {},
   labels: {
-    status: Record<TaskStatus, string>
+    status: Record<TaskStatusFilter, string>
     priority: Record<TaskPriority, string>
   },
 ): string {

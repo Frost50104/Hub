@@ -78,7 +78,7 @@ const RichEditor = lazy(() => import('@/components/learn/rich/RichEditor'))
 const UNLOCK_LABEL: Record<LessonUnlockRule, string> = {
   inherit: 'Как в курсе',
   free: 'Всегда открыт',
-  after_prev_test: 'После предыдущего',
+  after_prev_test: 'После предыдущего урока и его теста',
 }
 
 function ToolButton({
@@ -175,7 +175,9 @@ function LessonEditorInner({
   const [uploading, setUploading] = useState(false)
   const editorRef = useRef<Editor | null>(null)
 
-  const [status, setStatus] = useState(lesson.status)
+  // Статус — из запроса, не локальная копия: «глаз» в списке уроков меняет
+  // его снаружи, и копия показывала «Опубликован» после скрытия (ОС 2026-08).
+  const status = lesson.status
 
   const buildPayload = () => ({
     title: title.trim(),
@@ -326,6 +328,10 @@ function LessonEditorInner({
               последовательный или смешанный режим в настройках курса.
             </p>
           )}
+          <p className="mt-1 text-[13px] leading-[1.45] text-text2">
+            Обязательный тест урока блокирует его завершение при любом правиле —
+            и следующий урок в последовательном курсе.
+          </p>
         </div>
       </div>
 
@@ -407,10 +413,7 @@ function LessonEditorInner({
             onClick={() =>
               void saveWithStatus
                 .mutateAsync('published')
-                .then(() => {
-                  setStatus('published')
-                  toast.success('Урок опубликован')
-                })
+                .then(() => toast.success('Урок опубликован'))
                 .catch(() => undefined)
             }
           >
@@ -424,14 +427,11 @@ function LessonEditorInner({
             onClick={() =>
               void saveWithStatus
                 .mutateAsync('draft')
-                .then(() => {
-                  setStatus('draft')
-                  toast.success('Урок скрыт (черновик)')
-                })
+                .then(() => toast.success('Урок скрыт от сотрудников (черновик)'))
                 .catch(() => undefined)
             }
           >
-            <EyeOff className="h-4 w-4" /> Скрыть (в черновик)
+            <EyeOff className="h-4 w-4" /> Скрыть от сотрудников
           </Button>
         )}
         <Badge variant={status === 'published' ? 'default' : 'secondary'}>

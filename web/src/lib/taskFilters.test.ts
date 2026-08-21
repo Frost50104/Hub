@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  describeFilters,
   activeFilterCount,
   applyFiltersToSearchParams,
+  countOpenDone,
+  describeFilters,
   filtersFromSearchParams,
   narrowableFilter,
+  sinkDone,
   toCalendarFilters,
   toListFilters,
   type TaskViewFilters,
@@ -139,7 +141,13 @@ describe('narrowableFilter', () => {
 
 describe('describeFilters', () => {
   const labels = {
-    status: { todo: 'К выполнению', in_progress: 'В работе', in_review: 'На проверке', done: 'Готово' },
+    status: {
+      open: 'Не выполнено',
+      todo: 'К выполнению',
+      in_progress: 'В работе',
+      in_review: 'На проверке',
+      done: 'Готово',
+    },
     priority: { low: 'низкий', medium: 'средний', high: 'высокий', urgent: 'срочно' },
   } as const
   it('перечисляет применённые фильтры с именами', () => {
@@ -157,3 +165,30 @@ describe('describeFilters', () => {
     )
   })
 })
+
+describe('status=open, sinkDone, countOpenDone (ОС 2026-08)', () => {
+  it('f_status=open проходит через URL и в параметры списка', () => {
+    const sp = new URLSearchParams('f_status=open')
+    const f = filtersFromSearchParams(sp)
+    expect(f.status).toBe('open')
+    expect(toListFilters(f).status).toBe('open')
+    expect(filtersFromSearchParams(new URLSearchParams('f_status=whatever')).status).toBeUndefined()
+  })
+  it('пресет «просрочено» без статуса фильтрует только незавершённые', () => {
+    expect(toListFilters({ due: 'overdue' }).status).toBe('open')
+    expect(toListFilters({ due: 'overdue', status: 'done' }).status).toBe('done')
+    expect(toListFilters({ due: 'today' }).status).toBeUndefined()
+  })
+  it('sinkDone стабильно переносит выполненные в конец', () => {
+    const tasks = [
+      { id: 'a', status: 'done' },
+      { id: 'b', status: 'todo' },
+      { id: 'c', status: 'done' },
+      { id: 'd', status: 'in_progress' },
+    ] as const
+    expect(sinkDone(tasks).map((t) => t.id)).toEqual(['b', 'd', 'a', 'c'])
+    expect(sinkDone([]).length).toBe(0)
+    expect(countOpenDone(tasks)).toEqual({ open: 2, done: 2 })
+  })
+})
+

@@ -187,7 +187,7 @@ export function QuizBuilder({ lessonId }: { lessonId: string }) {
             ['shuffle_questions', 'перемешивать вопросы'],
             ['shuffle_options', 'перемешивать варианты'],
             ['show_correct_answers', 'показывать разбор после сдачи'],
-            ['is_required', 'обязательный (гейтит следующий урок)'],
+            ['is_required', 'обязательный: без сдачи урок не завершить'],
           ] as const
         ).map(([key, label]) => (
           <label key={key} className="flex items-center gap-2 text-xs text-text2">

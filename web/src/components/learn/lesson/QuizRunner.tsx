@@ -515,7 +515,7 @@ export function QuizRunner({ lessonId }: { lessonId: string }) {
         </span>
         {quiz.is_required && (
           <span className="rounded-md bg-surface px-[7px] py-[3px] text-[11px] font-medium normal-case tracking-normal text-text2">
-            открывает следующий урок
+            обязательный — без него урок не завершить
           </span>
         )}
       </p>

@@ -1,4 +1,5 @@
 import {
+  Archive,
   ChevronDown,
   Link as LinkIcon,
   Loader2,
@@ -8,8 +9,9 @@ import {
   Star,
   Tags,
   Trash2,
+  Upload,
 } from 'lucide-react'
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -44,6 +46,7 @@ import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { TaskRow } from '@/components/task/TaskRow'
 import { TimelineView } from '@/components/timeline/TimelineView'
 import { Badge } from '@/components/ui/Badge'
+import { BottomSheet, BottomSheetItem } from '@/components/ui/BottomSheet'
 import { Button } from '@/components/ui/Button'
 import {
   DropdownMenu,
@@ -76,19 +79,21 @@ import { type CustomFieldDefinition, type CustomFieldValue } from '@/lib/customF
 import { formatCustomFieldValue } from '@/lib/formatCustomField'
 import { PROJECT_ROLE_LABEL, type Project, type Section } from '@/lib/projects'
 import {
-  activeFilterCount,
-  narrowableFilter,
   type NarrowableFilter,
-  applyFiltersToSearchParams,
-  filtersFromSearchParams,
-  toListFilters,
   type TaskViewFilters,
+  activeFilterCount,
+  applyFiltersToSearchParams,
+  countOpenDone,
   describeFilters,
+  filtersFromSearchParams,
+  narrowableFilter,
+  sinkDone,
+  toListFilters,
 } from '@/lib/taskFilters'
 import { projectTaskGrid } from '@/lib/taskGrid'
 import { dataAgeLabel } from '@/lib/dates'
 import { requestInlineCreate } from '@/lib/quickCreate'
-import { type Task, PRIORITY_LABEL, STATUS_LABEL } from '@/lib/tasks'
+import { type Task, PRIORITY_LABEL, STATUS_FILTER_LABEL } from '@/lib/tasks'
 import { plural } from '@/lib/typography'
 import { ORPHAN_SECTION_KEY, useViewConfig } from '@/stores/viewConfig'
 
@@ -133,6 +138,37 @@ function ProjectHeader({
 }) {
   const isArchived = !!project.archived_at
   const setFavorite = useSetFavorite(project.id)
+  // Телефон: действия проекта (Поделиться/Поля/Метки/Импорт/Архив) — те же, что
+  // в десктопной шапке, шторкой «Действия»; без неё менеджер на телефоне не мог
+  // создать метку вовсе (ОС 2026-08).
+  const [actionsOpen, setActionsOpen] = useState(false)
+  const mobileActions: { label: string; icon: ReactNode; onClick: () => void }[] = []
+  if (project.can_edit)
+    mobileActions.push({
+      label: 'Поделиться',
+      icon: <LinkIcon className="h-5 w-5" />,
+      onClick: onOpenShare,
+    })
+  if (project.can_manage) {
+    mobileActions.push({
+      label: 'Поля',
+      icon: <Settings2 className="h-5 w-5" />,
+      onClick: onOpenFields,
+    })
+    mobileActions.push({ label: 'Метки', icon: <Tags className="h-5 w-5" />, onClick: onOpenLabels })
+  }
+  if (project.can_edit && !isArchived)
+    mobileActions.push({
+      label: 'Импорт из CSV…',
+      icon: <Upload className="h-5 w-5" />,
+      onClick: onImport,
+    })
+  if (project.can_manage)
+    mobileActions.push({
+      label: isArchived ? 'Разархивировать' : 'Архивировать',
+      icon: <Archive className="h-5 w-5" />,
+      onClick: onArchive,
+    })
   const counts = [
     project.task_count != null ? plural(project.task_count, 'задача', 'задачи', 'задач') : null,
     sectionCount > 0 ? plural(sectionCount, 'секция', 'секции', 'секций') : null,
@@ -163,8 +199,36 @@ function ProjectHeader({
           <p className="min-w-0 truncate text-[12px] font-semibold uppercase tracking-[0.08em] text-text2">
             {[project.key, ...counts].join(' · ')}
           </p>
-          {mobileFilters}
+          <span className="flex shrink-0 items-center gap-1.5">
+            {mobileFilters}
+            {mobileActions.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setActionsOpen(true)}
+                aria-label="Действия проекта"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-glass-border bg-glass text-text2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            )}
+          </span>
         </div>
+        {mobileActions.length > 0 && (
+          <BottomSheet open={actionsOpen} onOpenChange={setActionsOpen} title="Действия">
+            {mobileActions.map((a) => (
+              <BottomSheetItem
+                key={a.label}
+                icon={a.icon}
+                onClick={() => {
+                  setActionsOpen(false)
+                  a.onClick()
+                }}
+              >
+                {a.label}
+              </BottomSheetItem>
+            ))}
+          </BottomSheet>
+        )}
         <div className="mt-1 flex items-start gap-2">
           <h1 className="min-w-0 flex-1 font-display text-[22px] font-bold leading-[1.2] text-text [text-wrap:balance]">
             {project.name}
@@ -318,12 +382,16 @@ function ViewTabs({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
 function SectionHeader({
   title,
   count,
+  doneCount = 0,
   collapsed,
   onToggle,
   actions,
 }: {
   title: string
+  /** Незавершённые задачи секции. */
   count: number
+  /** Выполненные — отдельным приглушённым счётчиком «· M выполнено». */
+  doneCount?: number
   collapsed: boolean
   onToggle: () => void
   actions?: React.ReactNode
@@ -346,7 +414,12 @@ function SectionHeader({
         <span className="truncate text-[13px] font-bold uppercase tracking-[0.06em] text-text2">
           {title}
         </span>
-        <span className="font-mono text-[12px] text-text2">{count}</span>
+        <span className="font-mono text-[12px] text-text2">
+          {count}
+          {doneCount > 0 && (
+            <span className="font-body text-text3"> · {doneCount} выполнено</span>
+          )}
+        </span>
       </button>
       {actions && <div className="pr-3">{actions}</div>}
     </div>
@@ -435,7 +508,8 @@ function SectionBlock({
       ) : (
         <SectionHeader
           title={title}
-          count={tasks.length}
+          count={countOpenDone(tasks).open}
+          doneCount={countOpenDone(tasks).done}
           collapsed={collapsed}
           onToggle={() => toggleSection(projectId, key)}
           actions={
@@ -594,6 +668,8 @@ function ListTab({
       list.push(t)
       map.set(t.section_id, list)
     }
+    // Выполненные — в конец секции (решение владельца 2026-08-21).
+    for (const [key, list] of map) map.set(key, sinkDone(list))
     return map
   }, [tasks.data])
 
@@ -699,7 +775,7 @@ function ListTab({
                 ?.full_name,
               label: labels.data?.find((l) => l.id === filters.label)?.name,
             },
-            { status: STATUS_LABEL, priority: PRIORITY_LABEL },
+            { status: STATUS_FILTER_LABEL, priority: PRIORITY_LABEL },
           ),
           project.task_count
             ? `Из ${project.task_count} задач проекта — ни одной.`
@@ -1062,6 +1138,7 @@ export function ProjectPage() {
         projectId={id}
         onClose={closeTask}
         onOpenTask={openTask}
+        onManageLabels={() => setLabelsOpen(true)}
       />
 
       <CustomFieldsManager

@@ -10,6 +10,7 @@ import { UpdateBanner } from './components/UpdateBanner'
 import { setBackendEnv } from './lib/appEnv'
 import { queryClient } from './lib/queryClient'
 import { initSentry } from './lib/sentry'
+import { setDisplayTz } from './lib/taskDates'
 import { initTheme } from './lib/theme'
 import './styles/globals.css'
 
@@ -20,6 +21,7 @@ interface BootstrapEnv {
   version?: string
   environment?: string
   sentry_dsn?: string | null
+  display_timezone?: string
 }
 
 async function bootstrap(): Promise<void> {
@@ -36,6 +38,8 @@ async function bootstrap(): Promise<void> {
       // ДО проверки на sentry_dsn: маркер окружения нужен независимо от того,
       // заведён ли Sentry (а он пока выключен на обоих env).
       setBackendEnv(env.environment)
+      // Срок задачи = календарный день в этой зоне (lib/taskDates).
+      setDisplayTz(env.display_timezone)
       if (env.sentry_dsn) {
         initSentry({
           dsn: env.sentry_dsn,

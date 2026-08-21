@@ -6,6 +6,7 @@ import {
 } from '@tanstack/react-query'
 
 import {
+  type BlockedQuizItem,
   learnApi,
   type AudienceDryRun,
   type AudienceRules,
@@ -245,6 +246,9 @@ export function useCourseMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<T
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['learn-courses'] })
       void qc.invalidateQueries({ queryKey: ['learn-course'] })
+      // Редактор урока читает ['learn-lesson', id] — без этого «глаз» в списке
+      // менял статус, а редактор ниже показывал старый (ОС 2026-08).
+      void qc.invalidateQueries({ queryKey: ['learn-lesson'] })
     },
   })
 }
@@ -286,6 +290,16 @@ export function useQuizMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TRe
       void qc.invalidateQueries({ queryKey: ['learn-lesson-quiz-manage'] })
       void qc.invalidateQueries({ queryKey: ['learn-review-queue'] })
     },
+  })
+}
+
+export function useBlockedQuizzes(enabled = true): UseQueryResult<BlockedQuizItem[]> {
+  return useQuery({
+    queryKey: ['learn-quizzes-blocked'],
+    queryFn: learnApi.blockedQuizzes,
+    enabled,
+    retry: false,
+    meta: { suppressGlobalError: true }, // не-publisher получает 403
   })
 }
 

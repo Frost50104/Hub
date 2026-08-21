@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, ClipboardCheck, Clock, X } from 'lucide-react'
+import { Check, ClipboardCheck, Clock, RotateCcw, X } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
@@ -8,10 +8,15 @@ import { QueryError } from '@/components/QueryError'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { SkeletonRows } from '@/components/ui/Skeleton'
-import { useReviewQueue } from '@/hooks/useLearn'
+import { useBlockedQuizzes, useReviewQueue } from '@/hooks/useLearn'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { extractErrorDetail } from '@/lib/errors'
-import { learnApi, type QuizAttempt, type ReviewQueueItem } from '@/lib/learn'
+import {
+  learnApi,
+  type BlockedQuizItem,
+  type QuizAttempt,
+  type ReviewQueueItem,
+} from '@/lib/learn'
 
 import { useAdminEmbedded } from './adminEmbed'
 
@@ -125,11 +130,82 @@ function AttemptReview({
   )
 }
 
+/**
+ * Тупики «лимит попыток обязательного теста исчерпан»: с гейтом теста
+ * (ОС 2026-08) такой сотрудник не может завершить урок — publisher снимает
+ * тупик «Сбросить попытки» (ручка была, кнопки не было).
+ */
+function BlockedQuizzes({ items, onReset }: { items: BlockedQuizItem[]; onReset: () => void }) {
+  const [confirm, setConfirm] = useState<BlockedQuizItem | null>(null)
+  const reset = useMutation({
+    mutationFn: (item: BlockedQuizItem) =>
+      learnApi.resetQuizAttempts(item.quiz_id, item.profile_id),
+    meta: { suppressGlobalError: true },
+    onSuccess: (_d, item) => {
+      toast.success(`Попытки сброшены: ${item.employee_name} — «${item.quiz_title}»`)
+      setConfirm(null)
+      onReset()
+    },
+    onError: (e) =>
+      toast.error('Не удалось сбросить попытки', { description: extractErrorDetail(e) }),
+  })
+  if (items.length === 0) return null
+  return (
+    <section className="space-y-2">
+      <p className="text-xs font-bold uppercase tracking-[0.09em] text-text2">
+        Исчерпали лимит попыток · {items.length}
+      </p>
+      {items.map((item) => (
+        <div
+          key={`${item.quiz_id}:${item.profile_id}`}
+          className="flex items-center justify-between gap-3 rounded-xl border border-glass-border bg-glass px-4 py-3"
+        >
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-text">{item.quiz_title}</p>
+            <p className="text-xs text-text3">
+              {item.employee_name} · попыток {item.attempts_used} из {item.attempts_limit}
+              {item.last_attempt_at &&
+                ` · ${new Date(item.last_attempt_at).toLocaleDateString('ru-RU', {
+                  day: 'numeric',
+                  month: 'long',
+                })}`}
+            </p>
+          </div>
+          {confirm?.quiz_id === item.quiz_id && confirm.profile_id === item.profile_id ? (
+            <span className="flex shrink-0 items-center gap-1.5">
+              <Button
+                size="sm"
+                disabled={reset.isPending}
+                onClick={() => reset.mutate(item)}
+              >
+                Сбросить
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirm(null)}>
+                Отмена
+              </Button>
+            </span>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="shrink-0"
+              onClick={() => setConfirm(item)}
+            >
+              <RotateCcw className="h-3.5 w-3.5" /> Сбросить попытки
+            </Button>
+          )}
+        </div>
+      ))}
+    </section>
+  )
+}
+
 export function LearnReviewPage() {
   const isDesktop = useIsDesktop()
   const embedded = useAdminEmbedded()
   const qc = useQueryClient()
   const queue = useReviewQueue()
+  const blocked = useBlockedQuizzes()
   const [openId, setOpenId] = useState<string | null>(null)
 
   const items = queue.data ?? []
@@ -153,6 +229,11 @@ export function LearnReviewPage() {
             <p className="mt-3 text-sm text-text2">Очередь пуста — всё проверено.</p>
           </div>
         )}
+
+        <BlockedQuizzes
+          items={blocked.data ?? []}
+          onReset={() => void qc.invalidateQueries({ queryKey: ['learn-quizzes-blocked'] })}
+        />
 
         {items.map((item) => (
           <div

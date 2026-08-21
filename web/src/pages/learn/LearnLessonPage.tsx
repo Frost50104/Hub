@@ -26,19 +26,20 @@ import { useCourse, useLesson } from '@/hooks/useLearn'
 import { useScrollProgress } from '@/hooks/useScrollProgress'
 import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
-import { learnApi, type LessonContent, type LessonMeta } from '@/lib/learn'
+import { learnApi, type LessonMeta } from '@/lib/learn'
+import { QUIZ_GATE_LABEL, gateRows, quizBlocksCompletion } from '@/lib/lessonGates'
 import { formatMinutes, plural } from '@/lib/typography'
 
 /**
  * Прохождение урока (Ф3a) — учебная среда, а не строка списка.
  *
  * «Завершить урок» — явное действие; сервер проверяет предусловия
- * (gate-вопросы + досмотр видео ≥90%) и вернёт 409 с человекочитаемой
- * причиной — локальный чек-лист лишь подсказывает, поэтому кнопка остаётся
- * кликабельной при невыполненных условиях.
+ * (gate-вопросы + досмотр видео ≥90% + обязательный тест сдан) и вернёт 409 с
+ * человекочитаемой причиной. Вопросы/видео считает клиент — чек-лист лишь
+ * подсказывает и кнопка остаётся кликабельной; тест — состояние сервера
+ * (`quiz_state`), при несданном кнопка недоступна с причиной (ОС 2026-08).
  */
 
-const WATCH_THRESHOLD = 0.9
 /** Порог появления мини-шапки — ~96px прокрутки, как в макете. */
 const MINI_HEADER_AT = 96
 
@@ -72,37 +73,6 @@ function GateRow({ done, label }: { done: boolean; label: string }) {
       </span>
     </li>
   )
-}
-
-function gateRows(
-  lesson: LessonContent,
-  answeredGates: Set<string>,
-  videoCoverage: Record<string, number>,
-): { label: string; done: boolean }[] {
-  const rows: { label: string; done: boolean }[] = []
-  if (lesson.gate_blocks.length) {
-    const gatesDone = lesson.gate_blocks.filter((b) => answeredGates.has(b)).length
-    rows.push({
-      label:
-        lesson.gate_blocks.length === 1
-          ? 'Ответить на контрольный вопрос'
-          : `Ответить на контрольные вопросы (${gatesDone} из ${lesson.gate_blocks.length})`,
-      done: gatesDone >= lesson.gate_blocks.length,
-    })
-  }
-  if (lesson.required_videos.length) {
-    const videosDone = lesson.required_videos.filter(
-      (m) => (videoCoverage[m] ?? 0) >= WATCH_THRESHOLD,
-    ).length
-    rows.push({
-      label:
-        lesson.required_videos.length === 1
-          ? 'Досмотреть видео — минимум 90%'
-          : `Досмотреть видео (${videosDone} из ${lesson.required_videos.length})`,
-      done: videosDone >= lesson.required_videos.length,
-    })
-  }
-  return rows
 }
 
 /** Полноэкранное состояние — загрузка, ошибка, замок. */
@@ -231,6 +201,10 @@ export function LearnLessonPage() {
 
   const rows = data ? gateRows(data, answeredGates, videoCoverage) : []
   const localReady = rows.every((r) => r.done)
+  // Тест — серверное состояние, детерминированное: кнопку держим недоступной,
+  // а не «кликабельной до 409» (как у вопросов/видео, которые считает клиент).
+  const quizBlocked = data ? quizBlocksCompletion(data) : false
+  const quizHint = data?.quiz_required ? QUIZ_GATE_LABEL[data.quiz_state] : undefined
   const courseHref = data ? `/learn/courses/${data.course_id}${previewSuffix}` : '/learn/courses'
   const showMini = progress.top > MINI_HEADER_AT
 
@@ -468,20 +442,27 @@ export function LearnLessonPage() {
                   <button
                     type="button"
                     onClick={() => complete.mutate()}
-                    disabled={complete.isPending}
+                    disabled={complete.isPending || quizBlocked}
                     className={cn(
                       'inline-flex h-[52px] items-center justify-center gap-2 rounded-xl bg-amber text-[15px] font-semibold text-on-amber',
-                      !localReady && 'opacity-45',
+                      (!localReady || quizBlocked) && 'opacity-45',
+                      quizBlocked && 'cursor-not-allowed',
                     )}
                   >
                     <Check className="h-[19px] w-[19px]" strokeWidth={2.2} />
                     Завершить урок
                   </button>
-                  {!localReady && (
+                  {quizBlocked ? (
                     <p className="text-[13px] leading-[1.45] text-text2 [text-wrap:pretty]">
-                      Условия выше ещё не выполнены — проверит сервер, он же назовёт
-                      причину.
+                      {quizHint ?? 'Сдайте тест урока'} — без этого урок не засчитывается.
                     </p>
+                  ) : (
+                    !localReady && (
+                      <p className="text-[13px] leading-[1.45] text-text2 [text-wrap:pretty]">
+                        Условия выше ещё не выполнены — проверит сервер, он же назовёт
+                        причину.
+                      </p>
+                    )
                   )}
                 </div>
               )}

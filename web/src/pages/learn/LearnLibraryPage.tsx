@@ -13,6 +13,7 @@ import {
   Plus,
   Search,
   Send,
+  Trash2,
   Upload,
   Users,
   X,
@@ -27,6 +28,7 @@ import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
 import { MetaLine } from '@/components/ui/MetaLine'
 import { Button } from '@/components/ui/Button'
+import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import {
   Dialog,
   DialogContent,
@@ -45,8 +47,10 @@ import { useLibrary, useLibraryMutation } from '@/hooks/useLearn'
 import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
 import { nbsp, plural } from '@/lib/typography'
-import { inlineViewerKind } from '@/lib/inlineViewer'
+import { hasTextPreview, inlineViewerKind, materialPrimaryAction } from '@/lib/inlineViewer'
+import { describeSectionContents, sectionContents } from '@/lib/sectionDelete'
 import {
+  type MaterialText,
   CONTENT_STATUS_LABEL,
   learnApi,
   type AckReport,
@@ -56,6 +60,9 @@ import {
   type LibrarySection,
   type MaterialUpsert,
 } from '@/lib/learn'
+
+/** Значение фильтра «Без раздела» (материалы с section_id = null). */
+const NO_SECTION = '__none__'
 
 // Тот же lazy-чанк, что и в уроке: имя PdfViewer-*.js обязано сохраниться —
 // по нему globIgnores в vite.config держит вьювер и worker вне PWA-precache.
@@ -161,7 +168,13 @@ export function LearnLibraryPage() {
   const matching = useMemo(() => {
     const q = query.trim().toLowerCase()
     return all
-      .filter((m) => (sectionFilter ? m.section_id === sectionFilter : true))
+      .filter((m) =>
+        sectionFilter === NO_SECTION
+          ? m.section_id === null
+          : sectionFilter
+            ? m.section_id === sectionFilter
+            : true,
+      )
       .filter((m) => {
         if (!q) return true
         const section = m.section_id ? (sectionTitle.get(m.section_id) ?? '') : ''
@@ -325,6 +338,13 @@ export function LearnLibraryPage() {
                   onClick={() => setSectionFilter(s.id)}
                 />
               ))}
+              {all.some((m) => m.section_id === null) && (
+                <SectionChip
+                  label="Без раздела"
+                  active={sectionFilter === NO_SECTION}
+                  onClick={() => setSectionFilter(NO_SECTION)}
+                />
+              )}
             </div>
           </section>
         )}
@@ -404,7 +424,14 @@ export function LearnLibraryPage() {
         <MaterialFormDialog data={data} material={null} onClose={() => setCreateOpen(false)} />
       )}
       {sectionsOpen && data && (
-        <SectionsDialog sections={data.sections} onClose={() => setSectionsOpen(false)} />
+        <SectionsDialog
+          sections={data.sections}
+          materials={data.materials}
+          onDeleted={(id) => {
+            if (sectionFilter === id) setSectionFilter('')
+          }}
+          onClose={() => setSectionsOpen(false)}
+        />
       )}
     </div>
     {!searching && all.length > 0 && (
@@ -476,6 +503,18 @@ function MaterialDialog({
     null,
   )
   const viewerKind = inlineViewerKind(material.current_version?.mime)
+  const primary = materialPrimaryAction(material.kind, material.current_version?.mime)
+  // Текстовый предпросмотр docx/xlsx (извлечённый воркером текст версии) —
+  // на телефоне скачивание «Word/Excel» часто тупик, текст открывается сразу.
+  const canPreviewText =
+    material.kind === 'file' &&
+    hasTextPreview(material.current_version?.mime) &&
+    !!material.current_version?.has_text
+  const [textPreview, setTextPreview] = useState<MaterialText | null>(null)
+  const previewText = useLibraryMutation(async () => {
+    setTextPreview(await learnApi.materialText(material.id))
+    setOpenedLocally(true)
+  }, 'Не удалось показать текст')
   useEffect(
     () => () => {
       if (inline) URL.revokeObjectURL(inline.objectUrl)
@@ -553,16 +592,37 @@ function MaterialDialog({
             )}
           </div>
 
+          {primary.hint && (
+            <p className="text-[13px] leading-[1.45] text-text2 [text-wrap:pretty]">
+              {primary.hint}
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
+            {/* Главная кнопка называется по тому, что произойдёт (ОС 2026-08:
+                «Открыть документ» для docx/xlsx на деле скачивал): ссылка /
+                инлайн / «Скачать файл». */}
             <Button
               onClick={() => void open.mutateAsync(undefined as never)}
               disabled={
                 open.isPending || (material.kind === 'file' && !material.current_version_no)
               }
             >
-              <ExternalLink className="h-4 w-4" />
-              {material.kind === 'link' ? 'Открыть ссылку' : 'Открыть документ'}
+              {primary.mode === 'download' ? (
+                <Download className="h-4 w-4" />
+              ) : (
+                <ExternalLink className="h-4 w-4" />
+              )}
+              {primary.label}
             </Button>
+            {canPreviewText && (
+              <Button
+                variant="secondary"
+                disabled={previewText.isPending}
+                onClick={() => void previewText.mutateAsync(undefined as never)}
+              >
+                <FileText className="h-4 w-4" /> Просмотреть текст
+              </Button>
+            )}
             {/* ОС 19.08 «документ скачивается вместо открытия»: PDF и картинки
                 теперь показываются в приложении, а скачивание — отдельным
                 действием для тех, кому нужен файл. */}
@@ -731,7 +791,40 @@ function MaterialDialog({
             </DialogContent>
           </Dialog>
         )}
-        {inline && viewerKind === 'image' && (
+        {textPreview && (
+        <Dialog open onOpenChange={(v) => !v && setTextPreview(null)}>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>{material.title}</DialogTitle>
+              <DialogDescription>
+                Текстовая версия файла — без оформления
+                {textPreview.truncated ? ', показано начало' : ''}. Полный документ — «Скачать файл».
+              </DialogDescription>
+            </DialogHeader>
+            <pre
+              className={cn(
+                'max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg border border-glass-border bg-surface p-3 text-[14px] leading-[1.5] text-text',
+                textPreview.mime.includes('spreadsheetml') && 'whitespace-pre font-mono text-[13px]',
+              )}
+            >
+              {textPreview.text}
+            </pre>
+            <DialogFooter>
+              <Button
+                variant="secondary"
+                disabled={download.isPending}
+                onClick={() => void download.mutateAsync(undefined as never)}
+              >
+                <Download className="h-4 w-4" /> Скачать файл
+              </Button>
+              <Button type="button" onClick={() => setTextPreview(null)}>
+                Закрыть
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+      {inline && viewerKind === 'image' && (
           <ImageLightbox
             images={[{ src: inline.objectUrl, caption: material.title }]}
             index={0}
@@ -1118,22 +1211,34 @@ function AckReportDialog({
 
 function SectionsDialog({
   sections,
+  materials,
+  onDeleted,
   onClose,
 }: {
   sections: LibrarySection[]
+  /** Manage-выборка (все статусы) — для сводки в диалоге удаления. */
+  materials: LibraryMaterial[]
+  onDeleted?: (id: string) => void
   onClose: () => void
 }) {
   const [name, setName] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
+  const [deleting, setDeleting] = useState<LibrarySection | null>(null)
   const create = useLibraryMutation((title: string) => learnApi.createSection({ title }))
   const rename = useLibraryMutation((args: { id: string; title: string }) =>
     learnApi.renameSection(args.id, args.title),
   )
+  // Непустой раздел удаляется с переносом материалов в «Без раздела»
+  // (решение владельца 2026-08-21) — `force` после подтверждения в диалоге.
   const remove = useLibraryMutation(
-    (id: string) => learnApi.deleteSection(id),
+    (args: { id: string; force: boolean }) => learnApi.deleteSection(args.id, args.force),
     'Раздел не удалён',
   )
+  const deletingContents = deleting
+    ? sectionContents(deleting.id, materials, sections)
+    : null
+  const deletingSummary = deletingContents ? describeSectionContents(deletingContents) : null
 
   const commitRename = () => {
     const trimmed = editingTitle.trim()
@@ -1203,11 +1308,12 @@ function SectionsDialog({
               </button>
               <button
                 type="button"
-                title="Удалить — только пустой раздел, без материалов и подразделов"
+                title={`Удалить раздел «${s.title}»`}
+                aria-label={`Удалить раздел «${s.title}»`}
                 className="rounded p-1.5 text-text3 hover:bg-glass hover:text-red"
-                onClick={() => void remove.mutateAsync(s.id)}
+                onClick={() => setDeleting(s)}
               >
-                <Archive className="h-3.5 w-3.5" />
+                <Trash2 className="h-3.5 w-3.5" />
               </button>
             </li>
           ))}
@@ -1218,6 +1324,49 @@ function SectionsDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      {deleting && (
+        <ResponsiveDialog
+          open
+          onOpenChange={(v) => !v && setDeleting(null)}
+          title={`Удалить раздел «${deleting.title}»?`}
+          description={
+            deletingSummary
+              ? `${deletingSummary} Ограничение аудитории раздела с них снимается.`
+              : 'Раздел пуст — материалы не затронуты.'
+          }
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setDeleting(null)}>
+                Отмена
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={remove.isPending}
+                onClick={() => {
+                  const target = deleting
+                  void remove
+                    .mutateAsync({ id: target.id, force: !!deletingSummary })
+                    .then(() => {
+                      toast.success(`Раздел «${target.title}» удалён`)
+                      onDeleted?.(target.id)
+                      setDeleting(null)
+                    })
+                    .catch(() => undefined)
+                }}
+              >
+                <Trash2 className="h-4 w-4" /> Удалить раздел
+              </Button>
+            </>
+          }
+        >
+          <p className="text-[14px] leading-[1.5] text-text2">
+            {deletingSummary
+              ? 'Материалы останутся доступны в библиотеке в группе «Без раздела».'
+              : 'Действие необратимо, но материалы не затрагивает.'}
+          </p>
+        </ResponsiveDialog>
+      )}
     </Dialog>
   )
 }

@@ -616,17 +616,19 @@ function SortableLessonRow({
       <Badge variant={lesson.status === 'published' ? 'default' : 'secondary'}>
         {lesson.status === 'published' ? 'опубликован' : 'черновик'}
       </Badge>
+      {/* Иконка = ДЕЙСТВИЕ (как у кнопки в редакторе), состояние — бейдж рядом. */}
       <button
         type="button"
-        title={lesson.status === 'published' ? 'Скрыть (в черновик)' : 'Опубликовать'}
+        title={lesson.status === 'published' ? 'Скрыть от сотрудников' : 'Опубликовать'}
+        aria-label={lesson.status === 'published' ? 'Скрыть от сотрудников' : 'Опубликовать'}
         disabled={toggle.isPending}
         onClick={() => void toggle.mutateAsync(undefined as never)}
         className="rounded p-1.5 text-text3 hover:bg-glass hover:text-text"
       >
         {lesson.status === 'published' ? (
-          <Eye className="h-4 w-4" />
-        ) : (
           <EyeOff className="h-4 w-4" />
+        ) : (
+          <Eye className="h-4 w-4" />
         )}
       </button>
       <button

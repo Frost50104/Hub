@@ -44,7 +44,7 @@ const TASK_TABS: { key: DueWindow; label: string }[] = [
 
 function emptyText(tab: DueWindow): string {
   if (tab === 'overdue') return 'Нет просроченных — отлично!'
-  if (tab === 'today') return 'На сегодня задач нет.'
+  if (tab === 'today') return 'На сегодня задач нет — и просроченных тоже.'
   if (tab === 'all') return 'Задач на вас пока нет.'
   return 'Свободно — задач в ближайшее время нет.'
 }

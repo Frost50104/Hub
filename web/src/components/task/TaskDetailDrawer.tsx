@@ -48,7 +48,7 @@ import {
 } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { taskAssignees } from '@/lib/taskAssignees'
-import { isOverdue, overdueDays } from '@/lib/taskDates'
+import { dayKey, dueDayToIso, isOverdue, overdueDays } from '@/lib/taskDates'
 import {
   PRIORITY_LABEL,
   STATUS_LABEL,
@@ -64,6 +64,8 @@ interface TaskDetailDrawerProps {
   onClose: () => void
   /** Переключить drawer на другую задачу (родитель/подзадача). */
   onOpenTask?: (id: string) => void
+  /** Открыть «Метки проекта» (страница решает, кому можно — `can_manage`). */
+  onManageLabels?: () => void
 }
 
 const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done']
@@ -134,6 +136,7 @@ export function TaskDetailDrawer({
   projectId,
   onClose,
   onOpenTask,
+  onManageLabels,
 }: TaskDetailDrawerProps) {
   const isDesktop = useIsDesktop()
   // Раскладка фиксируется при открытии (инвариант Dialog/ResponsiveDialog):
@@ -174,8 +177,10 @@ export function TaskDetailDrawer({
     if (task) {
       setTitle(task.title)
       setDescription(task.description ?? '')
-      setDueAt(task.due_at ? task.due_at.slice(0, 10) : '')
-      setStartAt(task.start_at ? task.start_at.slice(0, 10) : '')
+      // День в display tz, а не UTC-срез ISO: срок 12:00 МСК = 09:00Z, но
+      // инстанты у границы суток давали вчерашнюю дату в поле.
+      setDueAt(task.due_at ? dayKey(task.due_at) : '')
+      setStartAt(task.start_at ? dayKey(task.start_at) : '')
     }
   }, [task])
 
@@ -199,7 +204,8 @@ export function TaskDetailDrawer({
 
   const saveDate = async (field: 'due_at' | 'start_at', val: string) => {
     if (!task) return
-    const iso = val ? new Date(val + 'T12:00:00').toISOString() : null
+    // Полдень display tz — единая конвенция с CSV-импортом и ассистентом.
+    const iso = val ? dueDayToIso(val) : null
     try {
       await update.mutateAsync({ id: task.id, [field]: iso })
     } catch {
@@ -631,6 +637,7 @@ export function TaskDetailDrawer({
                       taskId={task.id}
                       projectId={projectId}
                       canEdit={!readOnly}
+                      onManageLabels={project.data?.can_manage ? onManageLabels : undefined}
                     />
                   </dd>
 

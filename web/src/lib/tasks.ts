@@ -1,6 +1,9 @@
 import { api } from './api'
 
 export type TaskStatus = 'todo' | 'in_progress' | 'in_review' | 'done'
+/** Фильтр статуса списков: конкретный статус или `open` — «не выполнено»
+ *  (всё, кроме done). Псевдо-значение понимает бэкенд (`status=open`). */
+export type TaskStatusFilter = TaskStatus | 'open'
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
 
 export interface TaskAssigneeBrief {
@@ -69,7 +72,7 @@ export interface SubtaskStats {
 
 export interface TaskListFilters {
   include_archived?: boolean
-  status?: TaskStatus
+  status?: TaskStatusFilter
   assignee?: string
   section_id?: string
   priority?: TaskPriority
@@ -84,7 +87,7 @@ export interface TaskListFilters {
 
 /** Фильтры, применимые к calendar-эндпоинту (диапазон дат у него свой). */
 export interface CalendarFilters {
-  status?: TaskStatus
+  status?: TaskStatusFilter
   assignee?: string
   priority?: TaskPriority
 }
@@ -190,6 +193,12 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   in_progress: 'В работе',
   in_review: 'На проверке',
   done: 'Готово',
+}
+
+/** Подписи фильтра статуса: «Не выполнено» первым — это главный срез списка. */
+export const STATUS_FILTER_LABEL: Record<TaskStatusFilter, string> = {
+  open: 'Не выполнено',
+  ...STATUS_LABEL,
 }
 
 export const PRIORITY_LABEL: Record<TaskPriority, string> = {
