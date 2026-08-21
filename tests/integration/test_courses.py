@@ -15,6 +15,7 @@ from app.api.courses import (
     _course_visible_to,
     answer_block,
     complete_lesson,
+    duplicate_course,
     get_course,
     get_lesson,
     list_courses,
@@ -594,3 +595,47 @@ async def test_reorder_courses_denied_for_author(db: AsyncSession, tenant_id: uu
             CourseReorderBody(course_ids=[course.id]), principal=principal, db=db
         )
     assert exc.value.status_code == 403
+
+
+async def test_duplicate_and_preview(db: AsyncSession, tenant_id: uuid.UUID):
+    """Дубликат — черновик с теми же уроками (черновиками), сотруднику не виден;
+    ?preview=1 показывает управляющему курс без черновиков и с замками."""
+    admin, admin_profile = await _mk_member(db, tenant_id, email="dup-admin@t.ru")
+    admin_profile.content_role = "publisher"
+    await db.flush()
+    seller, seller_profile = await _mk_member(db, tenant_id, email="dup-seller@t.ru")
+    course, lessons = await _mk_course(db, tenant_id, lesson_count=2, title="Источник")
+    draft = CourseLesson(
+        tenant_id=tenant_id, course_id=course.id, title="Черновой урок", position=9, status="draft"
+    )
+    db.add(draft)
+    await db.flush()
+
+    # Управляющий видит все три урока; в preview — только два опубликованных.
+    full = await get_course(course.id, admin, db)
+    assert len(full.lessons) == 3
+    preview = await get_course(course.id, admin, db, preview=True)
+    assert [x.title for x in preview.lessons] == ["Урок 1", "Урок 2"]
+    assert preview.lessons[1].locked is True  # sequential: второй заперт без прогресса
+
+    copy = await duplicate_course(course.id, admin, db)
+    assert copy.status == "draft" and copy.title == "Источник (копия)"
+    copied = list(
+        (
+            await db.execute(
+                select(CourseLesson)
+                .where(CourseLesson.course_id == copy.id)
+                .order_by(CourseLesson.position)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [x.title for x in copied] == ["Урок 1", "Урок 2", "Черновой урок"]
+    assert all(x.status == "draft" for x in copied)
+
+    # Сотруднику черновик не отдаётся.
+    with pytest.raises(HTTPException) as exc:
+        await get_course(copy.id, seller, db)
+    assert exc.value.status_code == 404
+    assert seller_profile.id is not None

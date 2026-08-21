@@ -8,7 +8,7 @@ import {
   Lock,
   Play,
 } from 'lucide-react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 
 import { coursesSectionTitle } from '@/components/layout/learnNav'
 import { courseTypeBadgeClass } from '@/components/learn/CourseCover'
@@ -253,7 +253,11 @@ function CourseHeader({ data }: { data: CourseDetail }) {
 
 export function LearnCoursePage() {
   const { courseId } = useParams<{ courseId: string }>()
-  const course = useCourse(courseId)
+  const [params] = useSearchParams()
+  // «Глазами сотрудника» из конструктора: сервер отдаёт курс без черновиков и
+  // с замками, как новому сотруднику.
+  const preview = params.get('preview') === '1'
+  const course = useCourse(courseId, preview)
   const certificates = useMyCertificates()
 
   const data = course.data
@@ -290,6 +294,19 @@ export function LearnCoursePage() {
 
       {data && (
         <>
+          {preview && (
+            <div className="mx-5 mt-6 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber/45 bg-amber/10 px-3.5 py-2.5 lg:mx-0">
+              <p className="text-[14px] text-text">
+                Вы смотрите курс глазами сотрудника: черновики скрыты, замки действуют.
+              </p>
+              <Link
+                to={`/learn/courses/${courseId}/edit`}
+                className="text-[14px] font-semibold text-text underline-offset-2 hover:underline"
+              >
+                Вернуться в конструктор
+              </Link>
+            </div>
+          )}
           <CourseHeader data={data} />
 
           <div className="flex flex-col gap-3.5 px-5 pb-8 pt-6">

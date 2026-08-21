@@ -1316,8 +1316,13 @@ export const learnApi = {
     api
       .get<CourseList>('/learn/courses', { params: { manage: manage || undefined } })
       .then((r) => r.data),
-  course: (id: string): Promise<CourseDetail> =>
-    api.get<CourseDetail>(`/learn/courses/${id}`).then((r) => r.data),
+  course: (id: string, preview = false): Promise<CourseDetail> =>
+    api
+      .get<CourseDetail>(`/learn/courses/${id}`, { params: { preview: preview || undefined } })
+      .then((r) => r.data),
+  /** Дубликат черновиком (уроки + тесты, без назначений/аудитории). */
+  duplicateCourse: (id: string): Promise<Course> =>
+    api.post<Course>(`/learn/courses/${id}/duplicate`).then((r) => r.data),
   createCourse: (body: {
     title: string
     description?: string | null

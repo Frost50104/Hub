@@ -220,10 +220,10 @@ export function useCourses(manage: boolean, enabled = true): UseQueryResult<Cour
   })
 }
 
-export function useCourse(id: string | undefined): UseQueryResult<CourseDetail> {
+export function useCourse(id: string | undefined, preview = false): UseQueryResult<CourseDetail> {
   return useQuery({
-    queryKey: ['learn-course', id],
-    queryFn: () => learnApi.course(id!),
+    queryKey: preview ? ['learn-course', id, 'preview'] : ['learn-course', id],
+    queryFn: () => learnApi.course(id!, preview),
     enabled: Boolean(id),
   })
 }

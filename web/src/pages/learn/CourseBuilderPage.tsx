@@ -15,6 +15,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
+  Copy,
   Eye,
   EyeOff,
   GripVertical,
@@ -44,6 +45,7 @@ import {
 } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
+import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { Select } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/Switch'
 import { SkeletonRows } from '@/components/ui/Skeleton'
@@ -101,19 +103,111 @@ export function CourseBuilderPage() {
   const [editingLesson, setEditingLesson] = useState<LessonMeta | null>(null)
   const [audienceOpen, setAudienceOpen] = useState(false)
   const [assignOpen, setAssignOpen] = useState(false)
+  const navigate = useNavigate()
+  const setStatus = useCourseMutation((status: ContentStatus) =>
+    learnApi.setCourseStatus(courseId!, status),
+  )
+  const duplicate = useCourseMutation(() => learnApi.duplicateCourse(courseId!))
+
+  const publishedLessons = data?.lessons.filter((l) => l.status === 'published').length ?? 0
+  const topbarMeta = data
+    ? [
+        'Конструктор',
+        `${data.lessons.length} ${data.lessons.length === 1 ? 'урок' : data.lessons.length < 5 ? 'урока' : 'уроков'}`,
+        data.audience_id === null ? 'виден всем сотрудникам' : 'настроена аудитория',
+      ].join(' · ')
+    : ''
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className={isDesktop ? undefined : 'mx-auto max-w-3xl'}>
       {!isDesktop && (
         <MobilePageHeader eyebrow="Конструктор" title={data?.title ?? 'Курс'} />
       )}
-      <div className="space-y-4 p-4 lg:p-8">
-        <Link
-          to="/learn/courses"
-          className="inline-flex items-center gap-1.5 text-sm text-text3 hover:text-text"
-        >
-          <ArrowLeft className="h-4 w-4" /> {coursesTitle}
-        </Link>
+      {/* Десктопный топбар по макету «Конструктор»: назад-чип, название и
+          мета, бейдж статуса, действия курса — lifecycle тут, а не в карточке
+          настроек; в карточке остаются сохранение и удаление. */}
+      {isDesktop && data && (
+        <div className="sticky top-0 z-10 flex items-center gap-3.5 border-b border-hair bg-bg px-5 py-3">
+          <Link
+            to="/learn/courses"
+            className="inline-flex h-9 shrink-0 items-center gap-[7px] rounded-[10px] border border-glass-border px-3 text-[13px] font-semibold text-text2 hover:text-text"
+          >
+            <ArrowLeft className="h-4 w-4" strokeWidth={2.2} /> {coursesTitle}
+          </Link>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[14px] font-semibold text-text">{data.title}</p>
+            <p className="mt-px truncate text-[12px] text-text2">{topbarMeta}</p>
+          </div>
+          <Badge variant={data.status === 'published' ? 'default' : 'outline'}>
+            {CONTENT_STATUS_LABEL[data.status]}
+          </Badge>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              size="md"
+              className="bg-transparent"
+              title={publishedLessons === 0 ? 'Опубликуйте хотя бы один урок — иначе сотруднику нечего смотреть' : undefined}
+              onClick={() => navigate(`/learn/courses/${data.id}?preview=1`)}
+            >
+              <Eye className="h-4 w-4" /> Глазами сотрудника
+            </Button>
+            <Button
+              variant="secondary"
+              size="md"
+              className="bg-transparent"
+              disabled={duplicate.isPending}
+              onClick={() =>
+                void duplicate
+                  .mutateAsync(undefined as never)
+                  .then((copy) => {
+                    toast.success('Дубликат создан черновиком')
+                    navigate(`/learn/courses/${copy.id}/edit`)
+                  })
+                  .catch(() => undefined)
+              }
+            >
+              <Copy className="h-4 w-4" /> Дубликат
+            </Button>
+            <Button variant="secondary" size="md" className="bg-transparent" onClick={() => setAudienceOpen(true)}>
+              <Users className="h-4 w-4" /> Аудитория
+            </Button>
+            <Button variant="secondary" size="md" className="bg-transparent" onClick={() => setAssignOpen(true)}>
+              <UserPlus className="h-4 w-4" /> Назначить
+            </Button>
+            {STATUS_ACTIONS[data.status].map((action) => (
+              <Button
+                key={action.to}
+                size="md"
+                variant={action.to === 'published' ? 'default' : 'secondary'}
+                className={action.to === 'published' ? undefined : 'bg-transparent'}
+                disabled={setStatus.isPending || (action.to === 'published' && publishedLessons === 0)}
+                title={
+                  action.to === 'published' && publishedLessons === 0
+                    ? 'Курс нельзя опубликовать без хотя бы одного опубликованного урока'
+                    : undefined
+                }
+                onClick={() =>
+                  void setStatus
+                    .mutateAsync(action.to)
+                    .then(() => toast.success(CONTENT_STATUS_LABEL[action.to]))
+                    .catch(() => undefined)
+                }
+              >
+                {action.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className={isDesktop ? 'mx-auto flex max-w-[760px] flex-col gap-4 px-5 pb-16 pt-8' : 'space-y-4 p-4'}>
+        {!isDesktop && (
+          <Link
+            to="/learn/courses"
+            className="inline-flex min-h-11 items-center gap-1.5 text-sm text-text2 hover:text-text"
+          >
+            <ArrowLeft className="h-4 w-4" /> {coursesTitle}
+          </Link>
+        )}
 
         {course.isLoading && <SkeletonRows rows={6} />}
         {course.isError && <QueryError onRetry={() => void course.refetch()} />}
@@ -122,6 +216,8 @@ export function CourseBuilderPage() {
           <>
             <CourseSettingsCard
               course={data}
+              compact={isDesktop}
+              publishedLessons={publishedLessons}
               onAudience={() => setAudienceOpen(true)}
               onAssign={() => setAssignOpen(true)}
             />
@@ -155,14 +251,20 @@ export function CourseBuilderPage() {
 
 function CourseSettingsCard({
   course,
+  compact,
+  publishedLessons,
   onAudience,
   onAssign,
 }: {
   course: CourseDetail
+  /** Десктоп: lifecycle/аудитория/назначения живут в топбаре — в карточке только сохранение и удаление. */
+  compact: boolean
+  publishedLessons: number
   onAudience: () => void
   onAssign: () => void
 }) {
   const navigate = useNavigate()
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const [title, setTitle] = useState(course.title)
   const [description, setDescription] = useState(course.description ?? '')
   const [courseType, setCourseType] = useState<CourseType>(course.course_type)
@@ -282,51 +384,80 @@ function CourseSettingsCard({
             Сохранить
           </Button>
         )}
-        {STATUS_ACTIONS[course.status].map((action) => (
-          <Button
-            key={action.to}
-            size="sm"
-            variant={action.to === 'published' ? 'default' : 'secondary'}
-            disabled={setStatus.isPending}
-            onClick={() =>
-              void setStatus
-                .mutateAsync(action.to)
-                .then(() => toast.success(CONTENT_STATUS_LABEL[action.to]))
-              .catch(() => undefined)
-            }
-          >
-            {action.label}
+        {!compact &&
+          STATUS_ACTIONS[course.status].map((action) => (
+            <Button
+              key={action.to}
+              size="sm"
+              variant={action.to === 'published' ? 'default' : 'secondary'}
+              disabled={setStatus.isPending || (action.to === 'published' && publishedLessons === 0)}
+              onClick={() =>
+                void setStatus
+                  .mutateAsync(action.to)
+                  .then(() => toast.success(CONTENT_STATUS_LABEL[action.to]))
+                  .catch(() => undefined)
+              }
+            >
+              {action.label}
+            </Button>
+          ))}
+        {!compact && (
+          <Button size="sm" variant="secondary" onClick={onAudience}>
+            <Users className="h-4 w-4" /> Аудитория
           </Button>
-        ))}
-        <Button size="sm" variant="secondary" onClick={onAudience}>
-          <Users className="h-4 w-4" /> Аудитория
-        </Button>
-        <Button size="sm" variant="secondary" onClick={onAssign}>
-          <UserPlus className="h-4 w-4" /> Назначить
-        </Button>
+        )}
+        {!compact && (
+          <Button size="sm" variant="secondary" onClick={onAssign}>
+            <UserPlus className="h-4 w-4" /> Назначить
+          </Button>
+        )}
+        <span className="flex-1" />
         {course.published_at === null && (
           <Button
             size="sm"
-            variant="ghost"
-            className="text-red"
+            variant="secondary"
+            className="bg-transparent text-red"
             disabled={remove.isPending}
-            onClick={() => {
-              if (!window.confirm(`Удалить курс «${course.title}»?`)) return
-              void remove
-                .mutateAsync(undefined as never)
-                .then(() => navigate('/learn/courses'))
-              .catch(() => undefined)
-            }}
+            onClick={() => setDeleteOpen(true)}
           >
             <Trash2 className="h-4 w-4" /> Удалить
           </Button>
         )}
-        {course.published_at !== null && (
-          <span className="text-xs text-text3">
-            Публиковавшийся курс удалить нельзя — используйте «В архив».
-          </span>
-        )}
       </div>
+      <p className="text-[12px] leading-[1.5] text-text2">
+        {publishedLessons === 0 && 'Курс нельзя опубликовать без хотя бы одного опубликованного урока. '}
+        Удалить можно только курс, который никогда не публиковался. Публиковавшийся — в архив.
+      </p>
+      {deleteOpen && (
+        <ResponsiveDialog
+          open
+          onOpenChange={(v) => !v && setDeleteOpen(false)}
+          title={`Удалить курс «${course.title}»?`}
+          description="Уроки и тесты черновика удалятся насовсем. Назначений и прогресса у непубликовавшегося курса нет."
+          desktopWidth={440}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={remove.isPending}>
+                Отмена
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={remove.isPending}
+                onClick={() =>
+                  void remove
+                    .mutateAsync(undefined as never)
+                    .then(() => navigate('/learn/courses'))
+                    .catch(() => undefined)
+                }
+              >
+                Удалить
+              </Button>
+            </>
+          }
+        >
+          <span className="sr-only">Подтверждение удаления</span>
+        </ResponsiveDialog>
+      )}
     </div>
   )
 }
@@ -446,6 +577,7 @@ function SortableLessonRow({
     }),
   )
   const remove = useCourseMutation(() => learnApi.deleteLesson(lesson.id))
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -506,15 +638,38 @@ function SortableLessonRow({
       <button
         type="button"
         title="Удалить"
+        aria-label={`Удалить урок «${lesson.title}»`}
         disabled={remove.isPending}
-        onClick={() => {
-          if (!window.confirm(`Удалить урок «${lesson.title}»?`)) return
-          void remove.mutateAsync(undefined as never)
-        }}
+        onClick={() => setDeleteOpen(true)}
         className="rounded p-1.5 text-text3 hover:bg-glass hover:text-red"
       >
         <Trash2 className="h-4 w-4" />
       </button>
+      {deleteOpen && (
+        <ResponsiveDialog
+          open
+          onOpenChange={(v) => !v && setDeleteOpen(false)}
+          title={`Удалить урок «${lesson.title}»?`}
+          description="Содержимое урока и его тест удалятся. Прогресс сотрудников по этому уроку перестанет учитываться."
+          desktopWidth={440}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={remove.isPending}>
+                Отмена
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={remove.isPending}
+                onClick={() => void remove.mutateAsync(undefined as never).then(() => setDeleteOpen(false))}
+              >
+                Удалить
+              </Button>
+            </>
+          }
+        >
+          <span className="sr-only">Подтверждение удаления</span>
+        </ResponsiveDialog>
+      )}
     </div>
   )
 }

@@ -27,7 +27,7 @@ from app.models.audience import AudienceMember
 from app.models.course import Course, CourseLesson, LessonTemplate, MediaFile
 from app.models.employee_profile import EmployeeProfile
 from app.models.progress import CourseAssignment, CourseProgress, LessonProgress
-from app.models.quiz import Quiz
+from app.models.quiz import Quiz, QuizQuestion
 from app.models.survey import SurveyQuestion
 from app.schemas.course import (
     AssignBody,
@@ -486,6 +486,10 @@ async def get_course(
     course_id: UUID,
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
+    *,
+    # Обычный bool-дефолт, а не Query(...): тесты зовут хендлер напрямую, а
+    # объект Query истинен и превратил бы каждого управляющего в «preview».
+    preview: bool = False,
 ) -> CourseDetailResponse:
     role = await resolve_content_role(db, principal)
     course = await _get_course_or_404(db, course_id)
@@ -494,9 +498,13 @@ async def get_course(
     if not await _course_visible_to(db, course, principal, role, profile_id):
         raise HTTPException(status_code=404, detail="Курс не найден")
 
-    manager = lifecycle.can(role, "publisher") or (
+    is_manager = lifecycle.can(role, "publisher") or (
         role == "author" and course.created_by == principal.employee_id
     )
+    # «Глазами сотрудника» (?preview=1): управляющий смотрит курс так, как его
+    # увидит новый сотрудник — без черновиков, с замками; прогресс у автора
+    # без учебного профиля пустой, и это нормально (profile=None допустим).
+    manager = is_manager and not preview
     if manager:
         lessons = list(
             (
@@ -631,6 +639,134 @@ async def create_course(
     await db.commit()
     await db.refresh(course)
     return CourseResponse.model_validate(course)
+
+
+@router.post(
+    "/learn/courses/{course_id}/duplicate", response_model=CourseResponse, status_code=201
+)
+async def duplicate_course(
+    course_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> CourseResponse:
+    """Дубликат курса черновиком: настройки, уроки и тесты с вопросами.
+    Медиа — по ссылкам (те же media_files), назначения/аудитория/прогресс не
+    копируются, позиция — в конец каталога. Черновик не индексируется
+    (search_indexer только при publish) и сотрудникам не виден."""
+    role = await resolve_content_role(db, principal)
+    source = await _get_course_or_404(db, course_id)
+    if not (
+        lifecycle.can(role, "publisher")
+        or (role == "author" and source.created_by == principal.employee_id)
+    ):
+        raise HTTPException(status_code=403, detail="Дублировать может автор курса или публикатор")
+
+    max_pos = (
+        await db.execute(select(func.coalesce(func.max(Course.position), 0)))
+    ).scalar_one()
+    copy = Course(
+        tenant_id=principal.tenant_id,
+        title=f"{source.title} (копия)"[:255],
+        description=source.description,
+        course_type=source.course_type,
+        progression_mode=source.progression_mode,
+        certificate_enabled=source.certificate_enabled,
+        position=int(max_pos) + 1,
+        owner_id=principal.employee_id,
+        created_by=principal.employee_id,
+    )
+    db.add(copy)
+    await db.flush()
+
+    lessons = list(
+        (
+            await db.execute(
+                select(CourseLesson)
+                .where(CourseLesson.course_id == source.id)
+                .order_by(CourseLesson.position, CourseLesson.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    lesson_map: dict[UUID, UUID] = {}
+    for lesson in lessons:
+        new_lesson = CourseLesson(
+            tenant_id=principal.tenant_id,
+            course_id=copy.id,
+            title=lesson.title,
+            position=lesson.position,
+            content_format=lesson.content_format,
+            content=lesson.content,
+            pdf_media_id=lesson.pdf_media_id,
+            forbid_download=lesson.forbid_download,
+            unlock_rule=lesson.unlock_rule,
+            status="draft",
+        )
+        db.add(new_lesson)
+        await db.flush()
+        lesson_map[lesson.id] = new_lesson.id
+
+    quizzes = list(
+        (await db.execute(select(Quiz).where(Quiz.course_id == source.id))).scalars().all()
+    )
+    for quiz in quizzes:
+        new_quiz = Quiz(
+            tenant_id=principal.tenant_id,
+            course_id=copy.id,
+            lesson_id=lesson_map.get(quiz.lesson_id) if quiz.lesson_id else None,
+            title=quiz.title,
+            description=quiz.description,
+            status="draft",
+            pass_score_pct=quiz.pass_score_pct,
+            attempts_limit=quiz.attempts_limit,
+            shuffle_questions=quiz.shuffle_questions,
+            shuffle_options=quiz.shuffle_options,
+            show_correct_answers=quiz.show_correct_answers,
+            is_required=quiz.is_required,
+            created_by=principal.employee_id,
+        )
+        db.add(new_quiz)
+        await db.flush()
+        questions = list(
+            (
+                await db.execute(
+                    select(QuizQuestion)
+                    .where(QuizQuestion.quiz_id == quiz.id)
+                    .order_by(QuizQuestion.position)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for q in questions:
+            db.add(
+                QuizQuestion(
+                    tenant_id=principal.tenant_id,
+                    quiz_id=new_quiz.id,
+                    position=q.position,
+                    qtype=q.qtype,
+                    prompt=q.prompt,
+                    media_id=q.media_id,
+                    options=q.options,
+                    answer=q.answer,
+                    points=q.points,
+                )
+            )
+
+    audit.record(
+        db,
+        tenant_id=principal.tenant_id,
+        actor_id=principal.employee_id,
+        action="create",
+        object_type=_OBJECT_TYPE,
+        object_id=copy.id,
+        object_label=copy.title,
+        diff={"duplicated_from": str(source.id)},
+    )
+    await db.commit()
+    await db.refresh(copy)
+    return CourseResponse.model_validate(copy)
 
 
 @router.patch("/learn/courses/{course_id}", response_model=CourseResponse)
