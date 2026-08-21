@@ -33,7 +33,7 @@
 ### Задачи
 - `tasks` (project_id, section_id, parent_task_id, title, description markdown, status: `todo` | `in_progress` | `in_review` | `done`, priority: `low` | `medium` | `high` | `urgent`, start_at, due_at, position NUMERIC, search_vector tsvector)
   - Подзадачи только 1 уровень — CHECK `parent_task_id IS NULL OR (SELECT parent_task_id FROM tasks t2 WHERE t2.id = parent_task_id) IS NULL`; UI — секция в карточке (SubtaskList), в топ-уровне List/Board не показываются
-- `project_stages` (project_id, name, system_status, position; 0040) — колонки доски с пользовательскими именами; `tasks.stage_id` (NULLable до 0041), `tasks.status` — ЗЕРКАЛО `stage.system_status`, пишется только `app/services/stages.py` (`set_stage`/`apply_stage`); ≥1 этап на каждый системный статус; `create_project` создаёт 4 этапа. API `app/api/stages.py`
+- `project_stages` (project_id, name, system_status, position; 0040) — колонки доски с пользовательскими именами; `tasks.stage_id` (NULLable до 0042), `tasks.status` — ЗЕРКАЛО `stage.system_status`, пишется только `app/services/stages.py` (`set_stage`/`apply_stage`); ≥1 этап на каждый системный статус; `create_project` создаёт 4 этапа. API `app/api/stages.py`
 - `tasks.seq` (0032–0033) — номера «KEY-42» внутри проекта, выдача только `allocate_task_seq` под row-lock проекта, `project_id` иммутабелен
 - `task_assignees` (task_id, employee_id, position, assigned_by; PK составной, RLS с 0034) — **единственное место, где живут исполнители**; колонка-зеркало `tasks.assignee_id` удалена ревизией 0036. Пишет только `app/services/task_assignees.py`; в списках — EXISTS/батч, не JOIN
 - `task_watchers` — auto-добавление: assignee + creator + mentioned
