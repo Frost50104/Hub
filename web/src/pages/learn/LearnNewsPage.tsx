@@ -102,9 +102,9 @@ export function LearnNewsPage() {
     feed.length === 0
       ? ''
       : nbsp(
-          `${feed.length} ${plural(feed.length, 'новость', 'новости', 'новостей')} · ${
+          `${plural(feed.length, 'новость', 'новости', 'новостей')} · ${
             ackPending > 0
-              ? `${ackPending} ${plural(ackPending, 'требует', 'требуют', 'требуют')} ознакомления`
+              ? `${plural(ackPending, 'требует', 'требуют', 'требуют')} ознакомления`
               : 'всё прочитано'
           }`,
         )

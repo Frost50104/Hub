@@ -1,36 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  BadgeCheck,
-  CalendarClock,
-  Check,
-  Clock,
-  Import,
-  Pencil,
-  Play,
-  Plus,
-  Table2,
-  Trash2,
-  Users,
-  X,
-} from 'lucide-react'
-import { useEffect, useState, type FormEvent } from 'react'
+import { ArrowLeft, BadgeCheck, Import, Pencil, Plus, Trash2, Users, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 
 import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
 import { AttemptView, ResultView } from '@/components/learn/lesson/QuizRunner'
-import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
+import { ActionRow } from '@/components/ui/ActionRow'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/Dialog'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { FilterChip } from '@/components/ui/FilterChip'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
+import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
+import { SegmentGroup, type SegmentOption } from '@/components/ui/SegmentGroup'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMe } from '@/hooks/useMe'
@@ -41,25 +26,35 @@ import {
   learnApi,
   QUIZ_QUESTION_TYPE_LABEL,
   type AssessmentCampaign,
+  type AssessmentReportRow,
   type QuizAttempt,
   type QuizQuestionDraft,
 } from '@/lib/learn'
+import { nbsp, plural } from '@/lib/typography'
 
 import { QuestionDialog } from './QuizBuilder'
 
 /**
- * Аттестации (Ф8): сотрудник проходит назначенные кампании (движок тестов
- * Ф3b — попытки/снапшоты/ревью); hub-admin управляет кампаниями, вопросами
- * (в т.ч. импорт из тестов уроков) и смотрит отчёт (ОС 2026-08-10:
- * управление закрыто с publisher до admin; review остаётся publisher'ам).
+ * Аттестации (Ф8) по макету «Урок — редизайн» (route assess): два среза
+ * «Мои / Отчёт» (`SegmentGroup`), карточки кампаний сотрудника (идущая —
+ * амбер-рамка, закрытая — `--hair`), «Начать аттестацию» уводит в
+ * ПОЛНОЭКРАННЫЙ прогон (вместо inline-попытки в карточке), отчёт — «Прошли:
+ * N из M» + полоса + таблица со статусами (цвет только у крайних исходов:
+ * сдана — зелёный, не сдана — красный). Управление кампаниями (только
+ * hub-admin, ОС 2026-08-10) — третий срез «Кампании» с теми же примитивами;
+ * review открытых ответов остаётся publisher'ам в «Управлении».
  */
 
-const REPORT_STATUS_LABEL: Record<string, string> = {
+const REPORT_STATUS_LABEL: Record<AssessmentReportRow['status'], string> = {
   not_started: 'не начинал(а)',
   in_progress: 'в процессе',
   pending_review: 'на проверке',
   passed: 'сдана',
   failed: 'не сдана',
+}
+
+function formatDay(iso: string): string {
+  return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
 }
 
 function useAssessments() {
@@ -76,132 +71,314 @@ function useCampaignMutation<TArgs>(fn: (args: TArgs) => Promise<unknown>) {
   })
 }
 
+/** Ряд действий: 48px на телефоне, 36px в плотной ленте десктопа. */
+const ACTION_BTN =
+  'h-12 rounded-xl px-5 text-[15px] lg:h-9 lg:rounded-[10px] lg:px-3.5 lg:text-[13px]'
+const GHOST_BTN = cn(ACTION_BTN, 'bg-transparent')
+
+type View = 'my' | 'report' | 'manage'
+
 // ─── Карточка сотрудника ─────────────────────────────────────────────────────
 
-function EmployeeCampaignCard({ campaign }: { campaign: AssessmentCampaign }) {
-  const qc = useQueryClient()
-  const [attempt, setAttempt] = useState<QuizAttempt | null>(null)
-  const [finished, setFinished] = useState<QuizAttempt | null>(null)
+function stateLabel(campaign: AssessmentCampaign): string {
+  const s = campaign.my_state
+  if (!s) return ''
+  if (s.pending_review) return 'На проверке'
+  if (s.passed) return `Сдана${s.best_score_pct !== null ? ` · ${s.best_score_pct}%` : ''}`
+  if (s.active_attempt_id) return 'В процессе'
+  if (s.attempts_used > 0 && !s.can_start)
+    return `Не сдана${s.best_score_pct !== null ? ` · ${s.best_score_pct}%` : ''} — попытки исчерпаны`
+  if (s.attempts_used > 0) return `Не сдана${s.best_score_pct !== null ? ` · ${s.best_score_pct}%` : ''}`
+  return 'Не начата'
+}
+
+function EmployeeCampaignCard({
+  campaign,
+  onStart,
+  starting,
+}: {
+  campaign: AssessmentCampaign
+  onStart: () => void
+  starting: boolean
+}) {
   const state = campaign.my_state
-
-  const start = useMutation({
-    mutationFn: () => learnApi.startQuizAttempt(campaign.my_state!.id),
-    meta: { suppressGlobalError: true },
-    onSuccess: setAttempt,
-    onError: (e) =>
-      toast.error('Не удалось начать', { description: extractErrorDetail(e) }),
-  })
-
   if (!state) return null
+  const active = campaign.status === 'active'
   const deadline = campaign.ends_at
-    ? new Date(campaign.ends_at).toLocaleDateString('ru-RU', {
-        day: 'numeric',
-        month: 'long',
-      })
+    ? active
+      ? `до ${formatDay(campaign.ends_at)}`
+      : `закрыта ${formatDay(campaign.ends_at)}`
     : null
+  const meta = nbsp(
+    `${plural(campaign.question_count, 'вопрос', 'вопроса', 'вопросов')} · ${stateLabel(campaign)}`,
+  )
 
   return (
-    <div className="rounded-xl border border-glass-border bg-glass p-4">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Badge variant="default">
-          <BadgeCheck className="mr-1 h-3 w-3" /> Аттестация
+    <article
+      className={cn(
+        'flex flex-col gap-[9px] rounded-[14px] border bg-tint p-3.5 lg:p-4',
+        active ? 'border-amber/45' : 'border-hair',
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-2 lg:gap-2.5">
+        <Badge variant={active ? 'default' : 'secondary'} className={!active ? 'text-text' : undefined}>
+          {CAMPAIGN_STATUS_LABEL[campaign.status]}
         </Badge>
-        {deadline && (
-          <span className="inline-flex items-center gap-1 text-xs text-text3">
-            <CalendarClock className="h-3.5 w-3.5" /> до {deadline}
-          </span>
+        {deadline && <span className="text-[13px] text-text2 lg:text-[14px]">{deadline}</span>}
+      </div>
+      <div className="lg:flex lg:flex-wrap lg:items-center lg:justify-between lg:gap-3.5">
+        <div className="min-w-0">
+          <p className="text-[17px] font-semibold leading-[1.3] text-text [text-wrap:pretty] lg:text-[19px]">
+            {campaign.title}
+          </p>
+          <p className="mt-1 text-[15px] text-text2">{meta}</p>
+          {campaign.description && (
+            <p className="mt-1.5 text-[14px] leading-[1.5] text-text2 [text-wrap:pretty]">{campaign.description}</p>
+          )}
+        </div>
+        {active && state.can_start && (
+          <Button
+            className="mt-1 h-12 w-full rounded-xl text-[15px] lg:mt-0 lg:h-10 lg:w-auto lg:shrink-0 lg:rounded-[10px] lg:px-[18px]"
+            disabled={starting}
+            onClick={onStart}
+          >
+            {state.active_attempt_id ? 'Продолжить аттестацию' : 'Начать аттестацию'}
+          </Button>
         )}
       </div>
-      <p className="mt-1.5 text-sm font-medium text-text">{campaign.title}</p>
-      {campaign.description && (
-        <p className="mt-0.5 text-sm text-text2">{campaign.description}</p>
-      )}
-      <p className="mt-0.5 text-xs text-text3">
-        {campaign.question_count} вопросов · порог {state.pass_score_pct}%
-        {state.attempts_limit !== null && ` · попыток: ${state.attempts_used}/${state.attempts_limit}`}
-      </p>
+    </article>
+  )
+}
 
-      <div className="mt-3">
-        {attempt ? (
+/**
+ * Полноэкранный прогон аттестации: попытка и результат поверх страницы,
+ * с возвратом «Аттестации». Снапшот попытки и проверка — движок Ф3b.
+ */
+function FullscreenRunner({
+  campaign,
+  attempt,
+  onClose,
+}: {
+  campaign: AssessmentCampaign
+  attempt: QuizAttempt
+  onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const [finished, setFinished] = useState<QuizAttempt | null>(null)
+  const quiz = campaign.my_state!
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [])
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={campaign.title}
+      className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-bg"
+    >
+      <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-hair bg-bg-alt px-3 py-2 lg:px-6">
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[15px] font-medium text-text2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+        >
+          <ArrowLeft className="h-[18px] w-[18px]" /> Аттестации
+        </button>
+        <span className="min-w-0 flex-1 truncate text-center text-[14px] font-semibold text-text">
+          {campaign.title}
+        </span>
+        <span className="w-[112px] shrink-0" aria-hidden />
+      </header>
+      <div className="mx-auto w-full max-w-[720px] px-4 py-5 lg:px-8 lg:py-8">
+        {finished ? (
+          <ResultView
+            attempt={finished}
+            quiz={quiz}
+            canRetry={false}
+            onRetry={() => undefined}
+            onExit={onClose}
+          />
+        ) : (
           <AttemptView
             attempt={attempt}
-            quiz={state}
-            onExit={() => setAttempt(null)}
+            quiz={quiz}
+            onExit={onClose}
             onFinished={(a) => {
-              setAttempt(null)
               setFinished(a)
               void qc.invalidateQueries({ queryKey: ['learn-assessments'] })
             }}
           />
-        ) : finished ? (
-          <ResultView
-            attempt={finished}
-            quiz={state}
-            canRetry={false}
-            onRetry={() => undefined}
-            onExit={() => setFinished(null)}
-          />
-        ) : state.pending_review ? (
-          <p className="inline-flex items-center gap-1.5 rounded-lg border border-amber/40 bg-amber/5 px-3 py-2 text-sm text-text2">
-            <Clock className="h-4 w-4 text-amber" /> На проверке — дождитесь результата.
-          </p>
-        ) : state.passed ? (
-          <p className="inline-flex items-center gap-1.5 rounded-lg border border-green/50 bg-green/10 px-3 py-2 text-sm text-text">
-            <Check className="h-4 w-4 text-green" /> Сдана на {state.best_score_pct}%
-          </p>
-        ) : state.can_start ? (
-          <Button size="sm" disabled={start.isPending} onClick={() => start.mutate()}>
-            <Play className="h-4 w-4" />
-            {state.active_attempt_id ? 'Продолжить' : 'Пройти аттестацию'}
-          </Button>
-        ) : (
-          <p className="inline-flex items-center gap-1.5 rounded-lg border border-red/40 bg-red/5 px-3 py-2 text-sm text-text2">
-            <X className="h-4 w-4 text-red" />
-            {state.attempts_used > 0
-              ? `Не сдана (${state.best_score_pct ?? 0}%) — попытки исчерпаны`
-              : 'Недоступна'}
-          </p>
         )}
       </div>
+    </div>,
+    document.body,
+  )
+}
+
+// ─── Отчёт ───────────────────────────────────────────────────────────────────
+
+function ReportStatusBadge({ status }: { status: AssessmentReportRow['status'] }) {
+  // Цвет только у крайних исходов — иначе отчёт на 30 строк становится радугой.
+  return (
+    <span
+      className={cn(
+        'inline-flex h-[22px] items-center rounded-md px-2 text-[12px] font-semibold',
+        status === 'passed'
+          ? 'bg-green-deep text-bg'
+          : status === 'failed'
+            ? 'bg-red text-bg'
+            : 'bg-surface text-text',
+      )}
+    >
+      {REPORT_STATUS_LABEL[status]}
+    </span>
+  )
+}
+
+function ReportView({ campaigns }: { campaigns: AssessmentCampaign[] }) {
+  const [selected, setSelected] = useState<string | null>(campaigns[0]?.id ?? null)
+  const campaign = campaigns.find((c) => c.id === selected) ?? campaigns[0] ?? null
+  const report = useQuery({
+    queryKey: ['learn-assessment-report', campaign?.id],
+    queryFn: () => learnApi.assessmentReport(campaign!.id),
+    enabled: campaign !== null,
+  })
+  if (campaign === null) {
+    return (
+      <EmptyState
+        layout="card"
+        icon={<BadgeCheck className="h-7 w-7" />}
+        title="Отчитываться пока не о чем"
+        text="Отчёт появится, когда будет запущена хотя бы одна кампания аттестации."
+      />
+    )
+  }
+  const rows = report.data?.rows ?? []
+  const passed = rows.filter((r) => r.status === 'passed').length
+  const pct = rows.length > 0 ? Math.round((passed / rows.length) * 100) : 0
+  const deadline = campaign.ends_at ? ` · до ${formatDay(campaign.ends_at)}` : ''
+
+  return (
+    <div className="flex flex-col gap-3.5 lg:gap-4">
+      {campaigns.length > 1 && (
+        <div className="-mx-5 flex gap-2 overflow-x-auto px-5 pb-1 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:px-0">
+          {campaigns.map((c) => (
+            <FilterChip key={c.id} size="md" active={c.id === campaign.id} onClick={() => setSelected(c.id)}>
+              {c.title}
+            </FilterChip>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between lg:gap-3.5">
+        <div>
+          <p className="text-[15px] font-semibold text-text lg:text-[19px]">{campaign.title}</p>
+          <p className="mt-1 text-[14px] text-text2 lg:text-[15px]">
+            {report.data ? nbsp(`Прошли: ${passed} из ${rows.length}`) : 'Считаем…'}
+            <span className="hidden lg:inline">{deadline}</span>
+          </p>
+        </div>
+        <span className="block h-1.5 w-full rounded-[3px] bg-surface lg:w-[220px]">
+          <span className="block h-1.5 rounded-[3px] bg-amber transition-[width]" style={{ width: `${pct}%` }} />
+        </span>
+      </div>
+
+      {report.isLoading && <SkeletonRows rows={5} />}
+      {report.isError && <QueryError onRetry={() => void report.refetch()} />}
+      {report.data && rows.length === 0 && (
+        <p className="text-[14px] text-text2">В аудитории кампании пока никого нет.</p>
+      )}
+      {rows.length > 0 && (
+        <div className="overflow-hidden rounded-[14px] border border-hair bg-tint">
+          <div className="hidden grid-cols-[minmax(0,1fr)_130px_72px_116px] items-center gap-3 bg-surface px-3.5 py-2.5 text-[12px] font-bold uppercase tracking-[0.07em] text-text2 lg:grid">
+            <span>Сотрудник</span>
+            <span>Состояние</span>
+            <span>Балл</span>
+            <span>Завершено</span>
+          </div>
+          {rows.map((row, i) => (
+            <div
+              key={row.profile_id}
+              className={cn(
+                'flex items-center gap-2.5 px-3.5 py-[11px] lg:grid lg:grid-cols-[minmax(0,1fr)_130px_72px_116px] lg:gap-3',
+                i > 0 ? 'border-t border-hair' : 'lg:border-t lg:border-hair',
+              )}
+            >
+              <span className="min-w-0 flex-1 lg:flex-none">
+                <span className="block truncate text-[15px] font-semibold leading-[1.3] text-text lg:text-[16px]">
+                  {row.full_name}
+                </span>
+                <span className="mt-[3px] block text-[13px] text-text2 lg:hidden">
+                  {row.finished_at ? formatDay(row.finished_at) : '—'}
+                </span>
+              </span>
+              <span className="order-last shrink-0 lg:order-none">
+                <ReportStatusBadge status={row.status} />
+              </span>
+              <span className="shrink-0 font-display text-[14px] font-bold tabular-nums text-text lg:text-[15px]">
+                {row.score_pct !== null ? `${row.score_pct}%` : '—'}
+              </span>
+              <span className="hidden text-[14px] text-text2 lg:block">
+                {row.finished_at ? formatDay(row.finished_at) : '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-// ─── Карточка менеджера ──────────────────────────────────────────────────────
+// ─── Управление кампаниями (hub-admin) ───────────────────────────────────────
 
 function ManagerCampaignCard({ campaign }: { campaign: AssessmentCampaign }) {
   const [questionsOpen, setQuestionsOpen] = useState(false)
   const [audienceOpen, setAudienceOpen] = useState(false)
-  const [reportOpen, setReportOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const activate = useCampaignMutation(() => learnApi.activateAssessment(campaign.id))
   const close = useCampaignMutation(() => learnApi.closeAssessment(campaign.id))
-  const remove = useCampaignMutation(() => learnApi.deleteAssessment(campaign.id))
+  const active = campaign.status === 'active'
 
   return (
-    <div className="rounded-xl border border-glass-border bg-glass p-4">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Badge variant={campaign.status === 'active' ? 'default' : 'secondary'}>
+    <article
+      className={cn(
+        'flex flex-col gap-[9px] rounded-[14px] border bg-tint p-3.5 lg:p-4',
+        active ? 'border-amber/45' : 'border-hair',
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-2 lg:gap-2.5">
+        <Badge variant={active ? 'default' : 'secondary'} className={!active ? 'text-text' : undefined}>
           {CAMPAIGN_STATUS_LABEL[campaign.status]}
         </Badge>
-        <span className="text-xs text-text3">
-          {campaign.question_count} вопросов · прошли {campaign.completed_count}/
-          {campaign.audience_size}
-        </span>
+        {campaign.ends_at && (
+          <span className="text-[13px] text-text2 lg:text-[14px]">
+            {active ? 'до' : 'закрыта'} {formatDay(campaign.ends_at)}
+          </span>
+        )}
       </div>
-      <p className="mt-1.5 text-sm font-medium text-text">{campaign.title}</p>
-
-      <div className="mt-2.5 flex flex-wrap gap-2">
-        <Button size="sm" variant="secondary" onClick={() => setQuestionsOpen(true)}>
+      <div>
+        <p className="text-[17px] font-semibold leading-[1.3] text-text lg:text-[19px]">{campaign.title}</p>
+        <p className="mt-1 text-[15px] text-text2">
+          {nbsp(
+            `${plural(campaign.question_count, 'вопрос', 'вопроса', 'вопросов')} · прошли ${campaign.completed_count} из ${campaign.audience_size}`,
+          )}
+        </p>
+      </div>
+      <ActionRow className="mt-0">
+        <Button variant="secondary" className={GHOST_BTN} onClick={() => setQuestionsOpen(true)}>
           <Pencil className="h-4 w-4" /> Вопросы
         </Button>
-        <Button size="sm" variant="secondary" onClick={() => setAudienceOpen(true)}>
+        <Button variant="secondary" className={GHOST_BTN} onClick={() => setAudienceOpen(true)}>
           <Users className="h-4 w-4" /> Аудитория
         </Button>
         {campaign.status === 'draft' && (
           <>
             <Button
-              size="sm"
+              className={ACTION_BTN}
               disabled={activate.isPending}
               onClick={() =>
                 void activate
@@ -211,55 +388,60 @@ function ManagerCampaignCard({ campaign }: { campaign: AssessmentCampaign }) {
             >
               Запустить
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-red"
-              disabled={remove.isPending}
-              onClick={() => {
-                if (!window.confirm(`Удалить «${campaign.title}»?`)) return
-                void remove.mutateAsync(undefined as never)
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
+            <Button variant="secondary" className={cn(GHOST_BTN, 'text-red')} onClick={() => setDeleteOpen(true)}>
+              <Trash2 className="h-4 w-4" /> Удалить
             </Button>
           </>
         )}
-        {campaign.status === 'active' && (
+        {active && (
           <Button
-            size="sm"
-            variant="ghost"
+            variant="secondary"
+            className={cn(GHOST_BTN, 'text-red')}
             disabled={close.isPending}
             onClick={() => void close.mutateAsync(undefined as never)}
           >
             Закрыть кампанию
           </Button>
         )}
-        <Button size="sm" variant="ghost" onClick={() => setReportOpen(true)}>
-          <Table2 className="h-4 w-4" /> Отчёт
-        </Button>
-      </div>
+      </ActionRow>
 
-      {questionsOpen && (
-        <CampaignQuizDialog campaign={campaign} onClose={() => setQuestionsOpen(false)} />
-      )}
-      {audienceOpen && (
-        <CampaignAudienceDialog campaign={campaign} onClose={() => setAudienceOpen(false)} />
-      )}
-      {reportOpen && (
-        <CampaignReportDialog campaign={campaign} onClose={() => setReportOpen(false)} />
-      )}
-    </div>
+      {questionsOpen && <CampaignQuizDialog campaign={campaign} onClose={() => setQuestionsOpen(false)} />}
+      {audienceOpen && <CampaignAudienceDialog campaign={campaign} onClose={() => setAudienceOpen(false)} />}
+      {deleteOpen && <DeleteCampaignDialog campaign={campaign} onClose={() => setDeleteOpen(false)} />}
+    </article>
   )
 }
 
-function CampaignQuizDialog({
-  campaign,
-  onClose,
-}: {
-  campaign: AssessmentCampaign
-  onClose: () => void
-}) {
+function DeleteCampaignDialog({ campaign, onClose }: { campaign: AssessmentCampaign; onClose: () => void }) {
+  const remove = useCampaignMutation(() => learnApi.deleteAssessment(campaign.id))
+  return (
+    <ResponsiveDialog
+      open
+      onOpenChange={(v) => !v && onClose()}
+      title={`Удалить «${campaign.title}»?`}
+      description="Черновик кампании удаляется вместе с вопросами. Запущенные кампании не удаляются — их закрывают."
+      desktopWidth={440}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={remove.isPending}>
+            Отмена
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={remove.isPending}
+            onClick={() => void remove.mutateAsync(undefined as never).then(onClose)}
+          >
+            Удалить
+          </Button>
+        </>
+      }
+    >
+      <span className="sr-only">Подтверждение удаления</span>
+    </ResponsiveDialog>
+  )
+}
+
+function CampaignQuizDialog({ campaign, onClose }: { campaign: AssessmentCampaign; onClose: () => void }) {
   const quiz = useQuery({
     queryKey: ['learn-assessment-quiz', campaign.id],
     queryFn: () => learnApi.assessmentQuiz(campaign.id),
@@ -303,80 +485,14 @@ function CampaignQuizDialog({
   const save = useCampaignMutation(persist)
 
   return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[88vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Вопросы: {campaign.title}</DialogTitle>
-        </DialogHeader>
-        {quiz.isLoading && <SkeletonRows rows={3} />}
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <Label htmlFor="ac-pass">Порог сдачи, %</Label>
-            <Input
-              id="ac-pass"
-              type="number"
-              min={1}
-              max={100}
-              value={passScore}
-              onChange={(e) => setPassScore(Number(e.target.value) || 80)}
-            />
-          </div>
-          <div>
-            <Label htmlFor="ac-attempts">Лимит попыток (пусто = ∞)</Label>
-            <Input
-              id="ac-attempts"
-              type="number"
-              min={1}
-              max={50}
-              value={attemptsLimit}
-              onChange={(e) => setAttemptsLimit(e.target.value)}
-            />
-          </div>
-        </div>
-        <div className="space-y-1.5">
-          {questions.map((q, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-2 rounded-md border border-glass-border bg-surface px-2.5 py-1.5 text-sm"
-            >
-              <span className="w-5 shrink-0 text-center text-xs text-text3">{i + 1}</span>
-              <span className="min-w-0 flex-1 truncate text-text">{q.prompt}</span>
-              <span className="shrink-0 text-xs text-text3">
-                {QUIZ_QUESTION_TYPE_LABEL[q.qtype]} · {q.points} б.
-              </span>
-              <button
-                type="button"
-                title="Редактировать"
-                onClick={() => setEditIndex(i)}
-                className="rounded p-1 text-text3 hover:text-text"
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                title="Убрать"
-                onClick={() => setQuestions((prev) => prev.filter((_, j) => j !== i))}
-                className="rounded p-1 text-text3 hover:text-red"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          ))}
-          {questions.length === 0 && !quiz.isLoading && (
-            <p className="py-2 text-center text-sm text-text3">
-              Добавьте вопросы или импортируйте из тестов уроков.
-            </p>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={() => setEditIndex('new')}>
-            <Plus className="h-4 w-4" /> Вопрос
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setImportOpen(true)}>
-            <Import className="h-4 w-4" /> Импорт из теста урока
-          </Button>
-        </div>
-        <DialogFooter>
+    <ResponsiveDialog
+      open
+      onOpenChange={(v) => !v && onClose()}
+      title={`Вопросы: ${campaign.title}`}
+      description="Порог и лимит попыток действуют на всю кампанию; вопросы можно добавить вручную или импортом из теста урока."
+      desktopWidth={640}
+      footer={
+        <>
           <Button variant="secondary" onClick={onClose}>
             Отмена
           </Button>
@@ -391,35 +507,106 @@ function CampaignQuizDialog({
           >
             Сохранить
           </Button>
-        </DialogFooter>
+        </>
+      }
+    >
+      {quiz.isLoading && <SkeletonRows rows={3} />}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="ac-pass">Порог сдачи, %</Label>
+          <Input
+            id="ac-pass"
+            type="number"
+            min={1}
+            max={100}
+            value={passScore}
+            onChange={(e) => setPassScore(Number(e.target.value) || 80)}
+            className="h-12 text-[15px] lg:h-11"
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="ac-attempts">Лимит попыток (пусто = ∞)</Label>
+          <Input
+            id="ac-attempts"
+            type="number"
+            min={1}
+            max={50}
+            value={attemptsLimit}
+            onChange={(e) => setAttemptsLimit(e.target.value)}
+            className="h-12 text-[15px] lg:h-11"
+          />
+        </div>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {questions.map((q, i) => (
+          <div
+            key={i}
+            className="flex min-h-12 items-center gap-2 rounded-[10px] border border-hair bg-surface px-2.5 py-1.5 text-[14px]"
+          >
+            <span className="w-5 shrink-0 text-center text-[12px] text-text2">{i + 1}</span>
+            <span className="min-w-0 flex-1 truncate text-text">{q.prompt}</span>
+            <span className="hidden shrink-0 text-[12px] text-text2 sm:inline">
+              {QUIZ_QUESTION_TYPE_LABEL[q.qtype]} · {q.points} б.
+            </span>
+            <button
+              type="button"
+              title="Редактировать"
+              aria-label="Редактировать вопрос"
+              onClick={() => setEditIndex(i)}
+              className="flex h-9 w-9 items-center justify-center rounded-md text-text2 hover:text-text"
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              title="Убрать"
+              aria-label="Убрать вопрос"
+              onClick={() => setQuestions((prev) => prev.filter((_, j) => j !== i))}
+              className="flex h-9 w-9 items-center justify-center rounded-md text-text2 hover:text-red"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        ))}
+        {questions.length === 0 && !quiz.isLoading && (
+          <p className="py-2 text-center text-[14px] text-text2">
+            Добавьте вопросы или импортируйте из тестов уроков.
+          </p>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="secondary" className="bg-transparent" onClick={() => setEditIndex('new')}>
+          <Plus className="h-4 w-4" /> Вопрос
+        </Button>
+        <Button variant="secondary" className="bg-transparent" onClick={() => setImportOpen(true)}>
+          <Import className="h-4 w-4" /> Импорт из теста урока
+        </Button>
+      </div>
 
-        {editIndex !== null && (
-          <QuestionDialog
-            initial={editIndex === 'new' ? null : questions[editIndex] ?? null}
-            onClose={() => setEditIndex(null)}
-            onSave={(draft) => {
-              setQuestions((prev) =>
-                editIndex === 'new'
-                  ? [...prev, draft]
-                  : prev.map((q, i) => (i === editIndex ? draft : q)),
-              )
-              setEditIndex(null)
-            }}
-          />
-        )}
-        {importOpen && (
-          <ImportQuestionsDialog
-            campaign={campaign}
-            beforeImport={persist}
-            onClose={() => setImportOpen(false)}
-            onImported={() => {
-              setImportOpen(false)
-              void quiz.refetch()
-            }}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+      {editIndex !== null && (
+        <QuestionDialog
+          initial={editIndex === 'new' ? null : (questions[editIndex] ?? null)}
+          onClose={() => setEditIndex(null)}
+          onSave={(draft) => {
+            setQuestions((prev) =>
+              editIndex === 'new' ? [...prev, draft] : prev.map((q, i) => (i === editIndex ? draft : q)),
+            )
+            setEditIndex(null)
+          }}
+        />
+      )}
+      {importOpen && (
+        <ImportQuestionsDialog
+          campaign={campaign}
+          beforeImport={persist}
+          onClose={() => setImportOpen(false)}
+          onImported={() => {
+            setImportOpen(false)
+            void quiz.refetch()
+          }}
+        />
+      )}
+    </ResponsiveDialog>
   )
 }
 
@@ -436,7 +623,6 @@ function ImportQuestionsDialog({
   onClose: () => void
   onImported: () => void
 }) {
-  // Список тестов уроков: курсы (manage) → уроки → их квизы дочитываем лениво.
   const courses = useQuery({ queryKey: ['learn-courses', true], queryFn: () => learnApi.courses(true) })
   const [busy, setBusy] = useState(false)
 
@@ -460,27 +646,25 @@ function ImportQuestionsDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Импорт вопросов</DialogTitle>
-        </DialogHeader>
-        <p className="text-xs text-text3">
-          Выберите урок — вопросы его теста скопируются в аттестацию.
-        </p>
-        <div className="space-y-2">
-          {(courses.data?.items ?? []).map((course) => (
-            <CourseLessonPicker
-              key={course.id}
-              courseId={course.id}
-              courseTitle={course.title}
-              disabled={busy}
-              onPick={importFrom}
-            />
-          ))}
-        </div>
-      </DialogContent>
-    </Dialog>
+    <ResponsiveDialog
+      open
+      onOpenChange={(v) => !v && onClose()}
+      title="Импорт вопросов"
+      description="Выберите урок — вопросы его теста скопируются в аттестацию."
+    >
+      <div className="flex flex-col gap-3">
+        {(courses.data?.items ?? []).map((course) => (
+          <CourseLessonPicker
+            key={course.id}
+            courseId={course.id}
+            courseTitle={course.title}
+            disabled={busy}
+            onPick={importFrom}
+          />
+        ))}
+        {courses.isLoading && <SkeletonRows rows={3} />}
+      </div>
+    </ResponsiveDialog>
   )
 }
 
@@ -503,17 +687,15 @@ function CourseLessonPicker({
   if (!lessons.length) return null
   return (
     <div>
-      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-text3">
-        {courseTitle}
-      </p>
-      <div className="space-y-1">
+      <p className="mb-1.5 text-[12px] font-bold uppercase tracking-[0.08em] text-text2">{courseTitle}</p>
+      <div className="flex flex-col gap-1.5">
         {lessons.map((lesson) => (
           <button
             key={lesson.id}
             type="button"
             disabled={disabled}
             onClick={() => onPick(lesson.id, lesson.title)}
-            className="flex w-full items-center gap-2 rounded-lg border border-glass-border px-3 py-1.5 text-left text-sm text-text hover:border-amber/50 disabled:opacity-50"
+            className="flex min-h-12 w-full items-center gap-2 rounded-[10px] border border-hair px-3.5 text-left text-[15px] text-text hover:border-amber/50 disabled:opacity-50 lg:min-h-11"
           >
             <span className="min-w-0 flex-1 truncate">{lesson.title}</span>
           </button>
@@ -523,41 +705,17 @@ function CourseLessonPicker({
   )
 }
 
-function CampaignAudienceDialog({
-  campaign,
-  onClose,
-}: {
-  campaign: AssessmentCampaign
-  onClose: () => void
-}) {
+function CampaignAudienceDialog({ campaign, onClose }: { campaign: AssessmentCampaign; onClose: () => void }) {
   const audience = useAudienceDraft(campaign.audience_id)
   const { value, setValue } = audience
-  const save = useCampaignMutation(() =>
-    learnApi.setAssessmentAudience(campaign.id, value),
-  )
+  const save = useCampaignMutation(() => learnApi.setAssessmentAudience(campaign.id, value))
   return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Кто проходит «{campaign.title}»</DialogTitle>
-        </DialogHeader>
-        {audience.loading ? (
-          <SkeletonRows rows={3} />
-        ) : (
-          <>
-            {audience.failed && (
-              <p className="text-sm text-red">
-                Не удалось загрузить текущие правила — сохранение перезапишет их.
-              </p>
-            )}
-            <AudiencePicker
-              value={value}
-              onChange={setValue}
-              extraLabels={audience.extraLabels}
-            />
-          </>
-        )}
-        <DialogFooter>
+    <ResponsiveDialog
+      open
+      onOpenChange={(v) => !v && onClose()}
+      title={`Кто проходит «${campaign.title}»`}
+      footer={
+        <>
           <Button variant="secondary" onClick={onClose} disabled={save.isPending}>
             Отмена
           </Button>
@@ -572,126 +730,22 @@ function CampaignAudienceDialog({
           >
             Сохранить
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function CampaignReportDialog({
-  campaign,
-  onClose,
-}: {
-  campaign: AssessmentCampaign
-  onClose: () => void
-}) {
-  const report = useQuery({
-    queryKey: ['learn-assessment-report', campaign.id],
-    queryFn: () => learnApi.assessmentReport(campaign.id),
-  })
-  return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Отчёт: {campaign.title}</DialogTitle>
-        </DialogHeader>
-        {report.isLoading && <SkeletonRows rows={4} />}
-        {report.data && (
-          <div className="overflow-x-auto rounded-lg border border-glass-border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-glass-border text-left text-xs text-text3">
-                  <th className="px-3 py-2 font-medium">Сотрудник</th>
-                  <th className="px-3 py-2 font-medium">Статус</th>
-                  <th className="px-3 py-2 text-right font-medium">Балл</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.data.rows.map((row) => (
-                  <tr key={row.profile_id} className="border-b border-glass-border/50 last:border-0">
-                    <td className="px-3 py-2 text-text">{row.full_name}</td>
-                    <td
-                      className={cn(
-                        'px-3 py-2',
-                        row.status === 'passed'
-                          ? 'text-green'
-                          : row.status === 'failed'
-                            ? 'text-red'
-                            : 'text-text2',
-                      )}
-                    >
-                      {REPORT_STATUS_LABEL[row.status]}
-                    </td>
-                    <td className="px-3 py-2 text-right text-text">
-                      {row.score_pct !== null ? `${row.score_pct}%` : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ─── Страница ────────────────────────────────────────────────────────────────
-
-export function LearnAssessmentsPage() {
-  const isDesktop = useIsDesktop()
-  const data = useAssessments()
-  const [createOpen, setCreateOpen] = useState(false)
-
-  const items = data.data ?? []
-
-  return (
-    <div className="mx-auto max-w-3xl">
-      {!isDesktop && <MobilePageHeader eyebrow="Обучение" title="Аттестации" />}
-      <div className="space-y-4 p-4 lg:p-8">
-        <div className="flex items-center justify-between gap-2">
-          {isDesktop && (
-            <h1 className="font-display text-2xl font-bold text-text">Аттестации</h1>
+        </>
+      }
+    >
+      {audience.loading ? (
+        <SkeletonRows rows={3} />
+      ) : (
+        <>
+          {audience.failed && (
+            <p className="text-[14px] text-red">
+              Не удалось загрузить текущие правила — сохранение перезапишет их.
+            </p>
           )}
-          <CreateButton onOpen={() => setCreateOpen(true)} />
-        </div>
-
-        {data.isLoading && <SkeletonRows rows={3} />}
-        {data.isError && <QueryError onRetry={() => void data.refetch()} />}
-
-        {data.data && items.length === 0 && (
-          <div className="rounded-xl border border-glass-border bg-glass p-8 text-center">
-            <BadgeCheck className="mx-auto h-8 w-8 text-text3" />
-            <p className="mt-3 text-sm text-text2">Активных аттестаций нет.</p>
-          </div>
-        )}
-
-        <div className="space-y-3">
-          {items.map((campaign) =>
-            campaign.my_state !== null ? (
-              <EmployeeCampaignCard key={campaign.id} campaign={campaign} />
-            ) : (
-              <ManagerCampaignCard key={campaign.id} campaign={campaign} />
-            ),
-          )}
-        </div>
-
-        {createOpen && <CreateCampaignDialog onClose={() => setCreateOpen(false)} />}
-      </div>
-    </div>
-  )
-}
-
-function CreateButton({ onOpen }: { onOpen: () => void }) {
-  // Управление кампаниями — только hub-admin (сервер: require_content_role
-  // "admin" ровно совпадает с hub_role === 'admin'). Старая эвристика по
-  // форме списка показывала кнопку всем при пустом списке.
-  const me = useMe()
-  if (me.data?.hub_role !== 'admin') return null
-  return (
-    <Button onClick={onOpen}>
-      <Plus className="h-4 w-4" /> Аттестация
-    </Button>
+          <AudiencePicker value={value} onChange={setValue} extraLabels={audience.extraLabels} />
+        </>
+      )}
+    </ResponsiveDialog>
   )
 }
 
@@ -706,65 +760,199 @@ function CreateCampaignDialog({ onClose }: { onClose: () => void }) {
       ends_at: endsAt ? new Date(`${endsAt}T23:59`).toISOString() : null,
     }),
   )
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
+  const submit = () => {
     if (!title.trim()) return
     void create.mutateAsync(undefined as never).then(() => {
       toast.success('Кампания создана — добавьте вопросы и запустите')
       onClose()
     })
   }
+  return (
+    <ResponsiveDialog
+      open
+      onOpenChange={(v) => !v && onClose()}
+      title="Новая аттестация"
+      description="Кампания создаётся черновиком: добавьте вопросы, задайте аудиторию и запустите — участники получат уведомление с дедлайном."
+      footer={
+        <>
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Отмена
+          </Button>
+          <Button type="button" onClick={submit} disabled={!title.trim() || create.isPending}>
+            Создать
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          submit()
+        }}
+      >
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="camp-title">Название</Label>
+          <Input
+            id="camp-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Годовая аттестация бариста"
+            maxLength={255}
+            autoFocus
+            className="h-12 text-[15px] lg:h-11"
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="camp-desc">Описание</Label>
+          <textarea
+            id="camp-desc"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={2}
+            className="flex w-full rounded-[10px] border border-glass-border bg-surface px-3.5 py-2.5 text-[15px] text-text focus-visible:border-amber focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber"
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="camp-ends">Дедлайн (необязательно)</Label>
+          <Input
+            id="camp-ends"
+            type="date"
+            value={endsAt}
+            onChange={(e) => setEndsAt(e.target.value)}
+            className="h-12 text-[15px] lg:h-11"
+          />
+        </div>
+      </form>
+    </ResponsiveDialog>
+  )
+}
+
+// ─── Страница ────────────────────────────────────────────────────────────────
+
+export function LearnAssessmentsPage() {
+  const isDesktop = useIsDesktop()
+  const me = useMe()
+  const data = useAssessments()
+  const [view, setView] = useState<View>('my')
+  const [createOpen, setCreateOpen] = useState(false)
+  const [running, setRunning] = useState<{ campaign: AssessmentCampaign; attempt: QuizAttempt } | null>(
+    null,
+  )
+
+  const items = useMemo(() => data.data ?? [], [data.data])
+  const isAdmin = me.data?.hub_role === 'admin'
+  // Отчёт отдаёт сервер publisher'ам и руководителям магазинов (ТУ/франчайзи);
+  // hub-admin проходит как publisher.
+  const canReport =
+    isAdmin ||
+    me.data?.profile?.content_role === 'publisher' ||
+    me.data?.profile?.org_role === 'tu' ||
+    me.data?.profile?.org_role === 'franchisee_owner'
+
+  const mine = useMemo(() => items.filter((c) => c.my_state !== null), [items])
+  const options = useMemo(() => {
+    const out: SegmentOption<View>[] = [{ value: 'my', label: 'Мои' }]
+    if (canReport) out.push({ value: 'report', label: 'Отчёт' })
+    if (isAdmin) out.push({ value: 'manage', label: 'Кампании' })
+    return out
+  }, [canReport, isAdmin])
+  const effectiveView: View = options.some((o) => o.value === view) ? view : 'my'
+
+  const start = useMutation({
+    mutationFn: (campaign: AssessmentCampaign) =>
+      learnApi.startQuizAttempt(campaign.my_state!.id).then((attempt) => ({ campaign, attempt })),
+    meta: { suppressGlobalError: true },
+    onSuccess: setRunning,
+    onError: (e) => toast.error('Не удалось начать', { description: extractErrorDetail(e) }),
+  })
 
   return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent>
-        <form onSubmit={submit}>
-          <DialogHeader>
-            <DialogTitle>Новая аттестация</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-2 py-3">
-            <div>
-              <Label htmlFor="camp-title">Название</Label>
-              <Input
-                id="camp-title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Годовая аттестация бариста"
-                maxLength={255}
-                autoFocus
+    <div className="mx-auto max-w-[860px] px-5 pb-16 pt-11 lg:px-8">
+      <header className="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between lg:gap-3.5">
+        <h1 className="font-display text-[28px] font-bold leading-[1.18] tracking-[0.01em] text-text lg:text-[34px] lg:leading-[1.15]">
+          Аттестации
+        </h1>
+        <div className="flex flex-wrap items-center gap-2">
+          {options.length > 1 && (
+            <SegmentGroup
+              ariaLabel="Вид"
+              options={options}
+              value={effectiveView}
+              onChange={setView}
+              size={isDesktop ? 'md' : 'lg'}
+            />
+          )}
+          {isAdmin && effectiveView === 'manage' && (
+            <>
+              <span className="flex-1 lg:hidden" />
+              <Button
+                onClick={() => setCreateOpen(true)}
+                className="h-12 rounded-xl px-5 text-[15px] lg:h-9 lg:rounded-[10px] lg:px-3.5 lg:text-[13px]"
+              >
+                <Plus className="h-4 w-4" /> Аттестация
+              </Button>
+            </>
+          )}
+        </div>
+      </header>
+
+      <div className="mt-4 flex flex-col gap-3 lg:mt-[22px]">
+        {data.isLoading && <SkeletonRows rows={3} />}
+        {data.isError && <QueryError onRetry={() => void data.refetch()} />}
+
+        {data.data && effectiveView === 'my' && (
+          <>
+            {mine.length === 0 && (
+              <EmptyState
+                layout="card"
+                icon={<BadgeCheck className="h-7 w-7" />}
+                title="Назначенных аттестаций нет"
+                text="Когда руководитель запустит кампанию для вашей должности или магазина, она появится здесь с дедлайном."
               />
-            </div>
-            <div>
-              <Label htmlFor="camp-desc">Описание</Label>
-              <textarea
-                id="camp-desc"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={2}
-                className="flex w-full rounded-lg border border-glass-border bg-glass px-3 py-2 text-sm text-text focus-visible:border-amber focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber"
+            )}
+            {mine.map((campaign) => (
+              <EmployeeCampaignCard
+                key={campaign.id}
+                campaign={campaign}
+                starting={start.isPending && start.variables?.id === campaign.id}
+                onStart={() => start.mutate(campaign)}
               />
-            </div>
-            <div>
-              <Label htmlFor="camp-ends">Дедлайн (необязательно)</Label>
-              <Input
-                id="camp-ends"
-                type="date"
-                value={endsAt}
-                onChange={(e) => setEndsAt(e.target.value)}
+            ))}
+          </>
+        )}
+
+        {data.data && effectiveView === 'report' && (
+          <ReportView campaigns={items.filter((c) => c.status !== 'draft')} />
+        )}
+
+        {data.data && effectiveView === 'manage' && (
+          <>
+            {items.length === 0 && (
+              <EmptyState
+                layout="card"
+                icon={<BadgeCheck className="h-7 w-7" />}
+                title="Кампаний пока нет"
+                text="Создайте аттестацию, добавьте вопросы (можно импортом из тестов уроков) и запустите — аудитория получит уведомление."
+                cta="Новая аттестация"
+                onCta={() => setCreateOpen(true)}
               />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="secondary" onClick={onClose}>
-              Отмена
-            </Button>
-            <Button type="submit" disabled={!title.trim() || create.isPending}>
-              Создать
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+            )}
+            {items.map((campaign) => (
+              <ManagerCampaignCard key={campaign.id} campaign={campaign} />
+            ))}
+          </>
+        )}
+      </div>
+
+      {createOpen && <CreateCampaignDialog onClose={() => setCreateOpen(false)} />}
+      {running && (
+        <FullscreenRunner
+          campaign={running.campaign}
+          attempt={running.attempt}
+          onClose={() => setRunning(null)}
+        />
+      )}
+    </div>
   )
 }

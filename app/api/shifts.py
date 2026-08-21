@@ -51,13 +51,22 @@ class PostingCreate(BaseModel):
     auto_confirm: bool = False
 
 
+class CourseRef(BaseModel):
+    id: UUID
+    title: str
+
+
 class ApplicationView(BaseModel):
     id: UUID
     profile_id: UUID
     employee_name: str | None = None
+    position_name: str | None = None
     status: str
     comment: str | None
     created_at: datetime
+    # Все required-курсы смены завершены кандидатом (на момент отдачи: отклик
+    # проверяет это при подаче, но набор курсов могли изменить PATCH'ем позже).
+    passed_required: bool = True
 
 
 class PostingView(BaseModel):
@@ -80,7 +89,9 @@ class PostingView(BaseModel):
     # Персональное:
     my_application_status: str | None = None
     can_apply: bool = False
+    # Названия — legacy для старых бандлов; `missing` — с id для ссылки «К курсу».
     missing_courses: list[str] = []
+    missing: list[CourseRef] = []
     # Менеджеру:
     applications: list[ApplicationView] | None = None
 
@@ -88,6 +99,20 @@ class PostingView(BaseModel):
 class ShiftListResponse(BaseModel):
     items: list[PostingView]
     can_manage: bool
+    # Должность текущего сотрудника — подпись «моя должность — бариста» в шапке.
+    my_position_name: str | None = None
+
+
+class PostingUpdate(BaseModel):
+    """Правка ОТКРЫТОЙ смены. Магазин и должность не меняются: по ним уже
+    разосланы уведомления и поданы отклики — это другая смена."""
+
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    pay_note: str | None = Field(default=None, max_length=255)
+    note: str | None = Field(default=None, max_length=2000)
+    required_course_ids: list[UUID] | None = Field(default=None, max_length=10)
+    auto_confirm: bool | None = None
 
 
 class ApplyBody(BaseModel):
@@ -128,8 +153,8 @@ async def _require_posting_manager(
 
 async def _missing_courses(
     db: AsyncSession, posting: ShiftPosting, profile_id: UUID
-) -> list[str]:
-    """Названия required-курсов, которые кандидат ещё не завершил."""
+) -> list[CourseRef]:
+    """Required-курсы (id + название), которые кандидат ещё не завершил."""
     if not posting.required_course_ids:
         return []
     completed = {
@@ -145,13 +170,14 @@ async def _missing_courses(
     missing_ids = [c for c in posting.required_course_ids if c not in completed]
     if not missing_ids:
         return []
-    titles = [
-        r[0]
+    refs = [
+        CourseRef(id=r[0], title=r[1])
         for r in await db.execute(
-            select(Course.title).where(Course.id.in_(missing_ids))
+            select(Course.id, Course.title).where(Course.id.in_(missing_ids))
         )
     ]
-    return titles or ["курс удалён"]
+    # Удалённый курс требованием остаётся (чужой id), но имени у него нет.
+    return refs or [CourseRef(id=missing_ids[0], title="курс удалён")]
 
 
 async def _notify_profiles(
@@ -235,6 +261,11 @@ async def list_shifts(
         )
         postings = list((await db.execute(stmt)).scalars().all())
 
+    my_position_name = None
+    if profile is not None and profile.position_id is not None:
+        my_position_name = (
+            await db.execute(select(Position.name).where(Position.id == profile.position_id))
+        ).scalar_one_or_none()
     return ShiftListResponse(
         items=await _render_postings(
             db,
@@ -243,6 +274,7 @@ async def list_shifts(
             include_applications=manage and can_manage,
         ),
         can_manage=can_manage,
+        my_position_name=my_position_name,
     )
 
 
@@ -306,27 +338,53 @@ async def _render_postings(
 
     all_apps: dict[UUID, list[ApplicationView]] = {}
     if include_applications:
-        rows = await db.execute(
-            select(ShiftApplication, EmployeeProfile.full_name)
-            .join(EmployeeProfile, EmployeeProfile.id == ShiftApplication.profile_id)
-            .where(ShiftApplication.posting_id.in_([p.id for p in postings]))
-            .order_by(ShiftApplication.created_at)
-        )
-        for app_row, name in rows:
+        posting_by_id = {p.id: p for p in postings}
+        rows = (
+            await db.execute(
+                select(ShiftApplication, EmployeeProfile.full_name, EmployeeProfile.position_id)
+                .join(EmployeeProfile, EmployeeProfile.id == ShiftApplication.profile_id)
+                .where(ShiftApplication.posting_id.in_([p.id for p in postings]))
+                .order_by(ShiftApplication.created_at)
+            )
+        ).all()
+        # Кто из кандидатов закрыл required-курсы своей смены — одним запросом.
+        req_pairs = {
+            (app_row.profile_id, cid)
+            for app_row, _name, _pos in rows
+            for cid in (posting_by_id[app_row.posting_id].required_course_ids or [])
+        }
+        completed_pairs: set[tuple[UUID, UUID]] = set()
+        if req_pairs:
+            completed_pairs = {
+                (r[0], r[1])
+                for r in await db.execute(
+                    select(CourseProgress.profile_id, CourseProgress.course_id).where(
+                        CourseProgress.profile_id.in_({pid for pid, _ in req_pairs}),
+                        CourseProgress.course_id.in_({cid for _, cid in req_pairs}),
+                        CourseProgress.completed_at.is_not(None),
+                    )
+                )
+            }
+        for app_row, name, pos_id in rows:
+            required = posting_by_id[app_row.posting_id].required_course_ids or []
             all_apps.setdefault(app_row.posting_id, []).append(
                 ApplicationView(
                     id=app_row.id,
                     profile_id=app_row.profile_id,
                     employee_name=name,
+                    position_name=position_names.get(pos_id) if pos_id else None,
                     status=app_row.status,
                     comment=app_row.comment,
                     created_at=app_row.created_at,
+                    passed_required=all(
+                        (app_row.profile_id, cid) in completed_pairs for cid in required
+                    ),
                 )
             )
 
     out = []
     for posting in postings:
-        missing: list[str] = []
+        missing: list[CourseRef] = []
         can_apply = False
         if (
             profile is not None
@@ -360,7 +418,8 @@ async def _render_postings(
                 created_at=posting.created_at,
                 my_application_status=my_apps.get(posting.id),
                 can_apply=can_apply,
-                missing_courses=missing,
+                missing_courses=[m.title for m in missing],
+                missing=missing,
                 applications=all_apps.get(posting.id) if include_applications else None,
             )
         )
@@ -549,6 +608,74 @@ async def _assign(
         )
 
 
+@router.patch("/learn/shifts/{posting_id}", response_model=PostingView)
+async def update_posting(
+    posting_id: UUID,
+    body: PostingUpdate,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> PostingView:
+    posting = await _get_posting_or_404(db, posting_id)
+    await _require_posting_manager(db, principal, posting)
+    if posting.status != "open":
+        raise HTTPException(status_code=409, detail="Изменить можно только открытую смену")
+    data = body.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(status_code=422, detail="Нечего менять")
+    starts_at = data.get("starts_at", posting.starts_at)
+    ends_at = data.get("ends_at", posting.ends_at)
+    if ends_at <= starts_at:
+        raise HTTPException(status_code=422, detail="Конец смены раньше начала")
+    diff: dict[str, dict[str, object]] = {}
+    for key, value in data.items():
+        old_value = getattr(posting, key)
+        if old_value != value:
+            diff[key] = {"old": str(old_value), "new": str(value)}
+            setattr(posting, key, value)
+    if diff:
+        audit.record(
+            db,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.employee_id,
+            action="update",
+            object_type="shift_posting",
+            object_id=posting.id,
+            diff=diff,
+        )
+    await db.commit()
+    await db.refresh(posting)
+    profile = await get_profile(db, principal)
+    return (await _render_postings(db, [posting], profile=profile, include_applications=True))[0]
+
+
+@router.post("/learn/shift-applications/{application_id}/decline", status_code=204)
+async def decline_application(
+    application_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Менеджер отклоняет ОДИН отклик; смена остаётся открытой (в отличие от
+    accept, который отклоняет остальных сам)."""
+    application = await db.get(ShiftApplication, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Отклик не найден")
+    posting = await _get_posting_or_404(db, application.posting_id)
+    await _require_posting_manager(db, principal, posting)
+    if application.status != "pending":
+        raise HTTPException(status_code=409, detail="Отклик уже обработан")
+    application.status = "declined"
+    application.decided_at = datetime.now(UTC)
+    await _notify_profiles(
+        db,
+        posting,
+        [application.profile_id],
+        kind="shift.result",
+        title="Отклик отклонён",
+        body=f"На смену {_fmt_when(posting)} выбрали другого сотрудника.",
+    )
+    await db.commit()
+
+
 # ─── Сотрудник ───────────────────────────────────────────────────────────────
 
 
@@ -579,7 +706,7 @@ async def apply(
     if missing:
         raise HTTPException(
             status_code=409,
-            detail="Сначала завершите обучение: " + ", ".join(missing),
+            detail="Сначала завершите обучение: " + ", ".join(m.title for m in missing),
         )
     existing = (
         await db.execute(

@@ -907,9 +907,17 @@ export interface ShiftApplicationView {
   id: string
   profile_id: string
   employee_name: string | null
+  position_name: string | null
   status: ShiftApplicationStatus
   comment: string | null
   created_at: string
+  /** Все required-курсы смены у кандидата завершены (сервер считает при отдаче). */
+  passed_required: boolean
+}
+
+export interface ShiftCourseRef {
+  id: string
+  title: string
 }
 
 export interface ShiftPosting {
@@ -931,13 +939,26 @@ export interface ShiftPosting {
   created_at: string
   my_application_status: ShiftApplicationStatus | null
   can_apply: boolean
+  /** Названия недостающих курсов (legacy); `missing` — те же курсы с id для «К курсу». */
   missing_courses: string[]
+  missing: ShiftCourseRef[]
   applications: ShiftApplicationView[] | null
 }
 
 export interface ShiftListData {
   items: ShiftPosting[]
   can_manage: boolean
+  /** Должность текущего сотрудника — подпись «моя должность — …» в шапке. */
+  my_position_name: string | null
+}
+
+export interface ShiftPostingUpdate {
+  starts_at?: string
+  ends_at?: string
+  pay_note?: string | null
+  note?: string | null
+  required_course_ids?: string[]
+  auto_confirm?: boolean
 }
 
 export interface ShiftPostingCreate {
@@ -1535,6 +1556,10 @@ export const learnApi = {
     api.post(`/learn/shifts/${id}/withdraw`).then(() => undefined),
   acceptShiftApplication: (applicationId: string): Promise<void> =>
     api.post(`/learn/shift-applications/${applicationId}/accept`).then(() => undefined),
+  declineShiftApplication: (applicationId: string): Promise<void> =>
+    api.post(`/learn/shift-applications/${applicationId}/decline`).then(() => undefined),
+  updateShift: (id: string, body: ShiftPostingUpdate): Promise<ShiftPosting> =>
+    api.patch<ShiftPosting>(`/learn/shifts/${id}`, body).then((r) => r.data),
   cancelShift: (id: string): Promise<void> =>
     api.post(`/learn/shifts/${id}/cancel`).then(() => undefined),
   completeShift: (id: string): Promise<void> =>

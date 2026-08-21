@@ -14,11 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.shifts import (
     ApplyBody,
     PostingCreate,
+    PostingUpdate,
     accept_application,
     apply,
     cancel_posting,
     create_posting,
+    decline_application,
     list_shifts,
+    update_posting,
     withdraw,
 )
 from app.models.org import Position, Store
@@ -210,3 +213,71 @@ async def test_cancel_and_employee_listing(db: AsyncSession, tenant_id: uuid.UUI
     cancelled = next(i for i in listing2.items if i.id == posting.id)
     assert cancelled.status == "cancelled"
     assert cancelled.my_application_status == "pending"
+
+
+async def test_missing_refs_patch_and_decline(db: AsyncSession, tenant_id: uuid.UUID):
+    """`missing` отдаёт id курса (для «К курсу»); PATCH правит открытую смену и
+    снимает требование; decline отклоняет ОДИН отклик, смена остаётся open;
+    PATCH назначенной смены → 409."""
+    manager, barista, barista_profile, pos, store = await _setup(
+        db, tenant_id, email_prefix="s5"
+    )
+    course, _ = await _mk_course(db, tenant_id, lesson_count=1, title="Касса и СБП")
+    second, second_profile = await _mk_member(db, tenant_id, email="s5-second@t.ru")
+    second_profile.position_id = pos.id
+    await db.flush()
+
+    posting = await create_posting(
+        _body(store, pos, required_course_ids=[course.id]), manager, db
+    )
+    listing = await list_shifts(False, barista, db)
+    mine = next(i for i in listing.items if i.id == posting.id)
+    assert mine.can_apply is False
+    assert [m.id for m in mine.missing] == [course.id]
+    assert mine.missing_courses == ["Касса и СБП"]
+    assert listing.my_position_name == "Бариста"
+
+    # Руководитель снял требование — отклик открылся.
+    updated = await update_posting(
+        posting.id, PostingUpdate(required_course_ids=[], pay_note="+10%"), manager, db
+    )
+    assert updated.required_course_ids == [] and updated.pay_note == "+10%"
+    listing = await list_shifts(False, barista, db)
+    assert next(i for i in listing.items if i.id == posting.id).can_apply is True
+
+    await apply(posting.id, ApplyBody(), barista, db)
+    await apply(posting.id, ApplyBody(), second, db)
+    managed = await list_shifts(True, manager, db)
+    row = next(i for i in managed.items if i.id == posting.id)
+    assert row.applications is not None and len(row.applications) == 2
+    assert all(a.passed_required for a in row.applications)
+    assert {a.position_name for a in row.applications} == {"Бариста"}
+
+    second_app = next(a for a in row.applications if a.profile_id == second_profile.id)
+    await decline_application(second_app.id, manager, db)
+    statuses = {
+        r.profile_id: r.status
+        for r in (
+            await db.execute(
+                select(ShiftApplication).where(ShiftApplication.posting_id == posting.id)
+            )
+        )
+        .scalars()
+        .all()
+    }
+    assert statuses[second_profile.id] == "declined"
+    assert statuses[barista_profile.id] == "pending"
+    still_open = (
+        await db.execute(select(ShiftPosting).where(ShiftPosting.id == posting.id))
+    ).scalar_one()
+    assert still_open.status == "open"
+
+    with pytest.raises(HTTPException) as exc:
+        await decline_application(second_app.id, manager, db)
+    assert exc.value.status_code == 409
+
+    first_app = next(a for a in row.applications if a.profile_id == barista_profile.id)
+    await accept_application(first_app.id, manager, db)
+    with pytest.raises(HTTPException) as exc2:
+        await update_posting(posting.id, PostingUpdate(note="поздно"), manager, db)
+    assert exc2.value.status_code == 409
