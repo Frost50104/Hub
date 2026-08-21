@@ -32,8 +32,9 @@ from app.api.courses import (
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.activity import Certificate
 from app.models.audience import AudienceMember
-from app.models.course import MediaFile
+from app.models.course import CourseLesson, MediaFile
 from app.models.employee_profile import EmployeeProfile
+from app.models.org import Position, Store
 from app.models.quiz import Quiz, QuizAttempt, QuizQuestion
 from app.schemas.quiz import (
     AnswerBody,
@@ -890,6 +891,43 @@ async def get_certificate(
         role = await resolve_content_role(db, principal)
         if not lifecycle.can(role, "publisher"):
             raise HTTPException(status_code=404, detail="Сертификат не найден")
+    # Типографский лист (редизайн-2): должность · магазин владельца, число
+    # уроков курса и лучший балл теста — считаются при чтении (не снапшот:
+    # должность меняется, на листе это вторичная строка).
+    owner = await db.get(EmployeeProfile, cert.profile_id)
+    role_parts: list[str] = []
+    if owner is not None:
+        if owner.position_id is not None:
+            name = (
+                await db.execute(select(Position.name).where(Position.id == owner.position_id))
+            ).scalar_one_or_none()
+            if name:
+                role_parts.append(name)
+        if owner.store_id is not None:
+            name = (
+                await db.execute(select(Store.name).where(Store.id == owner.store_id))
+            ).scalar_one_or_none()
+            if name:
+                role_parts.append(name)
+    lessons_count = (
+        await db.execute(
+            select(func.count(CourseLesson.id)).where(
+                CourseLesson.course_id == cert.course_id,
+                CourseLesson.status == "published",
+            )
+        )
+    ).scalar_one()
+    best_score = (
+        await db.execute(
+            select(func.max(QuizAttempt.score_pct))
+            .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
+            .where(
+                Quiz.course_id == cert.course_id,
+                QuizAttempt.profile_id == cert.profile_id,
+                QuizAttempt.finished_at.is_not(None),
+            )
+        )
+    ).scalar_one_or_none()
     return {
         "id": str(cert.id),
         "serial": cert.serial,
@@ -898,6 +936,9 @@ async def get_certificate(
         "full_name": cert.full_name,
         "issued_at": cert.issued_at.isoformat(),
         "background_url": await _certificate_background_url(db, principal.tenant_id),
+        "role_title": " · ".join(role_parts) or None,
+        "lessons_count": int(lessons_count or 0),
+        "best_score_pct": best_score,
     }
 
 

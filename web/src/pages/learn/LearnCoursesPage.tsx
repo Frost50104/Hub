@@ -29,6 +29,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { coursesSectionTitle } from '@/components/layout/learnNav'
 import { CourseCover, courseTypeBadgeClass } from '@/components/learn/CourseCover'
 import { QueryError } from '@/components/QueryError'
+import { RailRow, RailSection, RightRail } from '@/components/ui/RightRail'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import {
@@ -280,9 +281,19 @@ export function LearnCoursesPage() {
   const consumerIds = new Set(items.map((c) => c.id))
   const managedOnly = (managed.data?.items ?? []).filter((c) => !consumerIds.has(c.id))
 
+  // Сводка для правого рельса десктопа (макет «Каталог»): считает клиент по
+  // тем же состояниям, что и группы списка.
+  const overdueCount = items.filter((c) => courseState(c) === 'overdue').length
+  const inWorkCount = items.filter((c) => ['active', 'due'].includes(courseState(c))).length
+  const doneCount = items.filter((c) => courseState(c) === 'done').length
+  const nextDue = items
+    .filter((c) => !c.completed && c.due_at)
+    .sort((a, b) => new Date(a.due_at!).getTime() - new Date(b.due_at!).getTime())[0]
+
   return (
-    <div className="mx-auto max-w-[680px]">
-      <header className="flex items-end justify-between gap-3 px-5 pt-14">
+    <div className="mx-auto max-w-[680px] lg:flex lg:max-w-[948px] lg:items-start lg:gap-12 lg:px-8">
+    <div className="min-w-0 flex-1 lg:max-w-[640px]">
+      <header className="flex flex-wrap items-end justify-between gap-3 px-5 pt-14 lg:px-0">
         <h1 className="font-display text-[28px] font-bold leading-[1.18] tracking-[0.01em] text-text lg:text-[34px] lg:leading-[1.15]">
           {coursesSectionTitle(probe.data?.content_role)}
         </h1>
@@ -301,7 +312,7 @@ export function LearnCoursesPage() {
       </header>
 
       {items.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto px-5 pb-1 pt-4">
+        <div className="flex gap-2 overflow-x-auto px-5 pb-1 pt-4 lg:px-0">
           {FILTERS.map((f) => (
             <button
               key={f.key}
@@ -320,7 +331,7 @@ export function LearnCoursesPage() {
         </div>
       )}
 
-      <div className="flex flex-col gap-2 px-5 pb-8 pt-3">
+      <div className="flex flex-col gap-2 px-5 pb-8 pt-3 lg:px-0">
         {probe.isLoading &&
           [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[84px] w-full" />)}
         {probe.isError && <QueryError onRetry={() => void probe.refetch()} />}
@@ -412,6 +423,29 @@ export function LearnCoursesPage() {
           />
         )}
       </div>
+    </div>
+    {probe.data && items.length > 0 && (
+      <RightRail className="lg:top-14">
+        <RailSection label="Сводка">
+          <RailRow term="Просрочено" tone={overdueCount > 0 ? 'danger' : 'default'}>
+            <span className="font-display text-[18px]">{overdueCount}</span>
+          </RailRow>
+          <RailRow term="В работе">
+            <span className="font-display text-[18px]">{inWorkCount}</span>
+          </RailRow>
+          <RailRow term="Пройдено" tone={doneCount > 0 ? 'success' : 'default'}>
+            <span className="font-display text-[18px]">{doneCount}</span>
+          </RailRow>
+          <RailRow term="Ближайший срок">
+            {nextDue
+              ? nbsp(
+                  `${nextDue.title} — ${new Date(nextDue.due_at!).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}`,
+                )
+              : '—'}
+          </RailRow>
+        </RailSection>
+      </RightRail>
+    )}
     </div>
   )
 }

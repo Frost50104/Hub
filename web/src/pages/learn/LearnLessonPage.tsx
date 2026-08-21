@@ -234,8 +234,8 @@ export function LearnLessonPage() {
   )
 
   return (
-    <div className="relative mx-auto max-w-[680px] lg:flex lg:max-w-[960px] lg:gap-10 lg:px-4">
-      <div className="min-w-0 lg:flex-1">
+    <div className="relative mx-auto max-w-[680px] lg:flex lg:max-w-[948px] lg:gap-12 lg:px-8">
+      <div className="min-w-0 lg:max-w-[640px] lg:flex-1">
       {/* Мини-шапка приезжает после ~96px: до этого крупная шапка ещё на
           экране. h-0 — она оверлей, а не блок в потоке: иначе скрытая шапка
           отжимала бы крупную вниз на свою высоту. */}

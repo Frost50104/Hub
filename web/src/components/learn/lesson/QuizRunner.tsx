@@ -337,15 +337,16 @@ export function ResultView({
       }
     >
       <div className="flex flex-col items-center gap-5 text-center">
-        {/* Кольцо 140px: процент набран Unbounded 34/700 — на 44px «100%»
-            упиралось в обводку. */}
+        {/* Кольцо 112px, процент Unbounded 30/700, обводка 5 (макет «Тест»
+            редизайна-2 пересчитал спеку 140/34: на 390 кольцо съедало треть
+            экрана результата). */}
         <span
           className={cn(
-            'flex h-[140px] w-[140px] items-center justify-center rounded-full border-[6px]',
+            'flex h-[112px] w-[112px] items-center justify-center rounded-full border-[5px]',
             passed ? 'border-green' : 'border-red',
           )}
         >
-          <span className="font-display text-[34px] font-bold tracking-[-0.01em] tabular-nums text-text">
+          <span className="font-display text-[30px] font-bold tracking-[-0.01em] tabular-nums text-text">
             {attempt.score_pct ?? 0}%
           </span>
         </span>

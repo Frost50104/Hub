@@ -38,6 +38,7 @@ import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select } from '@/components/ui/Select'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
+import { RailRow, RailSection, RightRail } from '@/components/ui/RightRail'
 import { StatTile } from '@/components/ui/StatTile'
 import { useLibrary, useLibraryMutation } from '@/hooks/useLearn'
 import { cn } from '@/lib/cn'
@@ -202,8 +203,9 @@ export function LearnLibraryPage() {
     : plural(all.length, 'документ', 'документа', 'документов')
 
   return (
-    <div className="mx-auto max-w-[680px]">
-      <header className="flex items-end justify-between gap-3 px-5 pt-11">
+    <div className="mx-auto max-w-[680px] lg:flex lg:max-w-[948px] lg:items-start lg:gap-12 lg:px-8">
+    <div className="min-w-0 flex-1 lg:max-w-[640px]">
+      <header className="flex items-end justify-between gap-3 px-5 pt-11 lg:px-0">
         <div className="min-w-0">
           {/* Счётчик над заголовком нужен только при поиске («12 из 179»):
               без фильтра то же число стоит в плашке «Всего документов», и
@@ -230,7 +232,7 @@ export function LearnLibraryPage() {
       </header>
 
       {/* Поле 48px, input растянут на всю высоту строки: иначе фокус ловит 23px. */}
-      <div className="px-5 pt-4">
+      <div className="px-5 pt-4 lg:px-0">
         <div className="flex min-h-[48px] items-center gap-2.5 rounded-xl border border-glass-border bg-tint px-3.5">
           <Search className="h-[18px] w-[18px] shrink-0 text-text2" />
           <input
@@ -254,14 +256,16 @@ export function LearnLibraryPage() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-7 px-5 pb-8 pt-6">
+      <div className="flex flex-col gap-7 px-5 pb-8 pt-6 lg:px-0">
         {probe.isLoading && <SkeletonRows rows={6} rowClassName="h-[56px]" />}
         {probe.isError && <QueryError onRetry={() => void probe.refetch()} />}
 
         {/* Сводка прячется при поиске: числа считаются по всей библиотеке, и
             рядом с отфильтрованным списком они читались бы как его итог. */}
+        {/* На десктопе те же числа живут в правом рельсе (макет «Библиотека»);
+            «Переиздавались» снято — служебная цифра без действия. */}
         {!searching && all.length > 0 && (
-          <div className="flex flex-wrap gap-2.5">
+          <div className="flex flex-wrap gap-2.5 lg:hidden">
             <StatTile label="Всего документов" value={String(summary.total)} />
             <StatTile
               label="Требуют ознакомления"
@@ -269,7 +273,6 @@ export function LearnLibraryPage() {
               accent={summary.pending === 0}
             />
             <StatTile label="Ближайший срок" value={summary.nearest} />
-            <StatTile label="Переиздавались" value={String(summary.versioned)} />
           </div>
         )}
 
@@ -401,6 +404,20 @@ export function LearnLibraryPage() {
       {sectionsOpen && data && (
         <SectionsDialog sections={data.sections} onClose={() => setSectionsOpen(false)} />
       )}
+    </div>
+    {!searching && all.length > 0 && (
+      <RightRail className="lg:top-11">
+        <RailSection label="Сводка">
+          <RailRow term="Всего документов">
+            <span className="font-display text-[18px]">{summary.total}</span>
+          </RailRow>
+          <RailRow term="Требуют ознакомления" tone={summary.pending > 0 ? 'danger' : 'success'}>
+            <span className="font-display text-[18px]">{summary.pending}</span>
+          </RailRow>
+          <RailRow term="Ближайший срок">{summary.nearest}</RailRow>
+        </RailSection>
+      </RightRail>
+    )}
     </div>
   )
 }

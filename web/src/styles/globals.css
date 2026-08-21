@@ -122,3 +122,29 @@
     background: #fff !important;
   }
 }
+
+/* Сертификат (редизайн-2): лист 1123×794 = A4 landscape при 96 dpi. На печать
+   уходит ТОЛЬКО лист — в масштабе 1:1, без transform экрана и без теней;
+   всё остальное на странице прячется через visibility (display:none у
+   предков сломал бы позиционирование листа). */
+@page {
+  size: A4 landscape;
+  margin: 0;
+}
+@media print {
+  body *:not([data-cert-print]):not([data-cert-print] *) {
+    visibility: hidden !important;
+  }
+  [data-cert-print] {
+    visibility: visible !important;
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    transform: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+  [data-cert-print] * {
+    visibility: visible !important;
+  }
+}

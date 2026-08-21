@@ -649,8 +649,12 @@ export interface CertificateInfo {
   course_title: string
   full_name: string
   issued_at: string
-  /** Подписанный URL фирменной подложки; null — типографская рамка. */
+  /** Подписанный URL фирменной подложки; null — типографский лист. */
   background_url: string | null
+  /** «Бариста · Галерея» — должность и магазин владельца на момент чтения (только в GET одного сертификата). */
+  role_title?: string | null
+  lessons_count?: number
+  best_score_pct?: number | null
 }
 
 // ─── Ассортимент + витрина + профиль (Ф4) ────────────────────────────────────

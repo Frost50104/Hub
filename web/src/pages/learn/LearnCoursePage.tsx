@@ -13,12 +13,18 @@ import { Link, useParams } from 'react-router-dom'
 import { coursesSectionTitle } from '@/components/layout/learnNav'
 import { courseTypeBadgeClass } from '@/components/learn/CourseCover'
 import { QueryError } from '@/components/QueryError'
+import { RailRow, RailSection, RightRail } from '@/components/ui/RightRail'
 import { MetaLine } from '@/components/ui/MetaLine'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useCourse, useMyCertificates } from '@/hooks/useLearn'
 import { useMe } from '@/hooks/useMe'
 import { cn } from '@/lib/cn'
-import { COURSE_TYPE_LABEL, type CourseDetail, type LessonMeta } from '@/lib/learn'
+import {
+  COURSE_TYPE_LABEL,
+  PROGRESSION_MODE_LABEL,
+  type CourseDetail,
+  type LessonMeta,
+} from '@/lib/learn'
 import { formatMinutes, nbsp, plural } from '@/lib/typography'
 
 /** Карточка курса (Ф3a): программа с серверными замками + «Продолжить». */
@@ -255,8 +261,13 @@ export function LearnCoursePage() {
   const published = (data?.lessons ?? []).filter((l) => l.status === 'published')
   const currentId = published.find((l) => !l.completed && !l.locked)?.id
 
+  const deadlineLabel = data?.due_at
+    ? new Date(data.due_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+    : null
+
   return (
-    <div className="mx-auto max-w-[680px]">
+    <div className="mx-auto max-w-[680px] lg:flex lg:max-w-[948px] lg:items-start lg:gap-12 lg:px-8">
+    <div className="min-w-0 flex-1 lg:max-w-[640px]">
       {course.isLoading && (
         <div className="space-y-4 px-5 pt-14">
           <Skeleton className="h-3 w-24" />
@@ -308,9 +319,10 @@ export function LearnCoursePage() {
               </Link>
             )}
 
-            <p className="mt-1.5 text-xs font-bold uppercase tracking-[0.09em] text-text2">
-              Программа курса
-            </p>
+            <div className="mt-1.5 flex items-center justify-between gap-4">
+              <p className="text-xs font-bold uppercase tracking-[0.09em] text-text2">Программа курса</p>
+              <p className="text-[13px] text-text2">{PROGRESSION_MODE_LABEL[data.progression_mode]}</p>
+            </div>
 
             {data.lessons.length === 0 && (
               <div className="rounded-[14px] border border-hair p-6 text-center">
@@ -332,6 +344,46 @@ export function LearnCoursePage() {
           </div>
         </>
       )}
+    </div>
+    {/* Правый рельс десктопа (макет «Курс»): факты о курсе, которые на
+        телефоне живут в шапке и метастроке. «Для кого» — человекочитаемой
+        аудитории в ответе курса нет (отложено). */}
+    {data && (
+      <RightRail className="lg:top-14">
+        <RailSection label="О курсе">
+          <RailRow term="Тип">{COURSE_TYPE_LABEL[data.course_type]}</RailRow>
+          <RailRow
+            term="Срок"
+            tone={
+              data.due_at && !data.completed && new Date(data.due_at) < new Date()
+                ? 'danger'
+                : data.completed
+                  ? 'success'
+                  : 'default'
+            }
+          >
+            {data.completed ? 'Пройден' : deadlineLabel ? nbsp(`до ${deadlineLabel}`) : 'без срока'}
+          </RailRow>
+          <RailRow term="Уроков">
+            {nbsp(
+              data.quizzes_total > 0
+                ? `${data.lessons_total} · ${data.quizzes_total} с тестом`
+                : String(data.lessons_total),
+            )}
+          </RailRow>
+          <RailRow term="Порядок">{PROGRESSION_MODE_LABEL[data.progression_mode]}</RailRow>
+          {data.certificate_enabled && (
+            <RailRow term="Сертификат" tone={myCert ? 'success' : 'default'}>
+              {myCert
+                ? nbsp(
+                    `Выдан ${new Date(myCert.issued_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}`,
+                  )
+                : 'После всех уроков'}
+            </RailRow>
+          )}
+        </RailSection>
+      </RightRail>
+    )}
     </div>
   )
 }
