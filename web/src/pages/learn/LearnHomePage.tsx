@@ -539,19 +539,19 @@ export function LearnHomePage() {
             <Section title="Управление">
               <div className="flex flex-col gap-2">
                 <Row
-                  to="/learn/admin/org"
+                  to="/learn/admin?tab=org"
                   icon={<GraduationCap className="h-[19px] w-[19px]" />}
                   title="Оргструктура"
                   meta="Должности, магазины, франчайзи, отделы, группы"
                 />
                 <Row
-                  to="/learn/admin/employees"
+                  to="/learn/admin?tab=employees"
                   icon={<BadgeCheck className="h-[19px] w-[19px]" />}
                   title="Сотрудники"
                   meta="Карточки, архив, импорт из CSV"
                 />
                 <Row
-                  to="/learn/admin/audit"
+                  to="/learn/admin?tab=audit"
                   icon={<ClipboardList className="h-[19px] w-[19px]" />}
                   title="Журнал действий"
                   meta="Кто и что менял в системе"

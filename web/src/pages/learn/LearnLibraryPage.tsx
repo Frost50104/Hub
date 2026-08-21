@@ -205,7 +205,7 @@ export function LearnLibraryPage() {
   return (
     <div className="mx-auto max-w-[680px] lg:flex lg:max-w-[948px] lg:items-start lg:gap-12 lg:px-8">
     <div className="min-w-0 flex-1 lg:max-w-[640px]">
-      <header className="flex items-end justify-between gap-3 px-5 pt-11 lg:px-0">
+      <header className="flex flex-wrap items-end justify-between gap-3 px-5 pt-11 lg:px-0">
         <div className="min-w-0">
           {/* Счётчик над заголовком нужен только при поиске («12 из 179»):
               без фильтра то же число стоит в плашке «Всего документов», и

@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { AudiencePicker } from '@/components/learn/AudiencePicker'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
+import { FilterChip } from '@/components/ui/FilterChip'
 import { Button } from '@/components/ui/Button'
 import {
   Dialog,
@@ -30,6 +31,8 @@ import {
   type OrgStore,
 } from '@/lib/learn'
 
+import { useAdminEmbedded } from './adminEmbed'
+
 type TabKey = 'positions' | 'stores' | 'franchisees' | 'departments' | 'groups' | 'access'
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -43,28 +46,24 @@ const TABS: { key: TabKey; label: string }[] = [
 
 export function LearnOrgPage() {
   const isDesktop = useIsDesktop()
+  const embedded = useAdminEmbedded()
   const [tab, setTab] = useState<TabKey>('positions')
   const org = useOrgSnapshot()
 
   return (
-    <div className="mx-auto max-w-5xl">
-      {!isDesktop && <MobilePageHeader eyebrow="Управление" title="Оргструктура" />}
-      <div className="space-y-4 p-4 lg:p-8">
-        {isDesktop && (
+    <div className={embedded ? undefined : "mx-auto max-w-5xl"}>
+      {!isDesktop && !embedded && <MobilePageHeader eyebrow="Управление" title="Оргструктура" />}
+      <div className={embedded ? "space-y-4" : "space-y-4 p-4 lg:p-8"}>
+        {isDesktop && !embedded && (
           <h1 className="font-display text-2xl font-bold text-text">Оргструктура</h1>
         )}
-        <div className="flex flex-wrap gap-1 rounded-lg border border-glass-border bg-bg-alt/60 p-1">
+        {/* Внутренние разделы — второй ряд ЧИПОВ, не сегментов: вложенные
+            сегмент-контролы под сегментами «Управления» читались бы как один. */}
+        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] lg:flex-wrap">
           {TABS.map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={cn(
-                'rounded-md px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
-                tab === key ? 'bg-surface text-amber' : 'text-text3 hover:text-text2',
-              )}
-            >
+            <FilterChip key={key} size="md" active={tab === key} onClick={() => setTab(key)}>
               {label}
-            </button>
+            </FilterChip>
           ))}
         </div>
 

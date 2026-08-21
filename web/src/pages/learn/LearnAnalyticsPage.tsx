@@ -1,77 +1,57 @@
 import { useQuery } from '@tanstack/react-query'
-import { BarChart3, Download, TrendingUp, Users } from 'lucide-react'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { Download } from 'lucide-react'
 
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Button } from '@/components/ui/Button'
+import { MeterRow } from '@/components/ui/MeterRow'
 import { SkeletonRows } from '@/components/ui/Skeleton'
+import { StatTile } from '@/components/ui/StatTile'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { COURSE_TYPE_LABEL, learnApi } from '@/lib/learn'
+import { nbsp } from '@/lib/typography'
+
+import { useAdminEmbedded } from './adminEmbed'
 
 /**
- * Аналитика обучения (Ф5, ТЗ §21). Скоуп считает сервер (org_scope):
- * админ/публикатор — вся сеть, ТУ/франчайзи — свои магазины.
+ * Аналитика обучения (Ф5, ТЗ §21) по макету «Управление → Аналитика»:
+ * четыре KPI-плитки, таблица курсов, «Темы провалов» и «Обязательные
+ * ознакомления» — CSS-полосами (`MeterRow`), без recharts. Красный у провалов
+ * допустим: это семантика ошибки, не акцент. Скоуп считает сервер
+ * (org_scope): админ/публикатор — вся сеть, ТУ/франчайзи — свои магазины.
  * Опросы намеренно не здесь — их агрегаты только на странице опроса.
  */
 
-function StatCard({
-  label,
-  value,
-  hint,
-}: {
-  label: string
-  value: string | number
-  hint?: string
-}) {
-  return (
-    <div className="rounded-xl border border-glass-border bg-glass p-4">
-      <p className="text-xs text-text3">{label}</p>
-      <p className="mt-1 font-display text-2xl font-bold text-text">{value}</p>
-      {hint && <p className="mt-0.5 text-xs text-text3">{hint}</p>}
-    </div>
-  )
-}
-
 export function LearnAnalyticsPage() {
   const isDesktop = useIsDesktop()
+  const embedded = useAdminEmbedded()
   const data = useQuery({
     queryKey: ['learn-analytics'],
     queryFn: learnApi.analytics,
     staleTime: 60_000,
   })
   const a = data.data
+  const engagement =
+    a && a.overview.employees_total
+      ? Math.round((a.overview.engaged_30d / a.overview.employees_total) * 100)
+      : null
 
   return (
-    <div className="mx-auto max-w-4xl">
-      {!isDesktop && <MobilePageHeader eyebrow="Обучение" title="Аналитика" />}
-      <div className="space-y-5 p-4 lg:p-8">
+    <div className={embedded ? undefined : 'mx-auto max-w-4xl'}>
+      {!isDesktop && !embedded && <MobilePageHeader eyebrow="Обучение" title="Аналитика" />}
+      <div className={embedded ? 'flex flex-col gap-5' : 'flex flex-col gap-5 p-4 lg:p-8'}>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          {isDesktop && (
-            <h1 className="font-display text-2xl font-bold text-text">
-              Аналитика обучения
-            </h1>
+          {isDesktop && !embedded && (
+            <h1 className="font-display text-2xl font-bold text-text">Аналитика обучения</h1>
           )}
-          <div className="flex items-center gap-2">
-            {a && a.scope !== 'all' && (
-              <span className="rounded bg-surface px-2 py-1 text-xs text-text3">
-                срез: мои магазины
+          <div className="flex flex-wrap items-center gap-2">
+            {a && (
+              <span className="text-[13px] text-text2">
+                {a.scope === 'all' ? 'срез: вся сеть' : 'срез: мои магазины'} · считает сервер
               </span>
             )}
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => void learnApi.downloadAnalyticsCsv()}
-            >
-              <Download className="h-4 w-4" /> CSV-отчёт
+            <Button variant="secondary" className="bg-transparent" onClick={() => void learnApi.downloadAnalyticsCsv()}>
+              <Download className="h-4 w-4" /> Выгрузить CSV
             </Button>
           </div>
         </div>
@@ -81,130 +61,111 @@ export function LearnAnalyticsPage() {
 
         {a && (
           <>
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <StatCard label="Сотрудников в срезе" value={a.overview.employees_total} />
-              <StatCard
+            <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+              <StatTile variant="kpi" label="Сотрудников в срезе" value={String(a.overview.employees_total)} />
+              <StatTile
+                variant="kpi"
                 label="Заходили в Hub"
-                value={a.overview.employees_linked}
+                value={String(a.overview.employees_linked)}
                 hint="привязали аккаунт"
               />
-              <StatCard
+              <StatTile
+                variant="kpi"
                 label="Активны за 30 дней"
-                value={a.overview.engaged_30d}
-                hint={
-                  a.overview.employees_total
-                    ? `${Math.round(
-                        (a.overview.engaged_30d / a.overview.employees_total) * 100,
-                      )}% вовлечённость`
-                    : undefined
-                }
+                value={String(a.overview.engaged_30d)}
+                hint={engagement !== null ? `${engagement}% вовлечённость` : undefined}
               />
-              <StatCard label="Баллы за 30 дней" value={a.overview.points_30d} />
+              <StatTile variant="kpi" label="Баллы за 30 дней" value={nbsp(a.overview.points_30d.toLocaleString('ru-RU'))} />
             </div>
 
-            <div>
-              <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-text3">
-                <TrendingUp className="h-3.5 w-3.5" /> Курсы
-              </h2>
+            <section className="flex flex-col gap-2">
+              <h2 className="text-[12px] font-bold uppercase tracking-[0.09em] text-text2">Курсы</h2>
               {a.courses.length === 0 ? (
-                <p className="text-sm text-text3">Опубликованных курсов пока нет.</p>
+                <p className="text-[14px] text-text2">Опубликованных курсов пока нет.</p>
               ) : (
-                <div className="overflow-x-auto rounded-xl border border-glass-border bg-glass">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-glass-border text-left text-xs text-text3">
-                        <th className="px-3 py-2 font-medium">Курс</th>
-                        <th className="px-3 py-2 font-medium">Тип</th>
-                        <th className="px-3 py-2 text-right font-medium">Начали</th>
-                        <th className="px-3 py-2 text-right font-medium">Завершили</th>
-                        <th className="px-3 py-2 text-right font-medium">Ср. балл теста</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {a.courses.map((c) => (
-                        <tr key={c.id} className="border-b border-glass-border/50 last:border-0">
-                          <td className="px-3 py-2 text-text">{c.title}</td>
-                          <td className="px-3 py-2 text-text3">
-                            {COURSE_TYPE_LABEL[c.course_type]}
-                          </td>
-                          <td className="px-3 py-2 text-right text-text">{c.enrolled}</td>
-                          <td className="px-3 py-2 text-right text-text">{c.completed}</td>
-                          <td className="px-3 py-2 text-right text-text">
-                            {c.avg_quiz_score !== null ? `${c.avg_quiz_score}%` : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="overflow-hidden rounded-xl border border-hair">
+                  <div className="hidden grid-cols-[1fr_150px_90px_90px_110px] gap-2.5 border-b border-hair bg-tint px-3.5 py-[9px] text-[11px] font-bold uppercase tracking-[0.07em] text-text2 lg:grid">
+                    <span>Курс</span>
+                    <span>Тип</span>
+                    <span className="text-right">Начали</span>
+                    <span className="text-right">Завершили</span>
+                    <span className="text-right">Ср. балл теста</span>
+                  </div>
+                  {a.courses.map((c, i) => (
+                    <div
+                      key={c.id}
+                      className={
+                        'flex flex-wrap items-center gap-x-2.5 gap-y-1 px-3.5 py-2.5 text-[14px] lg:grid lg:grid-cols-[1fr_150px_90px_90px_110px]' +
+                        (i > 0 ? ' border-t border-hair' : '')
+                      }
+                    >
+                      <span className="min-w-0 basis-full truncate font-semibold text-text lg:basis-auto">{c.title}</span>
+                      <span className="text-text2">{COURSE_TYPE_LABEL[c.course_type]}</span>
+                      <span className="tabular-nums text-text lg:text-right">
+                        <span className="lg:hidden">начали </span>
+                        {c.enrolled}
+                      </span>
+                      <span className="tabular-nums text-text lg:text-right">
+                        <span className="lg:hidden">· завершили </span>
+                        {c.completed}
+                      </span>
+                      <span className="font-semibold tabular-nums text-text lg:text-right">
+                        <span className="lg:hidden">· тест </span>
+                        {c.avg_quiz_score !== null ? `${c.avg_quiz_score}%` : '—'}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
-            </div>
+            </section>
 
-            {a.fail_questions.length > 0 && (
-              <div>
-                <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-text3">
-                  <BarChart3 className="h-3.5 w-3.5" /> Темы провалов (доля неверных
-                  ответов)
-                </h2>
-                <div className="rounded-xl border border-glass-border bg-glass p-3">
-                  <ResponsiveContainer width="100%" height={Math.max(180, a.fail_questions.length * 36)}>
-                    <BarChart
-                      data={a.fail_questions.map((f) => ({
-                        name:
-                          f.prompt.length > 40 ? `${f.prompt.slice(0, 40)}…` : f.prompt,
-                        rate: f.fail_rate_pct,
-                      }))}
-                      layout="vertical"
-                      margin={{ left: 8, right: 24 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid, #333)" />
-                      <XAxis type="number" domain={[0, 100]} unit="%" fontSize={11} />
-                      <YAxis
-                        type="category"
-                        dataKey="name"
-                        width={220}
-                        fontSize={11}
-                        tickLine={false}
-                      />
-                      <Tooltip formatter={(v) => [`${v}%`, 'провалы']} />
-                      <Bar dataKey="rate" fill="#e05252" radius={[0, 4, 4, 0]} barSize={16} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            )}
-
-            {a.acks.length > 0 && (
-              <div>
-                <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-text3">
-                  <Users className="h-3.5 w-3.5" /> Обязательные ознакомления
-                </h2>
-                <div className="space-y-1.5">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {a.fail_questions.length > 0 && (
+                <section className="flex flex-col gap-2.5 rounded-xl border border-hair p-4">
+                  <h2 className="text-[12px] font-bold uppercase tracking-[0.09em] text-text2">
+                    Темы провалов · доля неверных
+                  </h2>
+                  {a.fail_questions.map((f, i) => (
+                    <MeterRow
+                      key={i}
+                      label={
+                        <span className="block truncate" title={f.prompt}>
+                          {f.prompt}
+                        </span>
+                      }
+                      pct={f.fail_rate_pct}
+                      value={`${f.fail_rate_pct}%`}
+                      tone="red"
+                      labelWidth={isDesktop ? 200 : 140}
+                    />
+                  ))}
+                </section>
+              )}
+              {a.acks.length > 0 && (
+                <section className="flex flex-col gap-2.5 rounded-xl border border-hair p-4">
+                  <h2 className="text-[12px] font-bold uppercase tracking-[0.09em] text-text2">
+                    Обязательные ознакомления
+                  </h2>
                   {a.acks.map((m) => {
                     const pct = m.total ? Math.round((m.acked / m.total) * 100) : 0
                     return (
-                      <div
+                      <MeterRow
                         key={m.id}
-                        className="rounded-lg border border-glass-border bg-glass px-3 py-2"
-                      >
-                        <div className="flex items-center justify-between gap-2 text-sm">
-                          <span className="min-w-0 flex-1 truncate text-text">{m.title}</span>
-                          <span className="shrink-0 text-xs text-text3">
-                            {m.acked}/{m.total} ({pct}%)
+                        label={
+                          <span className="block truncate" title={m.title}>
+                            {m.title}
                           </span>
-                        </div>
-                        <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-surface">
-                          <span
-                            className="block h-full rounded-full bg-amber"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </span>
-                      </div>
+                        }
+                        pct={pct}
+                        value={nbsp(`${m.acked}/${m.total} (${pct}%)`)}
+                        tone="amber"
+                        labelWidth={isDesktop ? 200 : 140}
+                      />
                     )
                   })}
-                </div>
-              </div>
-            )}
+                </section>
+              )}
+            </div>
           </>
         )}
       </div>

@@ -1,11 +1,10 @@
 import * as Sentry from '@sentry/react'
-import { lazy, Suspense, type ReactElement } from 'react'
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { ErrorFallback } from '@/components/ErrorFallback'
 import { Shell } from '@/components/layout/Shell'
 import { SkeletonRows } from '@/components/ui/Skeleton'
-import { useMe } from '@/hooks/useMe'
 // Auth-роуты — eager: критичны для входа и крошечные.
 import { AuthCallback } from '@/pages/AuthCallback'
 import { LoginRedirect } from '@/pages/LoginRedirect'
@@ -49,17 +48,6 @@ const AppearanceTab = lazy(() =>
 const LearnHomePage = lazy(() =>
   import('@/pages/learn/LearnHomePage').then((m) => ({ default: m.LearnHomePage })),
 )
-const LearnOrgPage = lazy(() =>
-  import('@/pages/learn/LearnOrgPage').then((m) => ({ default: m.LearnOrgPage })),
-)
-const LearnEmployeesPage = lazy(() =>
-  import('@/pages/learn/LearnEmployeesPage').then((m) => ({
-    default: m.LearnEmployeesPage,
-  })),
-)
-const LearnAuditPage = lazy(() =>
-  import('@/pages/learn/LearnAuditPage').then((m) => ({ default: m.LearnAuditPage })),
-)
 const LearnLibraryPage = lazy(() =>
   import('@/pages/learn/LearnLibraryPage').then((m) => ({ default: m.LearnLibraryPage })),
 )
@@ -87,8 +75,8 @@ const CourseBuilderPage = lazy(() =>
 const LearnRatingPage = lazy(() =>
   import('@/pages/learn/LearnRatingPage').then((m) => ({ default: m.LearnRatingPage })),
 )
-const LearnReviewPage = lazy(() =>
-  import('@/pages/learn/LearnReviewPage').then((m) => ({ default: m.LearnReviewPage })),
+const LearnAdminPage = lazy(() =>
+  import('@/pages/learn/LearnAdminPage').then((m) => ({ default: m.LearnAdminPage })),
 )
 const CertificatePage = lazy(() =>
   import('@/pages/learn/CertificatePage').then((m) => ({ default: m.CertificatePage })),
@@ -110,28 +98,12 @@ const LearnShiftsPage = lazy(() =>
 const AssistantPage = lazy(() =>
   import('@/pages/AssistantPage').then((m) => ({ default: m.AssistantPage })),
 )
-const LearnAnalyticsPage = lazy(() =>
-  import('@/pages/learn/LearnAnalyticsPage').then((m) => ({ default: m.LearnAnalyticsPage })),
-)
-const LearnAutomationsPage = lazy(() =>
-  import('@/pages/learn/LearnAutomationsPage').then((m) => ({
-    default: m.LearnAutomationsPage,
-  })),
-)
 const NotificationsSettingsTab = lazy(() =>
   import('@/pages/settings/NotificationsTab').then((m) => ({
     default: m.NotificationsSettingsTab,
   })),
 )
 
-/** Client-гейт админ-раздела learn: сервер и так отдаёт 403 не-админам,
- * но рендерить страницу с падающими кнопками не нужно — редирект на витрину. */
-function RequireHubAdmin({ children }: { children: ReactElement }) {
-  const me = useMe()
-  if (me.isLoading) return <SkeletonRows rows={6} className="p-6" />
-  if (me.data?.hub_role !== 'admin') return <Navigate to="/learn" replace />
-  return children
-}
 
 export function App() {
   return (
@@ -174,41 +146,19 @@ export function App() {
           />
           <Route path="/learn/shifts" element={<LearnShiftsPage />} />
           <Route path="/learn/assessments" element={<LearnAssessmentsPage />} />
-          <Route path="/learn/admin/review" element={<LearnReviewPage />} />
           <Route path="/learn/certificates/:certificateId" element={<CertificatePage />} />
-          <Route
-            path="/learn/admin/org"
-            element={
-              <RequireHubAdmin>
-                <LearnOrgPage />
-              </RequireHubAdmin>
-            }
-          />
-          <Route
-            path="/learn/admin/employees"
-            element={
-              <RequireHubAdmin>
-                <LearnEmployeesPage />
-              </RequireHubAdmin>
-            }
-          />
-          <Route path="/learn/admin/analytics" element={<LearnAnalyticsPage />} />
-          <Route
-            path="/learn/admin/automations"
-            element={
-              <RequireHubAdmin>
-                <LearnAutomationsPage />
-              </RequireHubAdmin>
-            }
-          />
-          <Route
-            path="/learn/admin/audit"
-            element={
-              <RequireHubAdmin>
-                <LearnAuditPage />
-              </RequireHubAdmin>
-            }
-          />
+          {/* «Управление» — один маршрут с сегментами; старые пути живут
+              редиректами навсегда: бэкенд шлёт /learn/admin/review в push,
+              старые уведомления во «Входящих» хранят URL. Гейты — по сегментам
+              внутри LearnAdminPage. */}
+          <Route path="/learn/admin" element={<LearnAdminPage />} />
+          {(['review', 'org', 'employees', 'analytics', 'automations', 'audit'] as const).map((seg) => (
+            <Route
+              key={seg}
+              path={`/learn/admin/${seg}`}
+              element={<Navigate to={`/learn/admin?tab=${seg}`} replace />}
+            />
+          ))}
           <Route path="/settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="account" replace />} />
             <Route path="account" element={<AccountTab />} />

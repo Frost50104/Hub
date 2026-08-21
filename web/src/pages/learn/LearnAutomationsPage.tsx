@@ -30,6 +30,8 @@ import {
   type AutomationTrigger,
 } from '@/lib/learn'
 
+import { useAdminEmbedded } from './adminEmbed'
+
 /**
  * Автосценарии (Ф5, ТЗ §22): welcome-правила «новичок → курс с дедлайном».
  * Правило применяется только к профилям, созданным ПОСЛЕ его включения —
@@ -44,6 +46,7 @@ const JOB_STATUS_LABEL: Record<string, string> = {
 
 export function LearnAutomationsPage() {
   const qc = useQueryClient()
+  const embedded = useAdminEmbedded()
   const rules = useQuery({ queryKey: ['learn-automations'], queryFn: learnApi.automations })
   const [editor, setEditor] = useState<AutomationRule | 'new' | null>(null)
   const [jobsFor, setJobsFor] = useState<AutomationRule | null>(null)
@@ -54,13 +57,15 @@ export function LearnAutomationsPage() {
   })
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <MobilePageHeader eyebrow="Обучение" title="Автосценарии" className="lg:hidden" />
-      <div className="space-y-4 p-4 lg:p-8">
+    <div className={embedded ? undefined : "mx-auto max-w-3xl"}>
+      {!embedded && <MobilePageHeader eyebrow="Обучение" title="Автосценарии" className="lg:hidden" />}
+      <div className={embedded ? "space-y-4" : "space-y-4 p-4 lg:p-8"}>
         <div className="flex items-center justify-between gap-2">
-          <h1 className="hidden font-display text-2xl font-bold text-text lg:block">
-            Автосценарии
-          </h1>
+          {!embedded && (
+            <h1 className="hidden font-display text-2xl font-bold text-text lg:block">
+              Автосценарии
+            </h1>
+          )}
           <Button onClick={() => setEditor('new')}>
             <Plus className="h-4 w-4" /> Правило
           </Button>

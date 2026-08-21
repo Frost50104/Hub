@@ -1,7 +1,7 @@
 import { ChevronRight, User } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
-import { ADMIN_NAV, LEARN_MENU_ITEMS } from './learnNav'
+import { ADMIN_NAV, adminSegmentsFor, LEARN_MENU_ITEMS } from './learnNav'
 import { SpaceSwitcher } from './SpaceSwitcher'
 import { BottomSheet, BottomSheetItem } from '@/components/ui/BottomSheet'
 import { useMe } from '@/hooks/useMe'
@@ -21,7 +21,7 @@ export function LearnMenuSheet({
 }) {
   const navigate = useNavigate()
   const me = useMe()
-  const isAdmin = me.data?.hub_role === 'admin'
+  const isAdmin = adminSegmentsFor(me.data).length > 0
 
   // Закрыть ДО навигации: exit-анимация sheet'а не дерётся со сменой роута.
   const go = (to: string) => {

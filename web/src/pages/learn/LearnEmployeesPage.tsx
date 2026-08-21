@@ -37,8 +37,11 @@ import {
   type OrgSnapshot,
 } from '@/lib/learn'
 
+import { useAdminEmbedded } from './adminEmbed'
+
 export function LearnEmployeesPage() {
   const isDesktop = useIsDesktop()
+  const embedded = useAdminEmbedded()
   const [statusFilter, setStatusFilter] = useState<'active' | 'archived'>('active')
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search, 300)
@@ -57,11 +60,11 @@ export function LearnEmployeesPage() {
   const storeName = (id: string | null) => org.data?.stores.find((s) => s.id === id)?.name
 
   return (
-    <div className="mx-auto max-w-5xl">
-      {!isDesktop && <MobilePageHeader eyebrow="Управление" title="Сотрудники" />}
-      <div className="space-y-4 p-4 lg:p-8">
+    <div className={embedded ? undefined : "mx-auto max-w-5xl"}>
+      {!isDesktop && !embedded && <MobilePageHeader eyebrow="Управление" title="Сотрудники" />}
+      <div className={embedded ? "space-y-4" : "space-y-4 p-4 lg:p-8"}>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          {isDesktop && (
+          {isDesktop && !embedded && (
             <h1 className="font-display text-2xl font-bold text-text">Сотрудники</h1>
           )}
           <div className="flex flex-wrap gap-2">

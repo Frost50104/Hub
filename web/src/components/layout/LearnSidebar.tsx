@@ -1,7 +1,7 @@
 import { LogOut, Settings } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 
-import { ADMIN_NAV, coursesSectionTitle, LEARN_NAV, type LearnNavItem } from './learnNav'
+import { ADMIN_NAV, adminSegmentsFor, coursesSectionTitle, LEARN_NAV, type LearnNavItem } from './learnNav'
 import { SpaceSwitcher } from './SpaceSwitcher'
 import { Avatar } from '@/components/ui/Avatar'
 import { useMe } from '@/hooks/useMe'
@@ -65,7 +65,7 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
   const me = useMe()
   const unread = useUnreadCount()
   const unreadCount = unread.data?.count ?? 0
-  const isAdmin = me.data?.hub_role === 'admin'
+  const isAdmin = adminSegmentsFor(me.data).length > 0
   const coursesTitle = coursesSectionTitle(
     me.data?.profile?.content_role,
     me.data?.hub_role,

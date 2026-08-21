@@ -9,6 +9,8 @@ import { useAuditLog } from '@/hooks/useLearn'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { type AuditEntry } from '@/lib/learn'
 
+import { useAdminEmbedded } from './adminEmbed'
+
 const ACTION_LABEL: Record<string, string> = {
   create: 'создал',
   update: 'изменил',
@@ -74,6 +76,7 @@ function DiffLine({ entry }: { entry: AuditEntry }) {
 
 export function LearnAuditPage() {
   const isDesktop = useIsDesktop()
+  const embedded = useAdminEmbedded()
   const [objectType, setObjectType] = useState('')
   const [offset, setOffset] = useState(0)
 
@@ -83,10 +86,10 @@ export function LearnAuditPage() {
   })
 
   return (
-    <div className="mx-auto max-w-4xl">
-      {!isDesktop && <MobilePageHeader eyebrow="Управление" title="Журнал" />}
-      <div className="space-y-4 p-4 lg:p-8">
-        {isDesktop && (
+    <div className={embedded ? undefined : "mx-auto max-w-4xl"}>
+      {!isDesktop && !embedded && <MobilePageHeader eyebrow="Управление" title="Журнал" />}
+      <div className={embedded ? "space-y-4" : "space-y-4 p-4 lg:p-8"}>
+        {isDesktop && !embedded && (
           <h1 className="font-display text-2xl font-bold text-text">Журнал действий</h1>
         )}
         <Select

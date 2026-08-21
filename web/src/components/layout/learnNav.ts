@@ -15,6 +15,7 @@ import {
   Trophy,
   Users,
   Workflow,
+  type LucideIcon,
 } from 'lucide-react'
 
 /**
@@ -68,14 +69,40 @@ export const LEARN_NAV: LearnNavItem[] = [
   { to: '/inbox', label: 'Входящие', icon: Inbox, badge: true },
 ]
 
-export const ADMIN_NAV: LearnNavItem[] = [
-  { to: '/learn/admin/org', label: 'Оргструктура', icon: Building2 },
-  { to: '/learn/admin/employees', label: 'Сотрудники', icon: Users },
-  { to: '/learn/admin/review', label: 'Проверка тестов', icon: ClipboardList },
-  { to: '/learn/admin/analytics', label: 'Аналитика', icon: BarChart3 },
-  { to: '/learn/admin/automations', label: 'Автосценарии', icon: Workflow },
-  { to: '/learn/admin/audit', label: 'Журнал', icon: ScrollText },
+/** «Управление» — один маршрут с сегментами (редизайн-2); вход виден всем, у кого ≥1 сегмент. */
+export const ADMIN_NAV: LearnNavItem[] = [{ to: '/learn/admin', label: 'Управление', icon: Users }]
+
+export type AdminSegment = 'review' | 'analytics' | 'employees' | 'automations' | 'audit' | 'org'
+
+export const ADMIN_SEGMENTS: { key: AdminSegment; label: string; title: string; icon: LucideIcon }[] = [
+  { key: 'review', label: 'Проверка', title: 'Проверка тестов', icon: ClipboardList },
+  { key: 'analytics', label: 'Аналитика', title: 'Аналитика обучения', icon: BarChart3 },
+  { key: 'employees', label: 'Сотрудники', title: 'Сотрудники', icon: Users },
+  { key: 'automations', label: 'Автосценарии', title: 'Автосценарии', icon: Workflow },
+  { key: 'audit', label: 'Журнал', title: 'Журнал действий', icon: ScrollText },
+  { key: 'org', label: 'Оргструктура', title: 'Оргструктура', icon: Building2 },
 ]
+
+/**
+ * Гейты — по сегментам, не по экрану (то же, что проверяет бэкенд):
+ * Проверка и Аналитика — publisher, ТУ/франчайзи/офис и hub-admin;
+ * Сотрудники/Автосценарии/Журнал/Оргструктура — только hub-admin.
+ */
+export function adminSegmentsFor(me: {
+  hub_role: string | null
+  profile: { content_role: string; org_role: string } | null
+} | undefined): AdminSegment[] {
+  if (!me) return []
+  const isAdmin = me.hub_role === 'admin'
+  const reviewer =
+    isAdmin ||
+    me.profile?.content_role === 'publisher' ||
+    ['tu', 'franchisee_owner', 'office'].includes(me.profile?.org_role ?? '')
+  const out: AdminSegment[] = []
+  if (reviewer) out.push('review', 'analytics')
+  if (isAdmin) out.push('employees', 'automations', 'audit', 'org')
+  return out
+}
 
 /** Разделы, уже представленные вкладками мобильного learn-таб-бара. */
 const TAB_BAR_ROUTES = new Set(['/learn', '/learn/courses', '/inbox'])

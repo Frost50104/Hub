@@ -13,6 +13,8 @@ import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { extractErrorDetail } from '@/lib/errors'
 import { learnApi, type QuizAttempt, type ReviewQueueItem } from '@/lib/learn'
 
+import { useAdminEmbedded } from './adminEmbed'
+
 /**
  * Очередь проверки открытых ответов (Ф3b, publisher/HR). Рендерится СНАПШОТ
  * попытки — именно то, что видел сотрудник; закрытые вопросы уже оценены
@@ -125,6 +127,7 @@ function AttemptReview({
 
 export function LearnReviewPage() {
   const isDesktop = useIsDesktop()
+  const embedded = useAdminEmbedded()
   const qc = useQueryClient()
   const queue = useReviewQueue()
   const [openId, setOpenId] = useState<string | null>(null)
@@ -132,10 +135,10 @@ export function LearnReviewPage() {
   const items = queue.data ?? []
 
   return (
-    <div className="mx-auto max-w-3xl">
-      {!isDesktop && <MobilePageHeader eyebrow="Обучение" title="Проверка тестов" />}
-      <div className="space-y-4 p-4 lg:p-8">
-        {isDesktop && (
+    <div className={embedded ? undefined : "mx-auto max-w-3xl"}>
+      {!isDesktop && !embedded && <MobilePageHeader eyebrow="Обучение" title="Проверка тестов" />}
+      <div className={embedded ? "space-y-4" : "space-y-4 p-4 lg:p-8"}>
+        {isDesktop && !embedded && (
           <h1 className="font-display text-2xl font-bold text-text">Проверка тестов</h1>
         )}
 
