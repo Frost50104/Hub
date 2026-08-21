@@ -1,8 +1,10 @@
 import {
   Archive,
+  Bell,
   Check,
   ChevronRight,
   CircleAlert,
+  Download,
   ExternalLink,
   FileText,
   FolderCog,
@@ -11,7 +13,6 @@ import {
   Plus,
   Search,
   Send,
-  Download,
   Upload,
   Users,
   X,
@@ -42,6 +43,7 @@ import { RailRow, RailSection, RightRail } from '@/components/ui/RightRail'
 import { StatTile } from '@/components/ui/StatTile'
 import { useLibrary, useLibraryMutation } from '@/hooks/useLearn'
 import { cn } from '@/lib/cn'
+import { extractErrorDetail } from '@/lib/errors'
 import { nbsp, plural } from '@/lib/typography'
 import { inlineViewerKind } from '@/lib/inlineViewer'
 import {
@@ -1033,6 +1035,7 @@ function AckReportDialog({
 }) {
   const [report, setReport] = useState<AckReport | null>(null)
   const [error, setError] = useState(false)
+  const [reminding, setReminding] = useState(false)
 
   useEffect(() => {
     learnApi
@@ -1040,6 +1043,23 @@ function AckReportDialog({
       .then(setReport)
       .catch(() => setError(true))
   }, [material.id])
+
+  const pending = report ? report.rows.filter((r) => !r.acknowledged_at).length : 0
+  const remind = async () => {
+    setReminding(true)
+    try {
+      const res = await learnApi.remindMaterial(material.id)
+      toast.success(
+        res.notified > 0
+          ? `Напоминание отправлено: ${res.notified}`
+          : 'Напоминать некому — все ознакомлены',
+      )
+    } catch (e) {
+      toast.error('Не удалось отправить напоминание', { description: extractErrorDetail(e) })
+    } finally {
+      setReminding(false)
+    }
+  }
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
@@ -1052,6 +1072,16 @@ function AckReportDialog({
             </DialogDescription>
           )}
         </DialogHeader>
+        {report && pending > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber/40 bg-amber/[0.08] px-3.5 py-2.5">
+            <p className="min-w-0 flex-1 text-[14px] text-text">
+              {nbsp(`Не подтвердили: ${pending}`)} — можно напомнить ещё раз.
+            </p>
+            <Button variant="secondary" className="bg-transparent" disabled={reminding} onClick={() => void remind()}>
+              <Bell className="h-4 w-4" /> Напомнить неознакомленным
+            </Button>
+          </div>
+        )}
         {!report && !error && <SkeletonRows rows={4} />}
         {error && <p className="text-sm text-red">Не удалось загрузить отчёт.</p>}
         {report && (

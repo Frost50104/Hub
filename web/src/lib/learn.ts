@@ -1508,6 +1508,26 @@ export const learnApi = {
     api.get<LearnSearchData>('/learn/search', { params: { q } }).then((r) => r.data),
   analytics: (): Promise<AnalyticsData> =>
     api.get<AnalyticsData>('/learn/analytics').then((r) => r.data),
+  /** «Напомнить неознакомленным» — батч library.ack_required по отчёту об ознакомлении. */
+  remindMaterial: (id: string): Promise<{ notified: number; pending: number }> =>
+    api
+      .post<{ notified: number; pending: number }>(`/learn/library/materials/${id}/remind`)
+      .then((r) => r.data),
+  /** CSV результатов опроса — из тех же агрегатов с k-анонимностью, что и экран. */
+  downloadSurveyCsv: async (id: string, dimension?: string): Promise<void> => {
+    const resp = await api.get(`/learn/surveys/${id}/results.csv`, {
+      params: { dimension: dimension || undefined },
+      responseType: 'blob',
+    })
+    const url = URL.createObjectURL(resp.data as Blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'survey-results.csv'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  },
   downloadAnalyticsCsv: async (): Promise<void> => {
     const resp = await api.get('/learn/analytics/export', { responseType: 'blob' })
     const url = URL.createObjectURL(resp.data as Blob)

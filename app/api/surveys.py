@@ -8,10 +8,13 @@ answer_set с демографическим снапшотом (profile_id то
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from signaris_auth import Principal
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -47,7 +50,7 @@ from app.services.learn_settings import get_settings_dict
 from app.services.notify_batch import notify_many
 from app.services.org_scope import get_profile
 from app.services.points import award
-from app.services.survey_stats import participants_count, question_stats
+from app.services.survey_stats import QuestionStats, participants_count, question_stats
 
 router = APIRouter(tags=["learn-surveys"])
 
@@ -547,6 +550,81 @@ async def submit_survey(
 
 
 # --- Результаты --------------------------------------------------------------
+
+
+def _csv_label(stats: QuestionStats, options: list | None, key: str) -> str:
+    if stats.qtype in ("single", "multi") and options:
+        try:
+            return str(options[int(key)])
+        except (ValueError, IndexError):
+            return key
+    return key
+
+
+def _csv_block(
+    writer, stats: QuestionStats, options: list | None, group: str,
+    distribution: dict, total: int, enps: int | None,
+) -> None:
+    enps_cell = enps if enps is not None else ""
+    if not distribution:
+        writer.writerow([stats.prompt, group, "—", total, "", enps_cell])
+        return
+    for key, count in sorted(distribution.items(), key=lambda kv: str(kv[0])):
+        pct = round(100 * count / total) if total else 0
+        writer.writerow(
+            [stats.prompt, group, _csv_label(stats, options, str(key)), count, pct, enps_cell]
+        )
+
+
+@router.get("/learn/surveys/{survey_id}/results.csv")
+async def survey_results_csv(
+    survey_id: UUID,
+    dimension: str | None = Query(default=None),
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """CSV результатов — ТОЛЬКО из агрегатов `question_stats` с тем же порогом
+    k-анонимности, что и экран: группы ниже порога — «скрыто». Инвариант
+    «ответы выходят только через survey_stats» сохранён: сырых answer_sets
+    в выгрузке нет по построению."""
+    await require_content_role(db, principal, "publisher")
+    survey = await _get_survey_or_404(db, survey_id)
+    settings = await get_settings_dict(db, principal.tenant_id)
+    k = int(settings.get("survey_k_anonymity", 5))
+    buffer = io.StringIO()
+    buffer.write("\ufeff")  # BOM: Excel на Windows иначе читает кириллицу кракозябрами
+    writer = csv.writer(buffer, delimiter=";")
+    writer.writerow(["Вопрос", "Срез", "Вариант", "Ответов", "Доля, %", "eNPS"])
+    try:
+        for q in await _questions(db, survey_id):
+            st = await question_stats(db, survey, q, dimension=dimension, k_anonymity=k)
+            options = (q.options or {}).get("options") if isinstance(q.options, dict) else None
+            if dimension:
+                for group, entry in st.groups.items():
+                    if entry == "suppressed":
+                        writer.writerow(
+                            [st.prompt, group, "скрыто (меньше порога анонимности)", "", "", ""]
+                        )
+                        continue
+                    _csv_block(
+                        writer, st, options, group,
+                        entry.get("distribution", {}),
+                        entry.get("total", 0),
+                        entry.get("enps_score"),
+                    )
+            else:
+                _csv_block(
+                    writer, st, options, "все", st.distribution, st.total_answers, st.enps_score
+                )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    buffer.seek(0)
+    safe = "".join(ch for ch in survey.title if ch.isalnum() or ch in " -_")[:40].strip()
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{safe or "survey"}-results.csv"'},
+    )
 
 
 @router.get("/learn/surveys/{survey_id}/results", response_model=SurveyResultsResponse)

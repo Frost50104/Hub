@@ -1,4 +1,15 @@
-import { Archive, ArrowLeft, BarChart3, Check, ClipboardList, Plus, Send, Trash2, Users } from 'lucide-react'
+import {
+  Archive,
+  ArrowLeft,
+  BarChart3,
+  Check,
+  ClipboardList,
+  Download,
+  Plus,
+  Send,
+  Trash2,
+  Users,
+} from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -771,9 +782,21 @@ function SurveyResultsDialog({ survey, onClose }: { survey: Survey; onClose: () 
       }
       desktopWidth={680}
       footer={
-        <Button type="button" variant="secondary" onClick={onClose}>
-          Закрыть
-        </Button>
+        <>
+          <Button
+            type="button"
+            variant="secondary"
+            className="bg-transparent"
+            disabled={!results}
+            onClick={() => void learnApi.downloadSurveyCsv(survey.id, dimension || undefined)}
+          >
+            <Download className="h-4 w-4" /> CSV
+          </Button>
+          <span className="flex-1" />
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Закрыть
+          </Button>
+        </>
       }
     >
       <Select value={dimension} onChange={(e) => setDimension(e.target.value)} className="h-11 w-full sm:w-56">

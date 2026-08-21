@@ -974,6 +974,30 @@ async def acknowledge(
 # --- Отчёт об ознакомлении ---------------------------------------------------
 
 
+@router.post("/learn/library/materials/{material_id}/remind")
+async def remind_unacked(
+    material_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """«Напомнить неознакомленным»: батч kind `library.ack_required` тем членам
+    аудитории из отчёта, у кого нет подтверждения действующей версии. Нового
+    kind не заводим (20 kinds и фронт-словарь остаются синхронны); срез ТУ —
+    тот же, что в отчёте."""
+    await enforce_rate_limit(
+        bucket="library:remind",
+        employee_id=str(principal.employee_id),
+        limit=5,
+        window_sec=60,
+    )
+    report = await ack_report(material_id, principal, db)
+    material = await _get_material_or_404(db, material_id)
+    pending = [r.profile_id for r in report.rows if r.acknowledged_at is None]
+    sent = await notify_ack_required(db, material, pending) if pending else 0
+    await db.commit()
+    return {"notified": sent, "pending": len(pending)}
+
+
 @router.get(
     "/learn/library/materials/{material_id}/ack-report", response_model=AckReportResponse
 )
