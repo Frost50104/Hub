@@ -9,7 +9,7 @@ import { useUnreadCount } from '@/hooks/useNotifications'
 import { authClient } from '@/lib/auth'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/cn'
-import { HUB_ROLE_BADGE } from '@/lib/learn'
+import { HubRoleChip } from '@/components/layout/HubRoleChip'
 
 function NavEntry({
   item,
@@ -73,28 +73,20 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
 
   return (
     <aside className="glass flex h-screen w-[280px] shrink-0 flex-col gap-4 p-4 md:h-[calc(100vh-1.5rem)] md:w-[260px]">
-      {/* Роль второй строкой — та же причина, что в Sidebar: локап + «Hub» +
-          роль не влезают в 226px. 12px/--text2, не 10px/--text3 (2,75:1). */}
-      <Link to="/learn" onClick={onItemClick} className="flex flex-col gap-1 px-1">
-        <span className="flex items-center gap-2">
-          <img
-            src={
-              theme === 'light'
-                ? '/brand/signaris-horizontal-on-light.svg'
-                : '/brand/signaris-horizontal-on-dark.svg'
-            }
-            alt="Signaris"
-            className="h-6"
-          />
-          <span className="font-display text-lg font-black leading-none tracking-tight">
-            Hub
-          </span>
+      {/* Бренд как в Sidebar: марка-маяк + «Hub», роль — чипом у профиля. */}
+      <Link to="/learn" onClick={onItemClick} className="flex items-center gap-2.5 px-1">
+        <img
+          src={
+            theme === 'light'
+              ? '/brand/signaris-mark-on-light.svg'
+              : '/brand/signaris-mark-on-dark.svg'
+          }
+          alt="Signaris"
+          className="h-[26px] w-[26px] shrink-0"
+        />
+        <span className="font-display text-[17px] font-black leading-none tracking-[-0.025em] text-text">
+          Hub
         </span>
-        {me.data?.hub_role && (
-          <span className="truncate text-[12px] font-semibold uppercase tracking-[0.16em] text-text2">
-            {HUB_ROLE_BADGE[me.data.hub_role]}
-          </span>
-        )}
       </Link>
 
       <SpaceSwitcher />
@@ -142,8 +134,11 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
             className="h-7 w-7 text-[13px]"
           />
           <div className="min-w-0">
-            <p className="truncate text-[13px] font-medium leading-[1.35] text-text">
-              {me.data?.full_name || me.data?.email || '—'}
+            <p className="flex min-w-0 items-center gap-1.5">
+              <span className="min-w-0 truncate text-[13px] font-medium leading-[1.35] text-text">
+                {me.data?.full_name || me.data?.email || '—'}
+              </span>
+              {me.data?.hub_role && <HubRoleChip role={me.data.hub_role} />}
             </p>
             <p className="truncate text-[12px] leading-[1.35] text-text2">{me.data?.email ?? ''}</p>
           </div>

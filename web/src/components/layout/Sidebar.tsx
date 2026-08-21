@@ -65,7 +65,7 @@ import { authClient } from '@/lib/auth'
 import { useTheme } from '@/lib/theme'
 import { ProjectKeyChip } from '@/components/project/ProjectKeyChip'
 import { cn } from '@/lib/cn'
-import { HUB_ROLE_BADGE } from '@/lib/learn'
+import { HubRoleChip } from '@/components/layout/HubRoleChip'
 import {
   groupProjectsByFolder,
   UNFILED,
@@ -446,6 +446,7 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
   // Тот же queryKey, что читает ProjectsList — TanStack дедуплицирует,
   // лишнего запроса нет. Права считает сервер, копии правила тут не заводим.
   const foldersCanManage = useProjectFolders().data?.can_manage ?? false
+  const canCreateProjects = me.data?.can_create_projects ?? false
   const [drag, setDrag] = useState<SidebarDragData | null>(null)
   const setFolder = useSetProjectFolder()
 
@@ -489,29 +490,22 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
       onDragCancel={() => setDrag(null)}
     >
     <aside className="glass flex h-screen w-[280px] shrink-0 flex-col gap-4 p-4 md:h-[calc(100vh-1.5rem)] md:w-[260px]">
-      {/* Роль — ВТОРОЙ строкой, а не рядом с локапом: локап + «Hub» + роль не
-          влезают в 226px ни при каком кегле («Управляющий сетью»), поэтому не
-          уменьшаем 12px, а переносим. */}
-      <Link to="/" onClick={onItemClick} className="flex flex-col gap-1 px-1">
-        <span className="flex items-center gap-2">
-          <img
-            src={
-              theme === 'light'
-                ? '/brand/signaris-horizontal-on-light.svg'
-                : '/brand/signaris-horizontal-on-dark.svg'
-            }
-            alt="Signaris"
-            className="h-6"
-          />
-          <span className="font-display text-lg font-black leading-none tracking-tight">
-            Hub
-          </span>
+      {/* Бренд по макету: марка-маяк 26px + «Hub» на месте «Signaris»
+          (горизонтальный локап остаётся публичной странице и сертификату).
+          Роль живёт чипом у профиля в футере, не под логотипом. */}
+      <Link to="/" onClick={onItemClick} className="flex items-center gap-2.5 px-1">
+        <img
+          src={
+            theme === 'light'
+              ? '/brand/signaris-mark-on-light.svg'
+              : '/brand/signaris-mark-on-dark.svg'
+          }
+          alt="Signaris"
+          className="h-[26px] w-[26px] shrink-0"
+        />
+        <span className="font-display text-[17px] font-black leading-none tracking-[-0.025em] text-text">
+          Hub
         </span>
-        {me.data?.hub_role && (
-          <span className="truncate text-[12px] font-semibold uppercase tracking-[0.16em] text-text2">
-            {HUB_ROLE_BADGE[me.data.hub_role]}
-          </span>
-        )}
       </Link>
 
       <SpaceSwitcher />
@@ -571,8 +565,10 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
             <Folder className="h-3.5 w-3.5" /> Проекты
           </span>
           {/* Меню только когда есть права на папки: из одного пункта оно
-              было бы лишним кликом на ровном месте. */}
-          {foldersCanManage ? (
+              было бы лишним кликом на ровном месте. Без права создавать
+              проекты (линейный сотрудник) «+» не рисуется вовсе —
+              «кнопка без прав отсутствует, а не заблокирована». */}
+          {!canCreateProjects ? null : foldersCanManage ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
@@ -617,8 +613,11 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
             className="h-7 w-7 text-[13px]"
           />
           <div className="min-w-0">
-            <p className="truncate text-[13px] font-medium leading-[1.35] text-text">
-              {me.data?.full_name || me.data?.email || '—'}
+            <p className="flex min-w-0 items-center gap-1.5">
+              <span className="min-w-0 truncate text-[13px] font-medium leading-[1.35] text-text">
+                {me.data?.full_name || me.data?.email || '—'}
+              </span>
+              {me.data?.hub_role && <HubRoleChip role={me.data.hub_role} />}
             </p>
             <p className="truncate text-[12px] leading-[1.35] text-text2">
               {me.data?.email ?? ''}
