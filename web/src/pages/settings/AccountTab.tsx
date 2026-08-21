@@ -1,7 +1,6 @@
 import { Award } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import { PropertyRow, PropertyRows } from '@/components/ui/PropertyRows'
 import { useLearnProfile, useMyCertificates } from '@/hooks/useLearn'
 import { useMe } from '@/hooks/useMe'
 import { ORG_ROLE_LABEL } from '@/lib/learn'
@@ -50,27 +49,36 @@ export function AccountTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <section className="flex flex-col gap-3">
-        <h2 className="font-display text-[17px] font-bold text-text">Работа</h2>
+      <section className="flex flex-col gap-[11px]">
+        <h2 className="font-display text-[17px] font-bold leading-[1.25] text-text">Работа</h2>
         {learn.isLoading ? (
           <div className="h-24 rounded-[14px] bg-surface" aria-hidden />
         ) : workRows.length > 0 ? (
-          <PropertyRows>
+          // По макету «Настройки»: dl с рядами 11×14px и радиусом 10, а не
+          // мобильный блок свойств (48px, правый отступ под контролы — текстовые
+          // значения прилипали к рамке).
+          <dl className="m-0 overflow-hidden rounded-[10px] border border-glass-border">
             {workRows.map(([label, value]) => (
-              <PropertyRow key={label} label={label}>
-                <span className="text-[15px] font-semibold text-text">{value}</span>
-              </PropertyRow>
+              <div
+                key={label}
+                className="flex items-center justify-between gap-4 border-t border-hair px-3.5 py-[11px] first:border-t-0"
+              >
+                <dt className="text-[15px] text-text2">{label}</dt>
+                <dd className="m-0 min-w-0 text-right text-[15px] font-semibold text-text">
+                  {value}
+                </dd>
+              </div>
             ))}
-          </PropertyRows>
+          </dl>
         ) : (
           <p className="text-[14px] text-text2">Данных о должности и точке пока нет.</p>
         )}
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="font-display text-[17px] font-bold text-text">Сертификаты</h2>
+      <section className="flex flex-col gap-[11px]">
+        <h2 className="font-display text-[17px] font-bold leading-[1.25] text-text">Сертификаты</h2>
         {(certificates.data?.length ?? 0) > 0 ? (
-          <ul className="flex flex-col overflow-hidden rounded-[14px] border border-glass-border bg-tint">
+          <ul className="flex flex-col overflow-hidden rounded-[10px] border border-glass-border">
             {certificates.data!.map((cert) => (
               <li key={cert.id} className="border-t border-hair first:border-t-0">
                 <Link
@@ -87,7 +95,7 @@ export function AccountTab() {
             ))}
           </ul>
         ) : (
-          <p className="rounded-[14px] border border-dashed border-glass-border px-4 py-5 text-center text-[14px] text-text2">
+          <p className="rounded-[10px] border border-dashed border-glass-border p-4 text-[15px] leading-[1.5] text-text2">
             Пока нет сертификатов. Они появляются после пройденных курсов с аттестацией.
           </p>
         )}
