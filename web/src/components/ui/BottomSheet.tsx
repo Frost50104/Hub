@@ -34,6 +34,14 @@ export const BottomSheet = forwardRef<HTMLDivElement, BottomSheetProps>(
           />
           <DialogPrimitive.Content
             ref={ref}
+            tabIndex={-1}
+            // Авто-фокус — на саму шторку, а не на первый контрол: иначе
+            // первый селект/кнопка открывались с фокус-рингом (тот же класс
+            // находки, что у «Закрыть» карточки задачи — QA-0821 #14).
+            onOpenAutoFocus={(e) => {
+              e.preventDefault()
+              ;(e.target as HTMLElement | null)?.focus?.()
+            }}
             className={cn(
               'fixed inset-x-0 bottom-0 z-50 max-h-[85vh] overflow-y-auto rounded-t-2xl bg-bg-alt shadow-glass focus:outline-none',
               'data-[state=open]:animate-in data-[state=closed]:animate-out',

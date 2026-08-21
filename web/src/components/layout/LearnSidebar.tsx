@@ -134,13 +134,15 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
             className="h-7 w-7 text-[13px]"
           />
           <div className="min-w-0">
-            <p className="flex min-w-0 items-center gap-1.5">
-              <span className="min-w-0 truncate text-[13px] font-medium leading-[1.35] text-text">
-                {me.data?.full_name || me.data?.email || '—'}
-              </span>
-              {me.data?.hub_role && <HubRoleChip role={me.data.hub_role} />}
+            <p className="truncate text-[13px] font-medium leading-[1.35] text-text">
+              {me.data?.full_name || me.data?.email || '—'}
             </p>
-            <p className="truncate text-[12px] leading-[1.35] text-text2">{me.data?.email ?? ''}</p>
+            <p className="mt-0.5 flex min-w-0 items-center gap-1.5">
+              {me.data?.hub_role && <HubRoleChip role={me.data.hub_role} />}
+              <span className="min-w-0 truncate text-[12px] leading-[1.35] text-text2">
+                {me.data?.email ?? ''}
+              </span>
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-1">
