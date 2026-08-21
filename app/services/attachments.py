@@ -78,6 +78,57 @@ def resolve_mime(content_type: str | None, filename: str) -> str:
     return mime
 
 
+# Магические байты для семейств с однозначной сигнатурой. Проверяем ТОЛЬКО их:
+# text/*, json, csv сигнатуры не имеют (UTF-16/BOM — легальны) и пропускаются.
+# Ложный 415 хуже пропущенного файла, поэтому список консервативный.
+_MAGIC: dict[str, tuple[bytes, ...]] = {
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/gif": (b"GIF87a", b"GIF89a"),
+    # RIFF....WEBP — проверяется отдельно (offset 8).
+    "image/webp": (b"RIFF",),
+    # zip-семейство: docx/xlsx/pptx/zip. Пустой архив (PK\x05\x06) — тоже zip.
+    "application/zip": (b"PK\x03\x04", b"PK\x05\x06"),
+    "application/x-zip-compressed": (b"PK\x03\x04", b"PK\x05\x06"),
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": (b"PK\x03\x04",),
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": (b"PK\x03\x04",),
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": (b"PK\x03\x04",),
+    # OLE2 (doc/xls/ppt).
+    "application/msword": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),
+    "application/vnd.ms-excel": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),
+    "application/vnd.ms-powerpoint": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),
+}
+_HEIC_MIMES = frozenset(
+    {"image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"}
+)
+# Сколько байт нужно читать для sniff_mismatch: PDF ищем в первом килобайте
+# (допустим BOM/мусор до `%PDF`), остальным хватает 12.
+SNIFF_HEAD_BYTES = 1024
+
+
+def sniff_mismatch(mime: str, head: bytes) -> bool:
+    """True, если первые байты файла ПРОТИВОРЕЧАТ заявленному MIME.
+
+    Whitelist по заявленному типу клиент обходит переименованием (`MZ…` под
+    именем `.png` проходил 201 — QA-0821 #11). Проверяются только семейства с
+    однозначной сигнатурой; неизвестный MIME / пустой head → False (решает
+    whitelist ALLOWED_MIME, не сниффер).
+    """
+    if not head:
+        return False
+    if mime == "application/pdf":
+        return b"%PDF" not in head[:SNIFF_HEAD_BYTES]
+    if mime == "image/webp":
+        return not (head.startswith(b"RIFF") and head[8:12] == b"WEBP")
+    if mime in _HEIC_MIMES:
+        # ISO BMFF: размер бокса (4 байта) + 'ftyp' с 4-го байта.
+        return head[4:8] != b"ftyp"
+    magics = _MAGIC.get(mime)
+    if magics is None:
+        return False
+    return not any(head.startswith(m) for m in magics)
+
+
 def _sanitize_filename(name: str) -> str:
     """Strip path components, normalize unicode, keep only [A-Za-z0-9._-].
 

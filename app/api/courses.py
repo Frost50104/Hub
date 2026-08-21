@@ -1135,6 +1135,8 @@ async def get_lesson(
     lesson_id: UUID,
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
+    *,
+    preview: bool = False,
 ) -> LessonContentResponse:
     role = await resolve_content_role(db, principal)
     lesson = await _get_lesson_or_404(db, lesson_id)
@@ -1147,6 +1149,10 @@ async def get_lesson(
     manager = lifecycle.can(role, "publisher") or (
         role == "author" and course.created_by == principal.employee_id
     )
+    # ?preview=1 — «глазами сотрудника» (как у get_course): замки и
+    # next_locked считаются как для обычного профиля. keyword-only, не Query
+    # (тесты зовут хендлер напрямую).
+    manager = manager and not preview
     if lesson.status != "published" and not manager:
         raise HTTPException(status_code=404, detail="Урок не найден")
 

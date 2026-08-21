@@ -3,12 +3,16 @@
 In-app roles (`owner | editor | viewer`) live in `project_members.role` —
 they're NOT in the JWT. JWT-level role is `hub:admin | member | viewer`:
 - `hub:admin` — superuser inside the tenant, bypasses per-project checks.
-- `hub:member` — can create projects, then in-app role decides.
+- `hub:member` — in-app role decides; создавать проекты/папки может ТОЛЬКО
+  member с активным learn-профилем `org_role ∈ PROJECT_CREATOR_ORG_ROLES`
+  (офис, ТУ, франчайзи) — линейный сотрудник на точке проекты не заводит
+  (решение владельца 2026-08-21, QA-0821 #21).
 - `hub:viewer` — read-only, can't create projects.
 
 API:
     is_hub_admin(principal) -> bool
-    can_create_project(principal) -> bool
+    can_create_project(db, principal) -> bool      (async — смотрит профиль)
+    can_manage_project_folders(db, principal) -> bool
     fetch_project_or_404(db, project_id) -> Project
     get_my_role(db, project_id, employee_id) -> ProjectRole | None
     require_project_role(
@@ -30,10 +34,18 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.employee_profile import EmployeeProfile
 from app.models.project import Project, ProjectMember
 
 ProjectRole = Literal["owner", "editor", "viewer"]
 HUB_ADMIN_ROLE = "admin"
+# org_role learn-профиля, которым разрешено создавать проекты и управлять
+# папками (кроме hub:admin). Линейный `employee` — нет.
+PROJECT_CREATOR_ORG_ROLES: frozenset[str] = frozenset({"office", "tu", "franchisee_owner"})
+CREATE_PROJECT_DENIED = (
+    "Создавать проекты могут администраторы Hub и сотрудники офиса, ТУ и "
+    "франчайзи — обратитесь к администратору"
+)
 
 # Две ступени прав. Держим их РЯДОМ с require_project_role: списки обязаны
 # совпадать с `allow=` в ручках, иначе UI снова разъедется с бэкендом.
@@ -45,14 +57,31 @@ def is_hub_admin(principal: Principal) -> bool:
     return principal.role_for("hub") == HUB_ADMIN_ROLE
 
 
-def can_create_project(principal: Principal) -> bool:
+async def can_create_project(db: AsyncSession, principal: Principal) -> bool:
+    """admin — всегда; member — только с активным профилем офис/ТУ/франчайзи.
+
+    Профиль ищется по `employee_id` (как `org_scope.resolve_scope`); у member
+    без профиля (API-клиент, не заходивший в UI — `/api/me` связывает профиль
+    по email при первом входе) — False. hub:viewer — всегда False.
+    """
     role = principal.role_for("hub")
-    return role in ("admin", "member")
+    if role == HUB_ADMIN_ROLE:
+        return True
+    if role != "member":
+        return False
+    row = await db.execute(
+        select(EmployeeProfile.org_role).where(
+            EmployeeProfile.employee_id == principal.employee_id,
+            EmployeeProfile.status == "active",
+        )
+    )
+    org_role = row.scalars().first()
+    return org_role in PROJECT_CREATOR_ORG_ROLES
 
 
-def can_manage_project_folders(principal: Principal) -> bool:
-    """Папки ОБЩИЕ для тенанта, поэтому гейт — тот же, что у создания проекта
-    (hub admin|member): равный blast-radius, hub:viewer остаётся read-only.
+async def can_manage_project_folders(db: AsyncSession, principal: Principal) -> bool:
+    """Папки ОБЩИЕ для тенанта, поэтому гейт — тот же, что у создания проекта:
+    равный blast-radius, hub:viewer и линейный сотрудник остаются read-only.
 
     Не admin-only сознательно: ОС ровно про то, что в плоском списке тонут
     обычные пользователи — если раскладывать может только админ, фича мертва
@@ -61,7 +90,7 @@ def can_manage_project_folders(principal: Principal) -> bool:
 
     Сужение до is_hub_admin — правка ровно здесь, в одном месте.
     """
-    return can_create_project(principal)
+    return await can_create_project(db, principal)
 
 
 def capabilities(

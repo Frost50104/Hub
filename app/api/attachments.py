@@ -21,8 +21,10 @@ from app.schemas.attachment import AttachmentResponse
 from app.services.activity_writer import record_activity
 from app.services.attachments import (
     ALLOWED_MIME,
+    SNIFF_HEAD_BYTES,
     absolute_path,
     resolve_mime,
+    sniff_mismatch,
     storage_key_for,
 )
 from app.services.project_access import is_hub_admin, require_project_role
@@ -119,6 +121,15 @@ async def upload_attachment(
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"Тип файла {mime!r} не разрешён",
+        )
+    # Сниффинг магических байт: читаем голову и возвращаем курсор — стриминг
+    # ниже считает лимит размера с нуля.
+    head = await file.read(SNIFF_HEAD_BYTES)
+    await file.seek(0)
+    if sniff_mismatch(mime, head):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Содержимое файла не соответствует заявленному типу",
         )
 
     if not file.filename:

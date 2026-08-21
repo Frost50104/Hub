@@ -34,6 +34,7 @@ from app.services.content_access import require_content_role, resolve_content_ro
 from app.services.learn_notify import _employee_ids
 from app.services.notify_batch import notify_many
 from app.services.org_scope import get_profile, resolve_scope
+from app.services.timefmt import fmt_date
 
 router = APIRouter(tags=["learn-assessments"])
 
@@ -480,7 +481,7 @@ async def activate_campaign(
     members = await _audience_profile_ids(db, campaign.audience_id)
     recipients = await _employee_ids(db, members)
     deadline = (
-        f" до {campaign.ends_at.astimezone(UTC).strftime('%d.%m.%Y')}"
+        f" до {fmt_date(campaign.ends_at)}"
         if campaign.ends_at
         else ""
     )

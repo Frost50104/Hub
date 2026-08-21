@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.learn_home import AUTH_AVATAR_BASE
 from app.deps import get_db, require_auth_any
 from app.services.employee_profiles import ensure_profile_for_principal
+from app.services.project_access import can_create_project
 
 router = APIRouter(tags=["me"])
 
@@ -46,6 +47,10 @@ class MeResponse(BaseModel):
     # с этим email в архиве, требуется восстановление админом (повторный найм).
     profile: MeProfile | None = None
     profile_needs_restore: bool = False
+    # Может ли создавать проекты и папки (admin или офис/ТУ/франчайзи) —
+    # считает СЕРВЕР (project_access.can_create_project), фронт не выводит
+    # правило из ролей сам.
+    can_create_projects: bool = False
 
 
 @router.get("/me", response_model=MeResponse)
@@ -76,6 +81,9 @@ async def get_me(
                 status_text=result.profile.status_text,
             )
 
+    can_create = (
+        await can_create_project(db, principal) if hub_role is not None else False
+    )
     return MeResponse(
         employee_id=principal.employee_id,
         email=principal.email,
@@ -86,4 +94,5 @@ async def get_me(
         avatar_url=f"{AUTH_AVATAR_BASE}/{principal.employee_id}",
         profile=profile_payload,
         profile_needs_restore=needs_restore,
+        can_create_projects=can_create,
     )

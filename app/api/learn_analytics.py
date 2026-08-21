@@ -35,6 +35,7 @@ from app.services import lifecycle
 from app.services.content_access import resolve_content_role
 from app.services.org_scope import resolve_scope
 from app.services.quiz_scoring import score_attempt
+from app.services.timefmt import fmt_dt
 
 router = APIRouter(tags=["learn-analytics"])
 
@@ -364,7 +365,7 @@ async def export_csv(
                 done,
                 quiz_map.get(profile.id, 0),
                 points_map.get(profile.id, 0),
-                profile.last_activity_at.strftime("%Y-%m-%d")
+                fmt_dt(profile.last_activity_at, "%Y-%m-%d")
                 if profile.last_activity_at
                 else "",
             ]

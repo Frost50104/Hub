@@ -25,6 +25,7 @@ from app.db import tenant_scoped_session
 from app.models.course import Course
 from app.models.employee_profile import EmployeeProfile
 from app.models.progress import CourseAssignment, CourseProgress
+from app.services.timefmt import fmt_date
 
 log = structlog.get_logger("jobs.course_due_soon")
 
@@ -102,7 +103,7 @@ async def main() -> int:
                     title="Скоро дедлайн курса",
                     body=(
                         f"«{title}» — завершите до "
-                        f"{due_at.astimezone(UTC).strftime('%d.%m.%Y')}."
+                        f"{fmt_date(due_at)}."
                     ),
                     url=f"/learn/courses/{course_id}",
                     payload={"course_id": str(course_id)},

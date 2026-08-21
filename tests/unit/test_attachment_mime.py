@@ -47,3 +47,53 @@ def test_declared_type_wins_over_extension():
 def test_heic_family_allowed():
     for mime in ("image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"):
         assert mime in ALLOWED_MIME
+
+
+# ─── sniff_mismatch — магические байты против заявленного MIME (QA-0821 #11) ──
+
+from app.services.attachments import sniff_mismatch  # noqa: E402
+
+_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
+_OLE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 8
+
+
+def test_sniff_real_signatures_pass():
+    assert sniff_mismatch("image/png", _PNG) is False
+    assert sniff_mismatch("image/jpeg", b"\xff\xd8\xff\xe0\x00\x10JFIF") is False
+    assert sniff_mismatch("image/gif", b"GIF89a\x01\x00") is False
+    assert sniff_mismatch("image/webp", b"RIFF\x24\x00\x00\x00WEBPVP8 ") is False
+    assert sniff_mismatch("application/pdf", b"%PDF-1.7\n%\xe2\xe3") is False
+    assert sniff_mismatch("application/zip", b"PK\x03\x04\x14\x00") is False
+    assert sniff_mismatch("application/zip", b"PK\x05\x06" + b"\x00" * 18) is False  # пустой
+    assert sniff_mismatch(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        b"PK\x03\x04\x14\x00\x06\x00",
+    ) is False
+    assert sniff_mismatch("application/msword", _OLE) is False
+    assert sniff_mismatch("image/heic", b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00") is False
+    assert sniff_mismatch("image/heif", b"\x00\x00\x00\x1cftypmif1") is False
+
+
+def test_sniff_renamed_executable_is_rejected():
+    mz = b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff\x00\x00"
+    assert sniff_mismatch("image/png", mz) is True
+    assert sniff_mismatch("image/jpeg", mz) is True
+    assert sniff_mismatch("application/pdf", mz) is True
+    assert sniff_mismatch("application/zip", mz) is True
+    assert sniff_mismatch("application/msword", mz) is True
+    assert sniff_mismatch("image/heic", mz) is True
+    assert sniff_mismatch("image/webp", b"RIFF\x00\x00\x00\x00AVI LIST") is True
+
+
+def test_sniff_pdf_with_junk_before_header_passes():
+    assert sniff_mismatch("application/pdf", b"\xef\xbb\xbf\n\n%PDF-1.4") is False
+
+
+def test_sniff_skips_text_and_unknown_types():
+    # Текстовые форматы сигнатуры не имеют (UTF-16/BOM легальны).
+    assert sniff_mismatch("text/plain", b"\xff\xfeh\x00i\x00") is False
+    assert sniff_mismatch("text/csv", b"a;b;c") is False
+    assert sniff_mismatch("application/json", b"{}") is False
+    assert sniff_mismatch("application/x-unknown", b"MZ") is False
+    # Пустой файл — решает whitelist, не сниффер.
+    assert sniff_mismatch("image/png", b"") is False

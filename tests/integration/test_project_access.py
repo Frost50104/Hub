@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.projects import archive_project, create_project, get_project
 from app.api.sections import create_section
+from app.models.employee_profile import EmployeeProfile
 from app.models.project import ProjectMember
 from app.schemas.project import ProjectCreate
 from app.schemas.section import SectionCreate
@@ -24,10 +25,29 @@ from tests.integration.conftest import make_principal
 pytestmark = pytest.mark.integration
 
 
-async def _register(db: AsyncSession, principal) -> None:
-    """shadow_users/-tenants: доменные FK ссылаются на employee_id."""
+async def _register(
+    db: AsyncSession, principal, *, org_role: str | None = None
+) -> None:
+    """shadow_users/-tenants: доменные FK ссылаются на employee_id.
+
+    org_role — создать активный learn-профиль с этой орг-ролью: с 2026-08-21
+    hub:member создаёт проекты/папки ТОЛЬКО как офис/ТУ/франчайзи
+    (`project_access.can_create_project`), поэтому владельцы проектов в тестах
+    регистрируются с `org_role="office"`.
+    """
     await upsert_shadow_tenant(db, principal, table="shadow_tenants")
     await upsert_shadow_user(db, principal, table="shadow_users")
+    if org_role is not None:
+        db.add(
+            EmployeeProfile(
+                tenant_id=principal.tenant_id,
+                employee_id=principal.employee_id,
+                email=principal.email,
+                full_name=principal.full_name,
+                org_role=org_role,
+            )
+        )
+        await db.flush()
 
 
 async def _project_with_owner(
@@ -37,7 +57,7 @@ async def _project_with_owner(
     owner = make_principal(
         tenant_id, email=f"owner-{slug}@t.ru", role="member", tenant_slug=slug
     )
-    await _register(db, owner)
+    await _register(db, owner, org_role="office")
     project = await create_project(ProjectCreate(name=f"Проект {slug}"), owner, db)
     return owner, project
 

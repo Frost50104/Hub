@@ -27,6 +27,7 @@ from app.schemas.project import (
     ProjectUpdate,
 )
 from app.services.project_access import (
+    CREATE_PROJECT_DENIED,
     can_create_project,
     capabilities,
     fetch_project_or_404,
@@ -177,10 +178,9 @@ async def create_project(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectResponse:
-    if not can_create_project(principal):
+    if not await can_create_project(db, principal):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Создание проектов доступно только admin/member ролям в Hub",
+            status_code=status.HTTP_403_FORBIDDEN, detail=CREATE_PROJECT_DENIED
         )
 
     key = body.key

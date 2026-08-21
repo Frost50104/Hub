@@ -282,6 +282,10 @@ async def update_employee(
     if not diff:
         return await _to_response(db, profile)
     await db.flush()
+    # diffs инициализируется ДО ветки: PATCH без орг-полей (content_role,
+    # телефон, status_text) и PATCH архивного профиля раньше падали 500
+    # (UnboundLocalError) — QA-0821 #23.
+    diffs: dict = {}
     if org_changed and profile.status == "active":
         # «Перевели в другой отдел — доступы меняются автоматически» (ТЗ §2.1).
         diffs = await recalc_profile(db, profile)

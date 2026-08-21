@@ -590,6 +590,10 @@ async def replace_group_members(
                 **{member_field: member_id},
             )
         )
+    # Сессия autoflush=False: без flush rebuild_tenant (Core-select по членству)
+    # не видит pending-insert'ы и считает группу пустой — курс с аудиторией
+    # «группа» не появлялся у нового члена до ручного rebuild (QA-0821 #20).
+    await db.flush()
     audit.record(
         db,
         tenant_id=principal.tenant_id,

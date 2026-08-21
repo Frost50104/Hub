@@ -33,7 +33,7 @@ async def _seed(db: AsyncSession, tenant_id: uuid.UUID, slug: str):
     owner = make_principal(
         tenant_id, email=f"owner-{slug}@t.ru", role="member", tenant_slug=slug
     )
-    await _register(db, owner)
+    await _register(db, owner, org_role="office")
     project = await create_project(ProjectCreate(name=f"Seq {slug}"), owner, db)
     return owner, project
 

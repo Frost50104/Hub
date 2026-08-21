@@ -33,6 +33,7 @@ from app.services import audit
 from app.services.learn_notify import _employee_ids
 from app.services.notify_batch import notify_many
 from app.services.org_scope import get_profile, resolve_scope
+from app.services.timefmt import fmt_range
 
 router = APIRouter(tags=["learn-shifts"])
 
@@ -203,9 +204,9 @@ async def _notify_profiles(
 
 
 def _fmt_when(posting: ShiftPosting) -> str:
-    start = posting.starts_at.astimezone(UTC)
-    end = posting.ends_at.astimezone(UTC)
-    return f"{start.strftime('%d.%m %H:%M')}–{end.strftime('%H:%M')} UTC"
+    # Человеку — локальное время сети (settings.display_timezone), не UTC:
+    # «30.08 08:00–16:00 UTC» при 10:00–18:00 в интерфейсе — QA-0821 #27.
+    return fmt_range(posting.starts_at, posting.ends_at)
 
 
 # ─── Списки ──────────────────────────────────────────────────────────────────
@@ -743,7 +744,7 @@ async def apply(
             employee_ids=[posting.created_by],
             kind="shift.application",
             title="Новый отклик на смену",
-            body=f"{profile.full_name} откликнулся(-ась) на {_fmt_when(posting)}.",
+            body=f"Отклик на смену {_fmt_when(posting)}: {profile.full_name}.",
             url="/learn/shifts",
             payload={"posting_id": str(posting.id)},
         )

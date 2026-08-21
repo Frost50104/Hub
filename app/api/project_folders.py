@@ -41,11 +41,14 @@ _NOT_FOUND = HTTPException(
 )
 
 
-def _require_manage(principal: Principal) -> None:
-    if not can_manage_project_folders(principal):
+async def _require_manage(db: AsyncSession, principal: Principal) -> None:
+    if not await can_manage_project_folders(db, principal):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Управление папками доступно только admin/member ролям в Hub",
+            detail=(
+                "Управлять папками могут администраторы Hub и сотрудники "
+                "офиса, ТУ и франчайзи"
+            ),
         )
 
 
@@ -72,7 +75,7 @@ async def list_project_folders(
     folders = await _ordered(db)
     return ProjectFolderListResponse(
         folders=[ProjectFolderResponse.model_validate(f) for f in folders],
-        can_manage=can_manage_project_folders(principal),
+        can_manage=await can_manage_project_folders(db, principal),
     )
 
 
@@ -86,7 +89,7 @@ async def create_project_folder(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectFolderResponse:
-    _require_manage(principal)
+    await _require_manage(db, principal)
     next_position = (
         await db.execute(
             select(func.coalesce(func.max(ProjectFolder.position) + 1, 0))
@@ -120,7 +123,7 @@ async def reorder_project_folders(
     Никаких сдвигов и deferred-констрейнтов: уникальности на position нет.
     Чужие id отфильтрует RLS, неизвестные молча игнорируются.
     """
-    _require_manage(principal)
+    await _require_manage(db, principal)
     by_id = {f.id: f for f in await _ordered(db)}
     for idx, folder_id in enumerate(body.folder_ids):
         folder = by_id.get(folder_id)
@@ -137,7 +140,7 @@ async def update_project_folder(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectFolderResponse:
-    _require_manage(principal)
+    await _require_manage(db, principal)
     folder = await db.get(ProjectFolder, folder_id)
     if folder is None:
         raise _NOT_FOUND
@@ -158,7 +161,7 @@ async def delete_project_folder(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Проекты НЕ удаляются: FK ON DELETE SET NULL переводит их в «Без папки»."""
-    _require_manage(principal)
+    await _require_manage(db, principal)
     folder = await db.get(ProjectFolder, folder_id)
     if folder is None:
         raise _NOT_FOUND

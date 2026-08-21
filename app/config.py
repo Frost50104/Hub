@@ -11,6 +11,23 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _read_version_file() -> str:
+    """Версия сборки из файла `VERSION` в корне проекта.
+
+    Файл пишет `deploy.sh` (git-hash + dirty + timestamp) и rsync'ает вместе
+    с кодом — тот же источник, что `web/public/version.json`. Локально и в
+    тестах файла может не быть → `0.0.0-dev`. Env SIGNARIS_HUB_APP_VERSION
+    по-прежнему побеждает (pydantic читает env поверх default).
+    """
+    try:
+        value = (_PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "0.0.0-dev"
+    return value or "0.0.0-dev"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -23,7 +40,10 @@ class Settings(BaseSettings):
 
     # Environment
     environment: str = Field(default="staging")
-    app_version: str = Field(default="0.0.0-dev")
+    app_version: str = Field(default_factory=_read_version_file)
+    # Часовой пояс для ЧЕЛОВЕКОЧИТАЕМЫХ дат в уведомлениях/экспортах
+    # (app/services/timefmt.py). Tenant-tz нет; сеть UPPETIT — Москва.
+    display_timezone: str = Field(default="Europe/Moscow")
     port: int = Field(default=5060)
     debug_rls: bool = Field(default=False)
 

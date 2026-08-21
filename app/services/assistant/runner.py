@@ -86,6 +86,20 @@ def _extract_bullets(text: str) -> list[str]:
     ]
 
 
+def _strip_bullets(text: str) -> str:
+    """Текст без bullet-строк (лид и итог), схлопнутые пустые строки."""
+    kept = [
+        ln for ln in text.splitlines()
+        if not ln.strip().startswith(("- ", "* ", "• "))
+    ]
+    out: list[str] = []
+    for ln in kept:
+        if not ln.strip() and (not out or not out[-1].strip()):
+            continue
+        out.append(ln.rstrip())
+    return "\n".join(out).strip()
+
+
 async def run(
     ctx: ToolContext,
     *,
@@ -132,7 +146,14 @@ async def run(
                 )
             bullets = _extract_bullets(content)
             if used_summary_tool and len(bullets) >= 3:
-                return Turn(kind="summary", content=content, data={"lines": bullets})
+                # `lines` — те же пункты структурой; в content оставляем
+                # только лид/итог, иначе фронт показывал сводку дважды
+                # (markdown + <ol>) — QA-0821 #17.
+                return Turn(
+                    kind="summary",
+                    content=_strip_bullets(content),
+                    data={"lines": bullets},
+                )
             return Turn(kind="answer", content=content, sources=sources)
 
         messages.append(

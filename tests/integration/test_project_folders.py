@@ -40,7 +40,7 @@ async def _owner(db: AsyncSession, tenant_id: uuid.UUID, slug: str):
     p = make_principal(
         tenant_id, email=f"owner-{slug}@t.ru", role="member", tenant_slug=slug
     )
-    await _register(db, p)
+    await _register(db, p, org_role="office")
     return p
 
 

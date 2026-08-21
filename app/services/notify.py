@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task import Task
 from app.services.notification_dispatcher import dispatch
+from app.services.timefmt import fmt_dt
 
 STATUS_LABEL_RU = {
     "todo": "К выполнению",
@@ -118,9 +119,7 @@ async def notify_due_soon(
     task: Task,
     recipient_id: UUID,
 ) -> None:
-    when = (
-        task.due_at.strftime("%d.%m в %H:%M") if task.due_at else "скоро"
-    )
+    when = fmt_dt(task.due_at, "%d.%m в %H:%M") if task.due_at else "скоро"
     await dispatch(
         session,
         tenant_id=task.tenant_id,
