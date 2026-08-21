@@ -63,6 +63,15 @@ def _extract_docx(path: Path) -> str:
     return "\n".join(parts)
 
 
+def _cell_text(value: object) -> str:
+    """Ячейка → текст: целые float (5.0 из data_only) без «.0», None → пусто."""
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
 def _extract_xlsx(path: Path) -> str:
     if path.stat().st_size > XLSX_MAX_BYTES:
         raise ValueError("xlsx больше 20 МБ — текст не извлекаем")
@@ -77,7 +86,7 @@ def _extract_xlsx(path: Path) -> str:
             for row in ws.iter_rows(values_only=True):
                 if rows_left <= 0:
                     break
-                cells = ["" if v is None else str(v).strip() for v in row]
+                cells = [_cell_text(v) for v in row]
                 if any(cells):
                     parts.append("\t".join(cells).rstrip("\t"))
                     rows_left -= 1
@@ -263,6 +272,12 @@ async def main() -> None:
             processed = await _process_extraction_batch()
             if processed:
                 log.info("extraction.batch_done", jobs=processed)
+            else:
+                # Очередь пуста — доставить версии без извлечённого текста (бэкфилл
+                # идёт порциями по 300, чтобы не раздувать очередь разом).
+                queued = await _enqueue_backfill()
+                if queued:
+                    log.info("extraction.backfill_enqueued", jobs=queued)
             await _process_rag()
         except Exception as e:  # noqa: BLE001 — цикл живёт всегда
             log.error("extraction.cycle_failed", err=str(e)[:300])

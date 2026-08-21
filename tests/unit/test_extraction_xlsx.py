@@ -14,7 +14,7 @@ def test_xlsx_extracts_all_sheets_as_tab_rows(tmp_path: Path) -> None:
     ws = wb.active
     ws.title = "Техкарта"
     ws.append(["Блюдо", "Выход, г", "Цена"])
-    ws.append(["Азу из говядины", 250, 390])
+    ws.append(["Азу из говядины", 250.0, 390])
     ws.append([None, None, None])
     ws2 = wb.create_sheet("Чек-лист")
     ws2.append(["Открытие", "Да"])
