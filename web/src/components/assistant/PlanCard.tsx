@@ -48,8 +48,12 @@ function FieldValue({ field }: { field: Plan['fields'][number] }) {
   if (field.chip === 'who') {
     return (
       <span className="flex min-w-0 items-center gap-2">
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface text-[12px] font-bold text-text">
-          {field.value.slice(0, 1).toUpperCase()}
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-av-fill text-[11px] font-bold text-text ring-1 ring-glass-border">
+          {field.value
+            .split(/\s+/)
+            .slice(0, 2)
+            .map((w) => w.slice(0, 1).toUpperCase())
+            .join('')}
         </span>
         <span className="truncate text-[15px] text-text">{field.value}</span>
       </span>

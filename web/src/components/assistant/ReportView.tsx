@@ -153,12 +153,23 @@ export function ReportView({
           <ArrowLeft className="h-4 w-4" /> В журнал
         </Button>
       )}
+      <div className="flex flex-col gap-1.5">
+        <p className="text-[12px] font-bold uppercase tracking-[0.08em] text-text2">Отчёты iiko</p>
+        {data ? (
+          <>
+            <h2 className="font-display text-[22px] font-bold leading-[1.25] text-text">{data.title}</h2>
+            <p className="text-[15px] text-text2">{data.subtitle}</p>
+          </>
+        ) : (
+          <h2 className="font-display text-[22px] font-bold leading-[1.25] text-text">Отчёты</h2>
+        )}
+      </div>
       <div className="flex items-center gap-2">
-        <div className="flex min-w-0 flex-1 flex-wrap gap-2">
+        <div className="-mx-4 flex min-w-0 flex-1 gap-2 overflow-x-auto px-4 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:px-0">
           {(catalog.data?.reports ?? []).map((r) => (
             <button
-              key={r.key}
               type="button"
+              key={r.key}
               onClick={() => setKind(r.key)}
               className={cn(
                 'inline-flex min-h-[34px] shrink-0 items-center rounded-full px-3.5 text-[13px] font-semibold',
@@ -207,13 +218,6 @@ export function ReportView({
 
       {data && (
         <>
-          <div>
-            <h2 className="font-display text-[20px] font-bold leading-[1.25] text-text lg:text-[24px]">
-              {data.title}
-            </h2>
-            <p className="mt-1 text-[15px] text-text2">{data.subtitle}</p>
-          </div>
-
           <div className="flex flex-wrap gap-2.5">
             {data.stats.map((s) => (
               <StatTile key={s.label} label={s.label} value={s.value} accent={s.positive} />
@@ -221,6 +225,26 @@ export function ReportView({
           </div>
 
           <div className="rounded-[14px] border border-glass-border bg-tint p-4">
+            {/* Шапка блока графика: чип источника + название + действия периода
+                и выгрузки — рядом с данными, к которым относятся. */}
+            <div className="mb-3.5 flex flex-wrap items-center gap-2.5 border-b border-hair pb-3">
+              <span className="inline-flex h-[22px] shrink-0 items-center rounded-md bg-blue-deep px-2 text-[11px] font-bold uppercase tracking-[0.06em] text-bg">
+                iiko
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-text">{data.title}</span>
+              <Button size="sm" variant="secondary" className="bg-transparent" onClick={() => setPicking((v) => !v)}>
+                Другой период
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="bg-transparent"
+                disabled={csv.isPending}
+                onClick={() => csv.mutate()}
+              >
+                <Download className="h-4 w-4" /> CSV
+              </Button>
+            </div>
             {data.chart === 'bars' && <Bars rows={data.bars} />}
             {data.chart === 'hours' && <Hours rows={data.hours} />}
             {data.chart === 'lists' && (
@@ -242,17 +266,6 @@ export function ReportView({
           )}
 
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" onClick={() => setPicking((v) => !v)}>
-              Другой период
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={csv.isPending}
-              onClick={() => csv.mutate()}
-            >
-              <Download className="h-4 w-4" /> CSV
-            </Button>
             <Button size="sm" onClick={() => setTaskFrom(`${data.title} · ${data.subtitle}`)}>
               <ListPlus className="h-4 w-4" /> Создать задачу по отчёту
             </Button>

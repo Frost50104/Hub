@@ -60,25 +60,24 @@ export function EmptyState({
   const groups = reports ? [...GROUPS, REPORTS_GROUP] : GROUPS
   return (
     <div className="mx-auto w-full max-w-3xl">
-      <h2 className="font-display text-[22px] font-bold leading-[1.25] text-text lg:text-[26px]">
+      <h2 className="font-display text-[22px] font-bold leading-[1.25] text-text lg:text-[24px]">
         Что нужно сделать?
       </h2>
-      <p className="mt-2 max-w-[560px] text-[15px] leading-[1.5] text-text2">
+      <p className="mt-2 max-w-[640px] text-[15px] leading-[1.5] text-text2 lg:text-[16px] lg:leading-[1.55]">
         {canAct
           ? 'Напишите обычными словами. Всё, что меняет данные, ассистент сначала покажет планом — и выполнит только после вашего подтверждения.'
           : 'Напишите вопрос обычными словами. Текущий AI-провайдер умеет отвечать по базе знаний, но не выполняет действия.'}
       </p>
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
+      {/* auto-fit, а не grid-cols-3: при выключенном iiko групп две, и жёсткая
+          тройка оставляла бы пустую колонку. */}
+      <div className="mt-6 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
         {groups.map((group) => (
           <div
             key={group.title}
             className="shrink-0 rounded-[14px] border border-glass-border bg-tint p-3.5"
           >
-            <div className="flex items-center gap-2.5">
-              <p className="font-display text-[15px] font-semibold text-text">
-                {group.title}
-              </p>
+            <div className="flex items-center gap-2.5 border-b border-hair pb-2.5">
               <Badge
                 className={cn(
                   'whitespace-nowrap',
@@ -88,8 +87,11 @@ export function EmptyState({
               >
                 {group.tag}
               </Badge>
+              <p className="font-display text-[15px] font-semibold text-text">
+                {group.title}
+              </p>
             </div>
-            <div className="mt-1.5">
+            <div className="mt-2">
               {group.items.map((item) => (
                 <button
                   key={item}

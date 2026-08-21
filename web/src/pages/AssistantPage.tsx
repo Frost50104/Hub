@@ -1,5 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BarChart3, Bot, MessageSquarePlus, Trash2 } from 'lucide-react'
+import {
+  BarChart3,
+  Bot,
+  History,
+  MessageSquarePlus,
+  Trash2,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -233,6 +239,8 @@ export function AssistantPage() {
 
   const turns = toTurns(messages.data ?? [])
   const empty = !conversationId && !pending
+  // Десктоп: список разговоров спрятан за «История» (макет «Ассистент»).
+  const [historyOpen, setHistoryOpen] = useState(false)
   // Регистр задаём здесь: шапка его не трогает (preserveEyebrowCase).
   const opCount = empty
     ? 'Новый разговор'
@@ -271,8 +279,35 @@ export function AssistantPage() {
           }
         />
       )}
-      <div className="flex min-h-0 flex-1 gap-6 p-4 lg:p-8">
-        {isDesktop && (
+      {isDesktop && (
+        <header className="flex flex-wrap items-center gap-3 px-8 pb-2 pt-7">
+          <h1 className="font-display text-[19px] font-bold leading-[1.2] text-text">Ассистент</h1>
+          <span className="inline-flex h-[22px] items-center rounded-md border border-hair px-2 text-[12px] font-semibold text-text2">
+            {['Задачи', 'Обучение', status.data?.reports ? 'iiko' : null].filter(Boolean).join(' · ')}
+          </span>
+          <span className="text-[13px] text-text2">{opCount}</span>
+          <span className="flex-1" />
+          <Button
+            size="sm"
+            variant={view === 'reports' ? 'default' : 'secondary'}
+            className={view === 'reports' ? undefined : 'bg-transparent'}
+            onClick={() => setView(view === 'reports' ? 'journal' : 'reports')}
+          >
+            <BarChart3 className="h-4 w-4" /> Отчёты iiko
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="bg-transparent"
+            aria-pressed={historyOpen}
+            onClick={() => setHistoryOpen((v) => !v)}
+          >
+            <History className="h-4 w-4" /> История
+          </Button>
+        </header>
+      )}
+      <div className="flex min-h-0 flex-1 gap-6 p-4 lg:px-8 lg:pb-8 lg:pt-3">
+        {isDesktop && historyOpen && (
           <aside className="w-60 shrink-0 space-y-2 overflow-y-auto">
             <Button
               size="sm"
@@ -284,14 +319,6 @@ export function AssistantPage() {
               }}
             >
               <MessageSquarePlus className="h-4 w-4" /> Новый разговор
-            </Button>
-            <Button
-              size="sm"
-              variant={view === 'reports' ? 'default' : 'ghost'}
-              className="w-full justify-start"
-              onClick={() => setView(view === 'reports' ? 'journal' : 'reports')}
-            >
-              <BarChart3 className="h-4 w-4" /> Отчёты iiko
             </Button>
             {(conversations.data ?? []).map((c) => (
               <div
@@ -326,7 +353,7 @@ export function AssistantPage() {
         {/* min-w-0 обязателен: у flex-элемента min-width по умолчанию auto,
             и колонка отказывалась сжиматься под содержимое отчёта — вкладки
             и списки раздвигали страницу за правый край. */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+        <div className="mx-auto flex min-h-0 min-w-0 w-full max-w-[900px] flex-1 flex-col gap-4">
           {view === 'reports' ? (
             <div className="min-h-0 flex-1 overflow-y-auto">
               <ReportView initialKind={reportKind} onBack={() => setView('journal')} />

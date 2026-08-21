@@ -1,4 +1,4 @@
-import { Send, Sparkles } from 'lucide-react'
+import { ArrowRight, Send } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { MicButton, type MicState } from './MicButton'
@@ -17,6 +17,8 @@ const HINTS = [
   'Что просрочено у меня',
   'Сводка по проекту',
   'Кто перегружен на этой неделе',
+  'Создай задачу на приёмку',
+  'Регламент замены плёнки',
 ]
 
 export function Composer({
@@ -82,7 +84,8 @@ export function Composer({
           </span>
         </div>
       )}
-      <div className="flex items-end gap-2.5 rounded-2xl border border-glass-border bg-surface p-3 pl-4">
+      {/* Телефон: силуэт r14 / p6 (макет «Ассистент»), десктоп — 2xl / p3. */}
+      <div className="flex items-end gap-2 rounded-[14px] border border-glass-border bg-surface p-1.5 pl-3.5 lg:gap-2.5 lg:rounded-2xl lg:p-3 lg:pl-4">
         {/* Обёртка держит ширину: сам AutoGrowTextarea — это grid-двойник,
             и flex-1 на textarea внутри него не сработал бы. */}
         <div className="min-w-0 flex-1">
@@ -116,8 +119,8 @@ export function Composer({
         >
           {isDesktop ? (
             <>
-              <Sparkles className="h-4 w-4" />
               Выполнить
+              <ArrowRight className="h-4 w-4" />
             </>
           ) : (
             <Send className="h-4 w-4" />
