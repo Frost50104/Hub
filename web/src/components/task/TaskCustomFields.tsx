@@ -4,6 +4,7 @@ import { Fragment } from 'react'
 import { DrawerSection } from '@/components/task/DrawerSection'
 
 import { CustomFieldEditor } from '@/components/task/CustomFieldEditor'
+import { PropertyRow } from '@/components/ui/PropertyRows'
 import {
   useCustomFieldDefinitions,
   useSetTaskCustomValue,
@@ -14,8 +15,9 @@ import { type CustomFieldValue } from '@/lib/customFields'
 interface TaskCustomFieldsProps {
   taskId: string
   projectId: string
-  /** `rows` — пары dt/dd прямо в <dl> карточки задачи (без своей секции). */
-  variant?: 'section' | 'rows'
+  /** `rows` — пары dt/dd прямо в <dl> карточки задачи (без своей секции);
+   *  `mobile` — строки PropertyRow внутри мобильного блока свойств. */
+  variant?: 'section' | 'rows' | 'mobile'
 }
 
 /** Renders every project field as an inline editor pre-populated from the
@@ -31,6 +33,9 @@ export function TaskCustomFields({
   const setValue = useSetTaskCustomValue(taskId)
 
   if (defs.isLoading || values.isLoading) {
+    // В мобильном блоке свойств строки просто появятся, когда загрузятся:
+    // спиннер между «Срок» и футером читался бы как ещё одно свойство.
+    if (variant === 'mobile') return null
     return (
       <div className="flex items-center gap-2 text-[13px] text-text2">
         <Loader2 className="h-3.5 w-3.5 animate-spin" /> Загружаем поля…
@@ -54,10 +59,23 @@ export function TaskCustomFields({
           value={current}
           disabled={setValue.isPending}
           onChange={(next) => setValue.mutate({ fieldId: def.id, value: next })}
+          variant={variant === 'mobile' ? 'mobile' : 'field'}
         />
       ),
     }
   })
+
+  if (variant === 'mobile') {
+    return (
+      <>
+        {editors.map(({ def, node }) => (
+          <PropertyRow key={def.id} label={<span className="line-clamp-1">{def.name}</span>}>
+            {node}
+          </PropertyRow>
+        ))}
+      </>
+    )
+  }
 
   // Кастом-поля живут в той же <dl>, что статус и срок: это свойства задачи,
   // а не отдельный раздел (спека редизайна).

@@ -27,6 +27,9 @@ export interface Me {
   profile: MeProfile | null
   /** Карточка с этим email в архиве — требуется восстановление админом. */
   profile_needs_restore: boolean
+  /** Может создавать проекты и папки (admin или офис/ТУ/франчайзи) — считает
+   *  сервер (`project_access.can_create_project`), фронт правило не выводит. */
+  can_create_projects: boolean
 }
 
 export function useMe(): UseQueryResult<Me> {

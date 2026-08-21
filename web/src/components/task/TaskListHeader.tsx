@@ -33,8 +33,15 @@ export function TaskListHeader({
     >
       <span aria-hidden className={cell} />
       {labels.map((name, i) => (
-        <span key={`${name}-${i}`} className={cn(cell, 'truncate pr-3.5')} title={name}>
-          {name}
+        // `truncate` на flex-контейнере не даёт многоточия: обрезает ВНУТРЕННИЙ
+        // блочный span, а ячейка — min-w-0 + overflow-hidden, иначе подписи
+        // семи кастом-полей налезали друг на друга (QA-0821 #9).
+        <span
+          key={`${name}-${i}`}
+          className={cn(cell, 'min-w-0 overflow-hidden pr-3.5')}
+          title={name}
+        >
+          <span className="block min-w-0 truncate">{name}</span>
         </span>
       ))}
       <span aria-hidden className={cn(cell, 'justify-end')} />

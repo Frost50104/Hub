@@ -50,6 +50,9 @@ export function useCreateTask(projectId: string) {
     meta: { errorMessage: 'Не удалось создать задачу' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tasks', projectId] })
+      // «N задач» в шапке и списке проектов считает сервер по списку —
+      // без инвалидации шапка держала «0 задач» до рефетча (QA-0821 #6).
+      qc.invalidateQueries({ queryKey: ['projects'] })
     },
   })
 }
@@ -121,9 +124,11 @@ export function useUpdateTask(projectId: string) {
       qc.invalidateQueries({ queryKey: ['me-tasks'] })
       qc.invalidateQueries({ queryKey: taskKeys.detail(vars.id) })
       qc.invalidateQueries({ queryKey: ['task', vars.id, 'activity'] })
-      // «N из M» в шапках колонок живёт в кэше этапов.
+      // «N из M» в шапках колонок живёт в кэше этапов; done_count проекта —
+      // в его карточке.
       if (vars.stage_id !== undefined || vars.status !== undefined) {
         qc.invalidateQueries({ queryKey: ['stages', projectId] })
+        qc.invalidateQueries({ queryKey: ['projects', projectId] })
       }
     },
   })
@@ -246,6 +251,7 @@ export function useArchiveTask(projectId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tasks', projectId] })
       qc.invalidateQueries({ queryKey: ['me-tasks'] })
+      qc.invalidateQueries({ queryKey: ['projects', projectId] })
     },
   })
 }
@@ -255,6 +261,9 @@ export function useDeleteTask(projectId: string) {
   return useMutation({
     mutationFn: (id: string) => tasksApi.remove(id),
     meta: { errorMessage: 'Не удалось удалить задачу' },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', projectId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks', projectId] })
+      qc.invalidateQueries({ queryKey: ['projects'] })
+    },
   })
 }

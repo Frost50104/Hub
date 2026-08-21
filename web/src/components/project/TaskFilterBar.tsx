@@ -1,4 +1,5 @@
 import { ChevronDown, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import { PeoplePicker } from '@/components/PeoplePicker'
 import { Button } from '@/components/ui/Button'
@@ -46,6 +47,7 @@ function FilterSelect({
   onChange,
   children,
   ariaLabel,
+  stack = false,
 }: {
   /** Подпись, по которой считается ширина. */
   label: string
@@ -53,26 +55,54 @@ function FilterSelect({
   onChange: (v: string) => void
   children: React.ReactNode
   ariaLabel: string
+  /** Шторка фильтров на телефоне: селект во всю ширину, 44px. */
+  stack?: boolean
 }) {
   return (
-    <span className="relative inline-flex shrink-0 items-center">
+    <span className={cn('relative inline-flex shrink-0 items-center', stack && 'w-full')}>
       <select
         aria-label={ariaLabel}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        // 10px слева + 30px справа (гнездо под шеврон); `ch` в Onest немного
-        // уже среднего знака кириллицы, поэтому коэффициент 1.05.
-        style={{ width: `calc(${(label.length * 1.05).toFixed(1)}ch + 40px)` }}
-        className="h-8 cursor-pointer appearance-none whitespace-nowrap rounded-md border border-glass-border bg-glass pl-2.5 pr-[30px] font-body text-[12px] font-medium text-text2 focus-visible:border-amber focus-visible:outline-none"
+        // 8px слева + 28px справа (гнездо под шеврон); `ch` в Onest немного
+        // уже среднего знака кириллицы, поэтому коэффициент 1.02. Ужато с
+        // 1.05ch+40px: при 1280 с сайдбаром тулбар переносил «Колонки» на
+        // вторую строку (QA-0821 #5).
+        style={stack ? undefined : { width: `calc(${(label.length * 1.02).toFixed(1)}ch + 36px)` }}
+        className={cn(
+          'cursor-pointer appearance-none whitespace-nowrap rounded-md border border-glass-border bg-glass font-body font-medium focus-visible:border-amber focus-visible:outline-none',
+          stack
+            ? 'h-11 w-full pl-3 pr-[34px] text-[15px] text-text'
+            : 'h-8 pl-2 pr-[28px] text-[12px] text-text2',
+        )}
       >
         {children}
       </select>
       <ChevronDown
-        className="pointer-events-none absolute right-2.5 h-[13px] w-[13px] text-text2"
+        className={cn(
+          'pointer-events-none absolute h-[13px] w-[13px] text-text2',
+          stack ? 'right-3' : 'right-2',
+        )}
         strokeWidth={2.2}
       />
     </span>
   )
+}
+
+/** true, когда контент ряда шире контейнера — тогда справа мягкий край. */
+function useOverflowing<T extends HTMLElement>(enabled: boolean) {
+  const ref = useRef<T>(null)
+  const [overflowing, setOverflowing] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!enabled || !el || typeof ResizeObserver === 'undefined') return
+    const check = () => setOverflowing(el.scrollWidth > el.clientWidth + 1)
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [enabled])
+  return { ref, overflowing }
 }
 
 interface TaskFilterBarProps {
@@ -83,9 +113,15 @@ interface TaskFilterBarProps {
   showSort?: boolean
   /** Календарь не умеет фильтр по метке на бэке. */
   showLabel?: boolean
-  /** Хвостовые контролы (например «Колонки») — в ОДНОЙ wrap-строке с
+  /** Хвостовые контролы (например «Колонки») — в ОДНОЙ строке с
    * фильтрами, чтобы тулбар не разъезжался на три этажа. */
   trailing?: React.ReactNode
+  /**
+   * `row` — тулбар десктопа: на lg..xl одна строка со скрытым горизонтальным
+   * скроллом и мягким краем, на ≥xl перенос; `stack` — столбик контролов
+   * 44px во всю ширину для мобильной шторки (MobileFilterSheet).
+   */
+  layout?: 'row' | 'stack'
 }
 
 export function TaskFilterBar({
@@ -95,22 +131,46 @@ export function TaskFilterBar({
   showSort,
   showLabel = true,
   trailing,
+  layout = 'row',
 }: TaskFilterBarProps) {
   const labels = useLabels(projectId)
   const count = activeFilterCount(value)
   const set = (patch: Partial<TaskViewFilters>) => onChange({ ...value, ...patch })
   const labelName = labels.data?.find((l) => l.id === value.label)?.name
+  const stack = layout === 'stack'
+  const { ref, overflowing } = useOverflowing<HTMLDivElement>(!stack)
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <PeoplePicker
-        variant="filter"
-        value={value.assignee ?? null}
-        onChange={(id) => set({ assignee: id ?? undefined })}
-        placeholder="Исполнитель: все"
-      />
+    <div
+      ref={ref}
+      className={cn(
+        stack
+          ? 'flex flex-col gap-2'
+          : cn(
+              // -my-1/py-1: запас под focus-ring внутри overflow-контейнера.
+              '-my-1 flex flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:flex-wrap xl:overflow-visible',
+              overflowing &&
+                '[mask-image:linear-gradient(90deg,#000_calc(100%-28px),transparent)] xl:[mask-image:none]',
+            ),
+      )}
+    >
+      <span
+        className={cn(
+          'inline-flex shrink-0',
+          stack &&
+            'w-full [&>button]:h-11 [&>button]:w-full [&>button]:text-[15px] [&>button]:text-text',
+        )}
+      >
+        <PeoplePicker
+          variant="filter"
+          value={value.assignee ?? null}
+          onChange={(id) => set({ assignee: id ?? undefined })}
+          placeholder="Исполнитель: все"
+        />
+      </span>
 
       <FilterSelect
+        stack={stack}
         ariaLabel="Фильтр по статусу"
         label={value.status ? STATUS_LABEL[value.status] : 'Статус: все'}
         value={value.status ?? ''}
@@ -125,6 +185,7 @@ export function TaskFilterBar({
       </FilterSelect>
 
       <FilterSelect
+        stack={stack}
         ariaLabel="Фильтр по приоритету"
         label={value.priority ? PRIORITY_LABEL[value.priority] : 'Приоритет: любой'}
         value={value.priority ?? ''}
@@ -140,6 +201,7 @@ export function TaskFilterBar({
 
       {showLabel && (labels.data?.length ?? 0) > 0 && (
         <FilterSelect
+          stack={stack}
           ariaLabel="Фильтр по метке"
           label={labelName ?? 'Метка: любая'}
           value={value.label ?? ''}
@@ -155,6 +217,7 @@ export function TaskFilterBar({
       )}
 
       <FilterSelect
+        stack={stack}
         ariaLabel="Фильтр по сроку"
         label={value.due ? DUE_LABEL[value.due] : 'Срок: любой'}
         value={value.due ?? ''}
@@ -170,6 +233,7 @@ export function TaskFilterBar({
 
       {showSort && (
         <FilterSelect
+          stack={stack}
           ariaLabel="Сортировка"
           label={SORT_LABEL[value.sort ?? 'position']}
           value={value.sort ?? 'position'}
@@ -194,18 +258,21 @@ export function TaskFilterBar({
           onClick={() => set({ order: value.order === 'desc' ? 'asc' : 'desc' })}
           aria-label="Направление сортировки"
           className={cn(
-            'inline-flex h-8 shrink-0 items-center rounded-md border border-glass-border bg-glass px-2.5 text-[12px] font-medium text-text2',
+            'inline-flex shrink-0 items-center rounded-md border border-glass-border bg-glass font-medium text-text2',
             'hover:bg-surface focus-visible:border-amber focus-visible:outline-none',
+            stack ? 'h-11 w-full justify-center text-[15px]' : 'h-8 px-2.5 text-[12px]',
           )}
         >
-          {value.order === 'desc' ? '↓ убыв.' : '↑ возр.'}
+          {value.order === 'desc' ? '↓ по убыванию' : '↑ по возрастанию'}
         </button>
       )}
 
-      {count > 0 && (
+      {/* В шторке «Сбросить» живёт в её шапке (MobileFilterSheet). */}
+      {!stack && count > 0 && (
         <Button
           variant="ghost"
           size="sm"
+          className="shrink-0"
           onClick={() => onChange({ sort: value.sort, order: value.order })}
         >
           <X className="h-3.5 w-3.5" />

@@ -1,5 +1,5 @@
 import { Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/Button'
@@ -25,12 +25,21 @@ interface LabelsManagerProps {
   onOpenChange: (open: boolean) => void
 }
 
+const DEFAULT_LABEL_COLOR = '#FFB200'
+
 /** Управление метками проекта (owner-only — кнопка входа видна только owner'у). */
 export function LabelsManager({ projectId, open, onOpenChange }: LabelsManagerProps) {
   const labels = useLabels(open ? projectId : undefined)
   const create = useCreateLabel(projectId)
   const [name, setName] = useState('')
-  const [color, setColor] = useState('#FFB200')
+  const [color, setColor] = useState(DEFAULT_LABEL_COLOR)
+  // Диалог переоткрыли — черновик прошлого раза не нужен.
+  useEffect(() => {
+    if (open) {
+      setName('')
+      setColor(DEFAULT_LABEL_COLOR)
+    }
+  }, [open])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -40,6 +49,8 @@ export function LabelsManager({ projectId, open, onOpenChange }: LabelsManagerPr
       await create.mutateAsync({ name: trimmed, color })
       toast.success(`Метка «${trimmed}» создана`)
       setName('')
+      // Следующая метка начинается с амбера, а не с цвета предыдущей (QA-0821 #7).
+      setColor(DEFAULT_LABEL_COLOR)
     } catch {
       // тост показывает глобальный onError мутаций
     }

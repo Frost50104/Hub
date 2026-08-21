@@ -10,7 +10,7 @@ import {
   Users,
   X,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { Markdown } from '@/components/Markdown'
@@ -136,6 +136,15 @@ export function TaskDetailDrawer({
   onOpenTask,
 }: TaskDetailDrawerProps) {
   const isDesktop = useIsDesktop()
+  // Раскладка фиксируется при открытии (инвариант Dialog/ResponsiveDialog):
+  // `modal` у Radix нельзя переключать на лету, а поворот планшета не должен
+  // превращать панель в лист посреди правки. Пока карточка закрыта — следим
+  // за вьюпортом; открылась — замораживаем.
+  const [desktop, setDesktop] = useState(isDesktop)
+  useEffect(() => {
+    if (!taskId) setDesktop(isDesktop)
+  }, [taskId, isDesktop])
+  const contentRef = useRef<HTMLDivElement>(null)
   const taskQuery = useTask(taskId ?? undefined)
   const { data: task, isLoading } = taskQuery
   const project = useProject(projectId)
@@ -205,21 +214,39 @@ export function TaskDetailDrawer({
   const overdue = task ? isOverdue(task.due_at, task.status) : false
 
   return (
-    <DialogPrimitive.Root open={!!taskId} onOpenChange={(o) => !o && onClose()}>
+    // Десктоп — НЕмодальная панель (макет «Задача · десктоп»): список под ней
+    // виден, кликабелен и скроллится, клик по другой строке переключает
+    // карточку через ?task=. Телефон — модальный полноэкранный лист.
+    <DialogPrimitive.Root
+      key={desktop ? 'panel' : 'sheet'}
+      open={!!taskId}
+      onOpenChange={(o) => !o && onClose()}
+      modal={!desktop}
+    >
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+        {!desktop && (
+          <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+        )}
         <DialogPrimitive.Content
+          ref={contentRef}
+          tabIndex={-1}
+          // Немодальный Radix закрывает слой и по клику, и по ФОКУСУ снаружи —
+          // оба гасим: закрытие — крестик, Escape, пустой ?task=.
+          onInteractOutside={desktop ? (e) => e.preventDefault() : undefined}
+          // Авто-фокус — на сам контент, а не на первый фокусируемый элемент:
+          // «Закрыть» получал фокус-ринг при каждом открытии (QA-0821 #14).
+          onOpenAutoFocus={(e) => {
+            e.preventDefault()
+            contentRef.current?.focus()
+          }}
           className={cn(
-            'fixed z-50 flex flex-col bg-bg-alt focus:outline-none',
-            // Мобильный — полноэкранный лист снизу.
-            'inset-0',
-            'data-[state=open]:animate-in data-[state=closed]:animate-out',
-            'data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',
-            // Десктоп — панель 560px у правого края, с волосяной границей и
-            // тенью; ширина из спеки (была 480 — свойства не помещались в две
-            // колонки и переносились).
-            'lg:inset-y-0 lg:left-auto lg:right-0 lg:w-[560px] lg:border-l lg:border-hair lg:shadow-[-18px_0_48px_rgba(0,0,0,.35)]',
-            'lg:data-[state=closed]:slide-out-to-right-2 lg:data-[state=open]:slide-in-from-right-2',
+            'flex flex-col bg-bg-alt focus:outline-none',
+            desktop
+              ? // Панель 560 у правого края РАБОЧЕЙ ОБЛАСТИ: те же 12px
+                // (--shell-gap), что у панели Shell, правые углы 20px, слева
+                // волосяная граница и тень; z-40 — ниже меню и пикеров (z-50).
+                'fixed inset-y-[var(--shell-gap)] right-[var(--shell-gap)] z-40 w-[560px] max-w-[calc(100vw-2*var(--shell-gap))] overflow-hidden rounded-r-[20px] border-l border-hair shadow-[-18px_0_48px_rgba(0,0,0,.35)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right-2 data-[state=open]:slide-in-from-right-2'
+              : 'fixed inset-0 z-50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',
           )}
         >
           <DialogPrimitive.Title className="sr-only">
@@ -376,7 +403,7 @@ export function TaskDetailDrawer({
               />
             )}
 
-            {task && !isDesktop && (
+            {task && !desktop && (
               // Мобильный блок свойств: один компактный контейнер строк
               // «свойство → значение», контрол справа, строка 48px. Ряды чипов
               // на телефоне превращались в стену из шести разнородных блоков.
@@ -461,13 +488,17 @@ export function TaskDetailDrawer({
                     />
                   </span>
                 </PropertyRow>
+                {/* Кастом-поля — теми же строками 48px, что Этап/Приоритет/Срок
+                    (макет «Задача · мобильный»), а не стопкой «подпись + инпут»
+                    (QA-0821 #14). */}
+                <TaskCustomFields variant="mobile" taskId={task.id} projectId={projectId} />
               </PropertyRows>
             )}
 
             {task && (
               <>
                 <dl className="m-0 grid grid-cols-1 items-start gap-x-3.5 gap-y-3 lg:grid-cols-[112px_1fr] lg:items-center lg:gap-y-2.5">
-                  {isDesktop && (
+                  {desktop && (
                     <>
                       <Dt icon={Flag}>Этап</Dt>
                       <dd className="m-0">
@@ -551,7 +582,7 @@ export function TaskDetailDrawer({
                     />
                   </dd>
 
-                  {isDesktop && (
+                  {desktop && (
                     <>
                       <Dt icon={Calendar}>Старт</Dt>
                       <dd className="m-0">
@@ -603,11 +634,13 @@ export function TaskDetailDrawer({
                     />
                   </dd>
 
-                  <TaskCustomFields
-                    variant="rows"
-                    taskId={task.id}
-                    projectId={projectId}
-                  />
+                  {desktop && (
+                    <TaskCustomFields
+                      variant="rows"
+                      taskId={task.id}
+                      projectId={projectId}
+                    />
+                  )}
                 </dl>
 
                 <DrawerSection title="Описание">
@@ -683,7 +716,7 @@ export function TaskDetailDrawer({
           {/* Мобильный футер: «Комментарий…» ставит курсор в композер треда,
               «Готово» закрывает задачу (или возвращает). Sticky, не fixed:
               fixed под клавиатурой iOS уезжает вместе с visual viewport. */}
-          {task && !isDesktop && (
+          {task && !desktop && (
             <footer
               className="sticky bottom-0 z-10 flex shrink-0 items-center gap-2 border-t border-hair bg-bg-alt px-4 pt-2.5"
               style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 10px)' }}

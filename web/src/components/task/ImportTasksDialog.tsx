@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
+import { labelKeys } from '@/hooks/useLabels'
 import { cn } from '@/lib/cn'
 import { tasksApi, type TaskImportReport } from '@/lib/tasks'
 
@@ -37,6 +38,9 @@ export function ImportTasksDialog({
         qc.invalidateQueries({ queryKey: ['tasks', projectId] })
         qc.invalidateQueries({ queryKey: ['stages', projectId] })
         qc.invalidateQueries({ queryKey: ['projects'] })
+        // Импорт создаёт метки и вешает их на строки — без инвалидации
+        // назначений чипы появлялись только после F5 (QA-0821 #8).
+        qc.invalidateQueries({ queryKey: labelKeys.all(projectId) })
       }
     },
   })

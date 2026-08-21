@@ -27,6 +27,7 @@ import { ColumnsMenu } from '@/components/project/ColumnsMenu'
 import { CustomFieldsManager } from '@/components/project/CustomFieldsManager'
 import { LabelsManager } from '@/components/project/LabelsManager'
 import { MembersTab } from '@/components/project/MembersTab'
+import { MobileFilterSheet } from '@/components/project/MobileFilterSheet'
 import { TaskFilterBar } from '@/components/project/TaskFilterBar'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ShareDialog } from '@/components/share/ShareDialog'
@@ -115,6 +116,7 @@ function ProjectHeader({
   onImport,
   tab,
   onTab,
+  mobileFilters,
 }: {
   project: Project
   sectionCount: number
@@ -126,20 +128,63 @@ function ProjectHeader({
   onImport: () => void
   tab: TabKey
   onTab: (t: TabKey) => void
+  /** Телефон: чип «Фильтры (N)» → шторка (MobileFilterSheet); на вкладках без фильтров — нет. */
+  mobileFilters?: React.ReactNode
 }) {
   const isArchived = !!project.archived_at
   const setFavorite = useSetFavorite(project.id)
   const counts = [
     project.task_count != null ? plural(project.task_count, 'задача', 'задачи', 'задач') : null,
     sectionCount > 0 ? plural(sectionCount, 'секция', 'секции', 'секций') : null,
-  ].filter(Boolean)
+  ].filter((c): c is string => Boolean(c))
+
+  const favoriteButton = project.my_role && (
+    <button
+      type="button"
+      onClick={() => setFavorite.mutate(!project.is_favorite)}
+      disabled={setFavorite.isPending}
+      className={cn(
+        'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg hover:bg-glass',
+        project.is_favorite ? 'text-amber' : 'text-text2',
+      )}
+      aria-label={project.is_favorite ? 'Убрать из избранного' : 'В избранное'}
+    >
+      <Star className={cn('h-4 w-4', project.is_favorite && 'fill-amber')} />
+    </button>
+  )
 
   return (
     <header className="shrink-0 border-b border-hair bg-bg px-4 pt-4 lg:px-6">
-      <div className="flex items-start gap-3.5">
-        {/* items-start, а не items-center: на 360px блок с названием, бейджами
-            и описанием занимает четыре строки, и центрированная плашка ключа
-            уезжала на середину — к описанию, а не к названию. */}
+      {/* Телефон — компактная шапка макета «Доска · мобильный»: eyebrow
+          «KEY · N задач · M секций», название, бейджи; описание и кнопки
+          действий — десктопу, фильтры — чипом в шторку (QA-0821 #13). */}
+      <div className="lg:hidden">
+        <div className="flex items-center justify-between gap-3">
+          <p className="min-w-0 truncate text-[12px] font-semibold uppercase tracking-[0.08em] text-text2">
+            {[project.key, ...counts].join(' · ')}
+          </p>
+          {mobileFilters}
+        </div>
+        <div className="mt-1 flex items-start gap-2">
+          <h1 className="min-w-0 flex-1 font-display text-[22px] font-bold leading-[1.2] text-text [text-wrap:balance]">
+            {project.name}
+          </h1>
+          {favoriteButton}
+        </div>
+        {(isArchived || project.my_role) && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {isArchived && <Badge variant="secondary">архив</Badge>}
+            {project.my_role && (
+              <Badge variant="secondary">{PROJECT_ROLE_LABEL[project.my_role]}</Badge>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="hidden items-start gap-3.5 lg:flex">
+        {/* items-start, а не items-center: блок с названием, бейджами и
+            описанием может занимать две строки, и центрированная плашка ключа
+            уезжала бы к описанию, а не к названию. */}
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-amber font-display text-base font-bold uppercase text-on-amber">
             {project.key.slice(0, 2)}
@@ -149,22 +194,7 @@ function ProjectHeader({
               <h1 className="min-w-0 font-display text-[22px] font-bold leading-[1.2] text-text">
                 {project.name}
               </h1>
-              {project.my_role && (
-                <button
-                  type="button"
-                  onClick={() => setFavorite.mutate(!project.is_favorite)}
-                  disabled={setFavorite.isPending}
-                  className={cn(
-                    'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg hover:bg-glass',
-                    project.is_favorite ? 'text-amber' : 'text-text2',
-                  )}
-                  aria-label={
-                    project.is_favorite ? 'Убрать из избранного' : 'В избранное'
-                  }
-                >
-                  <Star className={cn('h-4 w-4', project.is_favorite && 'fill-amber')} />
-                </button>
-              )}
+              {favoriteButton}
               <Badge variant="outline" className="font-mono tracking-[0.04em]">
                 {project.key}
               </Badge>
@@ -173,20 +203,18 @@ function ProjectHeader({
                 <Badge variant="secondary">{PROJECT_ROLE_LABEL[project.my_role]}</Badge>
               )}
             </div>
-            {/* Описание и счётчики — одна строка на десктопе и две на узком
-                экране. Разделитель между ними живёт в `hidden sm:inline`:
-                при переносе он остался бы сиротой в начале новой строки. */}
-            <p className="mt-[3px] flex flex-wrap items-center gap-x-[7px] text-[13px] text-text2">
+            {/* Описание и счётчики — ОДНА строка: длинное описание режется
+                многоточием (полный текст — в title), счётчики не переносятся
+                на второй этаж (QA-0821 #3). */}
+            <p className="mt-[3px] flex min-w-0 flex-nowrap items-center gap-x-[7px] text-[13px] text-text2">
               {project.description && (
-                <span className="min-w-0 truncate">{project.description}</span>
-              )}
-              {project.description && counts.length > 0 && (
-                <span aria-hidden className="hidden sm:inline">
-                  ·
+                <span className="min-w-0 truncate" title={project.description}>
+                  {project.description}
                 </span>
               )}
+              {project.description && counts.length > 0 && <span aria-hidden>·</span>}
               {counts.map((c, i) => (
-                <span key={c} className="whitespace-nowrap">
+                <span key={c} className="shrink-0 whitespace-nowrap">
                   {i > 0 && <span className="pr-[7px]">·</span>}
                   {c}
                 </span>
@@ -212,24 +240,31 @@ function ProjectHeader({
                   <Tags className="h-[15px] w-[15px]" />
                   Метки
                 </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="secondary" size="icon" aria-label="Действия">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {/* Импорт и в непустой проект: из пустого состояния он
-                        достижим кнопкой, отсюда — всегда. */}
-                    {project.can_edit && !isArchived && (
-                      <DropdownMenuItem onSelect={onImport}>Импорт из CSV…</DropdownMenuItem>
-                    )}
+              </>
+            )}
+            {/* Меню «Действия» — и у редактора: иначе «Импорт из CSV…» в
+                непустом проекте был недостижим (QA-0821 #22). Рендерится,
+                только когда в нём есть хотя бы один пункт. */}
+            {((project.can_edit && !isArchived) || project.can_manage) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="secondary" size="icon" aria-label="Действия">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {/* Импорт и в непустой проект: из пустого состояния он
+                      достижим кнопкой, отсюда — всегда. */}
+                  {project.can_edit && !isArchived && (
+                    <DropdownMenuItem onSelect={onImport}>Импорт из CSV…</DropdownMenuItem>
+                  )}
+                  {project.can_manage && (
                     <DropdownMenuItem onSelect={onArchive}>
                       {isArchived ? 'Разархивировать' : 'Архивировать'}
                     </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             {project.can_edit && (
               <Button size="sm" onClick={onCreateTask}>
@@ -459,7 +494,9 @@ function SectionBlock({
                 gridColumns={gridColumns}
                 labels={labelsByTask?.get(t.id)}
                 subtasks={childrenByParent?.get(t.id)}
-                fallback={title}
+                // Без fallback: секция уже подписана шапкой над строками, и
+                // «Без секции» в каждой строке — шум (макет «Список»,
+                // QA-0821 #10). Контекст = проект остаётся в «Моих задачах».
                 selected={selectedTaskId === t.id}
                 onClick={() => onTaskClick(t.id)}
                 onToggleDone={() => toggleDone(t)}
@@ -486,7 +523,6 @@ function SectionBlock({
                 task={t}
                 labels={labelsByTask?.get(t.id)}
                 subtasks={childrenByParent?.get(t.id)}
-                fallback={title}
                 selected={selectedTaskId === t.id}
                 onClick={() => onTaskClick(t.id)}
                 onToggleDone={() => toggleDone(t)}
@@ -879,9 +915,10 @@ export function ProjectPage() {
       ? 'Только чтение: вы наблюдатель проекта.'
       : null
 
-  /** Тулбар фильтров — отдельная полоса под шапкой, как в макете. */
+  /** Тулбар фильтров — отдельная полоса под шапкой, как в макете (десктоп);
+   *  на телефоне те же фильтры — чип «Фильтры (N)» в шапке → шторка. */
   const toolbar = (trailing?: React.ReactNode, showSort?: boolean, showLabel = true) => (
-    <div className="shrink-0 border-b border-hair bg-bg px-4 py-2.5 lg:px-6">
+    <div className="hidden shrink-0 border-b border-hair bg-bg px-4 py-2.5 lg:block lg:px-6">
       <TaskFilterBar
         projectId={id}
         value={filters}
@@ -892,6 +929,15 @@ export function ProjectPage() {
       />
     </div>
   )
+  const mobileFilters = (showSort: boolean, showLabel: boolean) => (
+    <MobileFilterSheet
+      projectId={id}
+      value={filters}
+      onChange={setFilters}
+      showSort={showSort}
+      showLabel={showLabel}
+    />
+  )
 
   return (
     <div className="flex flex-col lg:h-full lg:overflow-hidden">
@@ -900,6 +946,15 @@ export function ProjectPage() {
         sectionCount={sections.data?.length ?? 0}
         tab={tab}
         onTab={setTab}
+        mobileFilters={
+          tab === 'list'
+            ? mobileFilters(true, true)
+            : tab === 'board'
+              ? mobileFilters(false, true)
+              : tab === 'calendar'
+                ? mobileFilters(false, false)
+                : undefined
+        }
         onArchive={async () => {
           try {
             await archive.mutateAsync(!isArchived)

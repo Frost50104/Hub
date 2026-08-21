@@ -46,6 +46,7 @@ import { Label } from '@/components/ui/Label'
 import { ListRow } from '@/components/ui/ListRow'
 import { SheetPicker } from '@/components/ui/SheetPicker'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
+import { useMe } from '@/hooks/useMe'
 import {
   useCreateProject,
   useDeleteFolder,
@@ -149,8 +150,10 @@ function ProjectRow({
               onKeyDown={(e) => e.stopPropagation()}
               className={cn(
                 '-m-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+                // На телефоне hover нет — контурная звезда у каждой строки
+                // превращалась в шум (QA-0821 #2): видна только у избранных,
+                // добавить в избранное можно из шапки проекта.
                 project.is_favorite ? 'text-amber' : 'text-text2 opacity-0 hover:text-text group-hover:opacity-100 focus-visible:opacity-100',
-                !isDesktop && 'opacity-100',
               )}
             >
               <Star className={cn('h-[15px] w-[15px]', project.is_favorite && 'fill-current')} />
@@ -538,6 +541,9 @@ export function ProjectListPage() {
     [data, folders],
   )
   const canManageFolders = foldersQuery.data?.can_manage ?? false
+  // Право создавать проекты считает сервер (admin или офис/ТУ/франчайзи);
+  // линейному сотруднику кнопок нет — он попадает в проекты по приглашению.
+  const canCreateProjects = useMe().data?.can_create_projects ?? false
   const dndEnabled = isDesktop && folders.length > 0
 
   // distance:5 — обычный клик по строке по-прежнему открывает проект.
@@ -564,7 +570,7 @@ export function ProjectListPage() {
           .join(' · ')
       : null
 
-  const createButtons = isDesktop ? (
+  const createButtons = !canCreateProjects ? null : isDesktop ? (
     <div className="flex shrink-0 items-center gap-2">
       {canManageFolders && (
         <Button variant="secondary" size="sm" onClick={() => setCreateFolderOpen(true)}>
@@ -633,9 +639,13 @@ export function ProjectListPage() {
           layout="card"
           icon={<Folder className="h-[26px] w-[26px]" strokeWidth={1.6} />}
           title="У вас пока нет проектов в Hub"
-          text="Проект — это задачи, секции и участники. Папки появятся, когда проектов станет много."
-          cta="Создать первый проект"
-          onCta={() => setCreateOpen(true)}
+          text={
+            canCreateProjects
+              ? 'Проект — это задачи, секции и участники. Папки появятся, когда проектов станет много.'
+              : 'Проект — это задачи, секции и участники. Вас добавит в проект руководитель или администратор.'
+          }
+          cta={canCreateProjects ? 'Создать первый проект' : undefined}
+          onCta={canCreateProjects ? () => setCreateOpen(true) : undefined}
         />
       )}
 

@@ -12,6 +12,9 @@
 
   /* Primary palette — RGB channels (space-separated) so Tailwind's `/<alpha>`
      opacity modifiers work via `rgb(var(--x) / <alpha-value>)` in the config. */
+  /* Отступ рабочей панели Shell на десктопе (lg:p-3). Его же берёт карточка
+     задачи — немодальная панель у правого края рабочей области. */
+  --shell-gap: 12px;
   --amber: 255 178 0;
   --green: 52 211 153;
   /* Заливка бейджей: --green в светлой теме (#16A34A) — средняя светлота, на

@@ -92,7 +92,7 @@ export function Shell() {
   if (me.data && me.data.hub_role === null) return <NoAccessScreen />
 
   return (
-    <div className="min-h-screen lg:flex lg:h-screen lg:gap-3 lg:overflow-hidden lg:p-3">
+    <div className="min-h-screen lg:flex lg:h-screen lg:gap-[var(--shell-gap)] lg:overflow-hidden lg:p-[var(--shell-gap)]">
       {isDesktop && (space === 'learn' ? <LearnSidebar /> : <Sidebar />)}
       {/* На десктопе рабочая область — ПАНЕЛЬ (как <main> в макете): скругление
           20px и фон --bg закрывают точечную сетку, а overflow-y:auto заодно

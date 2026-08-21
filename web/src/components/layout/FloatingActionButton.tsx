@@ -20,6 +20,7 @@ import {
 import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Button } from '@/components/ui/Button'
+import { useMe } from '@/hooks/useMe'
 import { useCreateProject, useProjectFolders } from '@/hooks/useProjects'
 import { cn } from '@/lib/cn'
 
@@ -54,6 +55,7 @@ export function FloatingActionButton({
   // Права считает сервер; тот же queryKey, что у сайдбара и страницы —
   // TanStack дедуплицирует, лишнего запроса нет.
   const foldersCanManage = useProjectFolders().data?.can_manage ?? false
+  const canCreateProjects = useMe().data?.can_create_projects ?? false
 
   if (hidden) return null
   return (
@@ -90,15 +92,17 @@ export function FloatingActionButton({
         >
           Задача
         </BottomSheetItem>
-        <BottomSheetItem
-          icon={<FolderKanban className="h-5 w-5" />}
-          onClick={() => {
-            setSheetOpen(false)
-            setProjectOpen(true)
-          }}
-        >
-          Проект
-        </BottomSheetItem>
+        {canCreateProjects && (
+          <BottomSheetItem
+            icon={<FolderKanban className="h-5 w-5" />}
+            onClick={() => {
+              setSheetOpen(false)
+              setProjectOpen(true)
+            }}
+          >
+            Проект
+          </BottomSheetItem>
+        )}
         {foldersCanManage && (
           <BottomSheetItem
             icon={<FolderPlus className="h-5 w-5" />}
