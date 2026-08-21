@@ -18,16 +18,16 @@
 
 | kind | Когда | Кому |
 |---|---|---|
-| `task.assigned_to_me` | `PATCH /api/tasks/{id}` меняет `assignee_id` на меня | новому assignee |
+| `task.assigned_to_me` | меня добавили в исполнители (`POST /tasks/{id}/assignees` или `PATCH assignee_ids`; исполнители — `task_assignees`) | новому исполнителю |
 | `task.mentioned` | в комментарии есть `@me` | упомянутому |
 | `task.commented_on_watched` | новый коммент на наблюдаемой задаче | всем watchers кроме автора |
-| `task.status_changed_on_watched` | PATCH меняет `status` | всем watchers кроме автора |
+| `task.status_changed_on_watched` | смена этапа/статуса (`stage_id` → `set_stage`, зеркало `status`; в тексте — имя этапа) | всем watchers кроме автора |
 | `task.due_soon` | `status != 'done'` и `due_at` в течение 24ч | assignee + watchers |
 | `task.overdue` | `status != 'done'` и `due_at < NOW()` | assignee + watchers |
 
 ## Триггеры: learn-домен (14 kinds)
 
-Источник истины полного списка — `app/services/notification_prefs.py::NOTIFICATION_KINDS` (фронт-словарь `web/src/lib/notifications.ts` синхронен).
+Источник истины полного списка — `app/services/notification_prefs.py::NOTIFICATION_KINDS` (фронт-словарь `web/src/lib/notificationKinds.ts`, реэкспорт через `notifications.ts`, синхронен — менять парой).
 
 | kind | Когда | Кому |
 |---|---|---|
