@@ -21,6 +21,7 @@ from app.jobs._common import already_notified
 from app.models.task import Task
 from app.services.notify import notify_overdue
 from app.services.task_assignees import collect_recipients
+from app.services.taskdates import start_of_today_utc
 
 log = structlog.get_logger("jobs.overdue")
 
@@ -38,7 +39,9 @@ async def main() -> int:
             await session.execute(
                 select(Task).where(
                     Task.due_at.is_not(None),
-                    Task.due_at < now,
+                    # День срока раньше сегодняшнего (display tz), не `< now`:
+                    # полуденный срок сегодня — ещё не просрочка.
+                    Task.due_at < start_of_today_utc(now),
                     Task.status != "done",
                     Task.archived_at.is_(None),
                 )

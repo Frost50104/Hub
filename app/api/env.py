@@ -20,6 +20,9 @@ class EnvResponse(BaseModel):
     environment: str
     vapid_public_key: str | None
     sentry_dsn: str | None
+    # Таймзона, в которой срок задачи = календарный день (services/taskdates);
+    # фронт считает «сегодня/просрочено» в ней же (lib/taskDates.setDisplayTz).
+    display_timezone: str = "Europe/Moscow"
 
 
 @router.get("/env", response_model=EnvResponse)
@@ -30,4 +33,5 @@ async def get_env() -> EnvResponse:
         environment=settings.environment,
         vapid_public_key=settings.vapid_public_key,
         sentry_dsn=settings.sentry_dsn,
+        display_timezone=settings.display_timezone,
     )

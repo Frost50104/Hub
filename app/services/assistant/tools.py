@@ -22,7 +22,6 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
-from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -43,8 +42,17 @@ from app.services.task_assignees import (
     has_no_assignees,
     load_assignees,
 )
+from app.services.taskdates import (
+    due_noon_utc,
+    overdue_clause,
+)
+from app.services.taskdates import overdue_days as taskdates_overdue_days
+from app.services.timefmt import display_tz
 
-MSK = ZoneInfo("Europe/Moscow")
+# Display tz сети (settings.display_timezone, default Europe/Moscow) — та же,
+# что у уведомлений и окон задач (services/timefmt, services/taskdates).
+# Берётся вызовом display_tz() в месте использования, не константой: тесты
+# переопределяют settings через env.
 
 STATUS_RU = {
     "todo": "К выполнению",
@@ -75,20 +83,19 @@ def parse_due(value: str | None) -> datetime | None:
     raw = value.strip()
     try:
         if len(raw) == 10:
-            naive = datetime.strptime(raw, "%Y-%m-%d").replace(hour=12)
-            return naive.replace(tzinfo=MSK).astimezone(UTC)
+            return due_noon_utc(datetime.strptime(raw, "%Y-%m-%d").date())
         parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         raise NotFound(f"Не понял дату «{value}» — нужен вид 2026-08-22") from None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=MSK)
+        parsed = parsed.replace(tzinfo=display_tz())
     return parsed.astimezone(UTC)
 
 
 def fmt_due(value: datetime | None) -> str | None:
     if value is None:
         return None
-    local = value.astimezone(MSK)
+    local = value.astimezone(display_tz())
     months = (
         "января", "февраля", "марта", "апреля", "мая", "июня",
         "июля", "августа", "сентября", "октября", "ноября", "декабря",
@@ -227,10 +234,10 @@ async def serialize_task(ctx: ToolContext, task: Task, project_key: str) -> dict
     """Компактное представление задачи ДЛЯ МОДЕЛИ: без описаний и вложений —
     в контекст должно влезать двадцать задач, а не две."""
     assignees = (await load_assignees(ctx.db, [task.id])).get(task.id, [])
-    now = datetime.now(UTC)
+    # Просрочка — в календарных днях display tz (taskdates), не в сутках от now.
     overdue_days = 0
-    if task.due_at and task.status != "done" and task.due_at < now:
-        overdue_days = (now - task.due_at).days
+    if task.due_at and task.status != "done":
+        overdue_days = taskdates_overdue_days(task.due_at)
     return {
         "key": f"{project_key}-{task.seq}",
         "title": task.title,
@@ -271,7 +278,7 @@ async def t_search_tasks(ctx: ToolContext, a: SearchTasksArgs) -> dict[str, Any]
     if a.unassigned:
         stmt = stmt.where(has_no_assignees())
     if a.overdue:
-        stmt = stmt.where(Task.due_at < datetime.now(UTC), Task.status != "done")
+        stmt = stmt.where(overdue_clause())
     rows = (
         await ctx.db.execute(
             stmt.order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc()).limit(a.limit)
@@ -303,7 +310,7 @@ async def t_project_summary(ctx: ToolContext, a: ProjectRefArgs) -> dict[str, An
         for s in ("todo", "in_progress", "in_review", "done")
     }
     overdue = (
-        await ctx.db.execute(base.where(Task.due_at < now, Task.status != "done"))
+        await ctx.db.execute(base.where(overdue_clause(now)))
     ).scalar_one()
     week_ago = now - timedelta(days=7)
     created_week = (await ctx.db.execute(base.where(Task.created_at >= week_ago))).scalar_one()
@@ -317,8 +324,7 @@ async def t_project_summary(ctx: ToolContext, a: ProjectRefArgs) -> dict[str, An
             .where(
                 Task.project_id == project.id,
                 Task.archived_at.is_(None),
-                Task.due_at < now,
-                Task.status != "done",
+                overdue_clause(now),
             )
             .order_by(Task.due_at.asc())
             .limit(5)
@@ -346,7 +352,7 @@ async def t_my_tasks(ctx: ToolContext, a: MyTasksArgs) -> dict[str, Any]:
     if a.status:
         stmt = stmt.where(Task.status == a.status)
     if a.overdue_only:
-        stmt = stmt.where(Task.due_at < datetime.now(UTC), Task.status != "done")
+        stmt = stmt.where(overdue_clause())
     rows = (
         await ctx.db.execute(stmt.order_by(Task.due_at.asc().nulls_last()).limit(30))
     ).all()

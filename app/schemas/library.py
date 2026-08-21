@@ -109,6 +109,15 @@ class VersionResponse(BaseModel):
     size_bytes: int
     note: str | None
     created_at: datetime
+    # Есть ли извлечённый текст (предпросмотр «Просмотреть текст» для docx/xlsx).
+    has_text: bool = False
+
+
+class MaterialTextResponse(BaseModel):
+    version_no: int
+    mime: str
+    text: str
+    truncated: bool
 
 
 class StatusBody(BaseModel):

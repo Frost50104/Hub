@@ -15,7 +15,7 @@ side covers the small overlap; the front-end clips visually.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -25,13 +25,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
 from app.models.task import Task
-from app.schemas.task import TaskPriority, TaskResponse, TaskStatus
+from app.schemas.task import TaskPriority, TaskResponse, TaskStatusFilter
 from app.services.project_access import require_project_role
 from app.services.task_assignees import (
     assignee_exists,
     load_assignees,
     serialize_with_assignees,
 )
+from app.services.taskdates import day_start_utc
+from app.services.tasks import apply_status_filter
 
 router = APIRouter(tags=["calendar"])
 
@@ -56,7 +58,7 @@ async def list_calendar_tasks(
     project_id: UUID,
     from_: str = Query(..., alias="from", description="Inclusive YYYY-MM-DD"),
     to: str = Query(..., description="Inclusive YYYY-MM-DD"),
-    status_: TaskStatus | None = Query(default=None, alias="status"),
+    status_: TaskStatusFilter | None = Query(default=None, alias="status"),
     assignee_id: UUID | None = Query(default=None, alias="assignee"),
     priority: TaskPriority | None = Query(default=None),
     principal: Principal = Depends(require_auth()),
@@ -79,8 +81,9 @@ async def list_calendar_tasks(
 
     # Half-open UTC range. `to_dt` = day after `to_date` at 00:00 → captures
     # everything that ended on `to_date` in any timezone reasonable for ops.
-    from_dt = datetime.combine(from_date, time(0, 0, 0), tzinfo=UTC)
-    to_dt = datetime.combine(to_date + timedelta(days=1), time(0, 0, 0), tzinfo=UTC)
+    # Границы дней — display tz (срок задачи = календарный день, taskdates).
+    from_dt = day_start_utc(from_date)
+    to_dt = day_start_utc(to_date + timedelta(days=1))
 
     stmt = (
         # Без JOIN на исполнителей — он размножил бы задачу по их числу
@@ -101,8 +104,7 @@ async def list_calendar_tasks(
         )
         .order_by(Task.start_at.nulls_last(), Task.due_at)
     )
-    if status_ is not None:
-        stmt = stmt.where(Task.status == status_)
+    stmt = apply_status_filter(stmt, status_)
     if assignee_id is not None:
         stmt = stmt.where(assignee_exists(assignee_id))
     if priority is not None:

@@ -11,6 +11,10 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 TaskStatus = Literal["todo", "in_progress", "in_review", "done"]
+# Фильтр статуса в списках: конкретный статус ИЛИ псевдо-значение `open`
+# («не выполнено» = status != done). Применяется ТОЛЬКО через
+# `services.tasks.apply_status_filter` — в модели такого статуса нет.
+TaskStatusFilter = Literal["todo", "in_progress", "in_review", "done", "open"]
 TaskPriority = Literal["low", "medium", "high", "urgent"]
 
 # Потолок фан-аута уведомлений (dispatch делает SELECT prefs + INSERT на

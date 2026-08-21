@@ -6,23 +6,29 @@ Used on the Home dashboard widget and the standalone /my page. Filters:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from signaris_auth import Principal
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth_any
 from app.models.project import Project
 from app.models.task import Task
-from app.schemas.task import TaskResponse, TaskStatus
+from app.schemas.task import TaskResponse, TaskStatusFilter
 from app.services.task_assignees import (
     assignee_exists,
     load_assignees,
     serialize_with_assignees,
 )
+from app.services.taskdates import (
+    overdue_clause,
+    start_of_today_utc,
+    start_of_tomorrow_utc,
+)
+from app.services.tasks import apply_status_filter
 
 router = APIRouter(tags=["me-tasks"])
 
@@ -31,7 +37,7 @@ DueWindow = Literal["overdue", "today", "upcoming", "all"]
 
 @router.get("/me/tasks", response_model=list[TaskResponse])
 async def list_my_tasks(
-    status_: TaskStatus | None = Query(default=None, alias="status"),
+    status_: TaskStatusFilter | None = Query(default=None, alias="status"),
     due_window: DueWindow | None = Query(default=None),
     include_archived: bool = Query(default=False),
     principal: Principal = Depends(require_auth_any()),
@@ -48,19 +54,23 @@ async def list_my_tasks(
     )
     if not include_archived:
         stmt = stmt.where(Task.archived_at.is_(None))
-    if status_ is not None:
-        stmt = stmt.where(Task.status == status_)
+    stmt = apply_status_filter(stmt, status_)
 
+    # Окна — по КАЛЕНДАРНЫМ дням display tz (services/taskdates.py), не по
+    # now(): задача со сроком сегодня после полудня — в «Сегодня» и
+    # «Предстоит», а не в «Просрочено» (ОС тестировщика 2026-08).
     now = datetime.now(UTC)
     if due_window == "overdue":
-        stmt = stmt.where(Task.due_at < now, Task.status != "done")
+        stmt = stmt.where(overdue_clause(now))
     elif due_window == "today":
-        today_end = (now + timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
+        # «Сегодня» = просроченные (не done) + всё со сроком сегодня
+        # (решение владельца 2026-08-21, как в Asana).
+        stmt = stmt.where(
+            Task.due_at < start_of_tomorrow_utc(now),
+            or_(Task.status != "done", Task.due_at >= start_of_today_utc(now)),
         )
-        stmt = stmt.where(Task.due_at >= now, Task.due_at < today_end)
     elif due_window == "upcoming":
-        stmt = stmt.where(Task.due_at >= now, Task.status != "done")
+        stmt = stmt.where(Task.due_at >= start_of_today_utc(now), Task.status != "done")
 
     rows = (await db.execute(stmt)).all()
     by_task = await load_assignees(db, [task.id for task, _ in rows])

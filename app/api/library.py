@@ -22,7 +22,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from signaris_auth import Principal
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,6 +47,7 @@ from app.schemas.library import (
     LibraryResponse,
     MaterialCreate,
     MaterialResponse,
+    MaterialTextResponse,
     MaterialUpdate,
     SectionCreate,
     SectionResponse,
@@ -55,6 +56,7 @@ from app.schemas.library import (
     VersionResponse,
 )
 from app.services import audit, lifecycle
+from app.services.attachments import SNIFF_HEAD_BYTES, resolve_mime, sniff_mismatch
 from app.services.audience_resolver import (
     set_object_audience,
     visible_filter,
@@ -138,8 +140,24 @@ async def _material_visible_to(
     return True
 
 
+async def _current_text(db: AsyncSession, material: LibraryMaterial) -> str | None:
+    """Извлечённый текст текущей версии (пишет extraction-воркер, 0041)."""
+    if material.kind != "file" or not material.current_version_no:
+        return None
+    return (
+        await db.execute(
+            select(MaterialVersion.extracted_text).where(
+                MaterialVersion.material_id == material.id,
+                MaterialVersion.version_no == material.current_version_no,
+            )
+        )
+    ).scalar_one_or_none()
+
+
 async def _reindex(db: AsyncSession, material: LibraryMaterial) -> None:
     if material.status == "published":
+        # body_text — из версии, иначе каждая переиндексация (PATCH, статус,
+        # аудитория) затирала извлечённый текст пустым (ОС 2026-08).
         await upsert_document(
             db,
             tenant_id=material.tenant_id,
@@ -147,6 +165,7 @@ async def _reindex(db: AsyncSession, material: LibraryMaterial) -> None:
             object_id=material.id,
             title=material.title,
             snippet=material.description,
+            body_text=await _current_text(db, material),
             audience_id=material.audience_id,
             published_at=material.published_at,
             url_path=f"/learn/library?m={material.id}",
@@ -434,27 +453,50 @@ async def delete_section(
     section_id: UUID,
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
+    *,
+    force: bool = False,
 ) -> None:
+    """Удалить раздел. Непустой — 409, либо `?force=1`: материалы (любого
+    статуса) и подразделы в одной транзакции переводятся в «Без раздела»
+    (section_id/parent_id = NULL — FK RESTRICT остаются страховкой), затем
+    раздел удаляется (решение владельца 2026-08-21)."""
     await require_content_role(db, principal, "publisher")
     section = await db.get(LibrarySection, section_id)
     if section is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Раздел не найден")
-    in_use = (
+    materials_count = (
         await db.execute(
-            select(LibraryMaterial.id)
-            .where(LibraryMaterial.section_id == section_id)
-            .limit(1)
+            select(func.count()).select_from(LibraryMaterial).where(
+                LibraryMaterial.section_id == section_id
+            )
         )
-    ).scalar_one_or_none() is not None
-    has_children = (
+    ).scalar_one()
+    children_count = (
         await db.execute(
-            select(LibrarySection.id).where(LibrarySection.parent_id == section_id).limit(1)
+            select(func.count()).select_from(LibrarySection).where(
+                LibrarySection.parent_id == section_id
+            )
         )
-    ).scalar_one_or_none() is not None
-    if in_use or has_children:
+    ).scalar_one()
+    if (materials_count or children_count) and not force:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Раздел не пуст — перенесите материалы и подразделы",
+            detail=(
+                f"Раздел не пуст: {materials_count} материалов, {children_count} подразделов — "
+                "перенесите их или удалите вместе с разделом"
+            ),
+        )
+    if materials_count:
+        await db.execute(
+            update(LibraryMaterial)
+            .where(LibraryMaterial.section_id == section_id)
+            .values(section_id=None)
+        )
+    if children_count:
+        await db.execute(
+            update(LibrarySection)
+            .where(LibrarySection.parent_id == section_id)
+            .values(parent_id=None)
         )
     audit.record(
         db,
@@ -464,6 +506,12 @@ async def delete_section(
         object_type="library_section",
         object_id=section.id,
         object_label=section.title,
+        diff={
+            "detached_materials": {"old": materials_count, "new": 0},
+            "detached_children": {"old": children_count, "new": 0},
+        }
+        if (materials_count or children_count)
+        else None,
     )
     await db.delete(section)
     await db.commit()
@@ -610,7 +658,7 @@ async def upload_version(
     if material.kind != "file":
         raise HTTPException(status_code=422, detail="У материала-ссылки нет версий")
 
-    mime = file.content_type or "application/octet-stream"
+    mime = resolve_mime(file.content_type, file.filename or "")
     if mime not in LIBRARY_MIME:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
@@ -618,6 +666,15 @@ async def upload_version(
         )
     if not file.filename:
         raise HTTPException(status_code=400, detail="Имя файла обязательно")
+    # Магические байты — как у вложений задач (QA-0821 #11): `.exe` под
+    # именем .docx не проходит по заявленному MIME.
+    head = await file.read(SNIFF_HEAD_BYTES)
+    await file.seek(0)
+    if sniff_mismatch(mime, head):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Содержимое файла не соответствует заявленному типу",
+        )
 
     next_no = (
         (
@@ -895,6 +952,61 @@ async def download_material(
         )
         await db.commit()
     return FileResponse(path, media_type=row.mime, filename=row.file_name)
+
+
+_TEXT_PREVIEW_LIMIT = 60_000
+
+
+@router.get(
+    "/learn/library/materials/{material_id}/text", response_model=MaterialTextResponse
+)
+async def material_text(
+    material_id: UUID,
+    version: int | None = Query(default=None),
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> MaterialTextResponse:
+    """Текстовый предпросмотр docx/xlsx (извлечённый воркером текст версии):
+    браузер такие файлы не показывает, а скачивание на телефоне — тупик.
+    Доступ и учёт ознакомления — как у download (предпросмотр = открыл)."""
+    role = await resolve_content_role(db, principal)
+    material = await _get_material_or_404(db, material_id)
+    profile = await get_profile(db, principal)
+    if not await _material_visible_to(
+        db, material, principal, role, profile.id if profile else None
+    ):
+        raise HTTPException(status_code=404, detail="Материал не найден")
+    version_no = version or material.current_version_no
+    if version_no is None:
+        raise HTTPException(status_code=404, detail="У материала нет файла")
+    row = (
+        await db.execute(
+            select(MaterialVersion).where(
+                MaterialVersion.material_id == material_id,
+                MaterialVersion.version_no == version_no,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Версия не найдена")
+    if not row.extracted_text:
+        raise HTTPException(
+            status_code=404,
+            detail="Текст ещё готовится — попробуйте через минуту или скачайте файл",
+        )
+    if profile is not None:
+        await _track_open(
+            db, tenant_id=material.tenant_id, profile_id=profile.id, material_id=material.id
+        )
+        await db.commit()
+    text_value = row.extracted_text
+    truncated = len(text_value) > _TEXT_PREVIEW_LIMIT
+    return MaterialTextResponse(
+        version_no=row.version_no,
+        mime=row.mime,
+        text=text_value[:_TEXT_PREVIEW_LIMIT],
+        truncated=truncated,
+    )
 
 
 @router.post("/learn/library/materials/{material_id}/ack", response_model=MaterialResponse)

@@ -180,6 +180,20 @@ class ReviewQueueItem(BaseModel):
     open_question_count: int
 
 
+class BlockedQuizItem(BaseModel):
+    """Сотрудник, упёршийся в лимит попыток обязательного теста (гейт урока)."""
+
+    quiz_id: UUID
+    quiz_title: str
+    course_id: UUID | None
+    lesson_id: UUID | None
+    profile_id: UUID
+    employee_name: str
+    attempts_used: int
+    attempts_limit: int
+    last_attempt_at: datetime | None
+
+
 class CertificateBackgroundBody(BaseModel):
     """Подложка сертификата: id картинки из media_files либо None (сброс)."""
 

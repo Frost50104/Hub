@@ -135,6 +135,10 @@ class LessonContentResponse(BaseModel):
     # Гейты завершения (фронт показывает, чего не хватает).
     gate_blocks: list[str] = []
     required_videos: list[str] = []
+    # Обязательный опубликованный тест урока и его состояние для профиля
+    # (services/quiz_gate.QuizGateState): без «passed» урок не завершить.
+    quiz_required: bool = False
+    quiz_state: str = "none"
     # Навигация.
     prev_lesson_id: UUID | None = None
     next_lesson_id: UUID | None = None

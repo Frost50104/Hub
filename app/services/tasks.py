@@ -117,13 +117,16 @@ async def create_task_record(
         created_by=principal.employee_id,
         start_at=body.start_at,
         due_at=body.due_at,
+        # Сначала seq (row-lock проекта до конца транзакции), ПОТОМ позиция:
+        # иначе два параллельных create (быстрый ввод Enter-Enter) считают
+        # max(position)+1 до лока и получают одинаковую позицию.
+        seq=await allocate_task_seq(db, project_id),
         position=await next_position(
             db,
             project_id,
             stage_id=stage.id if stage is not None else None,
             system_status=task_status,
         ),
-        seq=await allocate_task_seq(db, project_id),
     )
     if task_status == "done":
         task.completed_at = datetime.now(UTC)
@@ -177,3 +180,15 @@ async def create_task_record(
         },
     )
     return task
+
+
+def apply_status_filter(stmt, status_: str | None):
+    """Фильтр статуса списков: `open` → все незавершённые (`!= done`),
+    иначе равенство. Единственное место, знающее про псевдо-статус `open`
+    (`schemas.task.TaskStatusFilter`)."""
+    if status_ is None:
+        return stmt
+    if status_ == "open":
+        return stmt.where(Task.status != "done")
+    return stmt.where(Task.status == status_)
+

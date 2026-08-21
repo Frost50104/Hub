@@ -23,7 +23,7 @@ from app.schemas.task import (
     TaskCreate,
     TaskPriority,
     TaskResponse,
-    TaskStatus,
+    TaskStatusFilter,
     TaskUpdate,
     resolve_assignee_ids,
 )
@@ -43,6 +43,7 @@ from app.services.task_assignees import (
 from app.services.task_counts import load_row_counts
 from app.services.tasks import (
     allocate_task_seq,
+    apply_status_filter,
     assert_parent_one_level,
     assert_section_in_project,
     create_task_record,
@@ -84,7 +85,7 @@ async def _serialize_one(db: AsyncSession, task: Task) -> TaskResponse:
 async def list_tasks(
     project_id: UUID,
     include_archived: bool = Query(default=False),
-    status_: TaskStatus | None = Query(default=None, alias="status"),
+    status_: TaskStatusFilter | None = Query(default=None, alias="status"),
     assignee_id: UUID | None = Query(default=None, alias="assignee"),
     section_id: UUID | None = Query(default=None),
     priority: TaskPriority | None = Query(default=None),
@@ -121,8 +122,7 @@ async def list_tasks(
     )
     if not include_archived:
         stmt = stmt.where(Task.archived_at.is_(None))
-    if status_ is not None:
-        stmt = stmt.where(Task.status == status_)
+    stmt = apply_status_filter(stmt, status_)
     if assignee_id is not None:
         # Семантика: «сотрудник СРЕДИ исполнителей».
         stmt = stmt.where(assignee_exists(assignee_id))

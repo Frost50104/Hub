@@ -20,7 +20,7 @@ Rate-limited via `enforce_rate_limit(bucket="search")` — 60/min/user.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 from typing import Literal
 from uuid import UUID
 
@@ -39,6 +39,7 @@ from app.services.public_token import initials
 from app.services.search_dsl import ParsedQuery
 from app.services.search_dsl import parse as parse_dsl
 from app.services.task_assignees import assignee_exists, load_assignees
+from app.services.taskdates import day_start_utc
 
 router = APIRouter(tags=["search"])
 
@@ -119,14 +120,15 @@ def _apply_dsl_filters(stmt, parsed: ParsedQuery, *, employee_id: UUID):
     if parsed.priority is not None:
         stmt = stmt.where(Task.priority == parsed.priority)
     if parsed.due_date is not None:
-        dt = datetime.combine(parsed.due_date, time(0, 0, 0), tzinfo=UTC)
-        next_day = datetime.combine(parsed.due_date, time(23, 59, 59, 999_999), tzinfo=UTC)
+        # Границы дня — display tz (срок задачи = календарный день, taskdates).
+        dt = day_start_utc(parsed.due_date)
+        nxt = day_start_utc(parsed.due_date + timedelta(days=1))
         if parsed.due_op == "<":
             stmt = stmt.where(Task.due_at < dt)
         elif parsed.due_op == ">":
-            stmt = stmt.where(Task.due_at > next_day)
+            stmt = stmt.where(Task.due_at >= nxt)
         else:  # "="
-            stmt = stmt.where(Task.due_at >= dt, Task.due_at <= next_day)
+            stmt = stmt.where(Task.due_at >= dt, Task.due_at < nxt)
     if parsed.created_date is not None:
         dt = datetime.combine(parsed.created_date, time(0, 0, 0), tzinfo=UTC)
         next_day = datetime.combine(parsed.created_date, time(23, 59, 59, 999_999), tzinfo=UTC)

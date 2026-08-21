@@ -15,7 +15,7 @@ Same auth rules as `/calendar` — viewer+ on project. MAX 366 day window
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -32,6 +32,7 @@ from app.schemas.dependency import TaskDependencyResponse
 from app.schemas.task import TaskResponse
 from app.services.project_access import require_project_role
 from app.services.task_assignees import load_assignees, serialize_with_assignees
+from app.services.taskdates import day_start_utc
 
 router = APIRouter(tags=["timeline"])
 
@@ -88,8 +89,9 @@ async def get_timeline(
             detail=f"Окно > {_MAX_RANGE_DAYS} дней",
         )
 
-    from_dt = datetime.combine(from_date, time(0, 0, 0), tzinfo=UTC)
-    to_dt = datetime.combine(to_date + timedelta(days=1), time(0, 0, 0), tzinfo=UTC)
+    # Границы дней — display tz (срок задачи = календарный день, taskdates).
+    from_dt = day_start_utc(from_date)
+    to_dt = day_start_utc(to_date + timedelta(days=1))
 
     # ─── Tasks overlapping the window ───────────────────────────────────────
     overlaps = (Task.due_at.is_not(None)) & or_(

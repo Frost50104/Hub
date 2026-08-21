@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.courses import complete_lesson, get_lesson
 from app.api.quizzes import (
+    blocked_quizzes,
+    reset_attempts,
     review_attempt,
     save_answer,
     start_or_resume_attempt,
@@ -20,7 +22,13 @@ from app.api.quizzes import (
 )
 from app.models.activity import ActivityEvent, Certificate
 from app.models.notification import Notification
-from app.schemas.quiz import AnswerBody, QuestionDraft, QuizUpsert, ReviewBody
+from app.schemas.quiz import (
+    AnswerBody,
+    QuestionDraft,
+    QuizUpsert,
+    ResetAttemptsBody,
+    ReviewBody,
+)
 from app.services.certificate import issue_if_earned
 from app.services.points import award
 from tests.integration.conftest import make_principal
@@ -226,20 +234,107 @@ async def test_after_prev_test_lock(db: AsyncSession, tenant_id: uuid.UUID):
 
     quiz = await _publish_quiz(db, hr, lessons[0].id, [_single_draft(correct=1)])
 
-    # Урок 1 завершён, но тест не сдан → урок 2 всё ещё заперт.
-    await get_lesson(lessons[0].id, member, db)
-    await complete_lesson(lessons[0].id, member, db)
+    # Гейт обязательного теста (ОС 2026-08): урок 1 НЕ завершить без сдачи,
+    # урок 2 заперт.
+    opened = await get_lesson(lessons[0].id, member, db)
+    assert opened.quiz_required is True and opened.quiz_state == "not_started"
+    with pytest.raises(HTTPException) as exc:
+        await complete_lesson(lessons[0].id, member, db)
+    assert exc.value.status_code == 409
+    assert "тест" in str(exc.value.detail).lower()
     with pytest.raises(HTTPException) as exc:
         await get_lesson(lessons[1].id, member, db)
     assert exc.value.status_code == 403
 
-    # Сдал тест → урок 2 открыт.
+    # Сдал тест → урок 1 завершается, урок 2 открыт.
     attempt = await start_or_resume_attempt(quiz.id, member, db)
     qid = attempt.questions[0].id
     await save_answer(attempt.id, AnswerBody(question_id=qid, value=1), member, db)
     await submit_attempt(attempt.id, member, db)
+    done = await complete_lesson(lessons[0].id, member, db)
+    assert done.completed and done.quiz_state == "passed"
     resp = await get_lesson(lessons[1].id, member, db)
     assert resp.id == lessons[1].id
+
+
+async def test_required_quiz_gates_completion_with_default_unlock_rule(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Дефолт `unlock_rule='inherit'`: обязательный тест всё равно блокирует
+    завершение урока и, через «предыдущий не завершён», следующий урок."""
+    hr, _ = await _mk_publisher(db, tenant_id)
+    member, _profile = await _mk_member(db, tenant_id, email="seller5@t.ru")
+    _course, lessons = await _mk_course(db, tenant_id, lesson_count=2)
+    quiz = await _publish_quiz(db, hr, lessons[0].id, [_single_draft(correct=1)])
+
+    await get_lesson(lessons[0].id, member, db)
+    attempt = await start_or_resume_attempt(quiz.id, member, db)
+    qid = attempt.questions[0].id
+    await save_answer(attempt.id, AnswerBody(question_id=qid, value=0), member, db)  # провал
+    await submit_attempt(attempt.id, member, db)
+    state = await get_lesson(lessons[0].id, member, db)
+    assert state.quiz_state == "failed" and state.next_locked is True
+    with pytest.raises(HTTPException) as exc:
+        await complete_lesson(lessons[0].id, member, db)
+    assert exc.value.status_code == 409
+    with pytest.raises(HTTPException) as exc:
+        await get_lesson(lessons[1].id, member, db)
+    assert exc.value.status_code == 403
+
+
+async def test_quiz_gate_pending_review_and_limit(db: AsyncSession, tenant_id: uuid.UUID):
+    hr, _ = await _mk_publisher(db, tenant_id)
+    member, profile = await _mk_member(db, tenant_id, email="seller6@t.ru")
+    _course, lessons = await _mk_course(db, tenant_id, lesson_count=1)
+    quiz = await _publish_quiz(
+        db, hr, lessons[0].id, [_open_draft()], attempts_limit=1, pass_score_pct=50
+    )
+    await get_lesson(lessons[0].id, member, db)
+    attempt = await start_or_resume_attempt(quiz.id, member, db)
+    qid = attempt.questions[0].id
+    await save_answer(attempt.id, AnswerBody(question_id=qid, value="Здравствуйте"), member, db)
+    await submit_attempt(attempt.id, member, db)
+    # Open-вопрос → на проверке: урок не завершить, текст про проверку.
+    with pytest.raises(HTTPException) as exc:
+        await complete_lesson(lessons[0].id, member, db)
+    assert exc.value.status_code == 409 and "проверк" in str(exc.value.detail).lower()
+    assert (await get_lesson(lessons[0].id, member, db)).quiz_state == "pending_review"
+    # Проверяющий ставит 0 → провал при лимите 1 → тупик; в /quizzes/blocked.
+    await review_attempt(attempt.id, ReviewBody(scores={qid: 0}), hr, db)
+    assert (await get_lesson(lessons[0].id, member, db)).quiz_state == "limit_exhausted"
+    with pytest.raises(HTTPException) as exc:
+        await complete_lesson(lessons[0].id, member, db)
+    assert exc.value.status_code == 409 and "лимит" in str(exc.value.detail).lower()
+    blocked = await blocked_quizzes(hr, db)
+    assert any(b.profile_id == profile.id and b.quiz_id == quiz.id for b in blocked)
+    # Сброс попыток снимает тупик.
+    await reset_attempts(quiz.id, ResetAttemptsBody(profile_id=profile.id), hr, db)
+    assert (await get_lesson(lessons[0].id, member, db)).quiz_state == "not_started"
+    assert not any(b.profile_id == profile.id for b in await blocked_quizzes(hr, db))
+
+
+async def test_optional_quiz_does_not_gate(db: AsyncSession, tenant_id: uuid.UUID):
+    hr, _ = await _mk_publisher(db, tenant_id)
+    member, _profile = await _mk_member(db, tenant_id, email="seller7@t.ru")
+    _course, lessons = await _mk_course(db, tenant_id, lesson_count=1)
+    await _publish_quiz(db, hr, lessons[0].id, [_single_draft()], is_required=False)
+    opened = await get_lesson(lessons[0].id, member, db)
+    assert opened.quiz_required is False and opened.quiz_state == "none"
+    done = await complete_lesson(lessons[0].id, member, db)
+    assert done.completed
+
+
+async def test_free_mode_gates_completion_not_navigation(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    hr, _ = await _mk_publisher(db, tenant_id)
+    member, _profile = await _mk_member(db, tenant_id, email="seller8@t.ru")
+    _course, lessons = await _mk_course(db, tenant_id, lesson_count=2, progression_mode="free")
+    await _publish_quiz(db, hr, lessons[0].id, [_single_draft()])
+    assert (await get_lesson(lessons[1].id, member, db)).id == lessons[1].id  # навигация свободна
+    with pytest.raises(HTTPException) as exc:
+        await complete_lesson(lessons[0].id, member, db)
+    assert exc.value.status_code == 409
 
 
 async def test_lesson_event_and_certificate_idempotent(

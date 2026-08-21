@@ -1,3 +1,4 @@
+
 """Системный промпт ассистента.
 
 Три вещи здесь неслучайны и правятся с осторожностью:
@@ -16,9 +17,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
-MSK = ZoneInfo("Europe/Moscow")
+from app.services.timefmt import display_tz
 
 _WEEKDAYS = (
     "понедельник", "вторник", "среда", "четверг",
@@ -58,7 +58,8 @@ BASE_PROMPT = """Ты — ассистент корпоративной плат
 
 
 def system_prompt(*, now: datetime | None = None) -> str:
-    local = (now or datetime.now(MSK)).astimezone(MSK)
+    tz = display_tz()
+    local = (now or datetime.now(tz)).astimezone(tz)
     today = (
         f"Сегодня {_WEEKDAYS[local.weekday()]}, "
         f"{local.day} {_MONTHS[local.month - 1]} {local.year} года, "

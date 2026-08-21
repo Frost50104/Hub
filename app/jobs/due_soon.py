@@ -25,6 +25,9 @@ from app.services.task_assignees import collect_recipients
 log = structlog.get_logger("jobs.due_soon")
 
 ANTI_DUP_WINDOW = timedelta(hours=23)
+# Окно НАРОЧНО по мгновению, а не по дням (в отличие от overdue/окон
+# /me/tasks): срок пишется на 12:00 display tz, и «за сутки» = push около
+# полудня накануне; день-окно с 00:00 слало бы напоминание ночью.
 LOOKAHEAD_WINDOW = timedelta(hours=24)
 
 

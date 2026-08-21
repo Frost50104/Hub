@@ -135,6 +135,14 @@ class MaterialVersion(Base):
     mime: Mapped[str] = mapped_column(String(128), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Извлечённый воркером текст (pdf/docx/xlsx/text, ≤200k) — источник
+    # body_text поискового индекса и текстового предпросмотра (0041).
+    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def has_text(self) -> bool:  # читается VersionResponse (from_attributes)
+        return bool(self.extracted_text)
     uploaded_by: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("shadow_users.employee_id", ondelete="SET NULL"),

@@ -37,6 +37,7 @@ from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskAssignee
 from app.services.project_access import require_project_role
 from app.services.task_assignees import has_no_assignees
+from app.services.taskdates import start_of_today_utc
 
 router = APIRouter(tags=["stats"])
 
@@ -146,14 +147,15 @@ async def _completed_trend(
 
 
 async def _overdue_count(session: AsyncSession, project_id: UUID) -> int:
-    now = datetime.now(UTC)
+    # Просрочено = день срока раньше сегодняшнего (display tz) — см. taskdates.
+    today_start = start_of_today_utc()
     row = await session.execute(
         select(func.count(Task.id)).where(
             Task.project_id == project_id,
             Task.archived_at.is_(None),
             Task.status != "done",
             Task.due_at.is_not(None),
-            Task.due_at < now,
+            Task.due_at < today_start,
         )
     )
     return int(row.scalar_one())
@@ -167,11 +169,15 @@ _DONE_SUM = func.sum(cast(Task.status == "done", Integer)).label("done_count")
 
 def _overdue_sum(now: datetime):
     """Просроченные (тот же критерий, что `_overdue_count`): активные, не
-    закрытые, срок в прошлом. Считается в том же фан-ауте по исполнителям —
-    задача на двоих горит у обоих."""
+    закрытые, день срока раньше сегодняшнего. Считается в том же фан-ауте по
+    исполнителям — задача на двоих горит у обоих."""
     return func.sum(
         cast(
-            and_(Task.archived_at.is_(None), Task.status != "done", Task.due_at < now),
+            and_(
+                Task.archived_at.is_(None),
+                Task.status != "done",
+                Task.due_at < start_of_today_utc(now),
+            ),
             Integer,
         )
     ).label("overdue_count")

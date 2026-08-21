@@ -70,7 +70,11 @@ from app.services.lesson_content import (
 from app.services.notify_batch import notify_many
 from app.services.org_scope import get_profile
 from app.services.points import award
-from app.services.quiz_gate import passed_required_quiz_lessons
+from app.services.quiz_gate import (
+    QUIZ_GATE_MESSAGES,
+    lesson_quiz_state,
+    passed_required_quiz_lessons,
+)
 from app.services.search_indexer import delete_document, upsert_document
 from app.services.video_progress import is_watched, merge_intervals
 
@@ -1224,6 +1228,9 @@ async def get_lesson(
         if next_lesson is not None and not manager
         else False
     )
+    # Состояние обязательного теста ЭТОГО урока — для кнопки «Завершить урок»
+    # (считается и менеджеру: preview должен видеть тот же гейт).
+    quiz_required, quiz_state = await lesson_quiz_state(db, lesson.id, profile_id)
 
     return LessonContentResponse(
         id=lesson.id,
@@ -1243,6 +1250,8 @@ async def get_lesson(
         prev_lesson_id=prev_id,
         next_lesson_id=next_lesson.id if next_lesson else None,
         next_locked=next_locked,
+        quiz_required=quiz_required,
+        quiz_state=quiz_state,
     )
 
 
@@ -1353,6 +1362,15 @@ async def complete_lesson(
                         status_code=409,
                         detail="Досмотрите обязательное видео до конца",
                     )
+        # Предусловие 3: обязательный опубликованный тест урока сдан
+        # (ОС 2026-08: «тест не пройден, а пускает дальше»). Состояние — из
+        # quiz_gate, тексты — QUIZ_GATE_MESSAGES.
+        _required, quiz_state = await lesson_quiz_state(db, lesson.id, profile.id)
+        if quiz_state not in ("none", "passed"):
+            raise HTTPException(
+                status_code=409,
+                detail=QUIZ_GATE_MESSAGES.get(quiz_state, "Сдайте тест урока"),
+            )
         progress.status = "completed"
         progress.completed_at = datetime.now(UTC)
         await db.flush()  # autoflush=False: счётчик в _update_course_progress

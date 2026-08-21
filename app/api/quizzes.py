@@ -39,6 +39,7 @@ from app.models.quiz import Quiz, QuizAttempt, QuizQuestion
 from app.schemas.quiz import (
     AnswerBody,
     AttemptResponse,
+    BlockedQuizItem,
     CertificateBackgroundBody,
     QuestionFull,
     QuizConsumerResponse,
@@ -58,6 +59,7 @@ from app.services.learn_notify import _employee_ids
 from app.services.learn_settings import get_settings_dict, set_setting
 from app.services.notify_batch import notify_many
 from app.services.org_scope import get_profile
+from app.services.quiz_gate import derive_quiz_state
 from app.services.quiz_scoring import (
     build_snapshot,
     finalize,
@@ -423,12 +425,12 @@ async def consumer_quiz_state(
     finished = [a for a in attempts if a.finished_at is not None]
     active = next((a for a in attempts if a.finished_at is None), None)
     scored = [a.score_pct for a in finished if a.score_pct is not None]
+    # Один источник истины с гейтом урока (services/quiz_gate).
+    state = derive_quiz_state(attempts, quiz.attempts_limit)
     resp.attempts_used = len(finished)
     resp.best_score_pct = max(scored) if scored else None
-    resp.passed = any(a.passed for a in finished)
-    resp.pending_review = any(
-        a.needs_review and a.reviewed_at is None for a in finished
-    )
+    resp.passed = state == "passed"
+    resp.pending_review = state == "pending_review"
     resp.active_attempt_id = active.id if active else None
     resp.can_start = (
         not resp.pending_review
@@ -661,6 +663,56 @@ async def _award_quiz_events(
 
 
 # ─── Review (publisher) ──────────────────────────────────────────────────────
+
+
+@router.get("/learn/quizzes/blocked", response_model=list[BlockedQuizItem])
+async def blocked_quizzes(
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> list[BlockedQuizItem]:
+    """Тупики «лимит попыток исчерпан, обязательный тест не сдан» — с гейтом
+    теста (2026-08) такой сотрудник не может завершить урок; publisher
+    снимает тупик через `reset-attempts` (кнопка в «Проверке»)."""
+    await require_content_role(db, principal, "publisher")
+    rows = await db.execute(
+        select(QuizAttempt, Quiz, EmployeeProfile)
+        .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
+        .join(EmployeeProfile, EmployeeProfile.id == QuizAttempt.profile_id)
+        .where(
+            Quiz.attempts_limit.is_not(None),
+            Quiz.is_required.is_(True),
+            Quiz.status == "published",
+            EmployeeProfile.status == "active",
+        )
+        .order_by(QuizAttempt.finished_at)
+    )
+    grouped: dict[tuple[UUID, UUID], list] = {}
+    meta: dict[tuple[UUID, UUID], tuple[Quiz, EmployeeProfile]] = {}
+    for attempt, quiz, profile in rows:
+        key = (quiz.id, profile.id)
+        grouped.setdefault(key, []).append(attempt)
+        meta[key] = (quiz, profile)
+    out: list[BlockedQuizItem] = []
+    for key, attempts in grouped.items():
+        quiz, profile = meta[key]
+        if derive_quiz_state(attempts, quiz.attempts_limit) != "limit_exhausted":
+            continue
+        finished = [a for a in attempts if a.finished_at is not None]
+        out.append(
+            BlockedQuizItem(
+                quiz_id=quiz.id,
+                quiz_title=quiz.title,
+                course_id=quiz.course_id,
+                lesson_id=quiz.lesson_id,
+                profile_id=profile.id,
+                employee_name=profile.full_name,
+                attempts_used=len(finished),
+                attempts_limit=quiz.attempts_limit or 0,
+                last_attempt_at=max((a.finished_at for a in finished), default=None),
+            )
+        )
+    out.sort(key=lambda i: (i.last_attempt_at or datetime.min.replace(tzinfo=UTC)))
+    return out
 
 
 @router.get("/learn/review-queue", response_model=list[ReviewQueueItem])

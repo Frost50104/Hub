@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -38,6 +38,7 @@ from app.models.stage import ProjectStage
 from app.models.task import TaskLabel, TaskLabelAssignment
 from app.schemas.task import TaskCreate, TaskImportReport
 from app.services.project_access import require_project_role
+from app.services.taskdates import due_noon_utc
 from app.services.tasks import create_task_record
 
 router = APIRouter(tags=["tasks"])
@@ -62,22 +63,21 @@ _PRIORITY = {
 
 
 def _parse_due(raw: str) -> datetime | None:
-    """«14.08.2026», «2026-08-14», «2026-08-14T10:00» → полдень UTC дня
-    (как делает фронт в карточке: `T12:00:00`), чтобы день не уехал на
-    отрицательных поясах."""
+    """«14.08.2026», «2026-08-14», «2026-08-14T10:00» → полдень display tz
+    (`taskdates.due_noon_utc` — та же конвенция, что карточка и ассистент)."""
     raw = raw.strip()
     if not raw:
         return None
     for fmt in ("%d.%m.%Y", "%d.%m.%y"):
         try:
             d = datetime.strptime(raw, fmt).date()
-            return datetime.combine(d, time(12, 0), tzinfo=UTC)
+            return due_noon_utc(d)
         except ValueError:
             pass
     try:
         if len(raw) == 10:
             d = date.fromisoformat(raw)
-            return datetime.combine(d, time(12, 0), tzinfo=UTC)
+            return due_noon_utc(d)
         dt = datetime.fromisoformat(raw)
         return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
     except ValueError:

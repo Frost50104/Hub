@@ -482,7 +482,7 @@ async def test_blocker_points_at_tested_lesson_not_previous(
             attempts_limit=None,
             shuffle_questions=False,
             shuffle_options=False,
-            required_to_pass=True,
+            is_required=True,
             questions=[
                 QuestionDraft(
                     qtype="single",
@@ -496,9 +496,12 @@ async def test_blocker_points_at_tested_lesson_not_previous(
         db,
     )
 
-    # Первый урок завершён, но его required-тест не сдан.
+    # Первый урок открыт, его required-тест не сдан: завершить нельзя (409,
+    # гейт 2026-08), и замок второго урока указывает на первый.
     await get_lesson(lessons[0].id, principal, db)
-    await complete_lesson(lessons[0].id, principal, db)
+    with pytest.raises(HTTPException) as exc:
+        await complete_lesson(lessons[0].id, principal, db)
+    assert exc.value.status_code == 409
 
     detail = await get_course(course.id, principal, db)
     second = next(m for m in detail.lessons if m.id == lessons[1].id)
