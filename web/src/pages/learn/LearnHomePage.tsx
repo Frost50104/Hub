@@ -217,16 +217,16 @@ export function LearnHomePage() {
   const visibleUrgent = showAllUrgent ? urgentItems : urgentItems.slice(0, MAX_URGENT)
 
   // Блок 2 вычитает поднятое в блок 1: один курс не может встретиться дважды.
+  // Показываем ВСЕ незавершённые назначенные курсы, не только начатые — у
+  // сотрудника с тремя новыми курсами блок «Моё обучение» иначе пуст, а
+  // витрина выглядит как «ничего не назначено» (QA-0821 #25). Начатые выше
+  // новых: продолжить ближе, чем начать.
   const urgentIds = useMemo(() => new Set(urgentCourses.map((c) => c.id)), [urgentCourses])
   const inProgress = useMemo(
     () =>
       (data?.courses ?? [])
-        .filter(
-          (c) =>
-            !urgentIds.has(c.id) &&
-            c.lessons_completed > 0 &&
-            c.lessons_completed < c.lessons_total,
-        )
+        .filter((c) => !urgentIds.has(c.id) && c.lessons_completed < c.lessons_total)
+        .sort((a, b) => Number(b.lessons_completed > 0) - Number(a.lessons_completed > 0))
         .slice(0, MAX_IN_PROGRESS),
     [data, urgentIds],
   )
@@ -255,6 +255,12 @@ export function LearnHomePage() {
         <h1 className="font-display text-[28px] font-bold leading-[1.18] tracking-[0.01em] text-text lg:text-[34px] lg:leading-[1.15]">
           Обучение
         </h1>
+        {/* Лид макета «Витрина»: объясняет порядок блоков — срочное выше. */}
+        {data && !isEmpty && (
+          <p className="mt-2 max-w-[520px] text-[15px] leading-[1.5] text-text2 [text-wrap:pretty]">
+            Сначала то, что горит. Остальное можно взять в любой момент смены.
+          </p>
+        )}
       </header>
 
       {(archived || needsRestore) && (
@@ -472,17 +478,17 @@ export function LearnHomePage() {
                       </span>
                       <span className="mt-1.5 block text-xs text-text2">баллов</span>
                     </span>
-                    {data.rating.rank !== null && (
-                      <span className="whitespace-nowrap">
-                        <span className="block font-display text-[22px] font-bold leading-none tabular-nums text-text">
-                          {data.rating.rank}
-                          <span className="text-sm text-text2">
-                            {nbsp(` / ${data.rating.total_participants}`)}
-                          </span>
+                    {/* Место показываем всегда (макет «N / M место»): без баллов
+                        вместо числа — «—», чтобы рельс не менял форму. */}
+                    <span className="whitespace-nowrap">
+                      <span className="block font-display text-[22px] font-bold leading-none tabular-nums text-text">
+                        {data.rating.rank ?? '—'}
+                        <span className="text-sm text-text2">
+                          {nbsp(` / ${data.rating.total_participants}`)}
                         </span>
-                        <span className="mt-1.5 block text-xs text-text2">место в сети</span>
                       </span>
-                    )}
+                      <span className="mt-1.5 block text-xs text-text2">место в сети</span>
+                    </span>
                   </span>
                 </span>
                 {/* Нейтральный чип, а не зелёный: зелёная заливка в learn

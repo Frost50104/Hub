@@ -84,9 +84,12 @@ export const ADMIN_SEGMENTS: { key: AdminSegment; label: string; title: string; 
 ]
 
 /**
- * Гейты — по сегментам, не по экрану (то же, что проверяет бэкенд):
- * Проверка и Аналитика — publisher, ТУ/франчайзи/офис и hub-admin;
- * Сотрудники/Автосценарии/Журнал/Оргструктура — только hub-admin.
+ * Гейты — по сегментам, не по экрану, РОВНО как проверяет бэкенд:
+ * - Проверка (`quizzes.py` review-queue) — publisher и hub-admin;
+ * - Аналитика (`learn_analytics.py`) — publisher, hub-admin и скоуп
+ *   магазинов (ТУ, франчайзи);
+ * - Сотрудники/Автосценарии/Журнал/Оргструктура — только hub-admin.
+ * Офис без publisher раньше видел обе вкладки и получал 403 (QA-0821 #24).
  */
 export function adminSegmentsFor(me: {
   hub_role: string | null
@@ -94,12 +97,11 @@ export function adminSegmentsFor(me: {
 } | undefined): AdminSegment[] {
   if (!me) return []
   const isAdmin = me.hub_role === 'admin'
-  const reviewer =
-    isAdmin ||
-    me.profile?.content_role === 'publisher' ||
-    ['tu', 'franchisee_owner', 'office'].includes(me.profile?.org_role ?? '')
+  const publisher = ['publisher', 'admin'].includes(me.profile?.content_role ?? '')
+  const storeScope = ['tu', 'franchisee_owner'].includes(me.profile?.org_role ?? '')
   const out: AdminSegment[] = []
-  if (reviewer) out.push('review', 'analytics')
+  if (isAdmin || publisher) out.push('review')
+  if (isAdmin || publisher || storeScope) out.push('analytics')
   if (isAdmin) out.push('employees', 'automations', 'audit', 'org')
   return out
 }

@@ -244,7 +244,7 @@ export function AssistantPage() {
   // Регистр задаём здесь: шапка его не трогает (preserveEyebrowCase).
   const opCount = empty
     ? 'Новый разговор'
-    : `Сегодня, ${turns.length} ${plural(turns.length, 'операция', 'операции', 'операций')}`
+    : `Сегодня, ${plural(turns.length, 'операция', 'операции', 'операций')}`
 
   if (status.data && !status.data.configured) {
     return (

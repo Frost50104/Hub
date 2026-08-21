@@ -11,7 +11,7 @@ import {
   Trophy,
 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { LessonRenderer } from '@/components/learn/lesson/LessonRenderer'
@@ -142,8 +142,14 @@ function LessonState({
 
 export function LearnLessonPage() {
   const { lessonId } = useParams<{ lessonId: string }>()
+  const [params] = useSearchParams()
+  // «Глазами сотрудника» (из конструктора через страницу курса): флаг живёт в
+  // URL и пробрасывается ТОЛЬКО по ссылкам этой страницы — в обычную навигацию
+  // автора он не протекает.
+  const preview = params.get('preview') === '1'
+  const previewSuffix = preview ? '?preview=1' : ''
   const qc = useQueryClient()
-  const lesson = useLesson(lessonId)
+  const lesson = useLesson(lessonId, preview)
   const progress = useScrollProgress()
 
   const [answeredExtra, setAnsweredExtra] = useState<Set<string>>(new Set())
@@ -162,7 +168,7 @@ export function LearnLessonPage() {
   // Курс нужен всей шапке: название, «урок N из M», имена соседних уроков и
   // оценка чтения. Запрос кэшируется TanStack Query по курсу, поэтому при
   // переходе между уроками одного курса он не повторяется.
-  const course = useCourse(data?.course_id)
+  const course = useCourse(data?.course_id, preview)
 
   const lessons: LessonMeta[] = useMemo(
     () => (course.data?.lessons ?? []).filter((l) => l.status === 'published'),
@@ -225,7 +231,7 @@ export function LearnLessonPage() {
 
   const rows = data ? gateRows(data, answeredGates, videoCoverage) : []
   const localReady = rows.every((r) => r.done)
-  const courseHref = data ? `/learn/courses/${data.course_id}` : '/learn/courses'
+  const courseHref = data ? `/learn/courses/${data.course_id}${previewSuffix}` : '/learn/courses'
   const showMini = progress.top > MINI_HEADER_AT
 
   const sections = useMemo(
@@ -293,7 +299,7 @@ export function LearnLessonPage() {
         )}
 
         {lesson.isLoading && (
-          <div className="space-y-4 px-5 pt-14">
+          <div className="space-y-4 px-5 pt-[calc(env(safe-area-inset-top,0px)+1rem)] lg:pt-14">
             <Skeleton className="h-3 w-24" />
             <Skeleton className="h-[30px] w-3/4" />
             <Skeleton className="h-[30px] w-1/2" />
@@ -346,7 +352,7 @@ export function LearnLessonPage() {
 
         {data && (
           <>
-            <header className="px-5 pt-14">
+            <header className="px-5 pt-[calc(env(safe-area-inset-top,0px)+1rem)] lg:pt-14">
               <Link
                 to={courseHref}
                 className="inline-flex h-11 items-center gap-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-text2 hover:text-text"
@@ -483,7 +489,7 @@ export function LearnLessonPage() {
               <nav className="mt-5 flex flex-col gap-2.5">
                 {data.next_lesson_id && (
                   <Link
-                    to={data.next_locked ? '#' : `/learn/lessons/${data.next_lesson_id}`}
+                    to={data.next_locked ? '#' : `/learn/lessons/${data.next_lesson_id}${previewSuffix}`}
                     aria-disabled={data.next_locked}
                     onClick={(e) => data.next_locked && e.preventDefault()}
                     className={cn(

@@ -31,6 +31,10 @@ import { formatMinutes, nbsp, plural } from '@/lib/typography'
 
 type RowKind = 'done' | 'current' | 'locked' | 'draft'
 
+/** Верхний отступ мобильной шапки: safe-area iPhone + 16px; десктоп — 56px.
+ *  Класс, а не inline-style: inline перебил бы `lg:pt-14`. */
+const TOP_PAD = 'pt-[calc(env(safe-area-inset-top,0px)+1rem)] lg:pt-14'
+
 function rowKind(lesson: LessonMeta, isCurrent: boolean): RowKind {
   if (lesson.status === 'draft') return 'draft'
   if (lesson.completed) return 'done'
@@ -65,10 +69,13 @@ function LessonRow({
   lesson,
   index,
   kind,
+  hrefSuffix = '',
 }: {
   lesson: LessonMeta
   index: number
   kind: RowKind
+  /** `?preview=1` в режиме «глазами сотрудника» — урок тоже считается с замками. */
+  hrefSuffix?: string
 }) {
   const inner = (
     <div
@@ -118,10 +125,10 @@ function LessonRow({
   )
 
   if (kind === 'locked') return inner
-  return <Link to={`/learn/lessons/${lesson.id}`}>{inner}</Link>
+  return <Link to={`/learn/lessons/${lesson.id}${hrefSuffix}`}>{inner}</Link>
 }
 
-function CourseHeader({ data }: { data: CourseDetail }) {
+function CourseHeader({ data, hrefSuffix = '' }: { data: CourseDetail; hrefSuffix?: string }) {
   const me = useMe()
   const coursesTitle = coursesSectionTitle(
     me.data?.profile?.content_role,
@@ -145,7 +152,9 @@ function CourseHeader({ data }: { data: CourseDetail }) {
     : null
 
   return (
-    <header className="px-5 pt-14">
+    // На телефоне 56px сверху — пустота над «← Моё обучение» (QA-0821 #26):
+    // 16px + safe-area, на десктопе по-прежнему 56.
+    <header className={cn('px-5', TOP_PAD)}>
       <Link
         to="/learn/courses"
         className="inline-flex h-11 items-center gap-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-text2 hover:text-text"
@@ -224,7 +233,7 @@ function CourseHeader({ data }: { data: CourseDetail }) {
 
       {target && (
         <Link
-          to={`/learn/lessons/${target.id}`}
+          to={`/learn/lessons/${target.id}${hrefSuffix}`}
           className={cn(
             'flex min-h-[56px] w-full items-center gap-3 rounded-xl px-[18px] text-left',
             data.completed
@@ -273,7 +282,7 @@ export function LearnCoursePage() {
     <div className="mx-auto max-w-[680px] lg:flex lg:max-w-[948px] lg:items-start lg:gap-12 lg:px-8">
     <div className="min-w-0 flex-1 lg:max-w-[640px]">
       {course.isLoading && (
-        <div className="space-y-4 px-5 pt-14">
+        <div className={cn('space-y-4 px-5', TOP_PAD)}>
           <Skeleton className="h-3 w-24" />
           <Skeleton className="h-[30px] w-3/4" />
           <Skeleton className="h-3.5 w-full" />
@@ -307,7 +316,7 @@ export function LearnCoursePage() {
               </Link>
             </div>
           )}
-          <CourseHeader data={data} />
+          <CourseHeader data={data} hrefSuffix={preview ? '?preview=1' : ''} />
 
           <div className="flex flex-col gap-3.5 px-5 pb-8 pt-6">
             {data.completed && myCert && (
@@ -355,6 +364,7 @@ export function LearnCoursePage() {
                   lesson={lesson}
                   index={i + 1}
                   kind={rowKind(lesson, lesson.id === currentId)}
+                  hrefSuffix={preview ? '?preview=1' : ''}
                 />
               ))}
             </div>

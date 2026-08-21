@@ -1382,8 +1382,12 @@ export const learnApi = {
       .put(`/learn/courses/${courseId}/lessons/reorder`, { lesson_ids: lessonIds })
       .then(() => undefined),
 
-  lesson: (id: string): Promise<LessonContent> =>
-    api.get<LessonContent>(`/learn/lessons/${id}`).then((r) => r.data),
+  // preview — «глазами сотрудника»: сервер считает замки и next_locked как
+  // для обычного профиля, даже если зовёт автор/админ (QA-0821 #18).
+  lesson: (id: string, preview = false): Promise<LessonContent> =>
+    api
+      .get<LessonContent>(`/learn/lessons/${id}`, { params: { preview: preview || undefined } })
+      .then((r) => r.data),
   completeLesson: (id: string): Promise<LessonContent> =>
     api.post<LessonContent>(`/learn/lessons/${id}/complete`).then((r) => r.data),
   answerBlock: (

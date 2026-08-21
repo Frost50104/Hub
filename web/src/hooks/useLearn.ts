@@ -228,10 +228,10 @@ export function useCourse(id: string | undefined, preview = false): UseQueryResu
   })
 }
 
-export function useLesson(id: string | undefined): UseQueryResult<LessonContent> {
+export function useLesson(id: string | undefined, preview = false): UseQueryResult<LessonContent> {
   return useQuery({
-    queryKey: ['learn-lesson', id],
-    queryFn: () => learnApi.lesson(id!),
+    queryKey: preview ? ['learn-lesson', id, 'preview'] : ['learn-lesson', id],
+    queryFn: () => learnApi.lesson(id!, preview),
     enabled: Boolean(id),
     retry: false, // 403 «урок заперт» не лечится ретраями
     meta: { suppressGlobalError: true },

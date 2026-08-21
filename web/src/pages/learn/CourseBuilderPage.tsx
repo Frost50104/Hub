@@ -127,7 +127,7 @@ export function CourseBuilderPage() {
           мета, бейдж статуса, действия курса — lifecycle тут, а не в карточке
           настроек; в карточке остаются сохранение и удаление. */}
       {isDesktop && data && (
-        <div className="sticky top-0 z-10 flex items-center gap-3.5 border-b border-hair bg-bg px-5 py-3">
+        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b border-hair bg-bg px-5 py-3">
           <Link
             to="/learn/courses"
             className="inline-flex h-9 shrink-0 items-center gap-[7px] rounded-[10px] border border-glass-border px-3 text-[13px] font-semibold text-text2 hover:text-text"
@@ -138,10 +138,12 @@ export function CourseBuilderPage() {
             <p className="truncate text-[14px] font-semibold text-text">{data.title}</p>
             <p className="mt-px truncate text-[12px] text-text2">{topbarMeta}</p>
           </div>
-          <Badge variant={data.status === 'published' ? 'default' : 'outline'}>
+          <Badge variant={data.status === 'published' ? 'default' : 'outline'} className="shrink-0">
             {CONTENT_STATUS_LABEL[data.status]}
           </Badge>
-          <div className="flex shrink-0 flex-wrap gap-2">
+          {/* Действия переносятся внутрь бара, а не распирают его: на 1280 с
+              сайдбаром main уходил в горизонтальный скролл (QA-0821 #19). */}
+          <div className="flex min-w-0 flex-wrap justify-end gap-2">
             <Button
               variant="secondary"
               size="md"
