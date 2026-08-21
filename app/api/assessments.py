@@ -183,6 +183,16 @@ async def list_campaigns(
             if is_manager:
                 members = await _audience_profile_ids(db, campaign.audience_id)
                 audience_size = len(members)
+                # Администратор тоже может быть участником кампании: если его
+                # профиль в аудитории и кампания идёт — у него есть «Мои»
+                # (редизайн-2: срезы «Мои / Отчёт / Кампании» на одном экране).
+                if (
+                    profile is not None
+                    and campaign.status == "active"
+                    and _in_window(campaign, now)
+                    and profile.id in set(members)
+                ):
+                    my_state = await consumer_quiz_state(db, quiz, profile)
                 finished = {
                     r[0]
                     for r in await db.execute(

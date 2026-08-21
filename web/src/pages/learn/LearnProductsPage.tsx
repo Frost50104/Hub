@@ -1,5 +1,6 @@
 import {
   Archive,
+  ArrowLeft,
   BookOpen,
   FolderCog,
   ImagePlus,
@@ -12,27 +13,21 @@ import {
   X,
 } from 'lucide-react'
 import { useMemo, useRef, useState, type ChangeEvent } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
-import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/Dialog'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { FilterChip } from '@/components/ui/FilterChip'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
+import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useCourses, useProductMutation, useProducts } from '@/hooks/useLearn'
-import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
 import {
@@ -42,158 +37,158 @@ import {
   type ProductCategory,
   type ProductUpsert,
 } from '@/lib/learn'
+import { nbsp, plural } from '@/lib/typography'
 
 /**
- * Ассортимент (Ф4, ТЗ §9): каталог карточек товаров с фото, составом,
- * аллергенами и ссылками «изучить по теме». Открытие карточки фиксируется
- * (view_history + балл рейтинга за первое знакомство).
+ * Ассортимент (Ф4, ТЗ §9) по макету «Урок — редизайн» (route products):
+ * сетка плиток с фото 104/132 (или пустой слот на `--surface`: у ранней
+ * эксплуатации фото загружены не везде), чипы категорий `FilterChip`, счётчик
+ * «N из M позиций», карточка позиции — ОТДЕЛЬНЫЙ маршрут `/learn/products/:id`
+ * (раньше — диалог): на телефоне фото 200 → H1 → `<dl>` → «Что предложить
+ * вместе» → «Изучить по теме», на десктопе двухколонник 300 | 1fr — состав и
+ * аллергены читают рядом с плиткой, а не поверх списка. Бейдж «новинка для
+ * вас» снят: `viewed_by_me` — служебный факт, не маркетинговая новинка.
+ * Открытие карточки фиксируется (view_history + балл рейтинга за первое
+ * знакомство) — один раз, сервером.
  */
 
-export function LearnProductsPage() {
-  const isDesktop = useIsDesktop()
-  const [params, setParams] = useSearchParams()
-  const [category, setCategory] = useState<string | 'all'>('all')
-  const [openCard, setOpenCard] = useState<ProductCard | null>(null)
-  const [editorCard, setEditorCard] = useState<ProductCard | 'new' | null>(null)
-  const [categoriesOpen, setCategoriesOpen] = useState(false)
+/** Ряд действий: 48px на телефоне, 36px на десктопе. */
+const ACTION_BTN =
+  'h-12 rounded-xl px-5 text-[15px] lg:h-9 lg:rounded-[10px] lg:px-3.5 lg:text-[13px]'
+const GHOST_BTN = cn(ACTION_BTN, 'bg-transparent')
 
+function useProductsData() {
   const probe = useProducts(false)
   const canManage =
-    probe.data !== undefined &&
-    ['admin', 'publisher', 'author'].includes(probe.data.content_role)
+    probe.data !== undefined && ['admin', 'publisher', 'author'].includes(probe.data.content_role)
   const managed = useProducts(true, canManage)
   const data = canManage ? (managed.data ?? probe.data) : probe.data
+  return { probe, canManage, data }
+}
 
-  const focusId = params.get('p')
-  const items = useMemo(() => {
-    let list = data?.items ?? []
-    if (category !== 'all') list = list.filter((i) => i.category_id === category)
-    return list
-  }, [data, category])
+function PhotoPlaceholder({ className, iconClass }: { className: string; iconClass: string }) {
+  return (
+    <span className={cn('flex items-center justify-center bg-surface text-text2', className)}>
+      <ShoppingBag className={iconClass} strokeWidth={1.7} />
+    </span>
+  )
+}
 
-  // Deep-link из поиска/новинок: ?p=<id> открывает карточку.
-  const focused = focusId ? data?.items.find((i) => i.id === focusId) : undefined
-  if (focused && !openCard && !editorCard) {
-    setOpenCard(focused)
-    const next = new URLSearchParams(params)
-    next.delete('p')
-    setParams(next, { replace: true })
+// ─── Список ──────────────────────────────────────────────────────────────────
+
+export function LearnProductsPage() {
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const [category, setCategory] = useState<string | 'all'>('all')
+  const [editorCard, setEditorCard] = useState<ProductCard | 'new' | null>(null)
+  const [categoriesOpen, setCategoriesOpen] = useState(false)
+  const { probe, canManage, data } = useProductsData()
+
+  const all = useMemo(() => data?.items ?? [], [data])
+  const items = useMemo(
+    () => (category === 'all' ? all : all.filter((i) => i.category_id === category)),
+    [all, category],
+  )
+
+  // Старый deep-link `?p=` (поиск, уведомления) → маршрут карточки.
+  const legacy = params.get('p')
+  if (legacy) return <Navigate to={`/learn/products/${legacy}`} replace />
+
+  const counter = data ? nbsp(`${items.length} из ${plural(all.length, 'позиции', 'позиций', 'позиций')}`) : ''
+
+  const open = (card: ProductCard) => {
+    if (card.status === 'published') void learnApi.openProduct(card.id)
+    navigate(`/learn/products/${card.id}`)
   }
 
   return (
-    <div className="mx-auto max-w-4xl">
-      {!isDesktop && <MobilePageHeader eyebrow="Обучение" title="Ассортимент" />}
-      <div className="space-y-4 p-4 lg:p-8">
-        <div className="flex items-center justify-between gap-2">
-          {isDesktop && (
-            <h1 className="font-display text-2xl font-bold text-text">Ассортимент</h1>
-          )}
-          {canManage && (
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => setCategoriesOpen(true)}>
-                <FolderCog className="h-4 w-4" /> Категории
-              </Button>
-              <Button onClick={() => setEditorCard('new')}>
-                <Plus className="h-4 w-4" /> Товар
-              </Button>
-            </div>
-          )}
+    <div className="mx-auto max-w-[920px] px-5 pb-16 pt-11 lg:px-8">
+      <header className="flex flex-col gap-3.5 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between">
+        <div className="min-w-0">
+          <p className="mb-1 min-h-[1em] text-[12px] leading-[1.35] text-text2 lg:hidden">{counter}</p>
+          <h1 className="font-display text-[28px] font-bold leading-[1.18] tracking-[0.01em] text-text lg:text-[34px] lg:leading-[1.15]">
+            Ассортимент
+          </h1>
+          <p className="mt-2.5 hidden text-[18px] leading-[1.6] text-text2 lg:block">
+            {counter && `${counter}. `}
+            Позиция засчитывается в рейтинг один раз — за первое открытие.
+          </p>
         </div>
+        {canManage && (
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => setEditorCard('new')} className={cn(ACTION_BTN, 'order-first lg:order-last')}>
+              <Plus className="h-4 w-4" /> Товар
+            </Button>
+            <Button variant="secondary" className={GHOST_BTN} onClick={() => setCategoriesOpen(true)}>
+              <FolderCog className="h-4 w-4" /> Категории
+            </Button>
+          </div>
+        )}
+      </header>
 
-        {(data?.categories.length ?? 0) > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              onClick={() => setCategory('all')}
-              className={cn(
-                'rounded-full border px-3 py-1 text-xs font-medium',
-                category === 'all'
-                  ? 'border-amber/60 bg-amber/10 text-amber'
-                  : 'border-glass-border text-text2 hover:text-text',
-              )}
-            >
-              Все
-            </button>
-            {data!.categories.map((c) => (
+      {(data?.categories.length ?? 0) > 0 && (
+        <div className="-mx-5 mt-4 flex gap-2 overflow-x-auto px-5 pb-1 [scrollbar-width:none] lg:mx-0 lg:mt-[22px] lg:flex-wrap lg:px-0">
+          <FilterChip active={category === 'all'} onClick={() => setCategory('all')}>
+            Все
+          </FilterChip>
+          {data!.categories.map((c) => (
+            <FilterChip key={c.id} active={category === c.id} onClick={() => setCategory(c.id)}>
+              {c.title}
+            </FilterChip>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-3.5 lg:mt-[22px]">
+        {probe.isLoading && <SkeletonRows rows={4} />}
+        {probe.isError && <QueryError onRetry={() => void probe.refetch()} />}
+        {data && items.length === 0 && (
+          <EmptyState
+            layout="card"
+            icon={<ShoppingBag className="h-7 w-7" />}
+            title={category === 'all' ? 'Карточек пока нет' : 'В этой категории пусто'}
+            text={
+              canManage
+                ? 'Заведите позицию: состав, аллергены, срок, подача и фото — сотрудники откроют её у стойки.'
+                : 'Позиции ассортимента появятся здесь, как только их опубликуют.'
+            }
+            cta={canManage && category === 'all' ? 'Новый товар' : undefined}
+            onCta={canManage && category === 'all' ? () => setEditorCard('new') : undefined}
+          />
+        )}
+        {items.length > 0 && (
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 lg:gap-3.5">
+            {items.map((card) => (
               <button
-                key={c.id}
+                key={card.id}
                 type="button"
-                onClick={() => setCategory(c.id)}
-                className={cn(
-                  'rounded-full border px-3 py-1 text-xs font-medium',
-                  category === c.id
-                    ? 'border-amber/60 bg-amber/10 text-amber'
-                    : 'border-glass-border text-text2 hover:text-text',
-                )}
+                onClick={() => open(card)}
+                className="flex flex-col overflow-hidden rounded-[14px] border border-hair bg-tint text-left transition-colors hover:border-amber/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
               >
-                {c.title}
+                {card.photo_urls[0] ? (
+                  <img
+                    src={card.photo_urls[0]}
+                    alt={card.title}
+                    loading="lazy"
+                    className="h-[104px] w-full object-cover lg:h-[132px]"
+                  />
+                ) : (
+                  <PhotoPlaceholder className="h-[104px] w-full lg:h-[132px]" iconClass="h-[26px] w-[26px] lg:h-[30px] lg:w-[30px]" />
+                )}
+                <span className="flex flex-col gap-1.5 px-3 pb-[13px] pt-[11px] lg:px-[13px] lg:pb-3.5 lg:pt-3">
+                  <span className="text-[16px] font-semibold leading-[1.3] text-text lg:text-[17px]">{card.title}</span>
+                  {card.status !== 'published' && (
+                    <Badge variant="outline" className="self-start">
+                      {CONTENT_STATUS_LABEL[card.status]}
+                    </Badge>
+                  )}
+                </span>
               </button>
             ))}
           </div>
         )}
-
-        {probe.isLoading && <SkeletonRows rows={4} />}
-        {probe.isError && <QueryError onRetry={() => void probe.refetch()} />}
-
-        {data && items.length === 0 && (
-          <div className="rounded-xl border border-glass-border bg-glass p-8 text-center">
-            <ShoppingBag className="mx-auto h-8 w-8 text-text3" />
-            <p className="mt-3 text-sm text-text2">Карточек пока нет.</p>
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {items.map((card) => (
-            <button
-              key={card.id}
-              type="button"
-              onClick={() => {
-                setOpenCard(card)
-                if (card.status === 'published') void learnApi.openProduct(card.id)
-              }}
-              className="group overflow-hidden rounded-xl border border-glass-border bg-glass text-left transition-colors hover:border-amber/50"
-            >
-              {card.photo_urls[0] ? (
-                <img
-                  src={card.photo_urls[0]}
-                  alt={card.title}
-                  loading="lazy"
-                  className="h-32 w-full object-cover sm:h-40"
-                />
-              ) : (
-                <div className="flex h-32 w-full items-center justify-center bg-surface sm:h-40">
-                  <ShoppingBag className="h-8 w-8 text-text3" />
-                </div>
-              )}
-              <div className="p-2.5">
-                <p className="truncate text-sm font-medium text-text">{card.title}</p>
-                <div className="mt-1 flex items-center gap-1.5">
-                  {card.status !== 'published' && (
-                    <Badge variant="secondary">{CONTENT_STATUS_LABEL[card.status]}</Badge>
-                  )}
-                  {!card.viewed_by_me && card.status === 'published' && (
-                    <span className="rounded bg-amber/15 px-1.5 py-0.5 text-[10px] font-medium text-amber">
-                      новинка для вас
-                    </span>
-                  )}
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
       </div>
 
-      {openCard && (
-        <ProductViewDialog
-          card={openCard}
-          canManage={canManage}
-          onEdit={() => {
-            setEditorCard(openCard)
-            setOpenCard(null)
-          }}
-          onClose={() => setOpenCard(null)}
-        />
-      )}
       {editorCard !== null && (
         <ProductEditorDialog
           initial={editorCard === 'new' ? null : editorCard}
@@ -215,6 +210,234 @@ export function LearnProductsPage() {
   )
 }
 
+// ─── Карточка позиции: отдельный маршрут ─────────────────────────────────────
+
+export function LearnProductPage() {
+  const { productId = '' } = useParams()
+  const navigate = useNavigate()
+  const { probe, canManage, data } = useProductsData()
+  const [photoIdx, setPhotoIdx] = useState(0)
+  const [editing, setEditing] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const card = data?.items.find((i) => i.id === productId) ?? null
+  const back = () => navigate('/learn/products')
+
+  const fields = card
+    ? ([
+        ['Состав', card.composition],
+        ['Аллергены', card.allergens],
+        ['Срок годности', card.shelf_life],
+        ['Подача', card.serving],
+      ] as const).filter(([, v]) => Boolean(v))
+    : []
+
+  const photo = card?.photo_urls[photoIdx] ?? card?.photo_urls[0] ?? null
+  const Photo = card ? (
+    <div className="flex flex-col gap-2">
+      {photo ? (
+        <img
+          src={photo}
+          alt={card.title}
+          className="h-[200px] w-full rounded-2xl border border-hair bg-surface object-cover lg:h-[220px]"
+        />
+      ) : (
+        <div className="flex h-[200px] flex-col items-center justify-center gap-2 rounded-2xl bg-surface lg:h-[220px]">
+          <ShoppingBag className="h-[34px] w-[34px] text-text2 lg:h-[38px] lg:w-[38px]" strokeWidth={1.6} />
+          <p className="text-[14px] text-text2">Фото не загружено</p>
+        </div>
+      )}
+      {card.photo_urls.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:none]">
+          {card.photo_urls.map((url, i) => (
+            <button
+              key={i}
+              type="button"
+              aria-label={`Фото ${i + 1}`}
+              onClick={() => setPhotoIdx(i)}
+              className={cn(
+                'h-12 w-16 shrink-0 overflow-hidden rounded-lg border',
+                i === photoIdx ? 'border-amber' : 'border-hair opacity-70',
+              )}
+            >
+              <img src={url} alt="" className="h-full w-full object-cover" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : null
+
+  const Upsell = card?.upsell ? (
+    <div className="flex flex-col gap-1.5 rounded-[14px] border border-amber/45 bg-amber/10 p-3.5">
+      <p className="text-[12px] font-bold uppercase tracking-[0.07em] text-text2">Что предложить вместе</p>
+      <p className="whitespace-pre-wrap text-[16px] leading-[1.55] text-text [text-wrap:pretty]">{card.upsell}</p>
+    </div>
+  ) : null
+
+  const Links =
+    card && card.links.length > 0 ? (
+      <div className="flex flex-col gap-2">
+        {card.links.map((link) => (
+          <Link
+            key={`${link.object_type}-${link.object_id}`}
+            to={link.url_path ?? '#'}
+            className="flex flex-col gap-1 rounded-xl border border-hair bg-tint p-3.5 text-text transition-colors hover:border-amber/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+          >
+            <span className="text-[11px] font-bold uppercase tracking-[0.09em] text-text2">Изучить по теме</span>
+            <span className="flex items-center gap-2 text-[16px] font-semibold leading-[1.35]">
+              <BookOpen className="h-4 w-4 shrink-0 text-text2" />
+              <span className="min-w-0 flex-1">{link.title ?? 'Материал'}</span>
+            </span>
+          </Link>
+        ))}
+      </div>
+    ) : null
+
+  const Actions = canManage && card ? (
+    <div className="flex flex-wrap gap-2">
+      <Button variant="secondary" className={GHOST_BTN} onClick={() => setEditing(true)}>
+        <Pencil className="h-4 w-4" /> Редактировать
+      </Button>
+      {card.published_at === null && (
+        <Button variant="secondary" className={cn(GHOST_BTN, 'text-red')} onClick={() => setDeleting(true)}>
+          <Trash2 className="h-4 w-4" /> Удалить
+        </Button>
+      )}
+    </div>
+  ) : null
+
+  return (
+    <div className="mx-auto max-w-[920px] px-5 pb-16 pt-11 lg:px-8">
+      <button
+        type="button"
+        onClick={back}
+        className="-ml-2.5 inline-flex min-h-11 items-center gap-[7px] rounded-lg px-2.5 text-[15px] font-semibold text-text hover:text-amber focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 lg:min-h-10"
+      >
+        <ArrowLeft className="h-[17px] w-[17px]" strokeWidth={2.2} /> Ассортимент
+      </button>
+
+      {probe.isLoading && <SkeletonRows rows={6} />}
+      {probe.isError && <QueryError onRetry={() => void probe.refetch()} />}
+      {data && !card && (
+        <EmptyState
+          layout="card"
+          className="mt-4"
+          icon={<ShoppingBag className="h-7 w-7" />}
+          title="Позиция не найдена"
+          text="Карточку сняли с публикации или ссылка устарела."
+          cta="К ассортименту"
+          onCta={back}
+        />
+      )}
+
+      {card && (
+        <div className="mt-[18px] flex flex-col gap-[18px] lg:mt-5 lg:grid lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start lg:gap-7">
+          {/* Мобильный порядок: фото → текст → действия → поля → upsell → ссылки.
+              Десктоп: левая колонка фото + upsell + ссылки, правая — текст и поля. */}
+          <div className="flex flex-col gap-3.5 lg:contents">
+            <div className="lg:order-1 lg:flex lg:flex-col lg:gap-3.5">
+              {Photo}
+              <div className="hidden lg:flex lg:flex-col lg:gap-3.5">
+                {Upsell}
+                {Links}
+              </div>
+            </div>
+          </div>
+          <div className="flex min-w-0 flex-col gap-[18px] lg:order-2">
+            <div>
+              <h1 className="font-display text-[26px] font-bold leading-[1.2] tracking-[0.01em] text-text lg:text-[30px] lg:leading-[1.18]">
+                {card.title}
+              </h1>
+              {card.status !== 'published' && (
+                <Badge variant="outline" className="mt-2.5">
+                  {CONTENT_STATUS_LABEL[card.status]}
+                </Badge>
+              )}
+              {card.description && (
+                <p className="mt-2.5 whitespace-pre-wrap text-[17px] leading-[1.65] text-text [text-wrap:pretty] lg:mt-3 lg:text-[18px] lg:leading-[1.7]">
+                  {card.description}
+                </p>
+              )}
+            </div>
+            {Actions}
+            {fields.length > 0 && (
+              <dl className="flex flex-col gap-3 lg:gap-3.5">
+                {fields.map(([name, value]) => (
+                  <div
+                    key={name}
+                    className="flex flex-col gap-[3px] border-t border-hair pt-3 lg:grid lg:grid-cols-[160px_minmax(0,1fr)] lg:gap-4 lg:pt-3.5"
+                  >
+                    <dt className="text-[12px] font-bold uppercase tracking-[0.07em] text-text2">{name}</dt>
+                    <dd className="whitespace-pre-wrap text-[16px] leading-[1.55] text-text lg:text-[17px] lg:leading-[1.6]">
+                      {value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            <div className="flex flex-col gap-3.5 lg:hidden">
+              {Upsell}
+              {Links}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editing && card && (
+        <ProductEditorDialog initial={card} categories={data?.categories ?? []} onClose={() => setEditing(false)} />
+      )}
+      {deleting && card && (
+        <DeleteProductDialog
+          card={card}
+          onClose={() => setDeleting(false)}
+          onDeleted={() => {
+            setDeleting(false)
+            back()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function DeleteProductDialog({
+  card,
+  onClose,
+  onDeleted,
+}: {
+  card: ProductCard
+  onClose: () => void
+  onDeleted: () => void
+}) {
+  const remove = useProductMutation(() => learnApi.deleteProduct(card.id))
+  return (
+    <ResponsiveDialog
+      open
+      onOpenChange={(v) => !v && onClose()}
+      title={`Удалить «${card.title}»?`}
+      description="Черновик удаляется насовсем. Опубликованную позицию снимают в архив — она исчезнет у сотрудников, история открытий сохранится."
+      desktopWidth={440}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={remove.isPending}>
+            Отмена
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={remove.isPending}
+            onClick={() => void remove.mutateAsync(undefined as never).then(onDeleted)}
+          >
+            Удалить
+          </Button>
+        </>
+      }
+    >
+      <span className="sr-only">Подтверждение удаления</span>
+    </ResponsiveDialog>
+  )
+}
+
 // ─── Категории ───────────────────────────────────────────────────────────────
 
 /**
@@ -223,13 +446,7 @@ export function LearnProductsPage() {
  * Устройство — как у разделов библиотеки: создание, переименование по месту,
  * удаление только пустой категории (сервер отвечает 409 с причиной).
  */
-function CategoriesDialog({
-  categories,
-  onClose,
-}: {
-  categories: ProductCategory[]
-  onClose: () => void
-}) {
+function CategoriesDialog({ categories, onClose }: { categories: ProductCategory[]; onClose: () => void }) {
   const [name, setName] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
@@ -237,10 +454,7 @@ function CategoriesDialog({
   const rename = useProductMutation((args: { id: string; title: string }) =>
     learnApi.renameProductCategory(args.id, args.title),
   )
-  const remove = useProductMutation(
-    (id: string) => learnApi.deleteProductCategory(id),
-    'Категория не удалена',
-  )
+  const remove = useProductMutation((id: string) => learnApi.deleteProductCategory(id), 'Категория не удалена')
 
   const commitRename = () => {
     const trimmed = editingTitle.trim()
@@ -249,187 +463,84 @@ function CategoriesDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Категории ассортимента</DialogTitle>
-        </DialogHeader>
-        <form
-          className="flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (!name.trim()) return
-            void create.mutateAsync(name.trim()).then(() => setName(''))
-          }}
-        >
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Новая категория…"
-            maxLength={120}
-          />
-          <Button type="submit" disabled={!name.trim() || create.isPending}>
-            <Plus className="h-4 w-4" />
-          </Button>
-        </form>
-        <ul className="divide-y divide-glass-border">
-          {categories.length === 0 && (
-            <li className="py-3 text-sm text-text3">Категорий пока нет.</li>
-          )}
-          {categories.map((c) => (
-            <li key={c.id} className="flex items-center gap-2 py-2">
-              {editingId === c.id ? (
-                <Input
-                  autoFocus
-                  className="h-8 flex-1"
-                  value={editingTitle}
-                  onChange={(e) => setEditingTitle(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      commitRename()
-                    }
-                    if (e.key === 'Escape') setEditingId(null)
-                  }}
-                />
-              ) : (
-                <span className="min-w-0 flex-1 truncate text-sm text-text">{c.title}</span>
-              )}
-              <button
-                type="button"
-                title="Переименовать"
-                className="rounded p-1.5 text-text3 hover:bg-glass hover:text-text"
-                onClick={() => {
-                  setEditingId(c.id)
-                  setEditingTitle(c.title)
+    <ResponsiveDialog
+      open
+      onOpenChange={(v) => !v && onClose()}
+      title="Категории ассортимента"
+      description="Удалить можно только пустую категорию — сначала перенесите её позиции."
+      footer={
+        <Button type="button" variant="secondary" onClick={onClose}>
+          Закрыть
+        </Button>
+      }
+    >
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (!name.trim()) return
+          void create.mutateAsync(name.trim()).then(() => setName(''))
+        }}
+      >
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Новая категория…"
+          maxLength={120}
+          className="h-12 text-[15px] lg:h-11"
+        />
+        <Button type="submit" size="icon" className="h-12 w-12 shrink-0 lg:h-11 lg:w-11" disabled={!name.trim() || create.isPending} aria-label="Добавить">
+          <Plus className="h-4 w-4" />
+        </Button>
+      </form>
+      <ul className="divide-y divide-hair">
+        {categories.length === 0 && <li className="py-3 text-[14px] text-text2">Категорий пока нет.</li>}
+        {categories.map((c) => (
+          <li key={c.id} className="flex min-h-12 items-center gap-2 py-1.5">
+            {editingId === c.id ? (
+              <Input
+                autoFocus
+                className="h-10 flex-1"
+                value={editingTitle}
+                onChange={(e) => setEditingTitle(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    commitRename()
+                  }
+                  if (e.key === 'Escape') setEditingId(null)
                 }}
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                title="Удалить — только пустую категорию, без карточек"
-                className="rounded p-1.5 text-text3 hover:bg-glass hover:text-red"
-                disabled={remove.isPending}
-                onClick={() => void remove.mutateAsync(c.id)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </li>
-          ))}
-        </ul>
-        <DialogFooter>
-          <Button type="button" variant="secondary" onClick={onClose}>
-            Закрыть
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ─── Просмотр карточки ───────────────────────────────────────────────────────
-
-function Field({ label, value }: { label: string; value: string | null }) {
-  if (!value) return null
-  return (
-    <div>
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-text3">{label}</p>
-      <p className="whitespace-pre-wrap text-sm text-text2">{value}</p>
-    </div>
-  )
-}
-
-function ProductViewDialog({
-  card,
-  canManage,
-  onEdit,
-  onClose,
-}: {
-  card: ProductCard
-  canManage: boolean
-  onEdit: () => void
-  onClose: () => void
-}) {
-  const [photoIdx, setPhotoIdx] = useState(0)
-  return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[88vh] overflow-y-auto">
-        <DialogHeader>
-          {/* Правка ушла в футер: карандаш стоял в том же углу, что и
-              absolute-кнопка закрытия Dialog, и они перекрывали друг друга. */}
-          <DialogTitle className="pr-8">{card.title}</DialogTitle>
-        </DialogHeader>
-
-        {card.photo_urls.length > 0 && (
-          <div className="space-y-1.5">
-            <img
-              src={card.photo_urls[photoIdx]}
-              alt={card.title}
-              className="max-h-72 w-full rounded-lg border border-glass-border bg-surface object-contain"
-            />
-            {card.photo_urls.length > 1 && (
-              <div className="flex gap-1.5 overflow-x-auto">
-                {card.photo_urls.map((url, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => setPhotoIdx(i)}
-                    className={cn(
-                      'h-12 w-16 shrink-0 overflow-hidden rounded border',
-                      i === photoIdx ? 'border-amber' : 'border-glass-border opacity-70',
-                    )}
-                  >
-                    <img src={url} alt="" className="h-full w-full object-cover" />
-                  </button>
-                ))}
-              </div>
+              />
+            ) : (
+              <span className="min-w-0 flex-1 truncate text-[15px] text-text">{c.title}</span>
             )}
-          </div>
-        )}
-
-        <div className="space-y-2.5">
-          {card.description && (
-            <p className="whitespace-pre-wrap text-sm text-text">{card.description}</p>
-          )}
-          <Field label="Состав" value={card.composition} />
-          <Field label="Аллергены" value={card.allergens} />
-          <Field label="Сроки и хранение" value={card.shelf_life} />
-          <Field label="Приготовление и подача" value={card.serving} />
-          <Field label="Что предложить вместе" value={card.upsell} />
-
-          {card.links.length > 0 && (
-            <div>
-              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-text3">
-                Изучить по теме
-              </p>
-              <div className="space-y-1">
-                {card.links.map((link) => (
-                  <Link
-                    key={`${link.object_type}-${link.object_id}`}
-                    to={link.url_path ?? '#'}
-                    onClick={onClose}
-                    className="flex items-center gap-2 rounded-lg border border-glass-border bg-surface px-3 py-2 text-sm text-text transition-colors hover:border-amber/50"
-                  >
-                    <BookOpen className="h-4 w-4 shrink-0 text-amber" />
-                    <span className="min-w-0 flex-1 truncate">{link.title}</span>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {canManage && (
-          <DialogFooter>
-            <Button variant="secondary" size="sm" onClick={onEdit}>
-              <Pencil className="h-4 w-4" /> Редактировать
-            </Button>
-          </DialogFooter>
-        )}
-      </DialogContent>
-    </Dialog>
+            <button
+              type="button"
+              title="Переименовать"
+              aria-label={`Переименовать «${c.title}»`}
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-text2 hover:bg-glass hover:text-text"
+              onClick={() => {
+                setEditingId(c.id)
+                setEditingTitle(c.title)
+              }}
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              title="Удалить — только пустую категорию, без карточек"
+              aria-label={`Удалить «${c.title}»`}
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-text2 hover:bg-glass hover:text-red"
+              disabled={remove.isPending}
+              onClick={() => void remove.mutateAsync(c.id)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </ResponsiveDialog>
   )
 }
 
@@ -483,14 +594,11 @@ function ProductEditorDialog({
   })
 
   const save = useProductMutation(() =>
-    initial
-      ? learnApi.updateProduct(initial.id, buildBody())
-      : learnApi.createProduct(buildBody()),
+    initial ? learnApi.updateProduct(initial.id, buildBody()) : learnApi.createProduct(buildBody()),
   )
   const setStatus = useProductMutation((status: 'published' | 'archived' | 'draft') =>
     learnApi.setProductStatus(initial!.id, status),
   )
-  const remove = useProductMutation(() => learnApi.deleteProduct(initial!.id))
 
   const onPhotoPick = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = [...(e.target.files ?? [])].slice(0, 10 - photos.length)
@@ -509,133 +617,19 @@ function ProductEditorDialog({
     }
   }
 
+  const FIELD = 'h-12 text-[15px] lg:h-11'
+  const AREA =
+    'flex w-full rounded-[10px] border border-glass-border bg-surface px-3.5 py-2.5 text-[15px] text-text focus-visible:border-amber focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber'
+
   return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[88vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{initial ? 'Карточка товара' : 'Новый товар'}</DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-2.5">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="p-title">Название</Label>
-              <Input
-                id="p-title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                maxLength={255}
-              />
-            </div>
-            <div>
-              <Label htmlFor="p-category">Категория</Label>
-              <Select
-                id="p-category"
-                value={categoryId}
-                onChange={(e) => setCategoryId(e.target.value)}
-              >
-                <option value="">Без категории</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.title}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
-
-          {(
-            [
-              ['Описание', description, setDescription],
-              ['Состав', composition, setComposition],
-              ['Аллергены', allergens, setAllergens],
-              ['Сроки и хранение', shelfLife, setShelfLife],
-              ['Приготовление и подача', serving, setServing],
-              ['Что предложить вместе', upsell, setUpsell],
-            ] as const
-          ).map(([label, value, setter]) => (
-            <div key={label}>
-              <Label>{label}</Label>
-              <textarea
-                value={value}
-                onChange={(e) => setter(e.target.value)}
-                rows={2}
-                className="flex w-full rounded-lg border border-glass-border bg-glass px-3 py-2 text-sm text-text focus-visible:border-amber focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber"
-              />
-            </div>
-          ))}
-
-          <div>
-            <Label>Фото ({photos.length}/10)</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {photos.map((photo, i) => (
-                <div key={photo.media_id} className="relative">
-                  <img
-                    src={photo.url}
-                    alt=""
-                    className="h-16 w-20 rounded border border-glass-border object-cover"
-                  />
-                  <button
-                    type="button"
-                    aria-label="Убрать фото"
-                    onClick={() => setPhotos((prev) => prev.filter((_, j) => j !== i))}
-                    className="absolute -right-1.5 -top-1.5 rounded-full bg-surface p-0.5 text-text3 shadow hover:text-red"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-              {photos.length < 10 && (
-                <button
-                  type="button"
-                  disabled={uploading}
-                  onClick={() => photoInput.current?.click()}
-                  className="flex h-16 w-20 items-center justify-center rounded border border-dashed border-glass-border text-text3 hover:border-amber/50 hover:text-text disabled:opacity-50"
-                >
-                  <ImagePlus className="h-5 w-5" />
-                </button>
-              )}
-            </div>
-            <input
-              ref={photoInput}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              multiple
-              hidden
-              onChange={(e) => void onPhotoPick(e)}
-            />
-          </div>
-
-          <div>
-            <Label>Изучить по теме</Label>
-            <div className="space-y-1">
-              {links.map((link, i) => (
-                <div
-                  key={`${link.object_type}-${link.object_id}`}
-                  className="flex items-center gap-2 rounded-lg border border-glass-border bg-surface px-3 py-1.5 text-sm"
-                >
-                  <BookOpen className="h-4 w-4 shrink-0 text-amber" />
-                  <span className="min-w-0 flex-1 truncate text-text">
-                    {link.title ?? link.object_id}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="Убрать ссылку"
-                    onClick={() => setLinks((prev) => prev.filter((_, j) => j !== i))}
-                    className="rounded p-1 text-text3 hover:text-red"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-              <Button size="sm" variant="ghost" onClick={() => setCourseLinkOpen(true)}>
-                + курс по теме
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        <DialogFooter className="flex-wrap gap-2">
+    <ResponsiveDialog
+      open
+      onOpenChange={(v) => !v && onClose()}
+      title={initial ? 'Карточка товара' : 'Новый товар'}
+      description={initial ? undefined : 'Позиция создаётся черновиком — сотрудники увидят её после публикации.'}
+      desktopWidth={680}
+      footer={
+        <>
           {initial && initial.status !== 'published' && (
             <Button
               type="button"
@@ -653,7 +647,7 @@ function ProductEditorDialog({
           {initial && initial.status === 'published' && (
             <Button
               type="button"
-              variant="ghost"
+              variant="secondary"
               onClick={() =>
                 void setStatus.mutateAsync('archived').then(() => {
                   toast.success('В архиве')
@@ -665,21 +659,8 @@ function ProductEditorDialog({
             </Button>
           )}
           {initial && (
-            <Button type="button" variant="ghost" onClick={() => setAudienceOpen(true)}>
+            <Button type="button" variant="secondary" onClick={() => setAudienceOpen(true)}>
               <Users className="h-4 w-4" /> Аудитория
-            </Button>
-          )}
-          {initial && initial.published_at === null && (
-            <Button
-              type="button"
-              variant="ghost"
-              className="text-red"
-              onClick={() => {
-                if (!window.confirm(`Удалить «${initial.title}»?`)) return
-                void remove.mutateAsync(undefined as never).then(onClose)
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
             </Button>
           )}
           <span className="flex-1" />
@@ -698,70 +679,144 @@ function ProductEditorDialog({
           >
             Сохранить
           </Button>
-        </DialogFooter>
+        </>
+      }
+    >
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="p-title">Название</Label>
+          <Input id="p-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={255} className={FIELD} autoFocus={!initial} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="p-category">Категория</Label>
+          <Select id="p-category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className={FIELD}>
+            <option value="">Без категории</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.title}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
 
-        {audienceOpen && initial && (
-          <ProductAudienceDialog card={initial} onClose={() => setAudienceOpen(false)} />
-        )}
-        {courseLinkOpen && (
-          <CoursePickDialog
-            onClose={() => setCourseLinkOpen(false)}
-            onPick={(id, courseTitle) => {
-              setLinks((prev) =>
-                prev.some((l) => l.object_type === 'course' && l.object_id === id)
-                  ? prev
-                  : [
-                      ...prev,
-                      {
-                        object_type: 'course',
-                        object_id: id,
-                        title: courseTitle,
-                        url_path: `/learn/courses/${id}`,
-                      },
-                    ],
-              )
-              setCourseLinkOpen(false)
-            }}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+      {(
+        [
+          ['Описание', description, setDescription],
+          ['Состав', composition, setComposition],
+          ['Аллергены', allergens, setAllergens],
+          ['Срок годности', shelfLife, setShelfLife],
+          ['Подача', serving, setServing],
+          ['Что предложить вместе', upsell, setUpsell],
+        ] as const
+      ).map(([label, value, setter]) => (
+        <div key={label} className="flex flex-col gap-1.5">
+          <Label>{label}</Label>
+          <textarea value={value} onChange={(e) => setter(e.target.value)} rows={2} className={AREA} />
+        </div>
+      ))}
+
+      <div className="flex flex-col gap-1.5">
+        <Label>Фото ({photos.length}/10)</Label>
+        <div className="flex flex-wrap gap-2">
+          {photos.map((photo, i) => (
+            <div key={photo.media_id} className="relative">
+              <img src={photo.url} alt="" className="h-16 w-20 rounded-lg border border-hair object-cover" />
+              <button
+                type="button"
+                aria-label="Убрать фото"
+                onClick={() => setPhotos((prev) => prev.filter((_, j) => j !== i))}
+                className="absolute -right-1.5 -top-1.5 rounded-full bg-surface p-1 text-text2 shadow hover:text-red"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+          {photos.length < 10 && (
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={() => photoInput.current?.click()}
+              aria-label="Добавить фото"
+              className="flex h-16 w-20 items-center justify-center rounded-lg border border-dashed border-glass-border text-text2 hover:border-amber/50 hover:text-text disabled:opacity-50"
+            >
+              <ImagePlus className="h-5 w-5" />
+            </button>
+          )}
+        </div>
+        <input
+          ref={photoInput}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          multiple
+          hidden
+          onChange={(e) => void onPhotoPick(e)}
+        />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label>Изучить по теме</Label>
+        <div className="flex flex-col gap-1.5">
+          {links.map((link, i) => (
+            <div
+              key={`${link.object_type}-${link.object_id}`}
+              className="flex min-h-11 items-center gap-2 rounded-[10px] border border-hair bg-surface px-3 text-[14px]"
+            >
+              <BookOpen className="h-4 w-4 shrink-0 text-text2" />
+              <span className="min-w-0 flex-1 truncate text-text">{link.title ?? link.object_id}</span>
+              <button
+                type="button"
+                aria-label="Убрать ссылку"
+                onClick={() => setLinks((prev) => prev.filter((_, j) => j !== i))}
+                className="flex h-9 w-9 items-center justify-center rounded-md text-text2 hover:text-red"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+          <Button variant="secondary" className="self-start bg-transparent" onClick={() => setCourseLinkOpen(true)}>
+            <Plus className="h-4 w-4" /> Курс по теме
+          </Button>
+        </div>
+      </div>
+
+      {audienceOpen && initial && <ProductAudienceDialog card={initial} onClose={() => setAudienceOpen(false)} />}
+      {courseLinkOpen && (
+        <CoursePickDialog
+          onClose={() => setCourseLinkOpen(false)}
+          onPick={(id, courseTitle) => {
+            setLinks((prev) =>
+              prev.some((l) => l.object_type === 'course' && l.object_id === id)
+                ? prev
+                : [
+                    ...prev,
+                    {
+                      object_type: 'course',
+                      object_id: id,
+                      title: courseTitle,
+                      url_path: `/learn/courses/${id}`,
+                    },
+                  ],
+            )
+            setCourseLinkOpen(false)
+          }}
+        />
+      )}
+    </ResponsiveDialog>
   )
 }
 
-function ProductAudienceDialog({
-  card,
-  onClose,
-}: {
-  card: ProductCard
-  onClose: () => void
-}) {
+function ProductAudienceDialog({ card, onClose }: { card: ProductCard; onClose: () => void }) {
   const audience = useAudienceDraft(card.audience_id)
   const { value, setValue } = audience
   const save = useProductMutation(() => learnApi.setProductAudience(card.id, value))
   return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Кому виден «{card.title}»</DialogTitle>
-        </DialogHeader>
-        {audience.loading ? (
-          <SkeletonRows rows={3} />
-        ) : (
-          <>
-            {audience.failed && (
-              <p className="text-sm text-red">
-                Не удалось загрузить текущие правила — сохранение перезапишет их.
-              </p>
-            )}
-            <AudiencePicker
-              value={value}
-              onChange={setValue}
-              extraLabels={audience.extraLabels}
-            />
-          </>
-        )}
-        <DialogFooter>
+    <ResponsiveDialog
+      open
+      onOpenChange={(v) => !v && onClose()}
+      title={`Кому виден «${card.title}»`}
+      footer={
+        <>
           <Button variant="secondary" onClick={onClose} disabled={save.isPending}>
             Отмена
           </Button>
@@ -776,41 +831,44 @@ function ProductAudienceDialog({
           >
             Сохранить
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      {audience.loading ? (
+        <SkeletonRows rows={3} />
+      ) : (
+        <>
+          {audience.failed && (
+            <p className="text-[14px] text-red">
+              Не удалось загрузить текущие правила — сохранение перезапишет их.
+            </p>
+          )}
+          <AudiencePicker value={value} onChange={setValue} extraLabels={audience.extraLabels} />
+        </>
+      )}
+    </ResponsiveDialog>
   )
 }
 
-function CoursePickDialog({
-  onClose,
-  onPick,
-}: {
-  onClose: () => void
-  onPick: (courseId: string, title: string) => void
-}) {
+function CoursePickDialog({ onClose, onPick }: { onClose: () => void; onPick: (courseId: string, title: string) => void }) {
   const courses = useCourses(true)
   return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Курс по теме</DialogTitle>
-        </DialogHeader>
-        <div className="max-h-72 space-y-1 overflow-y-auto">
-          {(courses.data?.items ?? []).map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => onPick(c.id, c.title)}
-              className="flex w-full items-center gap-2 rounded-lg border border-glass-border px-3 py-2 text-left text-sm text-text hover:border-amber/50"
-            >
-              <BookOpen className="h-4 w-4 shrink-0 text-amber" />
-              <span className="min-w-0 flex-1 truncate">{c.title}</span>
-              <Badge variant="secondary">{CONTENT_STATUS_LABEL[c.status]}</Badge>
-            </button>
-          ))}
-        </div>
-      </DialogContent>
-    </Dialog>
+    <ResponsiveDialog open onOpenChange={(v) => !v && onClose()} title="Курс по теме" description="Ссылка появится в карточке блоком «Изучить по теме».">
+      <div className="flex max-h-[60vh] flex-col gap-1.5 overflow-y-auto">
+        {(courses.data?.items ?? []).map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => onPick(c.id, c.title)}
+            className="flex min-h-12 w-full items-center gap-2 rounded-[10px] border border-hair px-3.5 text-left text-[15px] text-text hover:border-amber/50 lg:min-h-11"
+          >
+            <BookOpen className="h-4 w-4 shrink-0 text-text2" />
+            <span className="min-w-0 flex-1 truncate">{c.title}</span>
+            <Badge variant="outline">{CONTENT_STATUS_LABEL[c.status]}</Badge>
+          </button>
+        ))}
+        {courses.isLoading && <SkeletonRows rows={3} />}
+      </div>
+    </ResponsiveDialog>
   )
 }

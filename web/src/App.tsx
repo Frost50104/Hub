@@ -69,6 +69,9 @@ const LearnNewsPage = lazy(() =>
 const LearnSurveysPage = lazy(() =>
   import('@/pages/learn/LearnSurveysPage').then((m) => ({ default: m.LearnSurveysPage })),
 )
+const LearnSurveyRunPage = lazy(() =>
+  import('@/pages/learn/LearnSurveysPage').then((m) => ({ default: m.LearnSurveyRunPage })),
+)
 const LearnCoursesPage = lazy(() =>
   import('@/pages/learn/LearnCoursesPage').then((m) => ({ default: m.LearnCoursesPage })),
 )
@@ -92,6 +95,9 @@ const CertificatePage = lazy(() =>
 )
 const LearnProductsPage = lazy(() =>
   import('@/pages/learn/LearnProductsPage').then((m) => ({ default: m.LearnProductsPage })),
+)
+const LearnProductPage = lazy(() =>
+  import('@/pages/learn/LearnProductsPage').then((m) => ({ default: m.LearnProductPage })),
 )
 const LearnAssessmentsPage = lazy(() =>
   import('@/pages/learn/LearnAssessmentsPage').then((m) => ({
@@ -151,11 +157,13 @@ export function App() {
           <Route path="/learn/library" element={<LearnLibraryPage />} />
           <Route path="/learn/news" element={<LearnNewsPage />} />
           <Route path="/learn/surveys" element={<LearnSurveysPage />} />
+          <Route path="/learn/surveys/:surveyId" element={<LearnSurveyRunPage />} />
           <Route path="/learn/courses" element={<LearnCoursesPage />} />
           <Route path="/learn/courses/:courseId" element={<LearnCoursePage />} />
           <Route path="/learn/courses/:courseId/edit" element={<CourseBuilderPage />} />
           <Route path="/learn/lessons/:lessonId" element={<LearnLessonPage />} />
           <Route path="/learn/products" element={<LearnProductsPage />} />
+          <Route path="/learn/products/:productId" element={<LearnProductPage />} />
           <Route path="/learn/rating" element={<LearnRatingPage />} />
           {/* Ассистент общий для двух пространств. Старый learn-путь —
               редирект, а не 404: PWA живёт вчерашним бандлом. */}
