@@ -168,6 +168,41 @@ def assignee_exists(employee_id: UUID):  # noqa: ANN201 — SQLAlchemy Exists
     )
 
 
+async def is_task_assignee(
+    db: AsyncSession, task_id: UUID, employee_id: UUID
+) -> bool:
+    """«Этот сотрудник — среди исполнителей задачи».
+
+    Нужна гейту `PATCH /tasks/{id}`: исполнитель меняет статус и этап своей
+    задачи даже с ролью viewer в проекте (назначение выдаёт именно viewer —
+    `apply_assignee_side_effects` → `ensure_project_member`).
+    """
+    row = await db.execute(
+        select(TaskAssignee.task_id).where(
+            TaskAssignee.task_id == task_id,
+            TaskAssignee.employee_id == employee_id,
+        )
+    )
+    return row.first() is not None
+
+
+def can_set_status(
+    role: str | None, employee_id: UUID, assignees: Sequence[AssigneeBrief]
+) -> bool:
+    """Право менять статус/этап задачи — для `TaskResponse.can_set_status`.
+
+    Зеркало гейта в `app/api/tasks.py::update_task`; считается из уже
+    загруженных исполнителей, без единого запроса. `role is None` — это
+    hub-admin-байпас `require_project_role`, а не «роли нет»: у не-участника
+    ручка вообще не дойдёт до сериализации (404).
+    """
+    return (
+        role is None
+        or role in ("owner", "editor")
+        or any(a.employee_id == employee_id for a in assignees)
+    )
+
+
 def has_no_assignees():  # noqa: ANN201 — SQLAlchemy Exists
     """Предикат «у задачи нет ни одного исполнителя» (бакет workload)."""
     return ~select(TaskAssignee.task_id).where(TaskAssignee.task_id == Task.id).exists()

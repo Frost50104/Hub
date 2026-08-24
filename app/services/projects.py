@@ -1,0 +1,61 @@
+"""Создание проекта — общий путь для ручки POST /projects и для личного
+пространства (`services/personal_projects.py`).
+
+Здесь только доменная работа: строка проекта + 4 дефолтных этапа + owner-
+членство создателя. Права, подбор ключа и commit — на вызывающем (тот же
+контракт, что у `services/tasks.py::create_task_record`). Вынесено из ручки,
+чтобы два пути создания не разъехались на первой же новой дефолтной сущности.
+"""
+
+from __future__ import annotations
+
+from uuid import UUID, uuid4
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.project import Project, ProjectMember
+from app.services.stages import create_default_stages
+
+
+async def create_project_record(
+    db: AsyncSession,
+    *,
+    tenant_id: UUID,
+    created_by: UUID,
+    name: str,
+    key: str,
+    description: str | None = None,
+    personal_owner_id: UUID | None = None,
+) -> Project:
+    """Проект + этапы + owner-членство БЕЗ commit'а и БЕЗ проверки прав.
+
+    `personal_owner_id` — только для личного пространства; значение обязано
+    приходить из `principal.employee_id`, никогда из тела запроса (см.
+    инвариант в `app/models/project.py`).
+    """
+    project = Project(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        key=key,
+        name=name,
+        description=description,
+        created_by=created_by,
+        personal_owner_id=personal_owner_id,
+    )
+    db.add(project)
+    await db.flush()
+    # Четыре этапа по умолчанию — в той же транзакции: проект без этапов не
+    # знает, куда класть задачи (инвариант «≥1 этап на системный статус»).
+    await create_default_stages(db, tenant_id=tenant_id, project_id=project.id)
+    db.add(
+        ProjectMember(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            project_id=project.id,
+            employee_id=created_by,
+            role="owner",
+            added_by=created_by,
+        )
+    )
+    await db.flush()
+    return project

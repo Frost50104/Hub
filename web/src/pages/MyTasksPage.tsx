@@ -1,20 +1,27 @@
 import { ChevronDown, Filter } from 'lucide-react'
-import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { MobileTaskRow } from '@/components/task/MobileTaskRow'
+import { PersonalTasksSection } from '@/components/task/PersonalTasksSection'
+import { TaskDetailDrawer } from '@/components/task/TaskDetailDrawer'
 import { TaskEmptyState, TaskListSkeleton } from '@/components/task/TaskListStates'
 import { TaskListHeader } from '@/components/task/TaskListHeader'
 import { TaskRow } from '@/components/task/TaskRow'
 import { BottomSheet, BottomSheetItem } from '@/components/ui/BottomSheet'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMyTasks, type DueWindow } from '@/hooks/useMyTasks'
+import { usePersonalTasks } from '@/hooks/usePersonalTasks'
 import { useProjects } from '@/hooks/useProjects'
 import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
+import {
+  resolvePersonalTaskParam,
+  shouldFocusPersonalCreate,
+} from '@/lib/personalTasks'
 import { addDaysKey, dayKey, todayKey } from '@/lib/taskDates'
 import { MY_TASKS_GRID } from '@/lib/taskGrid'
 import { type Task } from '@/lib/tasks'
@@ -85,7 +92,85 @@ function GroupHeader({ label, count }: { label: string; count: number }) {
 
 export function MyTasksPage() {
   const isDesktop = useIsDesktop()
-  return isDesktop ? <DesktopMyTasks /> : <MobileMyTasks />
+  const personal = usePersonalPane()
+  return (
+    <>
+      {isDesktop ? (
+        <DesktopMyTasks personal={personal} />
+      ) : (
+        <MobileMyTasks personal={personal} />
+      )}
+      {/* Карточка личной задачи живёт ЗДЕСЬ, а не на странице проекта:
+          личного проекта по продукту «не существует», и открывать его целиком
+          (вкладки, участники, «Поделиться») было бы противоречием. */}
+      <TaskDetailDrawer
+        taskId={personal.openTaskId}
+        projectId={personal.projectId ?? ''}
+        onClose={personal.closeTask}
+        onOpenTask={personal.openTaskById}
+      />
+    </>
+  )
+}
+
+interface PersonalPane {
+  projectId: string | undefined
+  /** id задачи, которую показывает карточка (null — карточка закрыта). */
+  openTaskId: string | null
+  openTask: (task: Task) => void
+  openTaskById: (taskId: string) => void
+  closeTask: () => void
+  focusCreate: boolean
+  clearFocusCreate: () => void
+}
+
+/** `?task=` и `?new=personal` в URL: deep-link, системное «назад» на телефоне
+ *  и точка входа из шторки FAB. */
+function usePersonalPane(): PersonalPane {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { projectId, query } = usePersonalTasks()
+  const requested = searchParams.get('task')
+  const resolved = resolvePersonalTaskParam(requested, {
+    tasks: query.data,
+    isPending: query.isPending,
+  })
+
+  const setParam = (mutate: (next: URLSearchParams) => void, replace: boolean) => {
+    const next = new URLSearchParams(searchParams)
+    mutate(next)
+    setSearchParams(next, { replace })
+  }
+
+  // Чужая или несуществующая задача: карточка получила бы чужие этапы и чужой
+  // can_edit — параметр вычищаем. В эффекте, а не в рендере: setSearchParams
+  // во время рендера роняет предупреждение React об обновлении чужого стейта.
+  const shouldDrop = resolved.kind === 'drop'
+  useEffect(() => {
+    if (shouldDrop) setParam((next) => next.delete('task'), true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldDrop])
+
+  return {
+    projectId,
+    openTaskId: resolved.kind === 'open' ? resolved.taskId : null,
+    openTask: (task) => setParam((next) => next.set('task', task.id), false),
+    openTaskById: (taskId) => setParam((next) => next.set('task', taskId), false),
+    closeTask: () => setParam((next) => next.delete('task'), true),
+    focusCreate: shouldFocusPersonalCreate(searchParams),
+    clearFocusCreate: () => setParam((next) => next.delete('new'), true),
+  }
+}
+
+function personalSection(personal: PersonalPane, variant: 'desktop' | 'mobile') {
+  return (
+    <PersonalTasksSection
+      variant={variant}
+      onOpenTask={personal.openTask}
+      selectedTaskId={personal.openTaskId}
+      focusCreate={personal.focusCreate}
+      onFocusHandled={personal.clearFocusCreate}
+    />
+  )
 }
 
 function useMyTasksData(tab: DueWindow) {
@@ -103,7 +188,10 @@ function useMyTasksData(tab: DueWindow) {
     // Карточка задачи живёт на странице проекта — deep-link (ОС 13.08: строки
     // были некликабельны, до вложений было не добраться).
     openTask: (t: Task) => navigate(`/projects/${t.project_id}?task=${t.id}`),
-    projectName: (t: Task) => projectsById.get(t.project_id)?.name ?? null,
+    // Фолбэк на project_key: задача, назначенная мне в ЧУЖОМ личном проекте,
+    // в useProjects() не найдётся — личные скрыты из списка.
+    projectName: (t: Task) =>
+      projectsById.get(t.project_id)?.name ?? t.project_key ?? null,
   }
 }
 
@@ -113,7 +201,7 @@ function emptyText(tab: DueWindow): string {
   return 'Здесь пока пусто.'
 }
 
-function DesktopMyTasks() {
+function DesktopMyTasks({ personal }: { personal: PersonalPane }) {
   const [tab, setTab] = useState<DueWindow>('upcoming')
   const { tasks, toggleDone, openTask, projectName } = useMyTasksData(tab)
   const grouped = tab === 'all'
@@ -152,6 +240,10 @@ function DesktopMyTasks() {
         </p>
       </header>
 
+      {personalSection(personal, 'desktop')}
+
+      {/* Граница вкладок читается как «фильтр, и всё под ним — его результат»:
+          секция «ЛИЧНОЕ» стоит ВЫШЕ неё и окнам дедлайнов не подчиняется. */}
       <nav className="flex gap-0.5 border-b border-hair">
         {TABS.map(({ key, label }) => (
           <button
@@ -208,7 +300,7 @@ function DesktopMyTasks() {
   )
 }
 
-function MobileMyTasks() {
+function MobileMyTasks({ personal }: { personal: PersonalPane }) {
   const [tab, setTab] = useState<DueWindow>('upcoming')
   const [pickerOpen, setPickerOpen] = useState(false)
   const { tasks, toggleDone, openTask, projectName } = useMyTasksData(tab)
@@ -228,7 +320,9 @@ function MobileMyTasks() {
 
   return (
     <>
-      <MobilePageHeader title="Мои задачи" withOverflowMenu />
+      <MobilePageHeader title="Мои задачи" />
+
+      {personalSection(personal, 'mobile')}
 
       {/* Полоса на --tint с одной пилюлей-фильтром (иконка Filter): это
           фильтр выборки, а не вкладка — и выглядит как фильтр. */}

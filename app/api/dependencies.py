@@ -24,7 +24,7 @@ from app.models.dependency import TaskDependency
 from app.models.task import Task
 from app.schemas.dependency import TaskDependencyResponse
 from app.services.dependency_cycle import would_create_cycle
-from app.services.project_access import require_project_role
+from app.services.personal_projects import require_task_access
 
 router = APIRouter(tags=["dependencies"])
 
@@ -56,7 +56,7 @@ async def list_dependencies(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена"
         )
-    await require_project_role(db, task.project_id, principal)
+    await require_task_access(db, task, principal)
 
     edge_rows = await db.execute(
         select(TaskDependency).where(
@@ -130,8 +130,8 @@ async def add_dependency(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Зависимости только внутри одного проекта",
         )
-    await require_project_role(
-        db, successor.project_id, principal, allow=("owner", "editor")
+    await require_task_access(
+        db, successor, principal, allow=("owner", "editor")
     )
 
     if await would_create_cycle(
@@ -178,8 +178,8 @@ async def remove_dependency(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена"
         )
-    await require_project_role(
-        db, successor.project_id, principal, allow=("owner", "editor")
+    await require_task_access(
+        db, successor, principal, allow=("owner", "editor")
     )
     dep = await db.get(TaskDependency, (predecessor_id, successor_id))
     if dep is not None:

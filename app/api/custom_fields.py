@@ -38,6 +38,7 @@ from app.services.custom_field_validator import (
 from app.services.custom_field_validator import (
     validate as validate_value,
 )
+from app.services.personal_projects import require_task_access
 from app.services.project_access import require_project_role
 
 router = APIRouter(tags=["custom_fields"])
@@ -205,7 +206,7 @@ async def _fetch_task_visible(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена"
         )
-    await require_project_role(db, task.project_id, principal)
+    await require_task_access(db, task, principal)
     return task
 
 
@@ -268,8 +269,8 @@ async def set_task_custom_value(
     )
 
     task = await _fetch_task_visible(db, task_id, principal)
-    await require_project_role(
-        db, task.project_id, principal, allow=("owner", "editor")
+    await require_task_access(
+        db, task, principal, allow=("owner", "editor")
     )
 
     definition = await db.get(CustomFieldDefinition, field_id)
@@ -330,8 +331,8 @@ async def clear_task_custom_value(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     task = await _fetch_task_visible(db, task_id, principal)
-    await require_project_role(
-        db, task.project_id, principal, allow=("owner", "editor")
+    await require_task_access(
+        db, task, principal, allow=("owner", "editor")
     )
     row = await db.get(TaskCustomFieldValue, (task.id, field_id))
     if row is not None:

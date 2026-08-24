@@ -132,6 +132,15 @@ class TaskResponse(BaseModel):
     comment_count: int | None = None
     attachment_count: int | None = None
     blocker_count: int | None = None
+    # Может ли ВЫЗЫВАЮЩИЙ менять статус/этап этой задачи: роль owner/editor,
+    # hub-admin ИЛИ он среди исполнителей (см. update_task). Заполняют только
+    # list_tasks и get_task — там уже посчитана роль в проекте; остальные
+    # ручки отдают None = «не знаем», клиент падает на can_edit проекта.
+    #
+    # ИНВАРИАНТ: ответ PATCH /tasks/{id} поле НЕ несёт и нести не должен —
+    # useUpdateTask кладёт в кэш свой патч, а не ответ (web/src/hooks/useTasks.ts);
+    # ответ с None затёр бы флаг и погасил контрол сразу после успешного клика.
+    can_set_status: bool | None = None
 
 
 def resolve_assignee_ids(body: TaskCreate | TaskUpdate) -> list[UUID] | None:

@@ -43,6 +43,10 @@ class ProjectResponse(BaseModel):
     updated_at: datetime
     my_role: ProjectRole | None = None  # filled from project_members for current principal
     is_favorite: bool = False  # личное избранное текущего пользователя
+    # Личное пространство сотрудника («Личное»). Отдаём производный булев, а не
+    # personal_owner_id: клиенту нужен факт, чтобы не рисовать «Архивировать» и
+    # «Переместить в папку» (сервер на них отвечает 409), а не «чьё это личное».
+    is_personal: bool = False
     # Эффективные права вызывающего = членство ИЛИ hub:admin-байпас. Считает
     # ТОЛЬКО сервер (project_access.capabilities) — клиент их рендерит и своей
     # копии правила не заводит. Без дефолтов: забытый call-site должен падать

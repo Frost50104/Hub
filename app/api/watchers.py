@@ -15,7 +15,7 @@ from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskWatcher
 from app.schemas.watcher import WatcherResponse
 from app.services.activity_writer import record_activity
-from app.services.project_access import require_project_role
+from app.services.personal_projects import require_task_access
 
 router = APIRouter(tags=["watchers"])
 
@@ -26,7 +26,7 @@ async def _fetch_task_visible(
     task = await db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
-    await require_project_role(db, task.project_id, principal)
+    await require_task_access(db, task, principal)
     return task
 
 

@@ -143,7 +143,7 @@ Claude Design 20.08 дорисовал 20 экранов из `docs/REDESIGN-BAC
 `~/.claude/plans/claude-design-iridescent-gray.md`. Волны 0–2 (`2bbe76c`, `68aba8d`, `6b501f7`,
 `4bfcba1`, `fde04ff`; **alembic 0040**) на staging проверены в браузере (десктоп 1288 +
 мобильный 390×844, обе темы). **В ПРОДЕ с 2026-08-21 (`4d04356`, alembic 0040 применён, 32 этапа
-на 8 проектов, 0 задач без этапа); следующий релиз — миграция 0042 `stage_id NOT NULL` (0041 — `material_versions.extracted_text`).**
+на 8 проектов, 0 задач без этапа); следующий релиз — миграция 0044 `stage_id NOT NULL` (0041 — `material_versions.extracted_text`, 0042 — личные проекты, 0043 — длительность видео).**
 
 ### Инварианты
 
@@ -164,7 +164,7 @@ Claude Design 20.08 дорисовал 20 экранов из `docs/REDESIGN-BAC
   после bulk-UPDATE — `db.expire_all()` (иначе MissingGreenlet на устаревших ORM-объектах).
   Позиции задач бакетируются по `(project_id, stage_id)`; уникальность позиций этапов —
   `DEFERRABLE INITIALLY DEFERRED` + `SET CONSTRAINTS … DEFERRED` при перестановке.
-- **`tasks.stage_id` NULLable** до миграции 0042: в окне `deploy.sh` (alembic → restart) старый
+- **`tasks.stage_id` NULLable** до миграции 0044: в окне `deploy.sh` (alembic → restart) старый
   код вставляет задачи без этапа. `NOT NULL` — отдельным релизом после кода (тот же урок, что
   `DROP COLUMN` в два деплоя). Доска рисует колонку «Без этапа» только если такие задачи есть.
 - **Список и публичная доска `/p/:token` по-прежнему группируются по секциям**; кросс-проектные

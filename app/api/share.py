@@ -29,6 +29,7 @@ from app.deps import get_db, require_auth
 from app.models.share import PublicShareToken
 from app.models.task import Task
 from app.schemas.share import ShareCreate, ShareResponse
+from app.services.personal_projects import assert_not_personal, require_task_access
 from app.services.project_access import is_hub_admin, require_project_role
 
 router = APIRouter(tags=["share"])
@@ -75,9 +76,13 @@ async def create_project_share(
     db: AsyncSession = Depends(get_db),
 ) -> ShareResponse:
     _disabled_if_off()
-    await require_project_role(
+    project, _ = await require_project_role(
         db, project_id, principal, allow=("owner", "editor")
     )
+    # Ссылка scope=project отдаёт анониму ВЕСЬ список задач проекта
+    # (api/public.py::_build_project_view) — для личного это выгрузка личных
+    # заметок наружу. Шеринг одной задачи остаётся: это явный акт над ней.
+    assert_not_personal(project, action="публиковать ссылкой")
     record = PublicShareToken(
         tenant_id=principal.tenant_id,
         scope="project",
@@ -108,8 +113,8 @@ async def create_task_share(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена"
         )
-    await require_project_role(
-        db, task.project_id, principal, allow=("owner", "editor")
+    await require_task_access(
+        db, task, principal, allow=("owner", "editor")
     )
     record = PublicShareToken(
         tenant_id=principal.tenant_id,
@@ -160,7 +165,7 @@ async def list_task_shares(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена"
         )
-    await require_project_role(db, task.project_id, principal)
+    await require_task_access(db, task, principal)
     rows = await db.execute(
         select(PublicShareToken)
         .where(

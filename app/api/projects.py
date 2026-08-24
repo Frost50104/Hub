@@ -26,6 +26,7 @@ from app.schemas.project import (
     ProjectResponse,
     ProjectUpdate,
 )
+from app.services.personal_projects import assert_not_personal, not_personal
 from app.services.project_access import (
     CREATE_PROJECT_DENIED,
     can_create_project,
@@ -35,7 +36,7 @@ from app.services.project_access import (
     require_project_role,
 )
 from app.services.project_key import generate_unique_key
-from app.services.stages import create_default_stages
+from app.services.projects import create_project_record
 
 router = APIRouter(tags=["projects"])
 
@@ -92,6 +93,7 @@ def _project_to_response(
         updated_at=project.updated_at,
         my_role=my_role,  # type: ignore[arg-type]
         is_favorite=is_favorite,
+        is_personal=project.personal_owner_id is not None,
         can_edit=can_edit,
         can_manage=can_manage,
         task_count=counts[0] if counts else None,
@@ -124,8 +126,12 @@ async def list_projects(
 ) -> list[ProjectResponse]:
     # hub:admin sees every project in the tenant; everyone else only those
     # they're a member of. RLS already restricts to tenant scope.
+    #
+    # Личные проекты не отдаём НИКОМУ — ни владельцу, ни админу: у каждого
+    # сотрудника свой, и в сайдбаре с «Недавними проектами» они были бы шумом.
+    # Вход в личное — секция «ЛИЧНОЕ» на /my (services/personal_projects.py).
     if is_hub_admin(principal):
-        stmt = select(Project)
+        stmt = select(Project).where(not_personal())
         if not include_archived:
             stmt = stmt.where(Project.archived_at.is_(None))
         rows = (await db.execute(stmt.order_by(Project.created_at.desc()))).scalars().all()
@@ -158,7 +164,7 @@ async def list_projects(
     stmt = (
         select(Project, ProjectMember.role, ProjectMember.is_favorite)
         .join(ProjectMember, ProjectMember.project_id == Project.id)
-        .where(ProjectMember.employee_id == principal.employee_id)
+        .where(ProjectMember.employee_id == principal.employee_id, not_personal())
     )
     if not include_archived:
         stmt = stmt.where(Project.archived_at.is_(None))
@@ -195,28 +201,13 @@ async def create_project(
                 detail="Не удалось подобрать уникальный ключ — задайте его вручную",
             ) from exc
 
-    project = Project(
-        id=uuid4(),
+    project = await create_project_record(
+        db,
         tenant_id=principal.tenant_id,
-        key=key,
-        name=body.name,
-        description=body.description,
         created_by=principal.employee_id,
-    )
-    db.add(project)
-    await db.flush()
-    # Четыре этапа по умолчанию — в той же транзакции: проект без этапов не
-    # знает, куда класть задачи (инвариант «≥1 этап на системный статус»).
-    await create_default_stages(db, tenant_id=principal.tenant_id, project_id=project.id)
-    db.add(
-        ProjectMember(
-            id=uuid4(),
-            tenant_id=principal.tenant_id,
-            project_id=project.id,
-            employee_id=principal.employee_id,
-            role="owner",
-            added_by=principal.employee_id,
-        )
+        name=body.name,
+        key=key,
+        description=body.description,
     )
     try:
         await db.commit()
@@ -296,6 +287,7 @@ async def set_project_folder(
     project, _ = await require_project_role(
         db, project_id, principal, allow=("owner",)
     )
+    assert_not_personal(project, action="класть в папку")
     # ИНВАРИАНТ: FK projects.folder_id НЕ проверяет совпадение тенантов —
     # RI-триггеры Postgres всегда обходят RLS. Единственная защита от
     # кросс-тенантной ссылки — это чтение через tenant-scoped сессию.
@@ -351,6 +343,7 @@ async def archive_project(
     project, _ = await require_project_role(
         db, project_id, principal, allow=("owner",)
     )
+    assert_not_personal(project, action="архивировать")
     if project.archived_at is None:
         project.archived_at = datetime.now(UTC)
         await db.commit()
@@ -477,6 +470,22 @@ async def add_member(
     )
 
 
+def _assert_not_personal_owner(
+    project: Project, member: ProjectMember, *, action: str
+) -> None:
+    """Хозяина личного пространства нельзя вынести из него самого.
+
+    Защиты «последнего owner'а» тут мало: добавив второго owner'а и удалив
+    себя, человек навсегда теряет своё «Личное» — /api/me продолжает отдавать
+    id, на котором GET /projects/{id} даёт 404, а секция на /my ломается.
+    """
+    if project.personal_owner_id == member.employee_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Владельца личного проекта нельзя {action}",
+        )
+
+
 @router.patch(
     "/projects/{project_id}/members/{member_id}", response_model=ProjectMemberResponse
 )
@@ -487,10 +496,13 @@ async def update_member(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectMemberResponse:
-    await require_project_role(db, project_id, principal, allow=("owner",))
+    project, _ = await require_project_role(
+        db, project_id, principal, allow=("owner",)
+    )
     member = await db.get(ProjectMember, member_id)
     if member is None or member.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Участник не найден")
+    _assert_not_personal_owner(project, member, action="понизить в роли")
     # Last-owner protection.
     if member.role == "owner" and body.role != "owner":
         count = await db.execute(
@@ -525,10 +537,13 @@ async def remove_member(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    await require_project_role(db, project_id, principal, allow=("owner",))
+    project, _ = await require_project_role(
+        db, project_id, principal, allow=("owner",)
+    )
     member = await db.get(ProjectMember, member_id)
     if member is None or member.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Участник не найден")
+    _assert_not_personal_owner(project, member, action="удалить из проекта")
     if member.role == "owner":
         count = await db.execute(
             select(ProjectMember.id).where(

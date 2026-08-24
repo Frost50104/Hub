@@ -23,6 +23,10 @@ interface ViewConfigState {
 /** Ключ блока «Без секции» в `collapsedSections`. */
 export const ORPHAN_SECTION_KEY = '__orphan__'
 
+/** Ключ секции «ЛИЧНОЕ» на /my: у личного проекта секций нет, свёрнутость
+ *  хранится здесь же — под id самого проекта. */
+export const PERSONAL_SECTION_KEY = '__personal__'
+
 const EMPTY: ProjectViewConfig = { visibleCustomFields: [] }
 
 /**

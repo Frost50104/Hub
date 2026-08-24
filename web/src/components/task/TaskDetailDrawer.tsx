@@ -157,6 +157,11 @@ export function TaskDetailDrawer({
   const stages = useStages(projectId)
   // Права считает сервер: viewer → read-only, hub:admin вне членства → правит.
   const readOnly = !project.data?.can_edit
+  // Исполнитель меняет статус и этап своей задачи даже будучи наблюдателем.
+  // Правило считает СЕРВЕР (TaskResponse.can_set_status); `??` — фолбэк для
+  // ручек, которые поле не заполняют (календарь, хронология, оптимистичные
+  // объекты в кэше).
+  const canStatus = task?.can_set_status ?? !readOnly
   // Наблюдателю мало сказать «нельзя» — надо назвать, кого просить.
   // `GET /projects/{id}/members` открыт любой роли в проекте (включая
   // viewer), поэтому имя владельца доступно и ему.
@@ -379,7 +384,11 @@ export function TaskDetailDrawer({
 
             {readOnly && task && (
               <p className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-[10px] border border-glass-border bg-tint px-[11px] py-[9px] text-[14px] leading-[1.45] text-text2">
-                <span>Вы наблюдатель проекта: поля доступны только для чтения.</span>
+                <span>
+                  {canStatus
+                    ? 'Вы наблюдатель проекта: можно только отметить статус своей задачи.'
+                    : 'Вы наблюдатель проекта: поля доступны только для чтения.'}
+                </span>
                 {/* Владельца может не быть вовсе — его могли разжаловать или
                     убрать из проекта. Тогда строку про доступ не показываем:
                     «обратитесь к undefined» хуже молчания. */}
@@ -418,7 +427,7 @@ export function TaskDetailDrawer({
                   {stages.data && stages.data.length > 0 ? (
                     <select
                       value={task.stage_id ?? ''}
-                      disabled={readOnly}
+                      disabled={!canStatus}
                       aria-label="Этап"
                       onChange={(e) => update.mutate({ id: task.id, stage_id: e.target.value })}
                       className={MOBILE_CONTROL}
@@ -433,7 +442,7 @@ export function TaskDetailDrawer({
                   ) : (
                     <select
                       value={task.status}
-                      disabled={readOnly}
+                      disabled={!canStatus}
                       aria-label="Статус"
                       onChange={(e) => update.mutate({ id: task.id, status: e.target.value as TaskStatus })}
                       className={MOBILE_CONTROL}
@@ -514,7 +523,7 @@ export function TaskDetailDrawer({
                         {stages.data && stages.data.length > 0 ? (
                           <select
                             value={task.stage_id ?? ''}
-                            disabled={readOnly}
+                            disabled={!canStatus}
                             aria-label="Этап"
                             onChange={(e) => update.mutate({ id: task.id, stage_id: e.target.value })}
                             className={STAGE_SELECT}
@@ -532,7 +541,7 @@ export function TaskDetailDrawer({
                               <OptionButton
                                 key={s}
                                 active={task.status === s}
-                                disabled={readOnly}
+                                disabled={!canStatus}
                                 tone="solid"
                                 onClick={() => update.mutate({ id: task.id, status: s })}
                               >
@@ -734,6 +743,23 @@ export function TaskDetailDrawer({
                     Комментировать может участник проекта.
                   </span>
                   <WatchControl taskId={task.id} />
+                  {/* Единственный способ закрыть задачу с телефона: без этой
+                      ветки исполнитель-наблюдатель видел бы карточку своей
+                      задачи вообще без действия. */}
+                  {canStatus && (
+                    <button
+                      type="button"
+                      onClick={() => toggleDone(task)}
+                      className={cn(
+                        'flex h-12 shrink-0 items-center justify-center rounded-xl px-5 text-[15px] font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+                        task.status === 'done'
+                          ? 'border border-glass-border text-text'
+                          : 'bg-amber text-on-amber',
+                      )}
+                    >
+                      {task.status === 'done' ? 'Вернуть' : 'Готово'}
+                    </button>
+                  )}
                 </>
               ) : (
                 <>

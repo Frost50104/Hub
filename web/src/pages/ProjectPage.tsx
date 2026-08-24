@@ -573,7 +573,13 @@ function SectionBlock({
                 // QA-0821 #10). Контекст = проект остаётся в «Моих задачах».
                 selected={selectedTaskId === t.id}
                 onClick={() => onTaskClick(t.id)}
-                onToggleDone={() => toggleDone(t)}
+                // Сервер сказал «нельзя» — контрол не рисуем вовсе (у
+                // TaskStatusControl нет disabled: без onToggle он рендерит
+                // неинтерактивную иконку). undefined ≠ false: «не знаем» —
+                // показываем, как раньше.
+                onToggleDone={
+                  t.can_set_status === false ? undefined : () => toggleDone(t)
+                }
                 cells={visibleFields.map((f) => {
                   const v = valuesByTask.get(t.id)?.get(f.id)?.value
                   const text = formatCustomFieldValue(f, v)
@@ -599,7 +605,13 @@ function SectionBlock({
                 subtasks={childrenByParent?.get(t.id)}
                 selected={selectedTaskId === t.id}
                 onClick={() => onTaskClick(t.id)}
-                onToggleDone={() => toggleDone(t)}
+                // Сервер сказал «нельзя» — контрол не рисуем вовсе (у
+                // TaskStatusControl нет disabled: без onToggle он рендерит
+                // неинтерактивную иконку). undefined ≠ false: «не знаем» —
+                // показываем, как раньше.
+                onToggleDone={
+                  t.can_set_status === false ? undefined : () => toggleDone(t)
+                }
               />
             ),
           )}

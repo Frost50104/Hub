@@ -36,6 +36,30 @@ function MetaChip({
   )
 }
 
+/**
+ * Будет ли строке контекста что показать. Один источник истины для самой
+ * строки и для списков, которые решают, резервировать ли под неё полосу.
+ */
+export function hasTaskContext(
+  task: Pick<Task, 'comment_count' | 'attachment_count' | 'blocker_count'>,
+  opts: {
+    labels?: Label[]
+    subtasks?: SubtaskStats
+    fallback?: string | null
+    mode?: 'auto' | 'fallback'
+  } = {},
+): boolean {
+  if (opts.fallback) return true
+  if (opts.mode === 'fallback') return false
+  return (
+    (opts.labels?.length ?? 0) > 0 ||
+    (opts.subtasks?.total ?? 0) > 0 ||
+    (task.comment_count ?? 0) > 0 ||
+    (task.attachment_count ?? 0) > 0 ||
+    (task.blocker_count ?? 0) > 0
+  )
+}
+
 interface TaskContextLineProps {
   task: Task
   labels?: Label[]
@@ -50,6 +74,14 @@ interface TaskContextLineProps {
    * набора нет.
    */
   mode?: 'auto' | 'fallback'
+  /**
+   * Резервировать полосу 22px, когда показывать нечего. По умолчанию да:
+   * в смешанном списке иначе «дышат» заголовки — у строк с контекстом они
+   * выше, у пустых по центру. Списки, где контекста нет НИ У ОДНОЙ строки
+   * (секция «ЛИЧНОЕ»), передают `false` — иначе заголовок висит выше
+   * чекбокса и правых ячеек, которые центрируются по всей строке.
+   */
+  reserve?: boolean
   className?: string
 }
 
@@ -60,6 +92,7 @@ export function TaskContextLine({
   fallback,
   compact = false,
   mode = 'auto',
+  reserve = true,
   className,
 }: TaskContextLineProps) {
   const shownLabels = compact ? (labels ?? []).slice(0, 1) : (labels ?? [])
@@ -71,6 +104,8 @@ export function TaskContextLine({
   const bare =
     mode === 'fallback' ||
     (shownLabels.length === 0 && !hasSubs && !comments && !files && !blocked)
+
+  if (bare && !fallback && !reserve) return null
 
   return (
     <span

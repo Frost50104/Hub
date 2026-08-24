@@ -33,7 +33,7 @@
 - Inline-создание: blur/unmount коммитят, Escape отменяет; `lib/inlineDraft.ts` — единственное место логики.
 - Гейт теста: `Quiz.is_required` + `services/quiz_gate.py::derive_quiz_state`; `complete_lesson` — три предусловия.
 - Текст файла библиотеки — `material_versions.extracted_text` (воркер), индекс берёт его при каждой переиндексации.
-- Миграция 0041 занята (`material_version_text`) — запланированная `tasks.stage_id NOT NULL` становится **0042**.
+- Миграция 0041 занята (`material_version_text`), 0042 — личные проекты; запланированная `tasks.stage_id NOT NULL` становится **0044** (0043 — `media_files.duration_sec`).
 
 ## Не проверено живьём / ручные сценарии
 

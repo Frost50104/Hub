@@ -27,6 +27,7 @@ from app.models.employee_profile import EmployeeProfile
 from app.models.project import Project, ProjectMember
 from app.models.shadow import ShadowUser
 from app.models.task import Task
+from app.services.personal_projects import personal_visible_to
 from app.services.project_access import is_hub_admin
 
 _TASK_KEY_RE = re.compile(r"^\s*([A-Za-zА-Яа-я0-9]{1,16})[-\s]?(\d{1,7})\s*$")
@@ -76,8 +77,13 @@ class NotFound(Exception):
 
 def visible_projects_stmt(ctx: ToolContext) -> Select[tuple[Project]]:
     """Проекты, которые сотрудник ВПРАВЕ видеть. RLS отсекает чужой тенант,
-    членство — чужие проекты; hub-admin видит весь тенант (как в API)."""
-    stmt = select(Project)
+    членство — чужие проекты; hub-admin видит весь тенант (как в API).
+
+    Чужие личные проекты отсекаются ДО ветки админа: ответы инструментов
+    уезжают во внешнюю LLM, и личные заметки сотрудников там делать нечего.
+    Свой личный остаётся видимым — «добавь мне личную задачу» должно работать.
+    """
+    stmt = select(Project).where(personal_visible_to(ctx.employee_id))
     if not ctx.is_admin:
         stmt = stmt.join(ProjectMember, ProjectMember.project_id == Project.id).where(
             ProjectMember.employee_id == ctx.employee_id

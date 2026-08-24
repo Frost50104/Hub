@@ -27,7 +27,8 @@ from app.services.attachments import (
     sniff_mismatch,
     storage_key_for,
 )
-from app.services.project_access import is_hub_admin, require_project_role
+from app.services.personal_projects import require_task_access
+from app.services.project_access import is_hub_admin
 
 router = APIRouter(tags=["attachments"])
 
@@ -38,7 +39,7 @@ async def _fetch_task_visible(
     task = await db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
-    await require_project_role(db, task.project_id, principal)
+    await require_task_access(db, task, principal)
     return task
 
 
@@ -111,8 +112,8 @@ async def upload_attachment(
     )
     task = await _fetch_task_visible(db, task_id, principal)
     # Edit-permission required — uploading mutates a task.
-    await require_project_role(
-        db, task.project_id, principal, allow=("owner", "editor")
+    await require_task_access(
+        db, task, principal, allow=("owner", "editor")
     )
 
     settings = get_settings()
@@ -218,7 +219,7 @@ async def download_attachment(
     task = await db.get(Task, attachment.task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
-    await require_project_role(db, task.project_id, principal)
+    await require_task_access(db, task, principal)
 
     path = absolute_path(attachment.storage_key)
     if not path.is_file():
@@ -248,8 +249,8 @@ async def delete_attachment(
     # Uploader can always delete. Otherwise need owner/editor in the project,
     # or hub:admin (covered by require_project_role(allow=owner,editor)).
     if attachment.uploaded_by != principal.employee_id and not is_hub_admin(principal):
-        await require_project_role(
-            db, task.project_id, principal, allow=("owner", "editor")
+        await require_task_access(
+            db, task, principal, allow=("owner", "editor")
         )
 
     path = absolute_path(attachment.storage_key)

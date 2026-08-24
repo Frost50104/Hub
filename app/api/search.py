@@ -34,6 +34,7 @@ from app.deps import enforce_rate_limit, get_db, require_auth_any
 from app.models.project import Project, ProjectMember
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskComment
+from app.services.personal_projects import not_personal, personal_visible_to
 from app.services.project_access import is_hub_admin
 from app.services.public_token import initials
 from app.services.search_dsl import ParsedQuery
@@ -235,7 +236,14 @@ async def search(
     task_stmt = (
         select(Task, Project.name, Project.key, headline_col.label("headline"))
         .join(Project, Project.id == Task.project_id)
-        .where(Task.archived_at.is_(None), Project.archived_at.is_(None))
+        .where(
+            Task.archived_at.is_(None),
+            Project.archived_at.is_(None),
+            # ДО ветки админа: точечный доступ к чужому личному по прямой
+            # ссылке у него остаётся, но выгребать личные заметки сотрудников
+            # пачкой поиск не должен.
+            personal_visible_to(principal.employee_id),
+        )
     )
     if not is_admin:
         task_stmt = task_stmt.join(
@@ -254,6 +262,7 @@ async def search(
         project_stmt = select(Project).where(
             Project.archived_at.is_(None),
             Project.name.ilike(_ilike_pattern(parsed.text or q)),
+            not_personal(),
         )
         if not is_admin:
             project_stmt = project_stmt.join(
@@ -335,6 +344,8 @@ async def search(
                 TaskComment.deleted_at.is_(None),
                 Task.archived_at.is_(None),
                 Project.archived_at.is_(None),
+                # Иначе комментарий выдал бы задачу, скрытую фильтром выше.
+                personal_visible_to(principal.employee_id),
                 text(
                     "to_tsvector('russian', task_comments.body) @@ "
                     "websearch_to_tsquery('russian', :tsq)"

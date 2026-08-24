@@ -57,7 +57,10 @@ export function SubtaskList({ taskId, projectId, canEdit, onOpenTask }: SubtaskL
               <button
                 type="button"
                 onClick={() => toggleDone(t)}
-                disabled={!canEdit}
+                // Своя подзадача закрывается и наблюдателем — то же правило,
+                // что у статуса в карточке и в строке списка
+                // (TaskResponse.can_set_status). undefined = «не знаем».
+                disabled={!(t.can_set_status ?? canEdit)}
                 aria-label={done ? 'Вернуть в работу' : 'Завершить'}
                 className={cn(
                   'flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full',

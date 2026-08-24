@@ -53,6 +53,9 @@ export function useCreateTask(projectId: string) {
       // «N задач» в шапке и списке проектов считает сервер по списку —
       // без инвалидации шапка держала «0 задач» до рефетча (QA-0821 #6).
       qc.invalidateQueries({ queryKey: ['projects'] })
+      // Задача, созданная сразу с исполнителем, обязана появиться в «Моих
+      // задачах» — раньше она ждала staleTime/фокуса окна.
+      qc.invalidateQueries({ queryKey: ['me-tasks'] })
     },
   })
 }

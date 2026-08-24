@@ -29,12 +29,15 @@ from app.schemas.task import (
 )
 from app.services.activity_writer import record_activity
 from app.services.notify import notify_status_changed
-from app.services.project_access import is_hub_admin, require_project_role
+from app.services.personal_projects import personal_task_scope, require_task_access
+from app.services.project_access import ProjectRole, is_hub_admin, require_project_role
 from app.services.stages import next_position, resolve_stage, set_stage
 from app.services.task_assignees import (
     add_assignee,
     apply_assignee_side_effects,
     assignee_exists,
+    can_set_status,
+    is_task_assignee,
     load_assignees,
     remove_assignee,
     serialize_with_assignees,
@@ -50,6 +53,13 @@ from app.services.tasks import (
 )
 
 router = APIRouter(tags=["tasks"])
+
+# Что исполнитель вправе менять в СВОЕЙ задаче помимо роли в проекте.
+# Назначение выдаёт ему viewer-членство (project_access.ensure_project_member),
+# и без этого правила он не мог бы даже отметить задачу выполненной.
+# `position` сюда НЕ входит: порядок остаётся редакторским, поэтому
+# drag-n-drop доски (шлёт stage_id + position одним PATCH) под правило не подпадает.
+ASSIGNEE_EDITABLE_FIELDS = frozenset({"status", "stage_id"})
 
 # Ранжирование приоритета для ORDER BY (колонка — строковый enum).
 PRIORITY_ORDER: dict[str, int] = {"low": 1, "medium": 2, "high": 3, "urgent": 4}
@@ -73,9 +83,25 @@ _assert_parent_one_level = assert_parent_one_level
 _serialize = serialize_with_assignees
 
 
-async def _serialize_one(db: AsyncSession, task: Task) -> TaskResponse:
+async def _serialize_one(
+    db: AsyncSession,
+    task: Task,
+    *,
+    rights_for: tuple[ProjectRole | None, Principal] | None = None,
+) -> TaskResponse:
+    """`rights_for=(role, principal)` — заполнить `can_set_status`.
+
+    Передаём только там, где роль уже посчитана и клиенту нужен контрол
+    статуса (get_task). Мутирующие ручки поле не заполняют сознательно: их
+    ответ в кэш клиента не попадает.
+    """
     by_task = await load_assignees(db, [task.id])
-    return _serialize(task, by_task.get(task.id, []))
+    assignees = by_task.get(task.id, [])
+    data = _serialize(task, assignees)
+    if rights_for is not None:
+        role, principal = rights_for
+        data.can_set_status = can_set_status(role, principal.employee_id, assignees)
+    return data
 
 
 # ─── List & Create ──────────────────────────────────────────────────────────
@@ -99,7 +125,11 @@ async def list_tasks(
     # keyword-only и последним: тесты зовут list_tasks позиционными kwargs.
     stage_id: UUID | None = Query(default=None),
 ) -> list[TaskResponse]:
-    await require_project_role(db, project_id, principal)
+    project, my_role = await require_project_role(db, project_id, principal)
+    # В ЧУЖОМ личном проекте приглашённый видит только свои задачи: назначение
+    # исполнителем выдаёт ему viewer-членство (project_access.ensure_project_member),
+    # а оно открывало бы весь личный список.
+    scope = personal_task_scope(project, principal)
 
     if sort == "priority":
         sort_col = case(PRIORITY_ORDER, value=Task.priority, else_=0)
@@ -120,6 +150,8 @@ async def list_tasks(
         # Вторичный ключ position — стабильный порядок при равных значениях.
         .order_by(sort_expr, Task.position)
     )
+    if scope is not None:
+        stmt = stmt.where(scope)
     if not include_archived:
         stmt = stmt.where(Task.archived_at.is_(None))
     stmt = apply_status_filter(stmt, status_)
@@ -152,7 +184,9 @@ async def list_tasks(
     counts = await load_row_counts(db, ids)
     out: list[TaskResponse] = []
     for t in tasks:
-        item = _serialize(t, by_task.get(t.id, []))
+        assignees = by_task.get(t.id, [])
+        item = _serialize(t, assignees)
+        item.can_set_status = can_set_status(my_role, principal.employee_id, assignees)
         c = counts.get(t.id)
         if c is not None:
             item.comment_count = c.comments
@@ -191,14 +225,23 @@ async def create_task(
 # ─── Single task ────────────────────────────────────────────────────────────
 
 
-async def _fetch_task_visible(
+async def _fetch_task_with_role(
     db: AsyncSession, task_id: UUID, principal: Principal
-) -> Task:
+) -> tuple[Task, ProjectRole | None]:
+    """Задача + роль вызывающего в её проекте (None — hub-admin-байпас)."""
     task = await db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
     # Reuse the project visibility check (404 if not a project member and not admin).
-    await require_project_role(db, task.project_id, principal)
+    _project, role = await require_task_access(db, task, principal)
+    return task, role
+
+
+async def _fetch_task_visible(
+    db: AsyncSession, task_id: UUID, principal: Principal
+) -> Task:
+    """Та же проверка без роли — её ждут 10 call-sites в других роутерах."""
+    task, _role = await _fetch_task_with_role(db, task_id, principal)
     return task
 
 
@@ -208,8 +251,8 @@ async def get_task(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> TaskResponse:
-    task = await _fetch_task_visible(db, task_id, principal)
-    return await _serialize_one(db, task)
+    task, role = await _fetch_task_with_role(db, task_id, principal)
+    return await _serialize_one(db, task, rights_for=(role, principal))
 
 
 @router.patch("/tasks/{task_id}", response_model=TaskResponse)
@@ -228,9 +271,16 @@ async def update_task(
     task = await db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
-    await require_project_role(
-        db, task.project_id, principal, allow=("owner", "editor")
-    )
+    # «Я исполнитель?» — ДО гейта: иначе 403 прилетит раньше, чем мы узнаем про
+    # назначение. Смешанный патч ({status, priority}) под правило не подпадает —
+    # набор полей обязан целиком лежать в ASSIGNEE_EDITABLE_FIELDS.
+    touched = set(body.model_fields_set)
+    allow: tuple[ProjectRole, ...] = ("owner", "editor")
+    if touched and touched <= ASSIGNEE_EDITABLE_FIELDS and await is_task_assignee(
+        db, task.id, principal.employee_id
+    ):
+        allow = ("owner", "editor", "viewer")
+    await require_task_access(db, task, principal, allow=allow)
 
     changes: dict[str, Any] = {}
 
@@ -389,7 +439,7 @@ async def _task_for_edit(db: AsyncSession, task_id: UUID, principal: Principal) 
     task = await db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
-    await require_project_role(db, task.project_id, principal, allow=("owner", "editor"))
+    await require_task_access(db, task, principal, allow=("owner", "editor"))
     return task
 
 
@@ -479,8 +529,8 @@ async def archive_task(
     task = await db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
-    await require_project_role(
-        db, task.project_id, principal, allow=("owner", "editor")
+    await require_task_access(
+        db, task, principal, allow=("owner", "editor")
     )
     if task.archived_at is None:
         task.archived_at = datetime.now(UTC)
@@ -505,8 +555,8 @@ async def unarchive_task(
     task = await db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
-    await require_project_role(
-        db, task.project_id, principal, allow=("owner", "editor")
+    await require_task_access(
+        db, task, principal, allow=("owner", "editor")
     )
     if task.archived_at is not None:
         task.archived_at = None
@@ -533,7 +583,7 @@ async def delete_task(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
     # Hard delete: owner only (admin bypasses via is_hub_admin).
     if not is_hub_admin(principal):
-        await require_project_role(db, task.project_id, principal, allow=("owner",))
+        await require_task_access(db, task, principal, allow=("owner",))
     await db.delete(task)
     await db.commit()
 

@@ -35,6 +35,7 @@ from app.deps import get_db, require_auth
 from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskAssignee
+from app.services.personal_projects import assert_full_project_access
 from app.services.project_access import require_project_role
 from app.services.task_assignees import has_no_assignees
 from app.services.taskdates import start_of_today_utc
@@ -398,7 +399,8 @@ async def get_stats(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectStatsResponse:
-    await require_project_role(db, project_id, principal)
+    project, _ = await require_project_role(db, project_id, principal)
+    assert_full_project_access(project, principal)
 
     status_breakdown = await _status_or_priority_breakdown(
         db, project_id, Task.status

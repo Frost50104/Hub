@@ -21,6 +21,8 @@ interface MobileTaskRowProps {
   onToggleDone?: () => void
   /** `fallback` — в строке контекста только проект (узкие списки «Главной»). */
   context?: 'auto' | 'fallback'
+  /** См. TaskContextLine.reserve. */
+  reserveContext?: boolean
 }
 
 /**
@@ -43,6 +45,7 @@ export function MobileTaskRow({
   onClick,
   onToggleDone,
   context = 'auto',
+  reserveContext = true,
 }: MobileTaskRowProps) {
   const done = task.status === 'done'
   const overdue = isOverdue(task.due_at, task.status)
@@ -86,6 +89,7 @@ export function MobileTaskRow({
           fallback={fallback}
           compact
           mode={context}
+          reserve={reserveContext}
         />
       </span>
 

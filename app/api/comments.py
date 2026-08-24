@@ -23,7 +23,7 @@ from app.schemas.comment import CommentCreate, CommentResponse, CommentUpdate
 from app.services.activity_writer import record_activity
 from app.services.mention_parser import resolve_mentions
 from app.services.notify import notify_commented, notify_mentioned
-from app.services.project_access import require_project_role
+from app.services.personal_projects import require_task_access
 
 router = APIRouter(tags=["comments"])
 
@@ -34,7 +34,7 @@ async def _fetch_task_visible(
     task = await db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
-    await require_project_role(db, task.project_id, principal)
+    await require_task_access(db, task, principal)
     return task
 
 

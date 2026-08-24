@@ -18,6 +18,7 @@ from app.deps import get_db, require_auth_any
 from app.models.project import Project
 from app.models.task import Task
 from app.schemas.task import TaskResponse, TaskStatusFilter
+from app.services.personal_projects import not_my_personal
 from app.services.task_assignees import (
     assignee_exists,
     load_assignees,
@@ -40,6 +41,10 @@ async def list_my_tasks(
     status_: TaskStatusFilter | None = Query(default=None, alias="status"),
     due_window: DueWindow | None = Query(default=None),
     include_archived: bool = Query(default=False),
+    # Задачи СВОЕГО личного проекта у окон отбираем: на /my для них отдельная
+    # секция «ЛИЧНОЕ», и одна задача не должна стоять на экране дважды. Задачи
+    # из ЧУЖОГО личного, назначенные мне, остаются — это обычная работа.
+    include_personal: bool = Query(default=False),
     principal: Principal = Depends(require_auth_any()),
     db: AsyncSession = Depends(get_db),
 ) -> list[TaskResponse]:
@@ -54,6 +59,8 @@ async def list_my_tasks(
     )
     if not include_archived:
         stmt = stmt.where(Task.archived_at.is_(None))
+    if not include_personal:
+        stmt = stmt.where(not_my_personal(principal.employee_id))
     stmt = apply_status_filter(stmt, status_)
 
     # Окна — по КАЛЕНДАРНЫМ дням display tz (services/taskdates.py), не по

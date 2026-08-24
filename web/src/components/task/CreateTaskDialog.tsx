@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/Dialog'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
+import { useMe } from '@/hooks/useMe'
 import { useProjects, useProjectSections } from '@/hooks/useProjects'
 import { useCreateTask } from '@/hooks/useTasks'
 
@@ -29,6 +30,10 @@ export function CreateTaskDialog({
   initialProjectId,
 }: CreateTaskDialogProps) {
   const projects = useProjects()
+  // Личный проект скрыт из useProjects(), но у сотрудника без единого рабочего
+  // проекта он — единственное место, куда можно писать. Без этой ветки диалог
+  // отправлял бы его на /projects, где кнопки создания у него нет.
+  const personalProjectId = useMe().data?.personal_project_id ?? null
   const [projectId, setProjectId] = useState<string | ''>(initialProjectId ?? '')
   const sections = useProjectSections(projectId || undefined)
   const [sectionId, setSectionId] = useState<string | ''>('')
@@ -41,6 +46,16 @@ export function CreateTaskDialog({
       setProjectId(projects.data[0]!.id)
     }
   }, [open, projectId, projects.data])
+
+  // Личное предлагаем ТОЛЬКО как запасной вариант: когда рабочих проектов нет.
+  // Иначе оно всплывало бы в списке, откуда его специально убрали.
+  const personalOnly =
+    (projects.data?.length ?? 0) === 0 && !projects.isLoading && !!personalProjectId
+  useEffect(() => {
+    if (open && !projectId && personalOnly && personalProjectId) {
+      setProjectId(personalProjectId)
+    }
+  }, [open, projectId, personalOnly, personalProjectId])
 
   const create = useCreateTask(projectId || '')
 
@@ -64,7 +79,7 @@ export function CreateTaskDialog({
     }
   }
 
-  const hasProjects = (projects.data?.length ?? 0) > 0
+  const hasProjects = (projects.data?.length ?? 0) > 0 || personalOnly
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -73,9 +88,11 @@ export function CreateTaskDialog({
           <DialogHeader>
             <DialogTitle>Новая задача</DialogTitle>
             <DialogDescription>
-              {hasProjects
-                ? 'Выберите проект и секцию (опционально), введите название.'
-                : 'Сначала создайте проект — задачи живут внутри проектов.'}
+              {personalOnly
+                ? 'Задача попадёт в ваш раздел «Личное» — коллеги её не увидят.'
+                : hasProjects
+                  ? 'Выберите проект и секцию (опционально), введите название.'
+                  : 'Сначала создайте проект — задачи живут внутри проектов.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -103,6 +120,9 @@ export function CreateTaskDialog({
                 className="flex h-9 w-full rounded-lg border border-glass-border bg-glass px-2 text-sm text-text focus:border-amber focus:outline-none"
               >
                 {!hasProjects && <option>—</option>}
+                {personalOnly && personalProjectId && (
+                  <option value={personalProjectId}>Личное</option>
+                )}
                 {projects.data?.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}

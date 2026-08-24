@@ -26,6 +26,9 @@ interface TaskRowProps {
   onToggleDone?: () => void
   /** «Мои задачи» — узкие отбивки: колонок кастом-полей там нет. */
   compact?: boolean
+  /** См. TaskContextLine.reserve: список без контекста ни у одной строки
+   *  не резервирует под неё полосу, иначе заголовок висит выше чекбокса. */
+  reserveContext?: boolean
 }
 
 /**
@@ -50,6 +53,7 @@ export function TaskRow({
   onClick,
   onToggleDone,
   compact = false,
+  reserveContext = true,
 }: TaskRowProps) {
   const done = task.status === 'done'
   const overdue = isOverdue(task.due_at, task.status)
@@ -96,6 +100,7 @@ export function TaskRow({
             labels={labels}
             subtasks={subtasks}
             fallback={fallback}
+            reserve={reserveContext}
           />
         </span>
       </span>

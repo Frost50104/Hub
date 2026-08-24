@@ -28,6 +28,7 @@ from app.schemas.label import (
     LabelUpdate,
 )
 from app.services.activity_writer import record_activity
+from app.services.personal_projects import require_task_access
 from app.services.project_access import require_project_role
 
 router = APIRouter(tags=["labels"])
@@ -177,7 +178,7 @@ async def _load_task_and_label(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена"
         )
-    await require_project_role(db, task.project_id, principal, allow=("owner", "editor"))
+    await require_task_access(db, task, principal, allow=("owner", "editor"))
     label = await db.get(TaskLabel, label_id)
     # Метка обязана принадлежать проекту задачи — иначе через смежный проект
     # того же tenant'а можно навесить чужую метку.

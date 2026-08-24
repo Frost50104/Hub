@@ -104,6 +104,11 @@ export function BoardView({
   })
   const [stageDelete, setStageDelete] = useState<TaskStage | null>(null)
 
+  // Перетаскивание — редакторское действие: PATCH шлёт stage_id ВМЕСТЕ с
+  // position, а исполнителю-наблюдателю разрешён только статус/этап. Гейт —
+  // на самой карточке (`KanbanCard draggable={canEdit}`): так снимаются и
+  // обработчики, и a11y-атрибуты «draggable». Свой этап наблюдатель меняет
+  // селектом в карточке задачи.
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, {

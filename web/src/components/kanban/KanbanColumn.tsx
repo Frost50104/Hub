@@ -135,8 +135,11 @@ export function KanbanColumn({
               task={t}
               subtasks={childrenByParent?.get(t.id)}
               labels={labelsByTask?.get(t.id)}
+              draggable={canEdit}
               onClick={() => onTaskClick(t.id)}
-              onToggleDone={() => onToggleDone(t)}
+              onToggleDone={
+                t.can_set_status === false ? undefined : () => onToggleDone(t)
+              }
             />
           ))}
         </SortableContext>

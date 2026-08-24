@@ -1,4 +1,4 @@
-import { CircleCheck, FolderKanban, FolderPlus, Plus } from 'lucide-react'
+import { CircleCheck, FolderKanban, FolderPlus, Plus, User } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/Button'
 import { useMe } from '@/hooks/useMe'
 import { useCreateProject, useProjectFolders } from '@/hooks/useProjects'
 import { cn } from '@/lib/cn'
+import { requestInlineCreate } from '@/lib/quickCreate'
 
 interface FloatingActionButtonProps {
   /** Position above the bottom tab bar — extra offset in rem. */
@@ -55,7 +56,10 @@ export function FloatingActionButton({
   // Права считает сервер; тот же queryKey, что у сайдбара и страницы —
   // TanStack дедуплицирует, лишнего запроса нет.
   const foldersCanManage = useProjectFolders().data?.can_manage ?? false
-  const canCreateProjects = useMe().data?.can_create_projects ?? false
+  const me = useMe().data
+  const canCreateProjects = me?.can_create_projects ?? false
+  const personalProjectId = me?.personal_project_id ?? null
+  const navigate = useNavigate()
 
   if (hidden) return null
   return (
@@ -92,6 +96,27 @@ export function FloatingActionButton({
         >
           Задача
         </BottomSheetItem>
+        {/* Личное достижимо инпутом на /my, но FAB — то место, куда на
+            телефоне смотрят, когда хотят что-то создать. */}
+        {personalProjectId && (
+          <BottomSheetItem
+            icon={<User className="h-5 w-5" />}
+            onClick={() => {
+              setSheetOpen(false)
+              // Тиком позже: Radix ещё возвращает фокус на триггер шторки, и
+              // на iOS клавиатура бы не поднялась.
+              window.setTimeout(() => {
+                // Секция может быть свёрнута — тогда инпут не смонтирован и
+                // ловить событие некому; ведём на /my, там его развернут.
+                if (!requestInlineCreate(personalProjectId)) {
+                  navigate('/my?new=personal')
+                }
+              }, 0)
+            }}
+          >
+            Личная задача
+          </BottomSheetItem>
+        )}
         {canCreateProjects && (
           <BottomSheetItem
             icon={<FolderKanban className="h-5 w-5" />}

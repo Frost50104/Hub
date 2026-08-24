@@ -30,6 +30,10 @@ export interface Me {
   /** Может создавать проекты и папки (admin или офис/ТУ/франчайзи) — считает
    *  сервер (`project_access.can_create_project`), фронт правило не выводит. */
   can_create_projects: boolean
+  /** Скрытый персональный проект «Личное» — источник секции на /my.
+   *  Optional, а не `string | null`: старый бэкенд в окне деплоя поля не
+   *  отдаёт, и strict-тип врал бы про рантайм. */
+  personal_project_id?: string | null
 }
 
 export function useMe(): UseQueryResult<Me> {

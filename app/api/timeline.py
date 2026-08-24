@@ -30,6 +30,7 @@ from app.models.section import Section
 from app.models.task import Task
 from app.schemas.dependency import TaskDependencyResponse
 from app.schemas.task import TaskResponse
+from app.services.personal_projects import assert_full_project_access
 from app.services.project_access import require_project_role
 from app.services.task_assignees import load_assignees, serialize_with_assignees
 from app.services.taskdates import day_start_utc
@@ -74,7 +75,8 @@ async def get_timeline(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> TimelineResponse:
-    await require_project_role(db, project_id, principal)
+    project, _ = await require_project_role(db, project_id, principal)
+    assert_full_project_access(project, principal)
 
     from_date = _parse_iso_date(from_, field="from")
     to_date = _parse_iso_date(to, field="to")

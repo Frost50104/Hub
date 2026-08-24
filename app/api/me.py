@@ -10,14 +10,15 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from signaris_auth import Principal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.learn_home import AUTH_AVATAR_BASE
-from app.deps import get_db, require_auth_any
+from app.deps import get_db, require_auth, require_auth_any
 from app.services.employee_profiles import ensure_profile_for_principal
+from app.services.personal_projects import ensure_personal_project
 from app.services.project_access import can_create_project
 
 router = APIRouter(tags=["me"])
@@ -51,6 +52,11 @@ class MeResponse(BaseModel):
     # считает СЕРВЕР (project_access.can_create_project), фронт не выводит
     # правило из ролей сам.
     can_create_projects: bool = False
+    # Персональный проект «Личное»: скрыт из всех списков проектов, секция на
+    # /my работает обычными /projects/{id}/tasks. None — у principal нет
+    # hub-роли либо проект не удалось создать (фронт деградирует в «секции
+    # нет», а не в ошибку).
+    personal_project_id: UUID | None = None
 
 
 @router.get("/me", response_model=MeResponse)
@@ -64,9 +70,15 @@ async def get_me(
     hub_role = principal.role_for("hub")
     profile_payload: MeProfile | None = None
     needs_restore = False
+    personal_project_id: UUID | None = None
 
     if hub_role is not None:
         result = await ensure_profile_for_principal(db, principal)
+        # Коммитим ДО личного проекта: ensure_personal_project при коллизии
+        # ключа откатывает SAVEPOINT, и незафиксированная привязка профиля
+        # попала бы в зону поражения.
+        await db.commit()
+        personal_project_id = await ensure_personal_project(db, principal)
         await db.commit()
         if result.outcome == "needs_restore":
             needs_restore = True
@@ -95,4 +107,30 @@ async def get_me(
         profile=profile_payload,
         profile_needs_restore=needs_restore,
         can_create_projects=can_create,
+        personal_project_id=personal_project_id,
     )
+
+
+class PersonalProjectResponse(BaseModel):
+    personal_project_id: UUID
+
+
+@router.post("/me/personal-project", response_model=PersonalProjectResponse)
+async def ensure_my_personal_project(
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> PersonalProjectResponse:
+    """Идемпотентно вернуть id личного проекта — ремонт, а не основной путь.
+
+    Основной путь — `personal_project_id` в GET /me. Ручка нужна, когда там
+    пришёл null (гонка, миграция не догнала, восстановленный после увольнения
+    аккаунт): фронту есть что нажать вместо пустого экрана без объяснений.
+    """
+    project_id = await ensure_personal_project(db, principal)
+    await db.commit()
+    if project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Не удалось создать личный проект — попробуйте позже",
+        )
+    return PersonalProjectResponse(personal_project_id=project_id)

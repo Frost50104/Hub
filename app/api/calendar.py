@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps import get_db, require_auth
 from app.models.task import Task
 from app.schemas.task import TaskPriority, TaskResponse, TaskStatusFilter
+from app.services.personal_projects import assert_full_project_access
 from app.services.project_access import require_project_role
 from app.services.task_assignees import (
     assignee_exists,
@@ -64,7 +65,8 @@ async def list_calendar_tasks(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> list[TaskResponse]:
-    await require_project_role(db, project_id, principal)
+    project, _ = await require_project_role(db, project_id, principal)
+    assert_full_project_access(project, principal)
 
     from_date = _parse_iso_date(from_, field="from")
     to_date = _parse_iso_date(to, field="to")

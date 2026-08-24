@@ -7,6 +7,10 @@ a per-project access list inside Hub.
 A project ALWAYS has at least one owner (enforced in service layer: deleting
 the last owner is rejected). `created_by` references shadow_users.employee_id;
 the creator is automatically added as owner in ProjectMember on creation.
+
+`personal_owner_id` — личное пространство сотрудника («Личное»): проект скрыт
+из всех списков проектов и живёт секцией на /my. Всё про него —
+`app/services/personal_projects.py`.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -33,7 +38,20 @@ from app.db import Base
 
 class Project(Base):
     __tablename__ = "projects"
-    __table_args__ = (UniqueConstraint("tenant_id", "key", name="uq_projects_tenant_key"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "key", name="uq_projects_tenant_key"),
+        # «Ровно один личный проект на сотрудника» — БД-инвариант, а не
+        # приложенческий лок: на этот индекс опирается идемпотентность
+        # services/personal_projects.py::ensure_personal_project (гонка двух
+        # параллельных /api/me гасится блокировкой на индексе).
+        Index(
+            "uq_projects_personal_owner",
+            "tenant_id",
+            "personal_owner_id",
+            unique=True,
+            postgresql_where=text("personal_owner_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
@@ -52,6 +70,20 @@ class Project(Base):
         ForeignKey("project_folders.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
+    )
+    # Личное пространство сотрудника: NULL — обычный проект, иначе — «Личное»
+    # этого человека. Одна колонка кодирует и признак, и владельца: role='owner'
+    # в project_members неоднозначен (владелец может позвать второго owner'а).
+    # RESTRICT как у created_by: SET NULL бесшумно вывалил бы личный проект во
+    # все списки, CASCADE снёс бы задачи.
+    #
+    # ИНВАРИАНТ: значение берётся ТОЛЬКО из principal.employee_id внутри
+    # tenant-scoped сессии, никогда из тела запроса — FK-триггер Postgres
+    # обходит RLS, и чужой employee_id прошёл бы проверку.
+    personal_owner_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("shadow_users.employee_id", ondelete="RESTRICT"),
+        nullable=True,
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[UUID] = mapped_column(

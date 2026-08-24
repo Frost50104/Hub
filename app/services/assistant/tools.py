@@ -37,9 +37,11 @@ from app.services.assistant.context import (
     resolve_task,
     visible_projects_stmt,
 )
+from app.services.personal_projects import not_personal
 from app.services.task_assignees import (
     assignee_exists,
     has_no_assignees,
+    is_task_assignee,
     load_assignees,
 )
 from app.services.taskdates import (
@@ -363,7 +365,11 @@ async def t_my_tasks(ctx: ToolContext, a: MyTasksArgs) -> dict[str, Any]:
 
 
 async def t_list_projects(ctx: ToolContext, a: BaseModel) -> dict[str, Any]:
-    rows = (await ctx.db.execute(visible_projects_stmt(ctx).limit(50))).scalars().all()
+    # Личное не перечисляем даже владельцу: «покажи мои проекты» не должно
+    # возвращать то, что убрано из всех списков. Резолв по имени («создай
+    # задачу в личном») при этом работает — он идёт через visible_projects_stmt.
+    stmt = visible_projects_stmt(ctx).where(not_personal()).limit(50)
+    rows = (await ctx.db.execute(stmt)).scalars().all()
     return {
         "projects": [
             {"name": p.name, "key": p.key, "can_edit": await can_edit_project(ctx, p.id)}
@@ -553,6 +559,27 @@ async def _apply_task_patch(
     return patch
 
 
+def _is_status_only(a: UpdateTaskArgs | UpdateTasksArgs) -> bool:
+    """Правка трогает только статус.
+
+    Тогда её вправе сделать исполнитель задачи, даже будучи наблюдателем в
+    проекте — то же правило, что в `api/tasks.py::update_task`
+    (ASSIGNEE_EDITABLE_FIELDS). Без этой ветки ассистент отказывал бы там, где
+    человек в интерфейсе нажимает «Готово», а тот же шаг внутри плана
+    (plans.py зовёт ручку напрямую) проходил бы.
+    """
+    return a.status is not None and all(
+        getattr(a, field, None) is None
+        for field in ("title", "priority", "due_at", "assignees")
+    )
+
+
+async def _may_edit_task(ctx: ToolContext, task: Task, a: UpdateTaskArgs | UpdateTasksArgs) -> bool:
+    if await can_edit_project(ctx, task.project_id):
+        return True
+    return _is_status_only(a) and await is_task_assignee(ctx.db, task.id, ctx.employee_id)
+
+
 async def t_update_task(ctx: ToolContext, a: UpdateTaskArgs) -> dict[str, Any]:
     """Правка ОДНОЙ задачи — выполняется сразу (порог подтверждения)."""
     from app.api.tasks import update_task as api_update_task
@@ -560,10 +587,10 @@ async def t_update_task(ctx: ToolContext, a: UpdateTaskArgs) -> dict[str, Any]:
 
     task = await resolve_task(ctx, a.task)
     project = await ctx.db.get(Project, task.project_id)
-    if not await can_edit_project(ctx, task.project_id):
+    if not await _may_edit_task(ctx, task, a):
         return denied(
             f"в проекте «{project.name if project else '—'}» у вас роль наблюдателя — "
-            "менять задачи там нельзя",
+            "менять задачи там нельзя (свою задачу можно только отметить статусом)",
             await project_managers(ctx, task.project_id),
         )
     patch = await _apply_task_patch(ctx, task, a)
@@ -593,7 +620,7 @@ async def t_update_tasks(ctx: ToolContext, a: UpdateTasksArgs) -> dict[str, Any]
         task = await resolve_task(ctx, ref)
         tasks.append((task, await ctx.db.get(Project, task.project_id)))
     for task, project in tasks:
-        if not await can_edit_project(ctx, task.project_id):
+        if not await _may_edit_task(ctx, task, a):
             return denied(
                 f"в проекте «{project.name if project else '—'}» у вас роль наблюдателя",
                 await project_managers(ctx, task.project_id),

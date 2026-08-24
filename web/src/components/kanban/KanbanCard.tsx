@@ -19,6 +19,10 @@ interface KanbanCardProps {
   labels?: Label[]
   onClick?: () => void
   onToggleDone?: () => void
+  /** Перетаскивание — редакторское действие. `false` снимает и обработчики,
+   *  и a11y-атрибуты «draggable»: наблюдателю карточка не должна обещать
+   *  действие, на которое сервер ответит 403. */
+  draggable?: boolean
   /** Карточка в DragOverlay: без sortable-обвязки и без обработчиков. */
   overlay?: boolean
 }
@@ -38,9 +42,15 @@ export function KanbanCard({
   labels,
   onClick,
   onToggleDone,
+  draggable = true,
   overlay = false,
 }: KanbanCardProps) {
-  const sortable = useSortable({ id: task.id, disabled: overlay })
+  // Карточка перетаскивается только у редактора. Атрибуты dnd-kit при этом не
+  // навешиваем вовсе: `disabled` у useSortable ставит на узел aria-disabled, и
+  // в дереве доступности гасла бы вся карточка вместе с кнопкой статуса —
+  // а её исполнителю-наблюдателю как раз нажимать можно.
+  const interactive = !overlay && draggable
+  const sortable = useSortable({ id: task.id, disabled: !interactive })
   const style: CSSProperties = overlay
     ? {}
     : {
@@ -57,12 +67,12 @@ export function KanbanCard({
     <div
       ref={overlay ? undefined : sortable.setNodeRef}
       style={style}
-      {...(overlay ? {} : sortable.attributes)}
-      {...(overlay ? {} : sortable.listeners)}
+      {...(interactive ? sortable.attributes : {})}
+      {...(interactive ? sortable.listeners : {})}
       onClick={onClick}
       role="button"
       tabIndex={overlay ? -1 : 0}
-      aria-roledescription="draggable task"
+      aria-roledescription={interactive ? 'draggable task' : undefined}
       aria-grabbed={sortable.isDragging || undefined}
       aria-label={task.title}
       onKeyDown={(e) => {

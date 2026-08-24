@@ -25,7 +25,8 @@
 
 ### Контейнеры
 - `Workspace = tenant_id` (из JWT, без своей таблицы)
-- `projects` (id, tenant_id, key, name, description, archived_at, created_by)
+- `projects` (id, tenant_id, key, name, description, archived_at, created_by, personal_owner_id)
+  - `personal_owner_id` (0042) — личное пространство сотрудника «Личное»: NULL у обычных проектов, partial UNIQUE `(tenant_id, personal_owner_id)`. Проект скрыт из ВСЕХ списков (предикаты `app/services/personal_projects.py`), заводится идемпотентно в `GET /api/me`; в чужом личном участник видит только свои задачи. Инвариант целиком — CLAUDE.md §«Задачи и проекты»
 - `project_members` (project_id, employee_id, role: `owner` | `editor` | `viewer`)
   - Права фронту отдаёт сервер: `project_access.capabilities()` → `ProjectResponse.can_edit/can_manage` (hub-admin вне членства тоже правит); фронт роли не вычисляет.
 - `sections` (project_id, name, position)
@@ -33,7 +34,7 @@
 ### Задачи
 - `tasks` (project_id, section_id, parent_task_id, title, description markdown, status: `todo` | `in_progress` | `in_review` | `done`, priority: `low` | `medium` | `high` | `urgent`, start_at, due_at, position NUMERIC, search_vector tsvector)
   - Подзадачи только 1 уровень — CHECK `parent_task_id IS NULL OR (SELECT parent_task_id FROM tasks t2 WHERE t2.id = parent_task_id) IS NULL`; UI — секция в карточке (SubtaskList), в топ-уровне List/Board не показываются
-- `project_stages` (project_id, name, system_status, position; 0040) — колонки доски с пользовательскими именами; `tasks.stage_id` (NULLable до 0042), `tasks.status` — ЗЕРКАЛО `stage.system_status`, пишется только `app/services/stages.py` (`set_stage`/`apply_stage`); ≥1 этап на каждый системный статус; `create_project` создаёт 4 этапа. API `app/api/stages.py`
+- `project_stages` (project_id, name, system_status, position; 0040) — колонки доски с пользовательскими именами; `tasks.stage_id` (NULLable до 0044), `tasks.status` — ЗЕРКАЛО `stage.system_status`, пишется только `app/services/stages.py` (`set_stage`/`apply_stage`); ≥1 этап на каждый системный статус; `create_project` создаёт 4 этапа. API `app/api/stages.py`
 - `tasks.seq` (0032–0033) — номера «KEY-42» внутри проекта, выдача только `allocate_task_seq` под row-lock проекта, `project_id` иммутабелен
 - `task_assignees` (task_id, employee_id, position, assigned_by; PK составной, RLS с 0034) — **единственное место, где живут исполнители**; колонка-зеркало `tasks.assignee_id` удалена ревизией 0036. Пишет только `app/services/task_assignees.py`; в списках — EXISTS/батч, не JOIN
 - `task_watchers` — auto-добавление: assignee + creator + mentioned
