@@ -133,24 +133,6 @@ export function AudiencePicker({
     return { is_all: debounced.is_all, rules: debounced.rules }
   }, [debounced, hasEmptyInclude])
   const dryRun = useAudienceDryRun(dryRunBody)
-  // Виноватое условие ищем по ПЕРВОЙ include-строке: exclude сюда не входит —
-  // там ноль означает «никого не исключили», а это не проблема. Без useMemo:
-  // разбор — пара проходов по списку условий, а `labelFor` пересоздаётся на
-  // каждом рендере и обнулял бы кэш.
-  const includeRule = val.rules.find((r) => r.mode === 'include')
-  const emptyReason = includeRule
-    ? emptyPickReason(
-        DIMENSIONS.flatMap((d) =>
-          includeRule[d.key].map((id) => ({
-            key: d.key,
-            id,
-            dimensionLabel: d.label,
-            valueLabel: labelFor(d.key, id),
-          })),
-        ),
-        dimCounts.data?.counts,
-      )
-    : null
 
   const optionsFor = (key: DimensionKey): { id: string; label: string }[] => {
     // Контуры — статичный словарь, не зависят от загрузки справочников.
@@ -191,6 +173,25 @@ export function AudiencePicker({
   const removeRule = (index: number) => {
     setVal({ ...val, rules: val.rules.filter((_, i) => i !== index) })
   }
+
+  // Виноватое условие ищем по ПЕРВОЙ include-строке: exclude сюда не входит —
+  // там ноль означает «никого не исключили», а это не проблема. Без useMemo:
+  // разбор — пара проходов по списку условий, а `labelFor` пересоздаётся на
+  // каждом рендере и обнулял бы кэш.
+  const includeRule = val.rules.find((r) => r.mode === 'include')
+  const emptyReason = includeRule
+    ? emptyPickReason(
+        DIMENSIONS.flatMap((d) =>
+          includeRule[d.key].map((id) => ({
+            key: d.key,
+            id,
+            dimensionLabel: d.label,
+            valueLabel: labelFor(d.key, id),
+          })),
+        ),
+        dimCounts.data?.counts,
+      )
+    : null
 
   const includes = val.rules.filter((r) => r.mode === 'include')
 
