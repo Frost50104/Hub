@@ -145,6 +145,17 @@ export function VideoPlayer({
   // проверить связь.
   const [saveState, setSaveState] = useState<'ok' | 'retrying' | 'poisoned'>('ok')
 
+  // Проп-колбэк живёт в ref: иначе `refreshCoverage` меняет идентичность на
+  // каждый рендер, а за ней — `flush` и эффекты, которые от неё зависят. Эффект
+  // keepalive при пересоздании выполняет cleanup, то есть ШЛЁТ запрос: на проде
+  // это давало 12 отправок за 2,5 секунды воспроизведения (по одной на
+  // timeupdate), каждая — запись в БД под FOR UPDATE. Плюс пинговый interval
+  // пересоздавался и до своих 15 секунд не доживал вовсе.
+  const onCoverageRef = useRef(onCoverageChange)
+  useEffect(() => {
+    onCoverageRef.current = onCoverageChange
+  })
+
   const unpoison = useCallback(() => {
     if (!poisonedRef.current) return
     poisonedRef.current = false
@@ -176,8 +187,8 @@ export function VideoPlayer({
         ? prev
         : { durationKnown, hasIntervals },
     )
-    onCoverageChange?.(c)
-  }, [snapshot, onCoverageChange])
+    onCoverageRef.current?.(c)
+  }, [snapshot])
 
   const applyDuration = useCallback(
     (next: number) => {
