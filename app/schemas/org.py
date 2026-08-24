@@ -189,3 +189,15 @@ class DryRunProfile(BaseModel):
 class AudienceDryRunResponse(BaseModel):
     count: int
     sample: list[DryRunProfile]
+
+
+class DimensionCountsResponse(BaseModel):
+    """Сколько активных сотрудников стоит за каждым значением измерения.
+
+    Ключ верхнего уровня — измерение пикера (`position_ids`, `org_roles`, …),
+    ключ второго — значение строкой (UUID или код контура). Значения, за
+    которыми никого нет, в ответе ОТСУТСТВУЮТ: клиент рисует у них ноль сам —
+    так ответ не раздувается справочником целиком.
+    """
+
+    counts: dict[str, dict[str, int]]

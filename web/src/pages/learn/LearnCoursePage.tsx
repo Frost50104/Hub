@@ -125,7 +125,11 @@ function LessonRow({
   )
 
   if (kind === 'locked') return inner
-  return <Link to={`/learn/lessons/${lesson.id}${hrefSuffix}`}>{inner}</Link>
+  return (
+    <Link to={`/learn/lessons/${lesson.id}${hrefSuffix}`} replace>
+      {inner}
+    </Link>
+  )
 }
 
 function CourseHeader({ data, hrefSuffix = '' }: { data: CourseDetail; hrefSuffix?: string }) {
@@ -234,6 +238,7 @@ function CourseHeader({ data, hrefSuffix = '' }: { data: CourseDetail; hrefSuffi
       {target && (
         <Link
           to={`/learn/lessons/${target.id}${hrefSuffix}`}
+          replace
           className={cn(
             'flex min-h-[56px] w-full items-center gap-3 rounded-xl px-[18px] text-left',
             data.completed

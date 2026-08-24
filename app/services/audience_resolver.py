@@ -579,6 +579,49 @@ async def dry_run(
     return len(matched), matched[:20]
 
 
+# Измерения пикера: (ключ, имя поля в EmployeeAttrs). `profile_ids` сюда не
+# входит — у «конкретного сотрудника» счётчик всегда 1 и смысла не несёт.
+_COUNTABLE: tuple[tuple[str, str], ...] = (
+    ("position_ids", "position_ids"),
+    ("position_group_ids", "position_group_ids"),
+    ("store_ids", "store_ids"),
+    ("store_group_ids", "store_group_ids"),
+    ("franchisee_ids", "franchisee_ids"),
+    ("franchisee_group_ids", "franchisee_group_ids"),
+    ("department_ids", "department_ids"),
+    ("user_group_ids", "user_group_ids"),
+    ("org_roles", "org_role"),
+)
+
+
+async def dimension_counts(db: AsyncSession) -> dict[str, dict[str, int]]:
+    """Сколько активных сотрудников стоит за каждым значением каждого измерения.
+
+    Пикер показывает это рядом со значением («Администратор · 0 сотрудников»):
+    без числа человек выбирает должность, получает «Увидят: 0» и не понимает,
+    что должность просто никому не проставлена (ОС 2026-08-24).
+
+    Считаем ПО ТЕМ ЖЕ атрибутам, что и `dry_run` (`load_attrs_map` →
+    `build_attrs`), а не `GROUP BY position_id`: у ТУ в магазины попадают
+    закреплённые точки, у владельца франчайзи — вся его сеть. Наивный COUNT
+    разошёлся бы со счётчиком «увидят» в том же окне.
+
+    Ключи значений — строки (UUID приводится к str), чтобы отдать as-is в JSON.
+    """
+    attrs_map = await load_attrs_map(db)
+    out: dict[str, dict[str, int]] = {key: {} for key, _ in _COUNTABLE}
+    for attrs in attrs_map.values():
+        for key, attr_field in _COUNTABLE:
+            value = getattr(attrs, attr_field)
+            values = (value,) if isinstance(value, str) else value
+            bucket = out[key]
+            for v in values:
+                if not v:
+                    continue
+                bucket[str(v)] = bucket.get(str(v), 0) + 1
+    return out
+
+
 def visible_filter(model: type, profile_id: UUID):  # noqa: ANN201 — SQLAlchemy expression
     """WHERE-фрагмент видимости для списков контента (модель несёт audience_id).
 

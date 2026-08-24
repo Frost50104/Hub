@@ -1,16 +1,19 @@
 import { Minus, Plus, Users, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import {
+  useAudienceDimensionCounts,
   useAudienceDryRun,
   useAudienceRules,
   useEmployees,
   useOrgSnapshot,
 } from '@/hooks/useLearn'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
+import { emptyPickReason, emptyPickText } from '@/lib/audienceHints'
 import { cn } from '@/lib/cn'
 import { emptyRule, ORG_ROLE_LABEL, type AudienceRuleDraft } from '@/lib/learn'
 
@@ -107,6 +110,14 @@ export function AudiencePicker({
   }
 
   const org = useOrgSnapshot()
+  // «Администратор · 0 сотрудников» рядом со значением: без числа человек
+  // выбирает должность, получает «Увидят: 0» и не понимает, что должность
+  // просто никому не проставлена (ОС 2026-08-24).
+  const dimCounts = useAudienceDimensionCounts()
+  const countFor = (key: DimensionKey, id: string): number | null =>
+    key === 'profile_ids' || !dimCounts.data
+      ? null
+      : (dimCounts.data.counts[key]?.[id] ?? 0)
   // Поиск в измерении «Сотрудник»: без него дропдаун молча показывал бы
   // только первую сотню активных (limit 100 в useEmployees).
   const [employeeQ, setEmployeeQ] = useState('')
@@ -122,6 +133,24 @@ export function AudiencePicker({
     return { is_all: debounced.is_all, rules: debounced.rules }
   }, [debounced, hasEmptyInclude])
   const dryRun = useAudienceDryRun(dryRunBody)
+  // Виноватое условие ищем по ПЕРВОЙ include-строке: exclude сюда не входит —
+  // там ноль означает «никого не исключили», а это не проблема. Без useMemo:
+  // разбор — пара проходов по списку условий, а `labelFor` пересоздаётся на
+  // каждом рендере и обнулял бы кэш.
+  const includeRule = val.rules.find((r) => r.mode === 'include')
+  const emptyReason = includeRule
+    ? emptyPickReason(
+        DIMENSIONS.flatMap((d) =>
+          includeRule[d.key].map((id) => ({
+            key: d.key,
+            id,
+            dimensionLabel: d.label,
+            valueLabel: labelFor(d.key, id),
+          })),
+        ),
+        dimCounts.data?.counts,
+      )
+    : null
 
   const optionsFor = (key: DimensionKey): { id: string; label: string }[] => {
     // Контуры — статичный словарь, не зависят от загрузки справочников.
@@ -187,6 +216,7 @@ export function AudiencePicker({
               rule={rule}
               optionsFor={optionsFor}
               labelFor={labelFor}
+              countFor={countFor}
               employeeQ={employeeQ}
               onEmployeeQ={setEmployeeQ}
               onChange={(r) => updateRule(i, r)}
@@ -234,6 +264,16 @@ export function AudiencePicker({
                 {dryRun.data.count > 5 ? '…' : ''}
               </span>
             )}
+            {dryRun.data.count === 0 && emptyReason && (
+              <span className="mt-0.5 block text-text2">
+                {emptyPickText(emptyReason)}{' '}
+                {emptyReason.kind === 'value' && (
+                  <Link to="/learn/employees" className="text-amber hover:underline">
+                    Заполнить у сотрудников
+                  </Link>
+                )}
+              </span>
+            )}
           </span>
         ) : (
           <span className="text-text3">—</span>
@@ -247,6 +287,7 @@ function RuleRow({
   rule,
   optionsFor,
   labelFor,
+  countFor,
   employeeQ,
   onEmployeeQ,
   onChange,
@@ -255,6 +296,8 @@ function RuleRow({
   rule: AudienceRuleDraft
   optionsFor: (key: DimensionKey) => { id: string; label: string }[]
   labelFor: (key: DimensionKey, id: string) => string
+  /** Сколько сотрудников стоит за значением; `null` — считать нечего. */
+  countFor: (key: DimensionKey, id: string) => number | null
   employeeQ: string
   onEmployeeQ: (q: string) => void
   onChange: (r: AudienceRuleDraft) => void
@@ -366,11 +409,16 @@ function RuleRow({
           onChange={(e) => setPickId(e.target.value)}
         >
           <option value="">Выберите…</option>
-          {available.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
+          {available.map((o) => {
+            const n = countFor(dimKey, o.id)
+            return (
+              <option key={o.id} value={o.id}>
+                {n === null
+                  ? o.label
+                  : `${o.label} · ${n} ${plural(n, 'сотрудник', 'сотрудника', 'сотрудников')}`}
+              </option>
+            )
+          })}
         </Select>
         <Button type="button" variant="secondary" onClick={addCondition} disabled={!pickId}>
           <Plus className="h-3.5 w-3.5" /> Условие

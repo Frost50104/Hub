@@ -243,6 +243,7 @@ export function LearnLessonPage() {
           <div className="flex items-center gap-2.5 border-b border-hair bg-bg px-3 pb-2.5 pt-2 backdrop-blur-[14px]">
             <Link
               to={courseHref}
+              replace
               aria-label={`К курсу «${course.data?.title ?? ''}»`}
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-text2 hover:text-text"
             >
@@ -307,6 +308,7 @@ export function LearnLessonPage() {
               action={
                 <Link
                   to={courseHref}
+                  replace
                   className="inline-flex h-12 items-center justify-center rounded-xl bg-amber px-5 text-[15px] font-semibold text-on-amber"
                 >
                   К программе курса
@@ -328,7 +330,7 @@ export function LearnLessonPage() {
                   >
                     Повторить
                   </button>
-                  <Link to={courseHref} className="text-[15px] text-text2 hover:text-text">
+                  <Link to={courseHref} replace className="text-[15px] text-text2 hover:text-text">
                     К курсу
                   </Link>
                 </>
@@ -341,6 +343,7 @@ export function LearnLessonPage() {
             <header className="px-5 pt-[calc(env(safe-area-inset-top,0px)+1rem)] lg:pt-14">
               <Link
                 to={courseHref}
+                replace
                 className="inline-flex h-11 items-center gap-1.5 text-[13px] font-semibold uppercase tracking-[0.06em] text-text2 hover:text-text"
               >
                 <ArrowLeft className="h-4 w-4" strokeWidth={2.2} />
@@ -487,6 +490,7 @@ export function LearnLessonPage() {
                 {data.next_lesson_id && (
                   <Link
                     to={data.next_locked ? '#' : `/learn/lessons/${data.next_lesson_id}${previewSuffix}`}
+                    replace={!data.next_locked}
                     aria-disabled={data.next_locked}
                     onClick={(e) => data.next_locked && e.preventDefault()}
                     className={cn(
@@ -527,6 +531,7 @@ export function LearnLessonPage() {
                     </p>
                     <Link
                       to={courseHref}
+                      replace
                       className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-amber text-[15px] font-semibold text-on-amber"
                     >
                       Завершить курс
@@ -538,6 +543,7 @@ export function LearnLessonPage() {
                 {!data.next_lesson_id && !(data.completed && course.data?.completed) && (
                   <Link
                     to={courseHref}
+                    replace
                     className="flex min-h-[44px] items-center gap-2.5 rounded-xl border border-glass-border px-3.5 py-3 text-text2"
                   >
                     <span className="min-w-0 flex-1">
@@ -554,7 +560,8 @@ export function LearnLessonPage() {
 
                 {data.prev_lesson_id && (
                   <Link
-                    to={`/learn/lessons/${data.prev_lesson_id}`}
+                    to={`/learn/lessons/${data.prev_lesson_id}${previewSuffix}`}
+                    replace
                     className="flex min-h-[44px] items-center gap-2.5 rounded-xl border border-glass-border px-3.5 py-3 text-text2"
                   >
                     <ArrowLeft className="h-5 w-5 shrink-0" strokeWidth={2.2} />

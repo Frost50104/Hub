@@ -8,6 +8,7 @@ import {
 import {
   type BlockedQuizItem,
   learnApi,
+  type AudienceDimensionCounts,
   type AudienceDryRun,
   type AudienceRules,
   type AudienceRuleDraft,
@@ -110,6 +111,25 @@ export function useAudienceDryRun(
     queryFn: () => learnApi.audienceDryRun(body!),
     enabled: body !== null,
     placeholderData: (prev) => prev,
+    meta: { suppressGlobalError: true },
+  })
+}
+
+/**
+ * Счётчики «сколько сотрудников» у значений пикера: «Администратор · 0».
+ *
+ * Справочники крошечные (единицы-десятки значений), поэтому берём разом и
+ * держим свежими минуту: пикер перерисовывается на каждый клик, и запрос на
+ * каждое нажатие был бы расточительством.
+ */
+export function useAudienceDimensionCounts(
+  enabled = true,
+): UseQueryResult<AudienceDimensionCounts> {
+  return useQuery({
+    queryKey: ['learn-audience-dimension-counts'],
+    queryFn: () => learnApi.audienceDimensionCounts(),
+    enabled,
+    staleTime: 60_000,
     meta: { suppressGlobalError: true },
   })
 }

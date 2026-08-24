@@ -117,7 +117,7 @@ export function LessonSections({
         <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-text2">
           Курс
         </p>
-        <Link to={courseHref} className="text-sm font-semibold text-text hover:text-amber">
+        <Link to={courseHref} replace className="text-sm font-semibold text-text hover:text-amber">
           {courseTitle}
         </Link>
         <div className="flex items-center gap-2">

@@ -169,6 +169,13 @@ export interface AudienceDryRun {
   sample: { id: string; full_name: string }[]
 }
 
+/** Сколько активных сотрудников стоит за каждым значением измерения пикера.
+ *  Значения, за которыми никого нет, в ответе отсутствуют — клиент рисует
+ *  у них ноль сам. */
+export interface AudienceDimensionCounts {
+  counts: Record<string, Record<string, number>>
+}
+
 /** Ответ GET /learn/audiences/{id} — предзаполнение пикера аудитории. */
 export interface AudienceRules {
   is_all: boolean
@@ -1177,6 +1184,10 @@ export const learnApi = {
     rules: AudienceRuleDraft[]
   }): Promise<AudienceDryRun> =>
     api.post<AudienceDryRun>('/learn/audiences/dry-run', body).then((r) => r.data),
+  audienceDimensionCounts: (): Promise<AudienceDimensionCounts> =>
+    api
+      .get<AudienceDimensionCounts>('/learn/audiences/dimension-counts')
+      .then((r) => r.data),
   audienceRebuild: (): Promise<{ audiences_changed: number }> =>
     api.post<{ audiences_changed: number }>('/learn/audiences/rebuild').then((r) => r.data),
   audienceRules: (audienceId: string): Promise<AudienceRules> =>

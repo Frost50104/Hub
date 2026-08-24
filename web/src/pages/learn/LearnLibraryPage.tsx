@@ -88,14 +88,25 @@ function extLabel(m: LibraryMaterial): string {
   return ext.slice(0, 4).toUpperCase() || 'ФАЙЛ'
 }
 
-function materialMeta(m: LibraryMaterial): string[] {
+/**
+ * Подпись под названием документа.
+ *
+ * Раздел стоит ПЕРВЫМ и занимает место владельца (ОС 2026-08-24: «покажите, в
+ * каком разделе файл»). Не добавляем четвёртым элементом: `MetaLine`
+ * переносит элементы, и на 390px строка ушла бы в две. Владелец остаётся в
+ * карточке материала — информация не теряется.
+ *
+ * `section` = null означает «раздел уже известен» (список отфильтрован по
+ * нему) — тогда чип был бы дублем шапки.
+ */
+function materialMeta(m: LibraryMaterial, section: string | null): string[] {
   return [
+    section ?? '',
     m.kind === 'link'
       ? 'внешняя ссылка'
       : m.current_version
         ? `v${m.current_version.version_no} · ${formatSize(m.current_version.size_bytes)}`
         : 'файл не загружен',
-    m.owner_name ? `владелец: ${m.owner_name}` : '',
     `обновлён ${formatDate(m.updated_at)}`,
   ].filter(Boolean)
 }
@@ -394,7 +405,14 @@ export function LearnLibraryPage() {
                   </span>
                   <MetaLine
                     className="mt-0.5 text-[13px] text-text2 lg:text-sm"
-                    items={materialMeta(m)}
+                    items={materialMeta(
+                      m,
+                      sectionFilter
+                        ? null
+                        : m.section_id
+                          ? (sectionTitle.get(m.section_id) ?? null)
+                          : 'Без раздела',
+                    )}
                   />
                 </span>
                 {canManage && m.status !== 'published' && (

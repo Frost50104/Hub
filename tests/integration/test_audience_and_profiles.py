@@ -260,3 +260,106 @@ async def test_get_audience_rules_roundtrip(db: AsyncSession, tenant_id: uuid.UU
     with pytest.raises(HTTPException) as exc:
         await get_audience_rules(audience.id, member_principal, db)
     assert exc.value.status_code == 403
+
+
+async def test_dimension_counts_explain_empty_pick(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Счётчики у значений пикера: почему «Увидят: 0» (ОС 2026-08-24).
+
+    Тестировщица выбирала должность «Администратор», получала ноль и не могла
+    понять причину — должность просто никому не проставлена. Счётчик обязан
+    показывать это ДО сохранения.
+    """
+    from app.services.audience_resolver import dimension_counts
+
+    seller_pos = Position(tenant_id=tenant_id, name="Продавец-бариста")
+    admin_pos = Position(tenant_id=tenant_id, name="Администратор")
+    db.add_all([seller_pos, admin_pos])
+    await db.flush()
+
+    # Контуры — общий словарь на всю базу, а интеграционные тесты бегут
+    # суперпользователем (RLS не действует), поэтому по ним считаем ДЕЛЬТУ.
+    # В проде выборку сужает RLS — ровно как у dry-run.
+    before = await dimension_counts(db)
+    await _mk_profile(db, tenant_id, email="s1@t.ru", position_id=seller_pos.id)
+    await _mk_profile(db, tenant_id, email="s2@t.ru", position_id=seller_pos.id)
+    office = await _mk_profile(db, tenant_id, email="ofc@t.ru")
+    office.org_role = "office"
+    await db.flush()
+
+    counts = await dimension_counts(db)
+    positions = counts["position_ids"]
+    assert positions[str(seller_pos.id)] == 2
+    # Должность без людей в ответе ОТСУТСТВУЕТ — клиент рисует ноль сам.
+    assert str(admin_pos.id) not in positions
+
+    def delta(role: str) -> int:
+        return counts["org_roles"].get(role, 0) - before["org_roles"].get(role, 0)
+
+    assert delta("office") == 1
+    assert delta("employee") == 2
+
+
+async def test_dimension_counts_match_dry_run(db: AsyncSession, tenant_id: uuid.UUID):
+    """Число у значения и «Увидят: N» обязаны сходиться на правиле из одного
+    измерения: разойдутся — подсказка соврёт прямо в том же окне."""
+    from app.services.audience_resolver import RuleSpec, dimension_counts, dry_run
+
+    pos = Position(tenant_id=tenant_id, name="Бариста")
+    db.add(pos)
+    await db.flush()
+    await _mk_profile(db, tenant_id, email="b1@t.ru", position_id=pos.id)
+    await _mk_profile(db, tenant_id, email="b2@t.ru", position_id=pos.id)
+    await _mk_profile(db, tenant_id, email="other@t.ru")
+
+    counts = await dimension_counts(db)
+    seen, _sample = await dry_run(
+        db,
+        is_all=False,
+        rules=[RuleSpec(mode="include", position_ids=frozenset({pos.id}))],
+    )
+    assert counts["position_ids"][str(pos.id)] == seen == 2
+
+
+async def test_dimension_counts_follow_tu_assignments(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """ТУ считается в СВОИХ закреплённых магазинах.
+
+    Наивный `GROUP BY store_id` дал бы ноль: у ТУ собственного магазина нет,
+    точки приходят из `tu_store_assignments` через `build_attrs`.
+    """
+    from app.models.employee_profile import TuStoreAssignment
+    from app.services.audience_resolver import dimension_counts
+
+    store = Store(tenant_id=tenant_id, name="Невская, 3")
+    db.add(store)
+    await db.flush()
+    tu = await _mk_profile(db, tenant_id, email="tu@t.ru")
+    tu.org_role = "tu"
+    db.add(TuStoreAssignment(tenant_id=tenant_id, profile_id=tu.id, store_id=store.id))
+    await db.flush()
+
+    counts = await dimension_counts(db)
+    assert counts["store_ids"][str(store.id)] == 1
+
+
+async def test_dimension_counts_gated_like_dry_run(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Числа складываются в состав штата — гейт publisher+, как у dry-run."""
+    from fastapi import HTTPException
+
+    from app.api.org import audience_dimension_counts
+    from tests.integration.test_courses import _mk_member
+    from tests.integration.test_quizzes import _mk_publisher
+
+    line, _profile = await _mk_member(db, tenant_id, email="line@t.ru")
+    with pytest.raises(HTTPException) as exc:
+        await audience_dimension_counts(principal=line, db=db)
+    assert exc.value.status_code == 403
+
+    hr, _hr_profile = await _mk_publisher(db, tenant_id)
+    out = await audience_dimension_counts(principal=hr, db=db)
+    assert "position_ids" in out.counts and "org_roles" in out.counts

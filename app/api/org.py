@@ -46,6 +46,7 @@ from app.schemas.org import (
     DepartmentCreate,
     DepartmentResponse,
     DepartmentUpdate,
+    DimensionCountsResponse,
     DryRunProfile,
     GroupMembersReplace,
     GroupResponse,
@@ -59,6 +60,7 @@ from app.schemas.org import (
 )
 from app.services import audit
 from app.services.audience_resolver import (
+    dimension_counts,
     dry_run,
     load_audience_rules,
     rebuild_tenant,
@@ -678,6 +680,20 @@ async def audience_dry_run(
             DryRunProfile(id=pid, full_name=names.get(pid, "?")) for pid in sample_ids
         ],
     )
+
+
+@router.get("/learn/audiences/dimension-counts", response_model=DimensionCountsResponse)
+async def audience_dimension_counts(
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> DimensionCountsResponse:
+    """Счётчики «сколько сотрудников» у значений в пикере аудитории.
+
+    Тот же гейт, что у dry-run: числа складываются в состав штата, линейному
+    сотруднику их видеть незачем.
+    """
+    await require_content_role(db, principal, "publisher")
+    return DimensionCountsResponse(counts=await dimension_counts(db))
 
 
 class AudienceRulesResponse(BaseModel):

@@ -81,6 +81,9 @@ const GROUPS: { label: string; states: CourseState[] }[] = [
 const FILTERS: { key: string; label: string }[] = [
   { key: 'all', label: 'Все' },
   { key: 'mandatory', label: 'Обязательные' },
+  // Тип `recommended` был в модели с Ф3a, а вкладки не было: четыре курса
+  // прода показывались только во «Всех» (ОС 2026-08-24).
+  { key: 'recommended', label: 'Рекомендованные' },
   { key: 'career', label: 'Карьерные' },
   { key: 'info', label: 'Информационные' },
   { key: 'done', label: 'Пройденные' },
