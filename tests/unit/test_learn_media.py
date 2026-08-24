@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from app.services.learn_media import (
     media_size_limit,
+    mp4_duration_seconds,
     mp4_has_faststart,
     sign_media_path,
     storage_key_for_media,
@@ -112,3 +113,84 @@ class TestStorageAndLimits:
         assert media_size_limit("pdf", {}) == 50 * 1024 * 1024
         assert media_size_limit("image", {}) == 10 * 1024 * 1024
         assert media_size_limit("video", {"video_max_bytes": 100}) == 100
+
+
+def _mvhd(*, version: int, timescale: int, duration: int) -> bytes:
+    """mvhd-бокс. v0 — 32-битные creation/modification/duration, v1 — 64-битные."""
+    if version == 1:
+        payload = bytes([1, 0, 0, 0]) + struct.pack(">QQIQ", 0, 0, timescale, duration)
+    else:
+        payload = bytes([0, 0, 0, 0]) + struct.pack(">IIII", 0, 0, timescale, duration)
+    return _box(b"mvhd", payload)
+
+
+class TestMp4Duration:
+    """Длительность нужна серверу: гейт делит просмотренное на неё, и клиентское
+    число может как открыть гейт раньше времени, так и навсегда заблокировать
+    завершение (завышение в 1,12 раза уже делает 90% недостижимыми)."""
+
+    def test_v0(self, tmp_path):
+        f = tmp_path / "v0.mp4"
+        f.write_bytes(
+            _box(b"ftyp", b"isom")
+            + _box(b"moov", _mvhd(version=0, timescale=1000, duration=53_243))
+            + _box(b"mdat")
+        )
+        assert mp4_duration_seconds(f) == 53.243
+
+    def test_v1_64bit(self, tmp_path):
+        f = tmp_path / "v1.mp4"
+        f.write_bytes(
+            _box(b"ftyp", b"isom")
+            + _box(b"moov", _mvhd(version=1, timescale=600, duration=31_946))
+            + _box(b"mdat")
+        )
+        got = mp4_duration_seconds(f)
+        assert got is not None and abs(got - 53.2433) < 0.001
+
+    def test_mvhd_not_first_in_moov(self, tmp_path):
+        # Реальные файлы кладут перед mvhd другие боксы (например, udta).
+        f = tmp_path / "nested.mp4"
+        moov = _box(b"udta", b"\x00" * 16) + _mvhd(version=0, timescale=90_000, duration=450_000)
+        f.write_bytes(_box(b"ftyp", b"isom") + _box(b"moov", moov))
+        assert mp4_duration_seconds(f) == 5.0
+
+    def test_no_moov(self, tmp_path):
+        f = tmp_path / "nomoov.mp4"
+        f.write_bytes(_box(b"ftyp", b"isom") + _box(b"mdat"))
+        assert mp4_duration_seconds(f) is None
+
+    def test_moov_without_mvhd(self, tmp_path):
+        f = tmp_path / "nomvhd.mp4"
+        f.write_bytes(_box(b"ftyp", b"isom") + _box(b"moov", _box(b"trak")))
+        assert mp4_duration_seconds(f) is None
+
+    def test_truncated_mvhd(self, tmp_path):
+        f = tmp_path / "cut.mp4"
+        full = _box(b"ftyp", b"isom") + _box(
+            b"moov", _mvhd(version=0, timescale=1000, duration=53_243)
+        )
+        f.write_bytes(full[:-6])
+        assert mp4_duration_seconds(f) is None
+
+    def test_zero_timescale(self, tmp_path):
+        f = tmp_path / "zero.mp4"
+        f.write_bytes(
+            _box(b"ftyp", b"isom")
+            + _box(b"moov", _mvhd(version=0, timescale=0, duration=1000))
+        )
+        assert mp4_duration_seconds(f) is None
+
+    def test_absurd_duration_rejected(self, tmp_path):
+        # Разъехавшийся timescale даёт годы — это не учебный ролик.
+        f = tmp_path / "absurd.mp4"
+        f.write_bytes(
+            _box(b"ftyp", b"isom")
+            + _box(b"moov", _mvhd(version=0, timescale=1, duration=90_000))
+        )
+        assert mp4_duration_seconds(f) is None
+
+    def test_garbage(self, tmp_path):
+        f = tmp_path / "garbage.mp4"
+        f.write_bytes(b"definitely not an mp4 file at all")
+        assert mp4_duration_seconds(f) is None

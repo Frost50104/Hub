@@ -24,6 +24,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -178,6 +179,13 @@ class MediaFile(Base):
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     mime: Mapped[str] = mapped_column(String(128), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Длительность видео, прочитанная СЕРВЕРОМ из mp4 (moov→mvhd, 0043). NULL —
+    # не видео либо распарсить не вышло; тогда гейт досмотра откатывается на
+    # число, присланное клиентом. Клиентскому значению доверять нельзя: занижение
+    # открывает гейт раньше времени, а завышение всего в 1,12 раза делает порог
+    # 90% недостижимым навсегда. Файл под media_id неизменяем, поэтому это
+    # константа, а не то, что уточняют пингами.
+    duration_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
     uploaded_by: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("shadow_users.employee_id", ondelete="SET NULL"),

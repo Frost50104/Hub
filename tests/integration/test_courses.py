@@ -22,7 +22,7 @@ from app.api.courses import (
     video_progress,
 )
 from app.models.audience import Audience, AudienceRule
-from app.models.course import Course, CourseLesson
+from app.models.course import Course, CourseLesson, MediaFile
 from app.models.employee_profile import EmployeeProfile
 from app.models.notification import Notification
 from app.models.org import Position
@@ -185,6 +185,135 @@ async def test_monotonicity_inserted_lesson_does_not_relock(
     # А вот новый урок теперь первый незавершённый — и сам открыт.
     resp_new = await get_lesson(inserted.id, principal, db)
     assert resp_new.id == inserted.id
+
+
+def _video_content(media_id: uuid.UUID) -> dict:
+    return {
+        "schema": 1,
+        "doc": {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "video",
+                    "attrs": {"mediaId": str(media_id), "requireFullWatch": True},
+                }
+            ],
+        },
+    }
+
+
+async def _mk_video(
+    db: AsyncSession, tenant_id: uuid.UUID, *, duration: float | None
+) -> uuid.UUID:
+    media = MediaFile(
+        tenant_id=tenant_id,
+        kind="video",
+        storage_key=f"{tenant_id}/learn/media/x.mp4",
+        file_name="x.mp4",
+        mime="video/mp4",
+        size_bytes=1024,
+        duration_sec=duration,
+    )
+    db.add(media)
+    await db.flush()
+    return media.id
+
+
+async def test_server_duration_beats_client_number(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Знаменатель гейта — длительность из файла, а не из пинга (0043)."""
+    principal, _profile = await _mk_member(db, tenant_id, email="dur@t.ru")
+    media_id = await _mk_video(db, tenant_id, duration=100.0)
+    _course, lessons = await _mk_course(
+        db, tenant_id, lesson_count=1, lesson_content=_video_content(media_id)
+    )
+    lesson = lessons[0]
+    await get_lesson(lesson.id, principal, db)
+
+    # Клиент объявляет ролик десятисекундным и «досматривает» его целиком.
+    echo = await video_progress(
+        lesson.id,
+        VideoProgressBody(media_id=media_id, intervals=[[0, 10]], duration=10),
+        principal,
+        db,
+    )
+    assert echo["duration"] == 100.0
+    assert echo["coverage"] == 0.1
+    assert echo["watched"] is False
+    with pytest.raises(HTTPException) as exc:
+        await complete_lesson(lesson.id, principal, db)
+    assert exc.value.status_code == 409
+
+    echo = await video_progress(
+        lesson.id,
+        VideoProgressBody(media_id=media_id, intervals=[[0, 95]], duration=10),
+        principal,
+        db,
+    )
+    assert echo["watched"] is True
+    done = await complete_lesson(lesson.id, principal, db)
+    assert done.completed
+    # Завершённое остаётся завершённым: гейты перепроверяются только до того.
+    assert (await complete_lesson(lesson.id, principal, db)).completed
+
+
+async def test_client_duration_drift_never_lowers_coverage(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Фолбэк-путь: сервер длительности не знает, клиент шлёт разное."""
+    principal, _profile = await _mk_member(db, tenant_id, email="drift@t.ru")
+    media_id = await _mk_video(db, tenant_id, duration=None)
+    _course, lessons = await _mk_course(
+        db, tenant_id, lesson_count=1, lesson_content=_video_content(media_id)
+    )
+    lesson = lessons[0]
+    await get_lesson(lesson.id, principal, db)
+
+    seen: list[float] = []
+    for duration, chunk in ((100.0, [0, 40]), (100.02, [40, 70]), (300.0, [70, 95])):
+        echo = await video_progress(
+            lesson.id,
+            VideoProgressBody(media_id=media_id, intervals=[chunk], duration=duration),
+            principal,
+            db,
+        )
+        seen.append(echo["coverage"])
+        # Якорь — первое значение: пинг с 300 не имеет права утроить знаменатель.
+        assert echo["duration"] == 100.0
+    assert seen == sorted(seen)
+    assert (await complete_lesson(lesson.id, principal, db)).completed
+
+
+async def test_unmeasurable_video_reports_itself(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Битый moov: гейт закрыт, но текст честный, а пинги не 422."""
+    principal, _profile = await _mk_member(db, tenant_id, email="broken@t.ru")
+    media_id = await _mk_video(db, tenant_id, duration=None)
+    _course, lessons = await _mk_course(
+        db, tenant_id, lesson_count=1, lesson_content=_video_content(media_id)
+    )
+    lesson = lessons[0]
+    await get_lesson(lesson.id, principal, db)
+
+    # Ролик не открывали вовсе — обычный текст.
+    with pytest.raises(HTTPException) as exc:
+        await complete_lesson(lesson.id, principal, db)
+    assert "досмотрите" in exc.value.detail.lower()
+
+    echo = await video_progress(
+        lesson.id,
+        VideoProgressBody(media_id=media_id, intervals=[[0, 50]], duration=None),
+        principal,
+        db,
+    )
+    assert echo["duration"] is None
+    assert echo["coverage"] == 0.0
+    with pytest.raises(HTTPException) as exc:
+        await complete_lesson(lesson.id, principal, db)
+    assert exc.value.status_code == 409
+    assert "длительность" in exc.value.detail.lower()
 
 
 async def test_complete_gates_video_and_question(

@@ -113,6 +113,29 @@ class TestCollectors:
         payload = _doc(_video(MEDIA, require=True), _video(other))
         assert collect_required_videos(payload) == [MEDIA]
 
+    def test_video_without_the_key_is_not_required(self):
+        # Ноды импорта 2026-08-16 ключа не несли вовсе. Смысл «нет ключа =
+        # гейта нет» до сих пор не фиксировал ни один тест — а бэкфилл флага
+        # опирается ровно на него.
+        payload = {
+            "schema": 1,
+            "doc": {
+                "type": "doc",
+                "content": [{"type": "video", "attrs": {"mediaId": MEDIA}}],
+            },
+        }
+        assert collect_required_videos(payload) == []
+
+    def test_explicit_false_is_not_required(self):
+        assert collect_required_videos(_doc(_video(MEDIA, require=False))) == []
+
+    def test_media_id_case_normalized(self):
+        # Ключ в block_state пишет сервер через str(UUID) — всегда нижний
+        # регистр. Ссылка в верхнем регистре означала бы «видео не досмотрено»
+        # при полностью досмотренном ролике.
+        payload = _doc(_video(MEDIA.upper(), require=True))
+        assert collect_required_videos(payload) == [MEDIA]
+
     def test_media_ids_from_gallery_and_figure(self):
         g1, g2, f1 = str(uuid4()), str(uuid4()), str(uuid4())
         payload = _doc(

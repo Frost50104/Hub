@@ -75,7 +75,7 @@
 - **Новости (0019):** `news_posts` (TipTap JSONB), `news_comments`, `news_reactions`, `news_acknowledgements`.
 - **Опросы (0020):** `surveys`, `survey_questions`, `survey_participations` (факт), `survey_answer_sets` (анти-деанон: без timestamp/identity), `survey_answers`; все выходы ответов — только через `survey_stats` (k-anonymity).
 - **Избранное/лог поиска (0021):** `favorites`, `search_queries`.
-- **Курсы (0022-0023):** `courses`, `course_lessons` (content JSONB, unlock_rule), `lesson_templates`, `media_files` (подписанные URL); `course_assignments`, `lesson_progress` (block_state: gate-ответы, видео-интервалы), `course_progress`.
+- **Курсы (0022-0023):** `courses`, `course_lessons` (content JSONB, unlock_rule), `lesson_templates`, `media_files` (подписанные URL; `duration_sec` — длительность видео, прочитанная сервером из mp4, 0043); `course_assignments`, `lesson_progress` (block_state: gate-ответы, видео-интервалы), `course_progress`.
 - **Тесты (0024):** `quizzes` (владелец: урок ИЛИ кампания — CHECK), `quiz_questions` (5 типов), `quiz_attempts` (снапшот вопросов + seed, needs_review для open-вопросов).
 - **Рейтинг (0025):** `activity_events` (append-only, partial-unique «первое действие»), `certificates`.
 - **Ассортимент (0026):** `product_categories`, `product_cards` (lifecycle+audience), `product_card_links` (изучить по теме).

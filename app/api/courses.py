@@ -76,7 +76,12 @@ from app.services.quiz_gate import (
     passed_required_quiz_lessons,
 )
 from app.services.search_indexer import delete_document, upsert_document
-from app.services.video_progress import is_watched, merge_intervals
+from app.services.video_progress import (
+    coverage,
+    is_watched,
+    merge_intervals,
+    resolve_duration,
+)
 
 router = APIRouter(tags=["learn-courses"])
 
@@ -1273,6 +1278,26 @@ async def _locked_progress(
     return row
 
 
+async def _video_durations(db: AsyncSession, media_ids: list[str]) -> dict[str, float]:
+    """media_id → длительность, прочитанная сервером из файла (0043).
+
+    Отсутствие ключа = «сервер не знает»: гейт откатится на число из
+    block_state. Ключи — в нижнем регистре, как в `collect_required_videos`.
+    """
+    ids: list[UUID] = []
+    for raw in media_ids:
+        try:
+            ids.append(UUID(raw))
+        except ValueError:
+            continue
+    if not ids:
+        return {}
+    rows = await db.execute(
+        select(MediaFile.id, MediaFile.duration_sec).where(MediaFile.id.in_(ids))
+    )
+    return {str(mid): dur for mid, dur in rows if dur is not None}
+
+
 @router.post("/learn/lessons/{lesson_id}/blocks/{block_id}/answer")
 async def answer_block(
     lesson_id: UUID,
@@ -1301,25 +1326,46 @@ async def answer_block(
     return {"correct": correct}
 
 
-@router.post("/learn/lessons/{lesson_id}/video-progress", status_code=204)
+@router.post("/learn/lessons/{lesson_id}/video-progress")
 async def video_progress(
     lesson_id: UUID,
     body: VideoProgressBody,
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
-) -> None:
+) -> dict:
+    """Принять интервалы и ВЕРНУТЬ серверное покрытие.
+
+    Эхо (`coverage`/`watched`) существует затем, чтобы у клиента не было
+    собственной копии формулы: полоса и чек-лист гейтов показывали своё число,
+    расходились с сервером — и человек видел зелёную полосу вместе с 409
+    «досмотрите до конца» (ОС 19.08 и 24.08).
+    """
     profile = await get_profile(db, principal)
     if profile is None:
         raise HTTPException(status_code=404, detail="Профиль не найден")
     progress = await _locked_progress(db, profile.id, lesson_id)
     state = dict(progress.block_state)
     videos = dict(state.get("video") or {})
-    entry = dict(videos.get(str(body.media_id)) or {})
+    key = str(body.media_id)
+    entry = dict(videos.get(key) or {})
     merged = merge_intervals(list(entry.get("intervals") or []), body.intervals)
-    videos[str(body.media_id)] = {"intervals": merged, "duration": body.duration}
+    media = await db.get(MediaFile, body.media_id)
+    duration = resolve_duration(
+        server=media.duration_sec if media is not None else None,
+        stored=entry.get("duration"),
+        incoming=body.duration,
+        profile_id=str(profile.id),
+        media_id=key,
+    )
+    videos[key] = {"intervals": merged, "duration": duration}
     state["video"] = videos
     progress.block_state = state
     await db.commit()
+    return {
+        "coverage": round(coverage(merged, duration), 4),
+        "duration": duration,
+        "watched": is_watched(merged, duration),
+    }
 
 
 @router.post("/learn/lessons/{lesson_id}/complete", response_model=LessonContentResponse)
@@ -1353,11 +1399,28 @@ async def complete_lesson(
                 )
             # Предусловие 2: обязательные видео досмотрены (≥90%).
             videos = state.get("video") or {}
-            for media_id in collect_required_videos(lesson.content):
+            required = collect_required_videos(lesson.content)
+            server_durations = await _video_durations(db, required)
+            for media_id in required:
                 entry = videos.get(media_id) or {}
-                if not is_watched(
-                    list(entry.get("intervals") or []), float(entry.get("duration") or 0)
-                ):
+                intervals = list(entry.get("intervals") or [])
+                duration = resolve_duration(
+                    server=server_durations.get(media_id),
+                    stored=entry.get("duration"),
+                )
+                if duration is None and intervals:
+                    # Человек ролик открывал, а длительность неизвестна ни из
+                    # файла, ни из прогресса. Гейт держим закрытым (иначе
+                    # обязательное видео обходится «битым» плеером), но врать
+                    # «досмотрите до конца» нельзя — досматривать нечего.
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Не удалось определить длительность видео — "
+                            "завершение недоступно. Сообщите администратору."
+                        ),
+                    )
+                if not is_watched(intervals, duration):
                     raise HTTPException(
                         status_code=409,
                         detail="Досмотрите обязательное видео до конца",

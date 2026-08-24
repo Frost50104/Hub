@@ -181,7 +181,11 @@ def collect_required_videos(payload: dict[str, Any]) -> list[str]:
             and attrs.get("requireFullWatch")
             and _is_uuid(attrs.get("mediaId"))
         ):
-            required.append(attrs["mediaId"])
+            # Нижний регистр — канонический ключ block_state: `_is_uuid`
+            # регистро-независим, а плеер кладёт прогресс под тем написанием,
+            # что пришло в attrs. Разъезд регистра = «видео не досмотрено»
+            # при полностью досмотренном ролике.
+            required.append(str(attrs["mediaId"]).lower())
         return
 
     transform_nodes(payload, fn)

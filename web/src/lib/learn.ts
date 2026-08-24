@@ -1,4 +1,5 @@
 import { api } from './api'
+import { parseEcho, type VideoProgressEcho } from './videoWatch'
 
 // ─── Оргструктура ────────────────────────────────────────────────────────────
 
@@ -511,7 +512,9 @@ export interface CourseDetail extends Course {
 
 export interface LessonBlockState {
   answers?: Record<string, { answer: number; correct: boolean }>
-  video?: Record<string, { intervals: [number, number][]; duration: number }>
+  /** duration = null: длительность не смог измерить ни сервер (битый moov),
+   *  ни клиент. Гейт в этом случае честно говорит, что завершение недоступно. */
+  video?: Record<string, { intervals: [number, number][]; duration: number | null }>
 }
 
 export interface LessonContent {
@@ -1438,11 +1441,15 @@ export const learnApi = {
         answer,
       })
       .then((r) => r.data),
+  /** Отдаёт СЕРВЕРНОЕ покрытие: своей копии формулы у клиента больше нет.
+   *  `null` — старый бэкенд ещё отвечает 204 (окно deploy.sh). */
   reportVideoProgress: (
     lessonId: string,
-    body: { media_id: string; intervals: [number, number][]; duration: number },
-  ): Promise<void> =>
-    api.post(`/learn/lessons/${lessonId}/video-progress`, body).then(() => undefined),
+    body: { media_id: string; intervals: [number, number][]; duration: number | null },
+  ): Promise<VideoProgressEcho | null> =>
+    api
+      .post(`/learn/lessons/${lessonId}/video-progress`, body)
+      .then((r) => parseEcho(r.data)),
 
   lessonTemplates: (): Promise<LessonTemplate[]> =>
     api.get<LessonTemplate[]>('/learn/lesson-templates').then((r) => r.data),

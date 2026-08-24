@@ -25,6 +25,7 @@ from app.services.learn_media import (
     absolute_path,
     check_free_space,
     media_size_limit,
+    mp4_duration_seconds,
     mp4_has_faststart,
     sign_media_path,
     storage_key_for_media,
@@ -126,6 +127,11 @@ async def upload_media(
     media.storage_key = storage_key
     media.file_name = sanitized
     media.size_bytes = written
+    if kind == "video":
+        # Длительность читаем СЕРВЕРОМ (0043): гейт досмотра делит на неё, а
+        # клиентскому числу верить нельзя. None (битый moov) — не ошибка
+        # загрузки: гейт откатится на значение из block_state.
+        media.duration_sec = mp4_duration_seconds(dest)
     await db.commit()
     return {
         "id": str(media.id),

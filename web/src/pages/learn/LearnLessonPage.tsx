@@ -20,7 +20,8 @@ import {
   LessonSections,
 } from '@/components/learn/lesson/LessonSections'
 import { QuizRunner } from '@/components/learn/lesson/QuizRunner'
-import { flushVideoProgress } from '@/components/learn/lesson/VideoPlayer'
+import { flushMessage, flushVideoProgress } from '@/components/learn/lesson/VideoPlayer'
+import { coverageOf } from '@/lib/videoWatch'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useCourse, useLesson } from '@/hooks/useLearn'
 import { useScrollProgress } from '@/hooks/useScrollProgress'
@@ -124,6 +125,10 @@ export function LearnLessonPage() {
 
   const [answeredExtra, setAnsweredExtra] = useState<Set<string>>(new Set())
   const [liveCoverage, setLiveCoverage] = useState<Record<string, number>>({})
+  // Локальное покрытие принадлежит КОНКРЕТНОМУ уроку: страница переживает
+  // переход между уроками без размонтирования, и без сброса чужие проценты
+  // утекали бы в соседний урок.
+  useEffect(() => setLiveCoverage({}), [lessonId])
 
   // ОС 19.08: «Следующий урок» открывал следующий урок в самом низу. Роут тот
   // же (/learn/lessons/:lessonId), компонент не размонтируется, а SPA-переход
@@ -165,12 +170,14 @@ export function LearnLessonPage() {
     return set
   }, [data, answeredExtra])
 
+  // Покрытие считает ОДНА функция на весь фронт (`coverageOf`) и по той же
+  // длительности, что и сервер: своя копия формулы здесь и была причиной
+  // «чек-лист зелёный, а завершение отвечает 409».
   const videoCoverage = useMemo(() => {
     const out: Record<string, number> = {}
     const saved = data?.block_state.video ?? {}
     for (const [mediaId, entry] of Object.entries(saved)) {
-      const watched = entry.intervals.reduce((acc, [s, e]) => acc + (e - s), 0)
-      out[mediaId] = entry.duration > 0 ? Math.min(1, watched / entry.duration) : 0
+      out[mediaId] = coverageOf(entry.intervals, entry.duration ?? 0)
     }
     return { ...out, ...liveCoverage }
   }, [data, liveCoverage])
@@ -180,7 +187,12 @@ export function LearnLessonPage() {
     // уходит на сервер раз в 15 секунд, и кнопка, нажатая сразу после
     // последнего кадра, судилась по устаревшим интервалам (ОС 19.08).
     mutationFn: async () => {
-      await flushVideoProgress(lessonId!)
+      // Исход отправки больше не теряется: раньше ошибка глоталась внутри
+      // плеера, и человек получал серверное «Досмотрите обязательное видео до
+      // конца» вместо честного «прогресс не доехал».
+      const outcome = await flushVideoProgress(lessonId!)
+      const problem = flushMessage(outcome)
+      if (problem) throw new Error(problem)
       return learnApi.completeLesson(lessonId!)
     },
     meta: { suppressGlobalError: true },
@@ -393,8 +405,12 @@ export function LearnLessonPage() {
                     setAnsweredExtra((prev) => new Set(prev).add(blockId))
                   }
                   onVideoCoverage={(mediaId, c) =>
+                    // БЕЗ монотонности: покрытие имеет право уменьшиться —
+                    // сервер прислал настоящую длительность или ужал список
+                    // интервалов. Прежний «только вверх» прятал именно те
+                    // случаи, ради которых чек-лист и существует.
                     setLiveCoverage((prev) =>
-                      (prev[mediaId] ?? 0) >= c ? prev : { ...prev, [mediaId]: c },
+                      prev[mediaId] === c ? prev : { ...prev, [mediaId]: c },
                     )
                   }
                 />

@@ -95,7 +95,18 @@ def _lesson_nodes(rows, media_names: dict[str, str], report: Report) -> list[dic
             url = row.content.strip()
             local = media_names.get(f"yt:{url}")
             if local:
-                nodes.append({"type": "video", "attrs": {"mediaId": f"@file:{local}"}})
+                nodes.append(
+                    {
+                        "type": "video",
+                        "attrs": {
+                            "mediaId": f"@file:{local}",
+                            # Без ключа гейт не включается вовсе (импорт
+                            # 2026-08-16 забыл его на 8 роликах, и
+                            # «обязательное» видео можно было пролистать).
+                            "requireFullWatch": True,
+                        },
+                    }
+                )
             else:
                 nodes.append(
                     {
@@ -273,7 +284,18 @@ def build_video_course(report: Report) -> dict | None:
                     "schema": 1,
                     "doc": {
                         "type": "doc",
-                        "content": [{"type": "video", "attrs": {"mediaId": f"@file:{path.name}"}}],
+                        "content": [
+                            {
+                                "type": "video",
+                                "attrs": {
+                                    "mediaId": f"@file:{path.name}",
+                                    # Курс видеоинструкций весь состоит из
+                                    # роликов: без флага урок засчитывается
+                                    # нажатием кнопки.
+                                    "requireFullWatch": True,
+                                },
+                            }
+                        ],
                     },
                 },
             }

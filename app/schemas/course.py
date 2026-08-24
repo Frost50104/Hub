@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.services.video_progress import MAX_INTERVALS
+
 
 def _strip_title(v: str) -> str:
     v = v.strip()
@@ -170,8 +172,14 @@ class BlockAnswerBody(BaseModel):
 
 class VideoProgressBody(BaseModel):
     media_id: UUID
-    intervals: list[list[float]] = Field(max_length=200)
-    duration: float = Field(gt=0, le=24 * 3600)
+    # Принимаем вдвое больше, чем храним (MAX_INTERVALS): приёмный лимит,
+    # который МЕНЬШЕ хранимого, означал вечный 422 у того, кто уже накопил
+    # длинный список, — то есть потерю прогресса ровно у самых усердных.
+    intervals: list[list[float]] = Field(max_length=MAX_INTERVALS * 2)
+    # None = «клиент не смог измерить»: JSON.stringify(Infinity) даёт null, и
+    # 422 в ответ стоил бы человеку всех интервалов пинга. Решение о том, какую
+    # длительность считать истиной, принимает `resolve_duration`.
+    duration: float | None = None
 
 
 class TemplateCreate(BaseModel):

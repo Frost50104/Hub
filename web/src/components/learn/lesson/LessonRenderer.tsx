@@ -150,6 +150,10 @@ export function LessonRenderer({
           requireFullWatch={Boolean(node.attrs?.requireFullWatch)}
           disableSeek={Boolean(node.attrs?.disableSeek)}
           initialIntervals={saved?.intervals ?? []}
+          initialDuration={saved?.duration ?? null}
+          // Черновик открыт автором в превью: прогресса у него нет, и ручка
+          // ответит 409 на КАЖДЫЙ пинг — красный баннер без всякой вины.
+          preview={lesson.status !== 'published'}
           onCoverageChange={
             onVideoCoverage ? (c) => onVideoCoverage(mediaId, c) : undefined
           }
