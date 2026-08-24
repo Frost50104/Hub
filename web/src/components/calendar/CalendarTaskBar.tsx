@@ -5,7 +5,7 @@ import type { CSSProperties } from 'react'
 import { cn } from '@/lib/cn'
 import { isOverdue } from '@/lib/taskDates'
 import { type Task, type TaskPriority } from '@/lib/tasks'
-import { OVERDUE_FILL, STATUS_FILL } from '@/lib/tone'
+import { DONE_FILL, OVERDUE_FILL, doneTone } from '@/lib/tone'
 
 /** Планка приоритета слева: у `medium` её нет. Плотная заливка позади — тон
  *  планки берём как у строки (`PRIORITY_BAR`), но рамкой. */
@@ -26,7 +26,7 @@ interface CalendarTaskBarProps {
 }
 
 /**
- * Плашка задачи в календаре. Заливка = статус (`STATUS_FILL` из словаря
+ * Плашка задачи в календаре. Заливка = состояние (`DONE_FILL` из словаря
  * тонов), **при просрочке — сплошной `--red`**: один факт обязан выглядеть
  * одинаково в списке (красный срок), на доске (красный чип) и здесь. Статус в
  * этом случае вторичен — задача уже горит. Слева планка 3px приоритета.
@@ -46,8 +46,8 @@ export function CalendarTaskBar({ task, day, onClick, variant = 'cell' }: Calend
     transform: CSS.Translate.toString(transform),
     opacity: isDragging ? 0.4 : 1,
   }
-  const overdue = isOverdue(task.due_at, task.status)
-  const fill = overdue ? OVERDUE_FILL : STATUS_FILL[task.status]
+  const overdue = isOverdue(task.due_at, task.done)
+  const fill = overdue ? OVERDUE_FILL : DONE_FILL[doneTone(task.done)]
 
   return (
     <button

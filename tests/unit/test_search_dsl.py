@@ -41,15 +41,25 @@ def test_assignee_uuid() -> None:
     assert out.assignee == uid
 
 
-def test_status_valid() -> None:
-    assert parse("status:in_progress").status == "in_progress"
-    assert parse("status:done").status == "done"
+def test_done_valid() -> None:
+    assert parse("done:yes").done is True
+    assert parse("done:да").done is True
+    assert parse("done:no").done is False
+    assert parse("done:нет").done is False
 
 
-def test_status_invalid_falls_to_text() -> None:
-    out = parse("status:wat")
-    assert out.status is None
-    assert "status:wat" in out.text
+def test_done_invalid_falls_to_text() -> None:
+    out = parse("done:wat")
+    assert out.done is None
+    assert "done:wat" in out.text
+
+
+def test_legacy_status_token_does_not_break_search() -> None:
+    # Ссылки со старым `status:` ещё ходят по чатам: неизвестное поле уходит
+    # в текстовую часть, а не роняет разбор (0044).
+    out = parse("договор status:in_progress")
+    assert out.done is None
+    assert "status:in_progress" in out.text
 
 
 def test_priority_valid() -> None:
@@ -88,9 +98,9 @@ def test_created_dates() -> None:
 
 
 def test_combined_filters_and_text() -> None:
-    out = parse('assignee:me status:in_progress "договор на услуги"')
+    out = parse('assignee:me done:no "договор на услуги"')
     assert out.assignee == "me"
-    assert out.status == "in_progress"
+    assert out.done is False
     assert out.text == "договор на услуги"
 
 
@@ -106,9 +116,9 @@ def test_unknown_field_kept_in_text() -> None:
 
 
 def test_text_with_filters_in_any_order() -> None:
-    out = parse("договор assignee:me и status:in_progress")
+    out = parse("договор assignee:me и done:no")
     assert out.assignee == "me"
-    assert out.status == "in_progress"
+    assert out.done is False
     # Free words appear in order; filters are stripped out.
     assert "договор" in out.text and "и" in out.text
 

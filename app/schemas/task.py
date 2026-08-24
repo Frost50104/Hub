@@ -10,12 +10,17 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-TaskStatus = Literal["todo", "in_progress", "in_review", "done"]
-# Фильтр статуса в списках: конкретный статус ИЛИ псевдо-значение `open`
-# («не выполнено» = status != done). Применяется ТОЛЬКО через
-# `services.tasks.apply_status_filter` — в модели такого статуса нет.
-TaskStatusFilter = Literal["todo", "in_progress", "in_review", "done", "open"]
 TaskPriority = Literal["low", "medium", "high", "urgent"]
+
+# Четырёх системных статусов больше нет (0044): колонка доски — это имя,
+# состояние задачи — `done`. Поле принимаем ЯВНО и отвечаем 422: pydantic по
+# умолчанию лишние ключи молча игнорирует, и старый бандл получил бы успешный
+# no-op — «задача закрыта» на экране при незакрытой задаче в базе.
+LEGACY_STATUS_DETAIL = (
+    "Статусы задач заменены на «выполнена / не выполнена», а этап — "
+    "это колонка доски. Обновите страницу."
+)
+
 
 # Потолок фан-аута уведомлений (dispatch делает SELECT prefs + INSERT на
 # получателя) и разумный предел для стека аватаров в UI. Живёт в схемах, а не
@@ -50,10 +55,10 @@ class TaskCreate(BaseModel):
     description: str | None = Field(default=None, max_length=20_000)
     section_id: UUID | None = None
     parent_task_id: UUID | None = None
-    # Этап (колонка доски). `status` — legacy-вход: без stage_id задача идёт в
-    # первый этап этого статуса (старые бандлы, ассистент, тесты).
+    # Колонка доски; без неё задача уходит в первую по позиции.
     stage_id: UUID | None = None
-    status: TaskStatus = "todo"
+    # LEGACY-вход старых бандлов — только чтобы ответить 422 (см. выше).
+    status: str | None = None
     priority: TaskPriority = "medium"
     # DEPRECATED-вход: держим ради PWA-бандлов, которые живут днями после
     # деплоя (registerType: 'prompt'). Разрешение конфликта — resolve_assignee_ids.
@@ -67,10 +72,12 @@ class TaskUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=20_000)
     section_id: UUID | None = None
-    # stage_id побеждает status; оба и не согласованы → 422. Явный null для
-    # stage_id не принимается (этап задаче нужен всегда).
+    # Явный null для stage_id не принимается: колонка задаче нужна всегда.
     stage_id: UUID | None = None
-    status: TaskStatus | None = None
+    # Состояние задачи — независимая ось: галочку ставят из любой колонки.
+    done: bool | None = None
+    # LEGACY-вход старых бандлов — только чтобы ответить 422 (см. выше).
+    status: str | None = None
     priority: TaskPriority | None = None
     assignee_id: UUID | None = None  # DEPRECATED-вход, см. TaskCreate
     assignee_ids: list[UUID] | None = Field(default=None, max_length=MAX_ASSIGNEES)
@@ -98,10 +105,11 @@ class TaskResponse(BaseModel):
     parent_task_id: UUID | None
     title: str
     description: str | None
-    status: TaskStatus
-    # Этап — колонка доски. Имя/системный статус фронт берёт из
-    # GET /projects/{id}/stages (один запрос на проект, кэш), не из JOIN'а.
-    stage_id: UUID | None = None
+    # Состояние задачи. Колонка к нему отношения не имеет (0044).
+    done: bool
+    # Колонка доски; имя фронт берёт из GET /projects/{id}/stages (один запрос
+    # на проект, кэш), не из JOIN'а.
+    stage_id: UUID
     priority: TaskPriority
     # Источник истины для UI. Уволенные (shadow_users.deleted_at) сюда не
     # попадают, поэтому легаси-поля ниже с ним всегда согласованы — раньше
@@ -121,6 +129,10 @@ class TaskResponse(BaseModel):
     # берёт key из project-запроса.
     seq: int
     project_key: str | None = None
+    # Имя колонки доски. Заполняют только кросс-проектные ручки (/me/tasks):
+    # в контексте проекта фронт берёт имена из GET /projects/{id}/stages, а на
+    # «Моих задачах» колонки чужих проектов взять неоткуда.
+    stage_name: str | None = None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
@@ -132,7 +144,7 @@ class TaskResponse(BaseModel):
     comment_count: int | None = None
     attachment_count: int | None = None
     blocker_count: int | None = None
-    # Может ли ВЫЗЫВАЮЩИЙ менять статус/этап этой задачи: роль owner/editor,
+    # Может ли ВЫЗЫВАЮЩИЙ закрывать задачу и двигать её по доске: роль owner/editor,
     # hub-admin ИЛИ он среди исполнителей (см. update_task). Заполняют только
     # list_tasks и get_task — там уже посчитана роль в проекте; остальные
     # ручки отдают None = «не знаем», клиент падает на can_edit проекта.
@@ -140,7 +152,7 @@ class TaskResponse(BaseModel):
     # ИНВАРИАНТ: ответ PATCH /tasks/{id} поле НЕ несёт и нести не должен —
     # useUpdateTask кладёт в кэш свой патч, а не ответ (web/src/hooks/useTasks.ts);
     # ответ с None затёр бы флаг и погасил контрол сразу после успешного клика.
-    can_set_status: bool | None = None
+    can_complete: bool | None = None
 
 
 def resolve_assignee_ids(body: TaskCreate | TaskUpdate) -> list[UUID] | None:

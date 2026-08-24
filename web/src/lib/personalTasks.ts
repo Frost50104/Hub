@@ -47,7 +47,7 @@ export interface PersonalListView<T> {
  * это inbox, за полгода под инпутом накопилась бы стена «Готово».
  */
 export function personalListView<
-  T extends Pick<Task, 'id' | 'status' | 'parent_task_id'>,
+  T extends Pick<Task, 'id' | 'done' | 'parent_task_id'>,
 >(
   tasks: readonly T[] | undefined,
   opts: { doneLimit?: number; showAllDone?: boolean } = {},
@@ -61,11 +61,11 @@ export function personalListView<
     if (task.parent_task_id) {
       const stats = subtasksByParent.get(task.parent_task_id) ?? { total: 0, done: 0 }
       stats.total += 1
-      if (task.status === 'done') stats.done += 1
+      if (task.done) stats.done += 1
       subtasksByParent.set(task.parent_task_id, stats)
       continue
     }
-    ;(task.status === 'done' ? done : open).push(task)
+    ;(task.done ? done : open).push(task)
   }
 
   const shown = showAllDone ? done : done.slice(0, doneLimit)

@@ -1,7 +1,7 @@
 import { Plus } from 'lucide-react'
 
 import { TaskContextLine } from '@/components/task/TaskContextLine'
-import { TaskStatusControl } from '@/components/task/TaskStatusControl'
+import { TaskDoneControl } from '@/components/task/TaskDoneControl'
 import { PriorityBar } from '@/components/task/PriorityBar'
 import { AvatarStack } from '@/components/ui/AvatarStack'
 import { cn } from '@/lib/cn'
@@ -16,6 +16,8 @@ interface MobileTaskRowProps {
   subtasks?: SubtaskStats
   /** Секция или проект — чем занять строку контекста, когда она пуста. */
   fallback?: string | null
+  /** Имя колонки доски — чип в строке контекста. */
+  stage?: string | null
   selected?: boolean
   onClick?: () => void
   onToggleDone?: () => void
@@ -41,14 +43,15 @@ export function MobileTaskRow({
   labels,
   subtasks,
   fallback,
+  stage,
   selected = false,
   onClick,
   onToggleDone,
   context = 'auto',
   reserveContext = true,
 }: MobileTaskRowProps) {
-  const done = task.status === 'done'
-  const overdue = isOverdue(task.due_at, task.status)
+  const done = task.done
+  const overdue = isOverdue(task.due_at, task.done)
   const assignees = taskAssignees(task)
 
   return (
@@ -71,7 +74,7 @@ export function MobileTaskRow({
     >
       <PriorityBar priority={task.priority} />
 
-      <TaskStatusControl status={task.status} size="mobile" onToggle={onToggleDone} />
+      <TaskDoneControl done={task.done} size="mobile" onToggle={onToggleDone} />
 
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span
@@ -83,6 +86,7 @@ export function MobileTaskRow({
           {task.title}
         </span>
         <TaskContextLine
+          stage={stage}
           task={task}
           labels={labels}
           subtasks={subtasks}

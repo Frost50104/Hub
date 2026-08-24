@@ -111,10 +111,10 @@ export function shortDate(iso: string): string {
  */
 export function isOverdue(
   due: string | null,
-  status: string,
+  done: boolean,
   now: number = Date.now(),
 ): boolean {
-  return !!due && status !== 'done' && dayKey(due) < todayKey(now)
+  return !!due && !done && dayKey(due) < todayKey(now)
 }
 
 /** «просрочено на 4 дня» — в КАЛЕНДАРНЫХ днях display tz (≥1 для просроченной). */

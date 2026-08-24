@@ -5,7 +5,6 @@ import {
   type TaskListFilters,
   type TaskPriority,
   type TaskSortField,
-  type TaskStatusFilter,
 } from './tasks'
 
 export type DuePreset = 'today' | 'week' | 'overdue'
@@ -13,7 +12,8 @@ export type DuePreset = 'today' | 'week' | 'overdue'
 /** Состояние фильтр-бара проекта. Живёт в URL searchParams (переживает F5 и шарится ссылкой). */
 export interface TaskViewFilters {
   assignee?: string
-  status?: TaskStatusFilter
+  /** Состояние: «не выполнено» / «выполнено». */
+  done?: DoneFilter
   priority?: TaskPriority
   /** id метки проекта. */
   label?: string
@@ -22,7 +22,17 @@ export interface TaskViewFilters {
   order?: 'asc' | 'desc'
 }
 
-const STATUSES: TaskStatusFilter[] = ['open', 'todo', 'in_progress', 'in_review', 'done']
+export type DoneFilter = 'open' | 'done'
+
+const DONE_VALUES: DoneFilter[] = ['open', 'done']
+/** Значения СТАРОГО фильтра статуса из ссылок, которыми уже поделились. */
+const LEGACY_STATUS_TO_DONE: Record<string, DoneFilter> = {
+  open: 'open',
+  todo: 'open',
+  in_progress: 'open',
+  in_review: 'open',
+  done: 'done',
+}
 const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
 const DUE_PRESETS: DuePreset[] = ['today', 'week', 'overdue']
 const SORTS: TaskSortField[] = ['position', 'due_at', 'priority', 'created_at', 'title']
@@ -30,7 +40,7 @@ const SORTS: TaskSortField[] = ['position', 'due_at', 'priority', 'created_at', 
 // URL-ключи с префиксом f_, чтобы не конфликтовать с ?task=
 const KEYS = {
   assignee: 'f_assignee',
-  status: 'f_status',
+  done: 'f_done',
   priority: 'f_priority',
   label: 'f_label',
   due: 'f_due',
@@ -45,7 +55,11 @@ function pick<T extends string>(raw: string | null, allowed: readonly T[]): T | 
 export function filtersFromSearchParams(sp: URLSearchParams): TaskViewFilters {
   return {
     assignee: sp.get(KEYS.assignee) ?? undefined,
-    status: pick(sp.get(KEYS.status), STATUSES),
+    // Ссылка со старым `f_status` не теряет смысл: «в работе» и «на проверке»
+    // сворачиваются в «не выполнено» (0044).
+    done:
+      pick(sp.get(KEYS.done), DONE_VALUES) ??
+      LEGACY_STATUS_TO_DONE[sp.get('f_status') ?? ''],
     priority: pick(sp.get(KEYS.priority), PRIORITIES),
     label: sp.get(KEYS.label) ?? undefined,
     due: pick(sp.get(KEYS.due), DUE_PRESETS),
@@ -69,7 +83,7 @@ export function applyFiltersToSearchParams(
 export function activeFilterCount(filters: TaskViewFilters): number {
   return [
     filters.assignee,
-    filters.status,
+    filters.done,
     filters.priority,
     filters.label,
     filters.due,
@@ -79,13 +93,13 @@ export function activeFilterCount(filters: TaskViewFilters): number {
 /** Человеческие названия фильтров — для строки контекста и кнопки снятия. */
 const FILTER_LABEL: Record<NarrowableFilter, string> = {
   assignee: 'исполнителя',
-  status: 'статус',
+  done: 'состояние',
   priority: 'приоритет',
   label: 'метку',
   due: 'срок',
 }
 
-export type NarrowableFilter = 'assignee' | 'status' | 'priority' | 'label' | 'due'
+export type NarrowableFilter = 'assignee' | 'done' | 'priority' | 'label' | 'due'
 
 /**
  * Какой ОДИН фильтр предложить снять, когда под фильтры не попало ничего.
@@ -97,7 +111,7 @@ export type NarrowableFilter = 'assignee' | 'status' | 'priority' | 'label' | 'd
 export function narrowableFilter(
   filters: TaskViewFilters,
 ): { key: NarrowableFilter; label: string } | null {
-  const active = (['assignee', 'status', 'priority', 'label', 'due'] as const).filter(
+  const active = (['assignee', 'done', 'priority', 'label', 'due'] as const).filter(
     (k) => filters[k],
   )
   if (active.length !== 1) return null
@@ -125,20 +139,20 @@ function dueRange(preset: DuePreset): { due_from?: string; due_to?: string } {
  * групп сохраняется). Решение владельца 2026-08-21: не скрывать по умолчанию,
  * а утопить; скрытие — явным фильтром «Статус: Не выполнено».
  */
-export function sinkDone<T extends Pick<Task, 'status'>>(tasks: readonly T[]): T[] {
+export function sinkDone<T extends Pick<Task, 'done'>>(tasks: readonly T[]): T[] {
   const open: T[] = []
   const done: T[] = []
-  for (const t of tasks) (t.status === 'done' ? done : open).push(t)
+  for (const t of tasks) (t.done ? done : open).push(t)
   return open.length && done.length ? [...open, ...done] : [...tasks]
 }
 
 /** Счётчик шапки секции: «N · M выполнено». */
-export function countOpenDone(tasks: readonly Pick<Task, 'status'>[]): {
+export function countOpenDone(tasks: readonly Pick<Task, 'done'>[]): {
   open: number
   done: number
 } {
   let done = 0
-  for (const t of tasks) if (t.status === 'done') done += 1
+  for (const t of tasks) if (t.done) done += 1
   return { open: tasks.length - done, done }
 }
 
@@ -152,13 +166,13 @@ export function toListFilters(
 ): TaskListFilters {
   const out: TaskListFilters = {}
   if (filters.assignee) out.assignee = filters.assignee
-  if (filters.status) out.status = filters.status
+  if (filters.done) out.done = filters.done === 'done'
   if (filters.priority) out.priority = filters.priority
   if (filters.label) out.label = filters.label
   if (filters.due) Object.assign(out, dueRange(filters.due))
-  // «Просрочено» без явного статуса — только незавершённые: закрытая с
+  // «Просрочено» без явного состояния — только невыполненные: закрытая с
   // опозданием задача не просрочена.
-  if (filters.due === 'overdue' && !filters.status) out.status = 'open'
+  if (filters.due === 'overdue' && !filters.done) out.done = false
   if (!opts.forBoard && filters.sort && filters.sort !== 'position') {
     out.sort = filters.sort
     out.order = filters.order ?? 'asc'
@@ -169,7 +183,7 @@ export function toListFilters(
 export function toCalendarFilters(filters: TaskViewFilters): CalendarFilters {
   const out: CalendarFilters = {}
   if (filters.assignee) out.assignee = filters.assignee
-  if (filters.status) out.status = filters.status
+  if (filters.done) out.done = filters.done === 'done'
   if (filters.priority) out.priority = filters.priority
   return out
 }
@@ -190,13 +204,13 @@ export function describeFilters(
   filters: TaskViewFilters,
   names: { assignee?: string | null; label?: string | null } = {},
   labels: {
-    status: Record<TaskStatusFilter, string>
+    done: Record<DoneFilter, string>
     priority: Record<TaskPriority, string>
   },
 ): string {
   const parts: string[] = []
   if (filters.assignee) parts.push(`Исполнитель: ${names.assignee ?? 'выбран'}`)
-  if (filters.status) parts.push(`Статус: ${labels.status[filters.status]}`)
+  if (filters.done) parts.push(`Состояние: ${labels.done[filters.done]}`)
   if (filters.priority) parts.push(`Приоритет: ${labels.priority[filters.priority]}`)
   if (filters.label) parts.push(`Метка: ${names.label ?? 'выбрана'}`)
   if (filters.due) parts.push(`Срок: ${DUE_LABEL[filters.due]}`)

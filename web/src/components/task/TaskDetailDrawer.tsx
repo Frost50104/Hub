@@ -2,6 +2,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import {
   Archive,
   Calendar,
+  CheckCircle2,
   CornerLeftUp,
   Flag,
   Link as LinkIcon,
@@ -49,13 +50,7 @@ import {
 import { cn } from '@/lib/cn'
 import { taskAssignees } from '@/lib/taskAssignees'
 import { dayKey, dueDayToIso, isOverdue, overdueDays } from '@/lib/taskDates'
-import {
-  PRIORITY_LABEL,
-  STATUS_LABEL,
-  taskKey,
-  type TaskPriority,
-  type TaskStatus,
-} from '@/lib/tasks'
+import { PRIORITY_LABEL, taskKey, type TaskPriority } from '@/lib/tasks'
 import { plural } from '@/lib/typography'
 
 interface TaskDetailDrawerProps {
@@ -68,7 +63,6 @@ interface TaskDetailDrawerProps {
   onManageLabels?: () => void
 }
 
-const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done']
 const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
 
 /** Кнопка-вариант в наборе «Статус»/«Приоритет». */
@@ -157,11 +151,11 @@ export function TaskDetailDrawer({
   const stages = useStages(projectId)
   // Права считает сервер: viewer → read-only, hub:admin вне членства → правит.
   const readOnly = !project.data?.can_edit
-  // Исполнитель меняет статус и этап своей задачи даже будучи наблюдателем.
-  // Правило считает СЕРВЕР (TaskResponse.can_set_status); `??` — фолбэк для
-  // ручек, которые поле не заполняют (календарь, хронология, оптимистичные
-  // объекты в кэше).
-  const canStatus = task?.can_set_status ?? !readOnly
+  // Исполнитель закрывает свою задачу и двигает её по доске даже будучи
+  // наблюдателем. Правило считает СЕРВЕР (TaskResponse.can_complete); `??` —
+  // фолбэк для ручек, которые поле не заполняют (календарь, хронология,
+  // оптимистичные объекты в кэше).
+  const canStatus = task?.can_complete ?? !readOnly
   // Наблюдателю мало сказать «нельзя» — надо назвать, кого просить.
   // `GET /projects/{id}/members` открыт любой роли в проекте (включая
   // viewer), поэтому имя владельца доступно и ему.
@@ -222,7 +216,7 @@ export function TaskDetailDrawer({
   const sectionName = task?.section_id
     ? (sections.data?.find((s) => s.id === task.section_id)?.name ?? null)
     : null
-  const overdue = task ? isOverdue(task.due_at, task.status) : false
+  const overdue = task ? isOverdue(task.due_at, task.done) : false
 
   return (
     // Десктоп — НЕмодальная панель (макет «Задача · десктоп»): список под ней
@@ -423,12 +417,26 @@ export function TaskDetailDrawer({
               // «свойство → значение», контрол справа, строка 48px. Ряды чипов
               // на телефоне превращались в стену из шести разнородных блоков.
               <PropertyRows>
-                <PropertyRow label="Этап">
+                <PropertyRow label="Состояние">
+                  <select
+                    value={task.done ? 'done' : 'open'}
+                    disabled={!canStatus}
+                    aria-label="Состояние"
+                    onChange={(e) =>
+                      update.mutate({ id: task.id, done: e.target.value === 'done' })
+                    }
+                    className={MOBILE_CONTROL}
+                  >
+                    <option value="open">Не выполнена</option>
+                    <option value="done">Выполнена</option>
+                  </select>
+                </PropertyRow>
+                <PropertyRow label="Колонка">
                   {stages.data && stages.data.length > 0 ? (
                     <select
                       value={task.stage_id ?? ''}
                       disabled={!canStatus}
-                      aria-label="Этап"
+                      aria-label="Колонка"
                       onChange={(e) => update.mutate({ id: task.id, stage_id: e.target.value })}
                       className={MOBILE_CONTROL}
                     >
@@ -440,19 +448,7 @@ export function TaskDetailDrawer({
                       ))}
                     </select>
                   ) : (
-                    <select
-                      value={task.status}
-                      disabled={!canStatus}
-                      aria-label="Статус"
-                      onChange={(e) => update.mutate({ id: task.id, status: e.target.value as TaskStatus })}
-                      className={MOBILE_CONTROL}
-                    >
-                      {STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {STATUS_LABEL[s]}
-                        </option>
-                      ))}
-                    </select>
+                    <span className="text-text2">—</span>
                   )}
                 </PropertyRow>
                 <PropertyRow label="Приоритет">
@@ -515,16 +511,37 @@ export function TaskDetailDrawer({
                 <dl className="m-0 grid grid-cols-1 items-start gap-x-3.5 gap-y-3 lg:grid-cols-[112px_1fr] lg:items-center lg:gap-y-2.5">
                   {desktop && (
                     <>
-                      <Dt icon={Flag}>Этап</Dt>
+                      <Dt icon={CheckCircle2}>Состояние</Dt>
+                      <dd className="m-0 flex flex-wrap gap-1">
+                        {/* Две независимые оси (0044): выполнена или нет — здесь,
+                            место на доске — ниже. */}
+                        <OptionButton
+                          active={!task.done}
+                          disabled={!canStatus}
+                          tone="solid"
+                          onClick={() => update.mutate({ id: task.id, done: false })}
+                        >
+                          Не выполнена
+                        </OptionButton>
+                        <OptionButton
+                          active={task.done}
+                          disabled={!canStatus}
+                          tone="solid"
+                          onClick={() => update.mutate({ id: task.id, done: true })}
+                        >
+                          Выполнена
+                        </OptionButton>
+                      </dd>
+
+                      <Dt icon={Flag}>Колонка</Dt>
                       <dd className="m-0">
-                        {/* Статус = колонка доски: имена этапов пользовательские
-                            и их сколько угодно — раскрывающийся список, а не ряд
-                            чипов. Проект без этапов (окно деплоя) — 4 системных. */}
+                        {/* Имена колонок пользовательские и их сколько угодно —
+                            раскрывающийся список, а не ряд чипов. */}
                         {stages.data && stages.data.length > 0 ? (
                           <select
                             value={task.stage_id ?? ''}
                             disabled={!canStatus}
-                            aria-label="Этап"
+                            aria-label="Колонка"
                             onChange={(e) => update.mutate({ id: task.id, stage_id: e.target.value })}
                             className={STAGE_SELECT}
                           >
@@ -536,19 +553,7 @@ export function TaskDetailDrawer({
                             ))}
                           </select>
                         ) : (
-                          <span className="flex flex-wrap gap-1">
-                            {STATUSES.map((s) => (
-                              <OptionButton
-                                key={s}
-                                active={task.status === s}
-                                disabled={!canStatus}
-                                tone="solid"
-                                onClick={() => update.mutate({ id: task.id, status: s })}
-                              >
-                                {STATUS_LABEL[s]}
-                              </OptionButton>
-                            ))}
-                          </span>
+                          <span className="text-text2">—</span>
                         )}
                       </dd>
 
@@ -752,12 +757,12 @@ export function TaskDetailDrawer({
                       onClick={() => toggleDone(task)}
                       className={cn(
                         'flex h-12 shrink-0 items-center justify-center rounded-xl px-5 text-[15px] font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
-                        task.status === 'done'
+                        task.done
                           ? 'border border-glass-border text-text'
                           : 'bg-amber text-on-amber',
                       )}
                     >
-                      {task.status === 'done' ? 'Вернуть' : 'Готово'}
+                      {task.done ? 'Вернуть' : 'Готово'}
                     </button>
                   )}
                 </>
@@ -781,12 +786,12 @@ export function TaskDetailDrawer({
                     onClick={() => toggleDone(task)}
                     className={cn(
                       'flex h-12 shrink-0 items-center justify-center rounded-xl px-5 text-[15px] font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
-                      task.status === 'done'
+                      task.done
                         ? 'border border-glass-border text-text'
                         : 'bg-amber text-on-amber',
                     )}
                   >
-                    {task.status === 'done' ? 'Вернуть' : 'Готово'}
+                    {task.done ? 'Вернуть' : 'Готово'}
                   </button>
                 </>
               )}

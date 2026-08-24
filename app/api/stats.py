@@ -5,7 +5,7 @@ all of the data the ProjectDashboard.tsx page needs — one round-trip is
 enough so the UI can render every card in parallel.
 
 Aggregates exposed:
-- `status_breakdown` / `priority_breakdown` — `{value: count}` maps.
+- `done_breakdown` / `priority_breakdown` — `{value: count}` maps.
 - `completed_trend` — list of `{day: YYYY-MM-DD, count: int}` for the
   last 30 days (zero-padded so the chart x-axis is continuous).
 - `overdue_count` — tasks with `due_at < now` and `status != 'done'`.
@@ -89,9 +89,10 @@ class CustomFieldStat(BaseModel):
 
 
 class ProjectStatsResponse(BaseModel):
-    status_breakdown: dict[str, int]
-    # Срез по этапам проекта: ключ — id этапа (строкой), «None» — без этапа
-    # (окно деплоя 0040). Имена этапов фронт берёт из /stages.
+    # Состояние задач: {"done": N, "open": M} (0044 — вместо четырёх статусов).
+    done_breakdown: dict[str, int]
+    # Срез по колонкам доски: ключ — id колонки строкой, значение — счётчик.
+    # Имя колонки фронт берёт из /stages (один запрос на проект, кэш).
     stage_breakdown: dict[str, int] = {}
     priority_breakdown: dict[str, int]
     completed_trend: list[TrendPoint]
@@ -154,7 +155,7 @@ async def _overdue_count(session: AsyncSession, project_id: UUID) -> int:
         select(func.count(Task.id)).where(
             Task.project_id == project_id,
             Task.archived_at.is_(None),
-            Task.status != "done",
+            Task.done.is_(False),
             Task.due_at.is_not(None),
             Task.due_at < today_start,
         )
@@ -163,9 +164,9 @@ async def _overdue_count(session: AsyncSession, project_id: UUID) -> int:
 
 
 _ACTIVE_SUM = func.sum(
-    cast(and_(Task.archived_at.is_(None), Task.status != "done"), Integer)
+    cast(and_(Task.archived_at.is_(None), Task.done.is_(False)), Integer)
 ).label("active_count")
-_DONE_SUM = func.sum(cast(Task.status == "done", Integer)).label("done_count")
+_DONE_SUM = func.sum(cast(Task.done, Integer)).label("done_count")
 
 
 def _overdue_sum(now: datetime):
@@ -176,7 +177,7 @@ def _overdue_sum(now: datetime):
         cast(
             and_(
                 Task.archived_at.is_(None),
-                Task.status != "done",
+                Task.done.is_(False),
                 Task.due_at < start_of_today_utc(now),
             ),
             Integer,
@@ -402,9 +403,12 @@ async def get_stats(
     project, _ = await require_project_role(db, project_id, principal)
     assert_full_project_access(project, principal)
 
-    status_breakdown = await _status_or_priority_breakdown(
-        db, project_id, Task.status
-    )
+    done_breakdown = await _status_or_priority_breakdown(db, project_id, Task.done)
+    # Ключи булева среза приходят как "True"/"False" — приводим к контракту.
+    done_breakdown = {
+        "done": done_breakdown.get("True", 0),
+        "open": done_breakdown.get("False", 0),
+    }
     stage_breakdown = await _status_or_priority_breakdown(db, project_id, Task.stage_id)
     priority_breakdown = await _status_or_priority_breakdown(
         db, project_id, Task.priority
@@ -414,7 +418,7 @@ async def get_stats(
     workload = await _workload(db, project_id)
     cf_stats = await _custom_field_stats(db, project_id)
 
-    total_active = sum(status_breakdown.values())
+    total_active = sum(done_breakdown.values())
     archived_row = await db.execute(
         select(func.count(Task.id)).where(
             Task.project_id == project_id, Task.archived_at.is_not(None)
@@ -426,7 +430,7 @@ async def get_stats(
     _ = Any
 
     return ProjectStatsResponse(
-        status_breakdown=status_breakdown,
+        done_breakdown=done_breakdown,
         stage_breakdown=stage_breakdown,
         priority_breakdown=priority_breakdown,
         completed_trend=completed_trend,

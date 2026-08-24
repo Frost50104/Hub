@@ -32,7 +32,8 @@ class ShareResponse(BaseModel):
 class PublicTaskHit(BaseModel):
     id: UUID
     title: str
-    status: str
+    # Состояние задачи (0044): четырёх статусов больше нет.
+    done: bool
     priority: str
     due_at: datetime | None
     # Легаси-скаляр = первый исполнитель: публичную страницу обслуживает тот
@@ -82,7 +83,7 @@ class PublicTaskView(BaseModel):
     kind: Literal["task"] = "task"
     title: str
     description: str | None
-    status: str
+    done: bool
     priority: str
     start_at: datetime | None
     due_at: datetime | None

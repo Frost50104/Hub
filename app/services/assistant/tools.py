@@ -56,12 +56,6 @@ from app.services.timefmt import display_tz
 # Берётся вызовом display_tz() в месте использования, не константой: тесты
 # переопределяют settings через env.
 
-STATUS_RU = {
-    "todo": "К выполнению",
-    "in_progress": "В работе",
-    "in_review": "На проверке",
-    "done": "Готово",
-}
 PRIORITY_RU = {
     "low": "Низкий",
     "medium": "Обычный",
@@ -69,7 +63,6 @@ PRIORITY_RU = {
     "urgent": "Срочный",
 }
 
-TaskStatusArg = Literal["todo", "in_progress", "in_review", "done"]
 TaskPriorityArg = Literal["low", "medium", "high", "urgent"]
 
 
@@ -113,7 +106,7 @@ class SearchTasksArgs(BaseModel):
     query: str | None = Field(default=None, description="Слова из заголовка задачи")
     project: str | None = Field(default=None, description="Название или ключ проекта")
     assignee: str | None = Field(default=None, description="ФИО исполнителя или «я»")
-    status: TaskStatusArg | None = None
+    done: bool | None = Field(default=None, description="Только выполненные / только нет")
     priority: TaskPriorityArg | None = None
     overdue: bool | None = Field(default=None, description="Только просроченные")
     unassigned: bool | None = Field(default=None, description="Только без исполнителя")
@@ -129,7 +122,7 @@ class ProjectRefArgs(BaseModel):
 
 
 class MyTasksArgs(BaseModel):
-    status: TaskStatusArg | None = None
+    done: bool | None = Field(default=None, description="Только выполненные / только нет")
     overdue_only: bool = False
 
 
@@ -153,7 +146,7 @@ class CreateTaskArgs(BaseModel):
 class UpdateTaskArgs(BaseModel):
     task: str
     title: str | None = Field(default=None, min_length=1, max_length=500)
-    status: TaskStatusArg | None = None
+    done: bool | None = Field(default=None, description="Отметить выполненной / вернуть")
     priority: TaskPriorityArg | None = None
     due_at: str | None = None
     assignees: list[str] | None = Field(default=None, max_length=10)
@@ -161,7 +154,7 @@ class UpdateTaskArgs(BaseModel):
 
 class UpdateTasksArgs(BaseModel):
     tasks: list[str] = Field(min_length=1, max_length=50)
-    status: TaskStatusArg | None = None
+    done: bool | None = Field(default=None, description="Отметить выполненными / вернуть")
     priority: TaskPriorityArg | None = None
     due_at: str | None = None
     assignees: list[str] | None = Field(default=None, max_length=10)
@@ -238,12 +231,12 @@ async def serialize_task(ctx: ToolContext, task: Task, project_key: str) -> dict
     assignees = (await load_assignees(ctx.db, [task.id])).get(task.id, [])
     # Просрочка — в календарных днях display tz (taskdates), не в сутках от now.
     overdue_days = 0
-    if task.due_at and task.status != "done":
+    if task.due_at and not task.done:
         overdue_days = taskdates_overdue_days(task.due_at)
     return {
         "key": f"{project_key}-{task.seq}",
         "title": task.title,
-        "status": STATUS_RU[task.status],
+        "done": task.done,
         "priority": PRIORITY_RU[task.priority],
         "assignees": [a.full_name or a.email or "—" for a in assignees],
         "due": fmt_due(task.due_at),
@@ -266,8 +259,8 @@ async def t_search_tasks(ctx: ToolContext, a: SearchTasksArgs) -> dict[str, Any]
         stmt = stmt.where(Task.project_id == (await resolve_project(ctx, a.project)).id)
     if a.query:
         stmt = stmt.where(Task.title.ilike(f"%{a.query}%"))
-    if a.status:
-        stmt = stmt.where(Task.status == a.status)
+    if a.done is not None:
+        stmt = stmt.where(Task.done.is_(a.done))
     if a.priority:
         stmt = stmt.where(Task.priority == a.priority)
     if a.assignee:
@@ -307,10 +300,8 @@ async def t_project_summary(ctx: ToolContext, a: ProjectRefArgs) -> dict[str, An
     base = select(func.count()).select_from(Task).where(
         Task.project_id == project.id, Task.archived_at.is_(None)
     )
-    by_status = {
-        s: (await ctx.db.execute(base.where(Task.status == s))).scalar_one()
-        for s in ("todo", "in_progress", "in_review", "done")
-    }
+    done_count = (await ctx.db.execute(base.where(Task.done))).scalar_one()
+    open_count = (await ctx.db.execute(base.where(Task.done.is_(False)))).scalar_one()
     overdue = (
         await ctx.db.execute(base.where(overdue_clause(now)))
     ).scalar_one()
@@ -335,7 +326,8 @@ async def t_project_summary(ctx: ToolContext, a: ProjectRefArgs) -> dict[str, An
     return {
         "project": project.name,
         "key": project.key,
-        "by_status": {STATUS_RU[k]: v for k, v in by_status.items()},
+        "done_count": done_count,
+        "open_count": open_count,
         "overdue_count": overdue,
         "unassigned_count": unassigned,
         "created_last_week": created_week,
@@ -351,8 +343,8 @@ async def t_my_tasks(ctx: ToolContext, a: MyTasksArgs) -> dict[str, Any]:
         .join(projects, projects.c.id == Task.project_id)
         .where(Task.archived_at.is_(None), assignee_exists(ctx.employee_id))
     )
-    if a.status:
-        stmt = stmt.where(Task.status == a.status)
+    if a.done is not None:
+        stmt = stmt.where(Task.done.is_(a.done))
     if a.overdue_only:
         stmt = stmt.where(overdue_clause())
     rows = (
@@ -547,8 +539,8 @@ async def _apply_task_patch(
     patch: dict[str, Any] = {}
     if getattr(a, "title", None) is not None:
         patch["title"] = a.title
-    if a.status is not None:
-        patch["status"] = a.status
+    if a.done is not None:
+        patch["done"] = a.done
     if a.priority is not None:
         patch["priority"] = a.priority
     if a.due_at is not None:
@@ -559,16 +551,16 @@ async def _apply_task_patch(
     return patch
 
 
-def _is_status_only(a: UpdateTaskArgs | UpdateTasksArgs) -> bool:
-    """Правка трогает только статус.
+def _is_done_only(a: UpdateTaskArgs | UpdateTasksArgs) -> bool:
+    """Правка трогает только «выполнена».
 
     Тогда её вправе сделать исполнитель задачи, даже будучи наблюдателем в
     проекте — то же правило, что в `api/tasks.py::update_task`
     (ASSIGNEE_EDITABLE_FIELDS). Без этой ветки ассистент отказывал бы там, где
-    человек в интерфейсе нажимает «Готово», а тот же шаг внутри плана
+    человек в интерфейсе ставит галочку, а тот же шаг внутри плана
     (plans.py зовёт ручку напрямую) проходил бы.
     """
-    return a.status is not None and all(
+    return a.done is not None and all(
         getattr(a, field, None) is None
         for field in ("title", "priority", "due_at", "assignees")
     )
@@ -577,7 +569,7 @@ def _is_status_only(a: UpdateTaskArgs | UpdateTasksArgs) -> bool:
 async def _may_edit_task(ctx: ToolContext, task: Task, a: UpdateTaskArgs | UpdateTasksArgs) -> bool:
     if await can_edit_project(ctx, task.project_id):
         return True
-    return _is_status_only(a) and await is_task_assignee(ctx.db, task.id, ctx.employee_id)
+    return _is_done_only(a) and await is_task_assignee(ctx.db, task.id, ctx.employee_id)
 
 
 async def t_update_task(ctx: ToolContext, a: UpdateTaskArgs) -> dict[str, Any]:
@@ -590,7 +582,7 @@ async def t_update_task(ctx: ToolContext, a: UpdateTaskArgs) -> dict[str, Any]:
     if not await _may_edit_task(ctx, task, a):
         return denied(
             f"в проекте «{project.name if project else '—'}» у вас роль наблюдателя — "
-            "менять задачи там нельзя (свою задачу можно только отметить статусом)",
+            "менять задачи там нельзя (свою задачу можно только отметить выполненной)",
             await project_managers(ctx, task.project_id),
         )
     patch = await _apply_task_patch(ctx, task, a)
@@ -603,10 +595,10 @@ async def t_update_task(ctx: ToolContext, a: UpdateTaskArgs) -> dict[str, Any]:
         db=ctx.db,
     )
     return {
-        "done": True,
+        "ok": True,
         "key": f"{project.key}-{updated.seq}" if project else str(updated.seq),
         "title": updated.title,
-        "status": STATUS_RU[updated.status],
+        "done": updated.done,
         "priority": PRIORITY_RU[updated.priority],
         "due": fmt_due(updated.due_at),
         "url": f"/projects/{updated.project_id}?task={updated.id}",
@@ -630,8 +622,10 @@ async def t_update_tasks(ctx: ToolContext, a: UpdateTasksArgs) -> dict[str, Any]
         return {"error": "Не указано, что менять"}
     keys = [f"{p.key}-{t.seq}" if p else str(t.seq) for t, p in tasks]
     changes = []
-    if a.status:
-        changes.append({"label": "Статус", "value": STATUS_RU[a.status]})
+    if a.done is not None:
+        changes.append(
+            {"label": "Состояние", "value": "Выполнена" if a.done else "Не выполнена"}
+        )
     if a.priority:
         changes.append(
             {"label": "Приоритет", "value": PRIORITY_RU[a.priority], "chip": "priority",
@@ -736,12 +730,12 @@ class _NoArgs(BaseModel):
 
 TOOLS: list[Tool] = [
     Tool("search_tasks", "Найти задачи трекера по фильтрам: проект, исполнитель, "
-         "статус, приоритет, просроченность, слова из заголовка.",
+         "выполнена или нет, приоритет, просроченность, слова из заголовка.",
          SearchTasksArgs, t_search_tasks, "read"),
     Tool("get_task", "Подробности одной задачи по номеру вида UPPETITTV-207.",
          TaskRefArgs, t_get_task, "read"),
-    Tool("project_summary", "Сводка по проекту: сколько задач в каких статусах, "
-         "просрочка, без исполнителя, движение за неделю.",
+    Tool("project_summary", "Сводка по проекту: сколько задач выполнено и сколько "
+         "открыто, просрочка, без исполнителя, движение за неделю.",
          ProjectRefArgs, t_project_summary, "read"),
     Tool("my_tasks", "Задачи, назначенные на спрашивающего.", MyTasksArgs, t_my_tasks, "read"),
     Tool("list_projects", "Проекты, доступные спрашивающему, и может ли он в них писать.",
@@ -755,8 +749,9 @@ TOOLS: list[Tool] = [
          IikoReportArgs, t_iiko_report, "read"),
     Tool("create_task", "Создать задачу. Требует подтверждения человеком.",
          CreateTaskArgs, t_create_task, "write"),
-    Tool("update_task", "Изменить ОДНУ задачу: статус, срок, приоритет, исполнителей, "
-         "заголовок. Выполняется сразу.", UpdateTaskArgs, t_update_task, "write"),
+    Tool("update_task", "Изменить ОДНУ задачу: отметить выполненной или вернуть в "
+         "работу, срок, приоритет, исполнителей, заголовок. Выполняется сразу.",
+         UpdateTaskArgs, t_update_task, "write"),
     Tool("update_tasks", "Изменить несколько задач одинаково. Требует подтверждения.",
          UpdateTasksArgs, t_update_tasks, "write"),
     Tool("archive_task", "Перенести задачу в архив. Требует подтверждения.",

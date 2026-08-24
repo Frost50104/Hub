@@ -1,7 +1,7 @@
 import { Plus } from 'lucide-react'
 
 import { TaskContextLine } from '@/components/task/TaskContextLine'
-import { TaskStatusControl } from '@/components/task/TaskStatusControl'
+import { TaskDoneControl } from '@/components/task/TaskDoneControl'
 import { PriorityBar } from '@/components/task/PriorityBar'
 import { AvatarStack } from '@/components/ui/AvatarStack'
 import { cn } from '@/lib/cn'
@@ -20,6 +20,8 @@ interface TaskRowProps {
   subtasks?: SubtaskStats
   /** Чем занять строку контекста, когда рассказывать нечего. */
   fallback?: string | null
+  /** Имя колонки доски — чип в строке контекста. */
+  stage?: string | null
   /** Строка, открытая в карточке задачи. */
   selected?: boolean
   onClick?: () => void
@@ -49,14 +51,15 @@ export function TaskRow({
   labels,
   subtasks,
   fallback,
+  stage,
   selected = false,
   onClick,
   onToggleDone,
   compact = false,
   reserveContext = true,
 }: TaskRowProps) {
-  const done = task.status === 'done'
-  const overdue = isOverdue(task.due_at, task.status)
+  const done = task.done
+  const overdue = isOverdue(task.due_at, task.done)
   const assignees = taskAssignees(task)
 
   return (
@@ -83,7 +86,7 @@ export function TaskRow({
       <PriorityBar priority={task.priority} />
 
       <span className="flex min-w-0 items-center gap-3 pl-[3px]">
-        <TaskStatusControl status={task.status} onToggle={onToggleDone} />
+        <TaskDoneControl done={task.done} onToggle={onToggleDone} />
         <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
           <span
             className={cn(
@@ -99,6 +102,7 @@ export function TaskRow({
             task={task}
             labels={labels}
             subtasks={subtasks}
+            stage={stage}
             fallback={fallback}
             reserve={reserveContext}
           />

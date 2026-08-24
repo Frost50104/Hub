@@ -1,17 +1,14 @@
 import { api } from './api'
-import { type TaskStatus } from './tasks'
 
 /**
- * Этапы проекта — колонки доски с пользовательскими именами (волна 2).
- * Каждый этап привязан к системному статусу; `tasks.status` — зеркало.
- * Имя/статус этапа фронт берёт из одного запроса на проект (`useStages`),
- * а не из каждой задачи.
+ * Колонки доски (0044). Колонка — это только имя и позиция: системного
+ * смысла у неё нет, состояние задачи живёт в `task.done`. Имя колонки фронт
+ * берёт из одного запроса на проект (`useStages`), а не из каждой задачи.
  */
 export interface TaskStage {
   id: string
   project_id: string
   name: string
-  system_status: TaskStatus
   position: number
   created_at: string
   /** Неархивных задач верхнего уровня в этапе — для «N из M». Только из списка. */
@@ -20,13 +17,11 @@ export interface TaskStage {
 
 export interface StageCreateBody {
   name: string
-  system_status: TaskStatus
   position?: number
 }
 
 export interface StageUpdateBody {
   name?: string
-  system_status?: TaskStatus
   position?: number
 }
 
@@ -43,12 +38,9 @@ export const stagesApi = {
       .then(() => undefined),
 }
 
-/** Первый по позиции этап системного статуса — куда попадает «закрыть»/«вернуть». */
-export function firstStageOf(
-  stages: TaskStage[] | undefined,
-  status: TaskStatus,
-): TaskStage | undefined {
-  return stages?.find((s) => s.system_status === status)
+/** Первая колонка проекта — дом для задачи, созданной без явной колонки. */
+export function firstStage(stages: TaskStage[] | undefined): TaskStage | undefined {
+  return stages?.[0]
 }
 
 export function stageById(stages: TaskStage[] | undefined, id: string | null | undefined) {

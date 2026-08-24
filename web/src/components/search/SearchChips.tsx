@@ -9,13 +9,6 @@ interface SearchChipsProps {
   onRemove: (field: keyof ParsedDsl) => void
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  todo: 'К выполнению',
-  in_progress: 'В работе',
-  in_review: 'На проверке',
-  done: 'Готово',
-}
-
 const PRIORITY_LABEL: Record<string, string> = {
   low: 'низкий',
   medium: 'средний',
@@ -34,10 +27,10 @@ export function SearchChips({ parsed, onRemove }: SearchChipsProps) {
       label: `assignee: ${parsed.assignee.slice(0, 8)}…`,
     })
   }
-  if (parsed.status) {
+  if (parsed.done !== null && parsed.done !== undefined) {
     chips.push({
-      key: 'status',
-      label: `статус: ${STATUS_LABEL[parsed.status] ?? parsed.status}`,
+      key: 'done',
+      label: parsed.done ? 'выполнено' : 'не выполнено',
     })
   }
   if (parsed.priority) {

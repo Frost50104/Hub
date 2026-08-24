@@ -33,6 +33,7 @@ async def _list(db, project_id, owner):
     return await list_tasks(
         project_id,
         include_archived=False,
+        done=None,
         status_=None,
         assignee_id=None,
         section_id=None,
@@ -62,7 +63,7 @@ async def test_import_creates_tasks_with_refs_and_warnings(db: AsyncSession, ten
     await create_section(project.id, SectionCreate(name="Плейлисты"), owner, db)
     await create_label(project.id, LabelCreate(name="Контент", color="#00B4A8"), owner, db)
     stage_rows = await list_project_stages(project.id, principal=owner, db=db)
-    stages = {s.system_status: s for s in stage_rows}
+    stages = {s.name: s for s in stage_rows}
 
     csv_text = (
         "title;description;assignee_email;due;priority;section;stage;labels\n"
@@ -85,10 +86,11 @@ async def test_import_creates_tasks_with_refs_and_warnings(db: AsyncSession, ten
     first = tasks["Согласовать сетку"]
     assert first.priority == "high"
     assert first.due_at is not None and first.due_at.day == 14
-    assert first.stage_id == stages["in_progress"].id and first.status == "in_progress"
+    assert first.stage_id == stages["В работе"].id and first.done is False
     assert [a.employee_id for a in first.assignees] == [owner.employee_id]
     second = tasks["Перезалить ролики"]
-    assert second.stage_id == stages["done"].id and second.status == "done"
+    # Колонка «Готово» — обычная колонка: импорт кладёт туда, но не закрывает.
+    assert second.stage_id == stages["Готово"].id and second.done is False
     assert second.assignees == []
     # Номера без дыр: 1, 2 (через общий путь allocate_task_seq)
     assert sorted(t.seq for t in tasks.values()) == [1, 2]

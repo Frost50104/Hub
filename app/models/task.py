@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -43,9 +44,10 @@ from app.db import Base
 class Task(Base):
     __tablename__ = "tasks"
     __table_args__ = (
+        # `done` и `completed_at` — один факт в двух колонках; связь сторожит
+        # БД, а не только код (`services/stages.py::set_done`).
         CheckConstraint(
-            "status IN ('todo', 'in_progress', 'in_review', 'done')",
-            name="ck_tasks_status",
+            "done = (completed_at IS NOT NULL)", name="ck_tasks_done_completed_at"
         ),
         CheckConstraint(
             "priority IN ('low', 'medium', 'high', 'urgent')",
@@ -76,17 +78,27 @@ class Task(Base):
         nullable=True,
         index=True,
     )
-    # Этап (колонка доски, 0040). NULL только в окне деплоя и после SET NULL
-    # при удалении этапа; зеркало `status` = stage.system_status — пишется
-    # ТОЛЬКО через services/stages.py.
-    stage_id: Mapped[UUID | None] = mapped_column(
+    # Колонка доски (0040, NOT NULL с 0044). Имя колонки задаёт пользователь,
+    # никакого системного смысла у неё нет — состояние задачи живёт в `done`.
+    # FK БЕЗ `ON DELETE SET NULL`: под NOT NULL обнуление было бы ошибкой 23502,
+    # а `NO ACTION` проверяется в конце оператора и переживает каскад удаления
+    # проекта. Удаление этапа с задачами API не пускает (409 + move_to).
+    stage_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("project_stages.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("project_stages.id"),
+        nullable=False,
     )
 
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Единственное состояние задачи. Колонка доски к нему отношения не имеет:
+    # выполненную задачу видно там же, где она лежала (модель Asana).
+    done: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    # LEGACY: четыре системных статуса. Колонка живёт до 0045 (`DROP COLUMN` —
+    # в два деплоя), новый код её не читает и не пишет; server_default держит
+    # INSERT'ы окна деплоя.
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="todo")
     priority: Mapped[str] = mapped_column(String(16), nullable=False, server_default="medium")
 

@@ -14,13 +14,6 @@ from app.models.task import Task
 from app.services.notification_dispatcher import dispatch
 from app.services.timefmt import fmt_dt
 
-STATUS_LABEL_RU = {
-    "todo": "К выполнению",
-    "in_progress": "В работе",
-    "in_review": "На проверке",
-    "done": "Готово",
-}
-
 
 def _task_url(task: Task) -> str:
     return f"/projects/{task.project_id}?task={task.id}"
@@ -50,26 +43,34 @@ async def notify_assigned(
     )
 
 
-async def notify_status_changed(
+async def notify_done_changed(
     session: AsyncSession,
     *,
     task: Task,
-    new_status: str,
+    done: bool,
     actor_name: str,
     recipient_id: UUID,
-    label: str | None = None,
 ) -> None:
-    """`label` — имя этапа («Проверка ТУ»); без него — системная подпись."""
-    label = label or STATUS_LABEL_RU.get(new_status, new_status)
+    """Задачу выполнили или вернули в работу.
+
+    Kind НЕ переименован (`task.status_changed_on_watched`) сознательно: ключи
+    лежат в JSONB-настройках людей (`notification_prefs`), и смена ключа
+    вернула бы пуш тем, кто его отключил. Перенос между колонками уведомления
+    не шлёт — только лента.
+    """
     await dispatch(
         session,
         tenant_id=task.tenant_id,
         employee_id=recipient_id,
         kind="task.status_changed_on_watched",
-        title="Статус задачи изменён",
-        body=f"{actor_name} перевёл «{task.title}» в «{label}»",
+        title="Задача выполнена" if done else "Задача вернулась в работу",
+        body=(
+            f"{actor_name} выполнил «{task.title}»"
+            if done
+            else f"{actor_name} вернул «{task.title}» в работу"
+        ),
         url=_task_url(task),
-        payload={"task_id": str(task.id), "new_status": new_status},
+        payload={"task_id": str(task.id), "done": done},
     )
 
 

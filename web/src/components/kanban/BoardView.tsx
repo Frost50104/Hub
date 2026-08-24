@@ -70,11 +70,14 @@ function BoardSkeleton({ columns = 4 }: { columns?: number }) {
 const ORPHAN_ID = '__orphan__'
 
 /**
- * Доска: колонка = ЭТАП задачи (`project_stages`), имена пользовательские,
- * этапов сколько угодно; справа ленту замыкает «+ Этап». Перетаскивание
- * патчит `stage_id` — сервер ставит зеркало `status`, completed_at и
- * позицию в хвост. «Без этапа» появляется только если такие задачи есть
- * (окно деплоя 0040 / SET NULL после удаления этапа).
+ * Доска: колонка = `project_stages`, имена пользовательские, колонок сколько
+ * угодно; справа ленту замыкает «+ Колонка». Перетаскивание патчит `stage_id`
+ * — сервер меняет колонку и позицию в хвост, состояние задачи (`done`) при
+ * этом НЕ трогается (0044).
+ *
+ * «Без колонки» появляется, только если такие карточки есть: у задачи в БД
+ * колонка обязательна, но объект из УСТАРЕВШЕГО кэша PWA приходит без
+ * `stage_id`, и без этого бакета он исчез бы с доски вовсе.
  */
 export function BoardView({
   projectId,
@@ -105,9 +108,9 @@ export function BoardView({
   const [stageDelete, setStageDelete] = useState<TaskStage | null>(null)
 
   // Перетаскивание — редакторское действие: PATCH шлёт stage_id ВМЕСТЕ с
-  // position, а исполнителю-наблюдателю разрешён только статус/этап. Гейт —
+  // position, а исполнителю-наблюдателю разрешены только галочка и колонка. Гейт —
   // на самой карточке (`KanbanCard draggable={canEdit}`): так снимаются и
-  // обработчики, и a11y-атрибуты «draggable». Свой этап наблюдатель меняет
+  // обработчики, и a11y-атрибуты «draggable». Свою колонку наблюдатель меняет
   // селектом в карточке задачи.
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -139,7 +142,7 @@ export function BoardView({
       if (!t.parent_task_id) continue
       const s = m.get(t.parent_task_id) ?? { total: 0, done: 0 }
       s.total += 1
-      if (t.status === 'done') s.done += 1
+      if (t.done) s.done += 1
       m.set(t.parent_task_id, s)
     }
     return m
@@ -165,7 +168,7 @@ export function BoardView({
       cols.push({
         dndId: ORPHAN_ID,
         stage: null,
-        name: 'Без этапа',
+        name: 'Без колонки',
         tasks: orphan.sort(byPos),
         total: null,
       })
@@ -216,7 +219,7 @@ export function BoardView({
       overTaskIndex = targetColumn?.tasks.findIndex((t) => t.id === overId)
     }
     if (!targetColumn) return
-    // В «Без этапа» бросать нельзя — это не этап, а остаток.
+    // В «Без колонки» бросать нельзя — это не колонка, а остаток кэша.
     if (!targetColumn.stage) return
 
     // No-op if hovering over the same task without moving anywhere new.
@@ -252,10 +255,11 @@ export function BoardView({
       sameStage
         ? { id: taskId, position: newPosition }
         : {
+            // Перенос между колонками состояние задачи не трогает (0044),
+            // поэтому оптимистичных зеркал больше нет.
             id: taskId,
             stage_id: targetColumn.stage.id,
             position: newPosition,
-            __optimistic: { status: targetColumn.stage.system_status },
           },
     )
   }
@@ -293,7 +297,7 @@ export function BoardView({
     ) : (
       <TaskEmptyState
         title="Пока нет задач. Создайте первую."
-        text="Доска группирует по этапам: колонки оживут с первой задачей."
+        text="Колонки доски оживут с первой задачей."
       />
     )
   }
@@ -323,7 +327,7 @@ export function BoardView({
         {columns.map((col, i) => (
           <KanbanColumn
             key={col.dndId}
-            // Первая колонка С ЭТАПОМ: у «Без этапа» (индекс 0, если есть)
+            // Первая НАСТОЯЩАЯ колонка: у «Без колонки» (индекс 0, если есть)
             // инпута нет — «Новая задача» из сайдбара молча падала в диалог.
             quickCreateTarget={i === firstStageIdx}
             column={col}
@@ -346,7 +350,7 @@ export function BoardView({
             }
           />
         ))}
-        {/* «+ Этап» — призрачная колонка той же ширины, что соседи. */}
+        {/* «+ Колонка» — призрачная колонка той же ширины, что соседи. */}
         {canEdit && (
           <button
             type="button"
@@ -354,7 +358,7 @@ export function BoardView({
             className="flex min-h-12 w-[85%] max-w-[320px] shrink-0 snap-start items-center justify-center gap-2 rounded-xl border border-dashed border-glass-border text-[14px] font-semibold text-text2 transition-colors hover:border-amber hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 sm:w-72 sm:max-w-none lg:min-h-11"
           >
             <Plus className="h-4 w-4" strokeWidth={2.2} />
-            Этап
+            Колонка
           </button>
         )}
       </div>

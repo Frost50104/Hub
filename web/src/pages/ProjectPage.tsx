@@ -72,6 +72,7 @@ import {
   useProjectMembers,
 } from '@/hooks/useProjects'
 import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
+import { useStages } from '@/hooks/useStages'
 import { useTasks, useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
@@ -93,7 +94,7 @@ import {
 import { projectTaskGrid } from '@/lib/taskGrid'
 import { dataAgeLabel } from '@/lib/dates'
 import { requestInlineCreate } from '@/lib/quickCreate'
-import { type Task, PRIORITY_LABEL, STATUS_FILTER_LABEL } from '@/lib/tasks'
+import { type Task, DONE_FILTER_LABEL, PRIORITY_LABEL } from '@/lib/tasks'
 import { plural } from '@/lib/typography'
 import { ORPHAN_SECTION_KEY, useViewConfig } from '@/stores/viewConfig'
 
@@ -435,6 +436,7 @@ function SectionBlock({
   valuesByTask,
   childrenByParent,
   labelsByTask,
+  stageNames,
   canEditFlag,
   canManageFlag,
   isDesktop,
@@ -450,6 +452,9 @@ function SectionBlock({
   valuesByTask: Map<string, Map<string, CustomFieldValue>>
   childrenByParent?: Map<string, { total: number; done: number }>
   labelsByTask?: Map<string, Label[]>
+  /** id колонки → имя: чип в строке контекста, единственный признак движения
+   *  задачи по доске после 0044. */
+  stageNames?: Map<string, string>
   canEditFlag: boolean
   canManageFlag: boolean
   isDesktop: boolean
@@ -568,6 +573,7 @@ function SectionBlock({
                 gridColumns={gridColumns}
                 labels={labelsByTask?.get(t.id)}
                 subtasks={childrenByParent?.get(t.id)}
+                stage={t.stage_id ? stageNames?.get(t.stage_id) : null}
                 // Без fallback: секция уже подписана шапкой над строками, и
                 // «Без секции» в каждой строке — шум (макет «Список»,
                 // QA-0821 #10). Контекст = проект остаётся в «Моих задачах».
@@ -578,7 +584,7 @@ function SectionBlock({
                 // неинтерактивную иконку). undefined ≠ false: «не знаем» —
                 // показываем, как раньше.
                 onToggleDone={
-                  t.can_set_status === false ? undefined : () => toggleDone(t)
+                  t.can_complete === false ? undefined : () => toggleDone(t)
                 }
                 cells={visibleFields.map((f) => {
                   const v = valuesByTask.get(t.id)?.get(f.id)?.value
@@ -603,6 +609,7 @@ function SectionBlock({
                 task={t}
                 labels={labelsByTask?.get(t.id)}
                 subtasks={childrenByParent?.get(t.id)}
+                stage={t.stage_id ? stageNames?.get(t.stage_id) : null}
                 selected={selectedTaskId === t.id}
                 onClick={() => onTaskClick(t.id)}
                 // Сервер сказал «нельзя» — контрол не рисуем вовсе (у
@@ -610,7 +617,7 @@ function SectionBlock({
                 // неинтерактивную иконку). undefined ≠ false: «не знаем» —
                 // показываем, как раньше.
                 onToggleDone={
-                  t.can_set_status === false ? undefined : () => toggleDone(t)
+                  t.can_complete === false ? undefined : () => toggleDone(t)
                 }
               />
             ),
@@ -693,7 +700,7 @@ function ListTab({
       if (!t.parent_task_id) continue
       const s = m.get(t.parent_task_id) ?? { total: 0, done: 0 }
       s.total += 1
-      if (t.status === 'done') s.done += 1
+      if (t.done) s.done += 1
       m.set(t.parent_task_id, s)
     }
     return m
@@ -735,6 +742,15 @@ function ListTab({
   }, [values.data])
 
   const grid = useMemo(() => projectTaskGrid(visibleFields), [visibleFields])
+
+  // Имена колонок доски для чипа в строке списка: состояние задачи после 0044
+  // схлопнулось в галочку, и без колонки список не отличает «взяли в работу»
+  // от «лежит нетронутой».
+  const stages = useStages(projectId)
+  const stageNames = useMemo(
+    () => new Map((stages.data ?? []).map((s) => [s.id, s.name])),
+    [stages.data],
+  )
 
   const onAddSection = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -787,7 +803,7 @@ function ListTab({
                 ?.full_name,
               label: labels.data?.find((l) => l.id === filters.label)?.name,
             },
-            { status: STATUS_FILTER_LABEL, priority: PRIORITY_LABEL },
+            { done: DONE_FILTER_LABEL, priority: PRIORITY_LABEL },
           ),
           project.task_count
             ? `Из ${project.task_count} задач проекта — ни одной.`
@@ -834,6 +850,7 @@ function ListTab({
           valuesByTask={valuesByTask}
           childrenByParent={childrenByParent}
           labelsByTask={labelsByTask}
+          stageNames={stageNames}
           canEditFlag={canEditFlag}
           canManageFlag={canManageFlag}
           isDesktop={isDesktop}
@@ -854,6 +871,7 @@ function ListTab({
           valuesByTask={valuesByTask}
           childrenByParent={childrenByParent}
           labelsByTask={labelsByTask}
+          stageNames={stageNames}
           canEditFlag={canEditFlag}
           canManageFlag={canManageFlag}
           isDesktop={isDesktop}

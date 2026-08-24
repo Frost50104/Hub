@@ -61,6 +61,7 @@ async def _list(db: AsyncSession, project_id: uuid.UUID, principal):
     return await list_tasks(
         project_id,
         include_archived=False,
+        done=None,
         status_=None,
         assignee_id=None,
         section_id=None,
@@ -92,27 +93,26 @@ async def test_assignee_is_only_viewer(db, tenant_id):
 
 async def test_assignee_closes_own_task(db, tenant_id):
     _owner, assignee, _bystander, _project, task = await _setup(db, tenant_id, "tp-done")
-    updated = await update_task(task.id, TaskUpdate(status="done"), assignee, db)
-    assert updated.status == "done"
+    before = task.stage_id
+    updated = await update_task(task.id, TaskUpdate(done=True), assignee, db)
+    assert updated.done is True
     assert updated.completed_at is not None
-    # Этап — зеркало статуса: смена через legacy-статус кладёт в done-этап.
-    stage = await db.get(ProjectStage, updated.stage_id)
-    assert stage is not None and stage.system_status == "done"
+    # Галочка не двигает карточку по доске (0044).
+    assert updated.stage_id == before
 
 
 async def test_assignee_moves_own_task_by_stage(db, tenant_id):
     _owner, assignee, _bystander, project, task = await _setup(db, tenant_id, "tp-stage")
     target = (
         await db.execute(
-            select(ProjectStage).where(
-                ProjectStage.project_id == project.id,
-                ProjectStage.system_status == "in_progress",
-            )
+            select(ProjectStage)
+            .where(ProjectStage.project_id == project.id, ProjectStage.position == 1)
         )
     ).scalars().first()
     updated = await update_task(task.id, TaskUpdate(stage_id=target.id), assignee, db)
     assert updated.stage_id == target.id
-    assert updated.status == "in_progress"
+    # Перенос не закрывает и не открывает задачу.
+    assert updated.done is False
 
 
 @pytest.mark.parametrize(
@@ -120,12 +120,12 @@ async def test_assignee_moves_own_task_by_stage(db, tenant_id):
     [
         pytest.param({"title": "Переименовал"}, id="title"),
         pytest.param({"priority": "urgent"}, id="priority"),
-        pytest.param({"status": "done", "priority": "urgent"}, id="status+priority"),
+        pytest.param({"done": True, "priority": "urgent"}, id="done+priority"),
         pytest.param({"position": 42}, id="position"),
     ],
 )
 async def test_assignee_cannot_change_anything_else(db, tenant_id, patch):
-    """Смешанный патч и любое НЕстатусное поле — по-прежнему 403.
+    """Смешанный патч и любое поле сверх «выполнена»/колонки — 403.
 
     `{stage_id, position}` — форма, которую шлёт drag-n-drop доски: правило
     сознательно её не пускает, порядок остаётся редакторским.
@@ -143,8 +143,7 @@ async def test_board_drag_shape_rejected_for_assignee(db, tenant_id):
     target = (
         await db.execute(
             select(ProjectStage).where(
-                ProjectStage.project_id == project.id,
-                ProjectStage.system_status == "in_review",
+                ProjectStage.project_id == project.id, ProjectStage.position == 2
             )
         )
     ).scalars().first()
@@ -159,17 +158,17 @@ async def test_bystander_viewer_still_denied(db, tenant_id):
     """Главный регресс: право получил ИСПОЛНИТЕЛЬ, а не всякий наблюдатель."""
     _owner, _assignee, bystander, _project, task = await _setup(db, tenant_id, "tp-by")
     with pytest.raises(HTTPException) as exc:
-        await update_task(task.id, TaskUpdate(status="done"), bystander, db)
+        await update_task(task.id, TaskUpdate(done=True), bystander, db)
     assert exc.value.status_code == 403
 
 
-async def test_can_set_status_in_list_and_detail(db, tenant_id):
+async def test_can_complete_in_list_and_detail(db, tenant_id):
     owner, assignee, bystander, project, task = await _setup(db, tenant_id, "tp-flag")
 
     for principal, expected in ((owner, True), (assignee, True), (bystander, False)):
         rows = await _list(db, project.id, principal)
-        assert [t.can_set_status for t in rows] == [expected]
-        assert (await get_task(task.id, principal, db)).can_set_status is expected
+        assert [t.can_complete for t in rows] == [expected]
+        assert (await get_task(task.id, principal, db)).can_complete is expected
 
 
 async def test_me_tasks_leaves_flag_unknown(db, tenant_id):
@@ -178,6 +177,7 @@ async def test_me_tasks_leaves_flag_unknown(db, tenant_id):
 
     _owner, assignee, _bystander, _project, _task = await _setup(db, tenant_id, "tp-me")
     rows = await list_my_tasks(
+        done=None,
         status_=None,
         due_window=None,
         include_archived=False,
@@ -185,25 +185,26 @@ async def test_me_tasks_leaves_flag_unknown(db, tenant_id):
         principal=assignee,
         db=db,
     )
-    assert [t.can_set_status for t in rows] == [None]
+    assert [t.can_complete for t in rows] == [None]
 
 
-async def test_assistant_lets_assignee_set_status(db, tenant_id):
-    """Ассистент не должен отказывать там, где человек нажимает «Готово»."""
+async def test_assistant_lets_assignee_complete(db, tenant_id):
+    """Ассистент не должен отказывать там, где человек ставит галочку."""
     from app.services.assistant.context import ToolContext
     from app.services.assistant.tools import UpdateTaskArgs, t_update_task
 
     _owner, assignee, bystander, project, task = await _setup(db, tenant_id, "tp-ai")
     ctx = ToolContext(db=db, principal=assignee, profile=None)
     result = await t_update_task(
-        ctx, UpdateTaskArgs(task=f"{project.key}-{task.seq}", status="done")
+        ctx, UpdateTaskArgs(task=f"{project.key}-{task.seq}", done=True)
     )
+    assert result.get("ok") is True
     assert result.get("done") is True
 
     # Наблюдателю без назначения — прежний отказ данными, с «кого просить».
     denied_ctx = ToolContext(db=db, principal=bystander, profile=None)
     refusal = await t_update_task(
-        denied_ctx, UpdateTaskArgs(task=f"{project.key}-{task.seq}", status="todo")
+        denied_ctx, UpdateTaskArgs(task=f"{project.key}-{task.seq}", done=False)
     )
     assert refusal["denied"] is True
     assert "наблюдател" in refusal["reason"]

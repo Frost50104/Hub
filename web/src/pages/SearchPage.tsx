@@ -19,7 +19,7 @@ import { type ParsedDsl } from '@/lib/search'
  */
 const TOKEN_REMOVERS: Partial<Record<keyof ParsedDsl, RegExp>> = {
   assignee: /\bassignee:\S+/i,
-  status: /\bstatus:\S+/i,
+  done: /\bdone:\S+/i,
   priority: /\bpriority:\S+/i,
   due_date: /\bdue:[<>=]?\S+/i,
   created_date: /\bcreated:[<>=]?\S+/i,
@@ -33,7 +33,7 @@ const PILL_FILTERS = [
 
 const QUICK_FILTERS = [
   { id: 'me', label: 'Назначенные мне', dsl: 'assignee:me' },
-  { id: 'in_progress', label: 'В работе', dsl: 'status:in_progress' },
+  { id: 'open', label: 'Не выполнено', dsl: 'done:no' },
   { id: 'urgent', label: 'Срочные', dsl: 'priority:urgent' },
 ]
 
@@ -42,7 +42,7 @@ const SHORTCUTS = [
   {
     id: 'completed',
     label: 'Недавно завершённые',
-    dsl: 'status:done',
+    dsl: 'done:yes',
   },
 ]
 
@@ -239,7 +239,7 @@ function DesktopSearch() {
             assignee:me
           </code>{' '}
           <code className="rounded bg-surface px-1.5 py-0.5 text-[12px] text-text">
-            status:in_progress
+            done:no
           </code>{' '}
           <code className="rounded bg-surface px-1.5 py-0.5 text-[12px] text-text">
             priority:urgent
@@ -259,7 +259,7 @@ function DesktopSearch() {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder='напр. assignee:me status:in_progress "договор"'
+          placeholder='напр. assignee:me done:no "договор"'
           autoFocus
           className="w-full rounded-md border border-glass-border bg-glass px-10 py-2 text-sm text-text placeholder:text-text2 focus:border-amber focus:outline-none"
         />

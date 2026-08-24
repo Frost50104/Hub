@@ -38,8 +38,9 @@ export interface CustomFieldStat {
 }
 
 export interface ProjectStats {
-  status_breakdown: Record<string, number>
-  /** Срез по этапам: ключ — id этапа, «None» — без этапа. Optional для старых ответов. */
+  /** Состояние задач: `{done, open}` (0044 — вместо четырёх статусов). */
+  done_breakdown: Record<'done' | 'open', number>
+  /** Срез по колонкам доски: ключ — id колонки, «None» — без колонки. */
   stage_breakdown?: Record<string, number>
   priority_breakdown: Record<string, number>
   completed_trend: TrendPoint[]

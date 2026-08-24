@@ -45,7 +45,7 @@ async def main() -> int:
                     Task.due_at.is_not(None),
                     Task.due_at >= now,
                     Task.due_at < upper,
-                    Task.status != "done",
+                    Task.done.is_(False),
                     Task.archived_at.is_(None),
                 )
             )

@@ -11,7 +11,7 @@ Syntax (whitespace-separated tokens):
 
 Supported fields:
     assignee  → assignee_id, accepts "me" or UUID string
-    status    → status in {todo, in_progress, in_review, done}
+    done      → выполнена ли задача: yes/no (да/нет, true/false, 1/0)
     priority  → priority in {low, medium, high, urgent}
     due       → due_at, accepts date with <,>,= operator
     created   → created_at, accepts date with <,>,= operator
@@ -30,11 +30,13 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
-VALID_STATUSES: set[str] = {"todo", "in_progress", "in_review", "done"}
+# Состояние задачи (0044): вместо четырёх статусов — одна ось «выполнена».
+_DONE_TRUE: set[str] = {"yes", "true", "1", "да", "done"}
+_DONE_FALSE: set[str] = {"no", "false", "0", "нет", "open"}
 VALID_PRIORITIES: set[str] = {"low", "medium", "high", "urgent"}
 SUPPORTED_FIELDS: set[str] = {
     "assignee",
-    "status",
+    "done",
     "priority",
     "due",
     "created",
@@ -63,7 +65,7 @@ class ParsedQuery:
 
     text: str = ""
     assignee: str | None = None  # "me" or UUID-string
-    status: str | None = None
+    done: bool | None = None
     priority: str | None = None
     due_op: str | None = None  # "<", ">", "="
     due_date: date | None = None
@@ -76,7 +78,7 @@ class ParsedQuery:
             v is not None
             for v in (
                 self.assignee,
-                self.status,
+                self.done,
                 self.priority,
                 self.due_date,
                 self.created_date,
@@ -113,10 +115,16 @@ def _consume_field(
             return True
         return False
 
-    if field == "status":
-        if op_ or raw not in VALID_STATUSES:
+    if field == "done":
+        if op_:
             return False
-        out.status = raw
+        low = raw.lower()
+        if low in _DONE_TRUE:
+            out.done = True
+        elif low in _DONE_FALSE:
+            out.done = False
+        else:
+            return False
         return True
 
     if field == "priority":

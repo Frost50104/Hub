@@ -1,0 +1,52 @@
+import { describe, expect, it } from 'vitest'
+
+import { renderActivity, type ActivityLike } from './taskActivity'
+
+function act(kind: string, payload: Record<string, unknown> = {}): ActivityLike {
+  return { kind, payload, actor_full_name: 'Пётр', actor_email: 'p@t.ru' }
+}
+
+describe('renderActivity', () => {
+  it('выполнение и возврат в работу', () => {
+    expect(renderActivity(act('done_changed', { done: true }))).toBe('Пётр выполнил задачу')
+    expect(renderActivity(act('done_changed', { done: false }))).toBe(
+      'Пётр вернул задачу в работу',
+    )
+  })
+
+  it('перенос между колонками называет колонку', () => {
+    expect(
+      renderActivity(act('stage_changed', { stage_from: 'Идея', stage_to: 'Согласование' })),
+    ).toBe('Пётр перенёс в «Согласование»')
+    expect(renderActivity(act('stage_changed', {}))).toBe('Пётр перенёс задачу')
+  })
+
+  it('СТАРЫЕ записи со статусами читаются после смены модели', () => {
+    // На проде таких 68: payload несёт системный статус, а не имя колонки.
+    // Без словаря строка схлопывалась бы в «перевёл в «»».
+    expect(renderActivity(act('status_changed', { old: 'todo', new: 'in_progress' }))).toBe(
+      'Пётр перевёл в «В работе»',
+    )
+    expect(renderActivity(act('status_changed', { new: 'done' }))).toBe(
+      'Пётр перевёл в «Готово»',
+    )
+  })
+
+  it('старая запись с именем этапа предпочитает имя', () => {
+    expect(
+      renderActivity(act('status_changed', { new: 'in_review', stage_to: 'Проверка ТУ' })),
+    ).toBe('Пётр перевёл в «Проверка ТУ»')
+  })
+
+  it('старая запись без опознавательных знаков не даёт пустых кавычек', () => {
+    expect(renderActivity(act('status_changed', {}))).toBe('Пётр изменил статус')
+  })
+
+  it('комментарий рисуется сам, строкой ленты — нет', () => {
+    expect(renderActivity(act('commented'))).toBeNull()
+  })
+
+  it('неизвестный вид не роняет ленту', () => {
+    expect(renderActivity(act('teleported'))).toBe('Пётр: teleported')
+  })
+})

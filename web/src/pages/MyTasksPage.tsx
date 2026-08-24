@@ -59,8 +59,8 @@ function groupTasksByDue(tasks: Task[]): { key: GroupKey; items: Task[] }[] {
     if (!t.due_at) key = 'nodate'
     else {
       const day = dayKey(t.due_at)
-      // Готовые задачи не считаем просроченными — оставляем в своей дате.
-      if (day < today && t.status !== 'done') key = 'overdue'
+      // Выполненные задачи не считаем просроченными — оставляем в своей дате.
+      if (day < today && !t.done) key = 'overdue'
       else if (day <= today) key = 'today'
       else if (day <= weekEnd) key = 'week'
       else key = 'later'
@@ -216,6 +216,9 @@ function DesktopMyTasks({ personal }: { personal: PersonalPane }) {
       // Проект уже стоит колонкой справа — во второй раз в строке контекста
       // он был бы дублем. На мобильном колонок нет, там fallback остаётся.
       fallback={null}
+      // Имя колонки чужого проекта приходит с сервера (/me/tasks): своих
+      // `useStages` для него у страницы нет.
+      stage={t.stage_name}
       cells={
         <span
           className="min-w-0 truncate pr-3.5 text-[14px] text-text2"
@@ -312,6 +315,7 @@ function MobileMyTasks({ personal }: { personal: PersonalPane }) {
     <MobileTaskRow
       key={t.id}
       task={t}
+      stage={t.stage_name}
       fallback={projectName(t)}
       onClick={() => openTask(t)}
       onToggleDone={() => toggleDone(t)}

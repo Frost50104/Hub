@@ -2,8 +2,6 @@ import {
   CheckCircle2,
   ChevronDown,
   Circle,
-  ClipboardCheck,
-  Clock,
   Link as LinkIcon,
   X,
 } from 'lucide-react'
@@ -28,7 +26,7 @@ import { useTasks } from '@/hooks/useTasks'
 import { DrawerSection } from '@/components/task/DrawerSection'
 import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
-import { taskKey, type TaskStatus } from '@/lib/tasks'
+import { taskKey } from '@/lib/tasks'
 import { type DependencyPeer } from '@/lib/timeline'
 
 interface TaskDependenciesProps {
@@ -38,19 +36,7 @@ interface TaskDependenciesProps {
   canEdit?: boolean
 }
 
-const STATUS_TONE: Record<DependencyPeer['status'], string> = {
-  todo: 'text-text2',
-  in_progress: 'text-amber',
-  in_review: 'text-amber',
-  done: 'text-green',
-}
-
-const STATUS_ICON: Record<TaskStatus, typeof Circle> = {
-  todo: Circle,
-  in_progress: Clock,
-  in_review: ClipboardCheck,
-  done: CheckCircle2,
-}
+const DONE_TONE = (done: boolean) => (done ? 'text-green' : 'text-text2')
 
 /** Пикер показывает максимум столько совпадений (виртуализации нет). */
 const MAX_VISIBLE = 50
@@ -130,7 +116,7 @@ export function TaskDependencies({
 
   const peerChip = (p: DependencyPeer) => (
     <span className="flex min-w-0 items-center gap-2">
-      <LinkIcon className={cn('h-3 w-3 shrink-0', STATUS_TONE[p.status])} />
+      <LinkIcon className={cn('h-3 w-3 shrink-0', DONE_TONE(p.done))} />
       {projectKey && (
         <span className="shrink-0 font-mono text-[12px] text-text2">
           {projectKey}-{p.seq}
@@ -215,7 +201,7 @@ export function TaskDependencies({
                 </p>
               )}
               {visible.map((c) => {
-                const StatusIcon = STATUS_ICON[c.status]
+                const StateIcon = c.done ? CheckCircle2 : Circle
                 const cLabels = labelsByTask.get(c.id) ?? []
                 const section = c.section_id
                   ? sectionName.get(c.section_id)
@@ -223,11 +209,8 @@ export function TaskDependencies({
                 return (
                   <DropdownMenuItem key={c.id} onSelect={() => onAdd(c.id)}>
                     <div className="flex min-w-0 flex-1 items-start gap-2">
-                      <StatusIcon
-                        className={cn(
-                          'mt-0.5 h-3.5 w-3.5 shrink-0',
-                          STATUS_TONE[c.status],
-                        )}
+                      <StateIcon
+                        className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', DONE_TONE(c.done))}
                       />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm leading-snug" title={c.title}>

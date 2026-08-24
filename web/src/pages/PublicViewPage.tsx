@@ -7,13 +7,6 @@ import { usePublicShare } from '@/hooks/usePublicShare'
 import { cn } from '@/lib/cn'
 import { type PublicProjectView, type PublicTaskView } from '@/lib/publicApi'
 
-const STATUS_LABEL: Record<string, string> = {
-  todo: 'К выполнению',
-  in_progress: 'В работе',
-  in_review: 'На проверке',
-  done: 'Готово',
-}
-
 const PRIORITY_TONE: Record<string, string> = {
   low: 'text-text3',
   medium: 'text-text2',
@@ -176,7 +169,7 @@ function TaskView({ data }: { data: PublicTaskView }) {
         </h1>
         <div className="flex flex-wrap items-center gap-2 text-xs text-text2">
           <span className="rounded bg-surface px-1.5 py-0.5 text-text">
-            {STATUS_LABEL[data.status] ?? data.status}
+            {data.done ? 'Выполнена' : 'Не выполнена'}
           </span>
           <span className={cn('uppercase tracking-wider', PRIORITY_TONE[data.priority])}>
             {PRIORITY_LABEL[data.priority] ?? data.priority}
@@ -287,7 +280,7 @@ function ProjectViewBlock({ data }: { data: PublicProjectView }) {
                 <span
                   className={cn(
                     'truncate',
-                    t.status === 'done' ? 'text-text3 line-through' : 'text-text',
+                    t.done ? 'text-text3 line-through' : 'text-text',
                   )}
                 >
                   {t.is_subtask && (

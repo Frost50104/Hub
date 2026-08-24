@@ -1,4 +1,4 @@
-import { type TaskPriority, type TaskStatus } from './tasks'
+import { type TaskPriority } from './tasks'
 
 /**
  * Словарь тонов трекера — ЕДИНСТВЕННЫЙ источник цвета статуса и приоритета.
@@ -16,33 +16,27 @@ import { type TaskPriority, type TaskStatus } from './tasks'
  * изобретается — берётся отсюда.
  */
 
-/** Краска иконки статуса в строке/карточке (текстовые классы). */
-export const STATUS_INK: Record<TaskStatus, string> = {
-  todo: 'text-text2',
-  in_progress: 'text-amber',
-  in_review: 'text-amber',
+/** Краска иконки состояния в строке/карточке (текстовые классы). */
+export const DONE_INK: Record<'open' | 'done', string> = {
+  open: 'text-text2',
   done: 'text-green',
 }
 
-/**
- * Плотная заливка плашки по статусу + краска на ней (календарь, легенды).
- * `in_review` здесь — `--blue-deep`: на календаре «на проверке» и «в работе»
- * соседствуют, и одинаковый амбер не различим; в иконке строки они обе амбер,
- * потому что там различие несёт глиф.
- */
-export const STATUS_FILL: Record<TaskStatus, string> = {
-  todo: 'bg-text2 text-bg',
-  in_progress: 'bg-amber text-on-amber',
-  in_review: 'bg-blue-deep text-bg',
+/** Плотная заливка плашки состояния + краска на ней (календарь, легенды). */
+export const DONE_FILL: Record<'open' | 'done', string> = {
+  open: 'bg-text2 text-bg',
   done: 'bg-green-deep text-bg',
 }
 
-/** CSS-выражение цвета статуса — для inline-стилей (conic-gradient, точки легенды). */
-export const STATUS_COLOR: Record<TaskStatus, string> = {
-  todo: 'rgb(var(--text2))',
-  in_progress: 'rgb(var(--amber))',
-  in_review: 'rgb(var(--blue-deep))',
+/** CSS-выражение цвета состояния — для inline-стилей (Donut, точки легенды). */
+export const DONE_COLOR: Record<'open' | 'done', string> = {
+  open: 'rgb(var(--text2))',
   done: 'rgb(var(--green-deep))',
+}
+
+/** Ключ тона по состоянию задачи. */
+export function doneTone(done: boolean): 'open' | 'done' {
+  return done ? 'done' : 'open'
 }
 
 /** Планка 3px у левого края. У `medium` планки нет — это пустое место. */

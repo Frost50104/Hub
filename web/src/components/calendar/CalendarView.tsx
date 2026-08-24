@@ -169,7 +169,7 @@ export function CalendarView({ projectId, onTaskClick, filters }: CalendarViewPr
     return d.getMonth() === viewMonth.getMonth() && d.getFullYear() === viewMonth.getFullYear()
   }
   const monthTasks = (tasks.data ?? []).filter(inMonth)
-  const overdueCount = monthTasks.filter((t) => isOverdue(t.due_at, t.status)).length
+  const overdueCount = monthTasks.filter((t) => isOverdue(t.due_at, t.done)).length
 
   const onDragOver = (e: DragOverEvent) => {
     const overId = e.over ? String(e.over.id) : ''

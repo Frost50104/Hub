@@ -16,8 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth_any
 from app.models.project import Project
+from app.models.stage import ProjectStage
 from app.models.task import Task
-from app.schemas.task import TaskResponse, TaskStatusFilter
+from app.schemas.task import TaskResponse
 from app.services.personal_projects import not_my_personal
 from app.services.task_assignees import (
     assignee_exists,
@@ -29,7 +30,7 @@ from app.services.taskdates import (
     start_of_today_utc,
     start_of_tomorrow_utc,
 )
-from app.services.tasks import apply_status_filter
+from app.services.tasks import apply_done_filter, reject_legacy_status
 
 router = APIRouter(tags=["me-tasks"])
 
@@ -38,7 +39,9 @@ DueWindow = Literal["overdue", "today", "upcoming", "all"]
 
 @router.get("/me/tasks", response_model=list[TaskResponse])
 async def list_my_tasks(
-    status_: TaskStatusFilter | None = Query(default=None, alias="status"),
+    done: bool | None = Query(default=None),
+    # LEGACY (0044): см. `_reject_legacy_status` в api/tasks.py.
+    status_: str | None = Query(default=None, alias="status"),
     due_window: DueWindow | None = Query(default=None),
     include_archived: bool = Query(default=False),
     # Задачи СВОЕГО личного проекта у окон отбираем: на /my для них отдельная
@@ -48,12 +51,15 @@ async def list_my_tasks(
     principal: Principal = Depends(require_auth_any()),
     db: AsyncSession = Depends(get_db),
 ) -> list[TaskResponse]:
+    reject_legacy_status(status_)
     # EXISTS, а не JOIN на task_assignees: JOIN размножил бы задачу по числу
     # исполнителей и дал дубли в списке. Семантика — «я СРЕДИ исполнителей».
     stmt = (
-        select(Task, Project.key)
-        # key проекта — для бейджа «KEY-42» в кросс-проектном списке.
+        select(Task, Project.key, ProjectStage.name)
+        # key проекта — для бейджа «KEY-42» в кросс-проектном списке,
+        # имя колонки — единственный признак прогресса в чужом проекте.
         .join(Project, Project.id == Task.project_id)
+        .join(ProjectStage, ProjectStage.id == Task.stage_id)
         .where(assignee_exists(principal.employee_id))
         .order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
     )
@@ -61,7 +67,7 @@ async def list_my_tasks(
         stmt = stmt.where(Task.archived_at.is_(None))
     if not include_personal:
         stmt = stmt.where(not_my_personal(principal.employee_id))
-    stmt = apply_status_filter(stmt, status_)
+    stmt = apply_done_filter(stmt, done)
 
     # Окна — по КАЛЕНДАРНЫМ дням display tz (services/taskdates.py), не по
     # now(): задача со сроком сегодня после полудня — в «Сегодня» и
@@ -74,16 +80,17 @@ async def list_my_tasks(
         # (решение владельца 2026-08-21, как в Asana).
         stmt = stmt.where(
             Task.due_at < start_of_tomorrow_utc(now),
-            or_(Task.status != "done", Task.due_at >= start_of_today_utc(now)),
+            or_(Task.done.is_(False), Task.due_at >= start_of_today_utc(now)),
         )
     elif due_window == "upcoming":
-        stmt = stmt.where(Task.due_at >= start_of_today_utc(now), Task.status != "done")
+        stmt = stmt.where(Task.due_at >= start_of_today_utc(now), Task.done.is_(False))
 
     rows = (await db.execute(stmt)).all()
-    by_task = await load_assignees(db, [task.id for task, _ in rows])
+    by_task = await load_assignees(db, [task.id for task, _, _ in rows])
     out: list[TaskResponse] = []
-    for task, project_key in rows:
+    for task, project_key, stage_name in rows:
         data = serialize_with_assignees(task, by_task.get(task.id, []))
         data.project_key = project_key
+        data.stage_name = stage_name
         out.append(data)
     return out

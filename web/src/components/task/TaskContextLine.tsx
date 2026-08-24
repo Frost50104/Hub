@@ -46,11 +46,13 @@ export function hasTaskContext(
     labels?: Label[]
     subtasks?: SubtaskStats
     fallback?: string | null
+    stage?: string | null
     mode?: 'auto' | 'fallback'
   } = {},
 ): boolean {
   if (opts.fallback) return true
   if (opts.mode === 'fallback') return false
+  if (opts.stage) return true
   return (
     (opts.labels?.length ?? 0) > 0 ||
     (opts.subtasks?.total ?? 0) > 0 ||
@@ -64,6 +66,12 @@ interface TaskContextLineProps {
   task: Task
   labels?: Label[]
   subtasks?: SubtaskStats
+  /**
+   * Имя колонки доски. Единственный признак движения задачи после 0044:
+   * состояние схлопнулось в галочку, и без колонки список не отличает
+   * «взяли в работу» от «лежит нетронутой».
+   */
+  stage?: string | null
   /** Что показать, когда рассказывать нечего: секция или проект. */
   fallback?: string | null
   /** На мобильном по месту влезает одна метка, остальные схлопываются в «+N». */
@@ -89,6 +97,7 @@ export function TaskContextLine({
   task,
   labels,
   subtasks,
+  stage,
   fallback,
   compact = false,
   mode = 'auto',
@@ -103,7 +112,7 @@ export function TaskContextLine({
   const blocked = (task.blocker_count ?? 0) > 0
   const bare =
     mode === 'fallback' ||
-    (shownLabels.length === 0 && !hasSubs && !comments && !files && !blocked)
+    (!stage && shownLabels.length === 0 && !hasSubs && !comments && !files && !blocked)
 
   if (bare && !fallback && !reserve) return null
 
@@ -117,6 +126,14 @@ export function TaskContextLine({
     >
       {bare && fallback && (
         <span className="min-w-0 truncate text-[13px] text-text2">{fallback}</span>
+      )}
+      {mode !== 'fallback' && stage && (
+        <span
+          className="inline-flex h-[22px] shrink-0 items-center rounded-md bg-surface px-1.5 text-[12px] font-semibold text-text2"
+          title={`Колонка: ${stage}`}
+        >
+          {stage}
+        </span>
       )}
       {mode !== 'fallback' && compact && hasSubs && (
         <MetaChip icon={ListTree} title={`Подзадачи: ${subtasks!.done} из ${subtasks!.total}`}>

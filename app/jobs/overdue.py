@@ -42,7 +42,7 @@ async def main() -> int:
                     # День срока раньше сегодняшнего (display tz), не `< now`:
                     # полуденный срок сегодня — ещё не просрочка.
                     Task.due_at < start_of_today_utc(now),
-                    Task.status != "done",
+                    Task.done.is_(False),
                     Task.archived_at.is_(None),
                 )
             )

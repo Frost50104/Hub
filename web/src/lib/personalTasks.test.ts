@@ -17,7 +17,7 @@ function task(over: Partial<Task> & { id: string }): Task {
     parent_task_id: null,
     title: over.id,
     description: null,
-    status: 'todo',
+    done: false,
     priority: 'medium',
     assignee_id: null,
     assignee: null,
@@ -57,7 +57,7 @@ describe('personalListView', () => {
     const view = personalListView([
       task({ id: 'parent' }),
       task({ id: 'kid1', parent_task_id: 'parent' }),
-      task({ id: 'kid2', parent_task_id: 'parent', status: 'done' }),
+      task({ id: 'kid2', parent_task_id: 'parent', done: true }),
     ])
     expect(view.open.map((t) => t.id)).toEqual(['parent'])
     expect(view.subtasksByParent.get('parent')).toEqual({ total: 2, done: 1 })
@@ -65,11 +65,11 @@ describe('personalListView', () => {
 
   it('выполненные идут после незавершённых и режутся лимитом', () => {
     const view = personalListView([
-      task({ id: 'd1', status: 'done' }),
+      task({ id: 'd1', done: true }),
       task({ id: 'o1' }),
-      task({ id: 'd2', status: 'done' }),
-      task({ id: 'd3', status: 'done' }),
-      task({ id: 'd4', status: 'done' }),
+      task({ id: 'd2', done: true }),
+      task({ id: 'd3', done: true }),
+      task({ id: 'd4', done: true }),
     ])
     expect(view.open.map((t) => t.id)).toEqual(['o1'])
     expect(view.done).toHaveLength(DONE_PREVIEW_LIMIT)
@@ -79,7 +79,7 @@ describe('personalListView', () => {
 
   it('showAllDone снимает лимит', () => {
     const list = Array.from({ length: 5 }, (_, i) =>
-      task({ id: `d${i}`, status: 'done' }),
+      task({ id: `d${i}`, done: true }),
     )
     const view = personalListView(list, { showAllDone: true })
     expect(view.done).toHaveLength(5)

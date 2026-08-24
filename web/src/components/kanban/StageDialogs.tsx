@@ -8,17 +8,10 @@ import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { SheetPicker } from '@/components/ui/SheetPicker'
 import { useCreateStage, useDeleteStage, useUpdateStage } from '@/hooks/useStages'
 import { type TaskStage } from '@/lib/stages'
-import { STATUS_LABEL, type TaskStatus } from '@/lib/tasks'
-
-const SYSTEM: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done']
-
-const SELECT_CLASS =
-  'h-11 w-full rounded-[10px] border border-glass-border bg-surface px-3.5 font-body text-[15px] text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 lg:h-10'
 
 /**
- * «+ Этап» / «Переименовать»: имя + системный статус. Статус объясняется
- * словами — он решает, что считать «сделано» (уведомления, просрочка,
- * дашборд), а имя колонки — только подпись.
+ * «+ Колонка» / «Переименовать»: только имя. Системного смысла у колонки нет
+ * (0044) — выполнение задачи живёт в её галочке, а не в месте на доске.
  */
 export function StageFormDialog({
   open,
@@ -35,11 +28,9 @@ export function StageFormDialog({
   const create = useCreateStage(projectId)
   const update = useUpdateStage(projectId)
   const [name, setName] = useState('')
-  const [status, setStatus] = useState<TaskStatus>('todo')
   useEffect(() => {
     if (open) {
       setName(stage?.name ?? '')
-      setStatus(stage?.system_status ?? 'todo')
     }
   }, [open, stage])
   const pending = create.isPending || update.isPending
@@ -49,11 +40,11 @@ export function StageFormDialog({
     if (!trimmed) return
     try {
       if (stage) {
-        await update.mutateAsync({ stageId: stage.id, name: trimmed, system_status: status })
+        await update.mutateAsync({ stageId: stage.id, name: trimmed })
         toast.success('Этап обновлён')
       } else {
-        await create.mutateAsync({ name: trimmed, system_status: status })
-        toast.success(`Этап «${trimmed}» добавлен`)
+        await create.mutateAsync({ name: trimmed })
+        toast.success(`Колонка «${trimmed}» добавлена`)
       }
       onOpenChange(false)
     } catch {
@@ -65,8 +56,8 @@ export function StageFormDialog({
     <ResponsiveDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={stage ? `Этап «${stage.name}»` : 'Новый этап'}
-      description="Имя этапа — ваше; системный статус решает, что считать «сделано»: уведомления, просрочка и дашборд смотрят на него."
+      title={stage ? `Колонка «${stage.name}»` : 'Новая колонка'}
+      description="Имя колонки — ваше: «Идея», «Согласование», «Печать». Выполненность задачи от колонки не зависит — её отмечают галочкой."
       desktopWidth={480}
       footer={
         <>
@@ -74,7 +65,7 @@ export function StageFormDialog({
             Отмена
           </Button>
           <Button onClick={() => void submit()} disabled={pending || !name.trim()}>
-            {pending ? 'Сохраняем…' : stage ? 'Сохранить' : 'Добавить этап'}
+            {pending ? 'Сохраняем…' : stage ? 'Сохранить' : 'Добавить колонку'}
           </Button>
         </>
       }
@@ -98,30 +89,15 @@ export function StageFormDialog({
             className="h-11 text-[15px] lg:h-10"
           />
         </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="stage-status">Системный статус</Label>
-          <select
-            id="stage-status"
-            value={status}
-            onChange={(e) => setStatus(e.target.value as TaskStatus)}
-            className={SELECT_CLASS}
-          >
-            {SYSTEM.map((s) => (
-              <option key={s} value={s}>
-                {STATUS_LABEL[s]}
-              </option>
-            ))}
-          </select>
-        </div>
       </form>
     </ResponsiveDialog>
   )
 }
 
 /**
- * Удаление этапа: если в нём есть задачи — сначала выбрать, куда их
- * перенести (список остальных этапов). Последний этап системного статуса
- * сервер удалить не даст (409) — текст отказа придёт тостом.
+ * Удаление колонки: если в ней есть задачи — сначала выбрать, куда их
+ * перенести (список остальных колонок). Последнюю колонку проекта сервер
+ * удалить не даст (409) — текст отказа придёт тостом.
  */
 export function DeleteStageDialog({
   open,
@@ -145,10 +121,10 @@ export function DeleteStageDialog({
   const run = async (moveTo: string | null) => {
     try {
       await remove.mutateAsync({ stageId: stage.id, moveTo })
-      toast.success(`Этап «${stage.name}» удалён`)
+      toast.success(`Колонка «${stage.name}» удалена`)
       onOpenChange(false)
     } catch {
-      // тост показывает глобальный onError мутаций (в т.ч. 409 «последний этап статуса»)
+      // тост показывает глобальный onError мутаций (в т.ч. 409 «последняя колонка»)
     }
   }
 
@@ -158,8 +134,8 @@ export function DeleteStageDialog({
         open={open}
         onOpenChange={onOpenChange}
         title={`Удалить «${stage.name}»`}
-        description={`В этапе ${taskCount} задач — выберите, куда их перенести.`}
-        items={others.map((s) => ({ id: s.id, label: s.name, meta: STATUS_LABEL[s.system_status] }))}
+        description={`В колонке ${taskCount} задач — выберите, куда их перенести.`}
+        items={others.map((s) => ({ id: s.id, label: s.name }))}
         onSelect={(id) => void run(id)}
       />
     )
@@ -168,8 +144,8 @@ export function DeleteStageDialog({
     <ResponsiveDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={`Удалить этап «${stage.name}»?`}
-      description="Этап пуст — задачи переносить не нужно."
+      title={`Удалить колонку «${stage.name}»?`}
+      description="Колонка пуста — задачи переносить не нужно."
       desktopWidth={440}
       footer={
         <>

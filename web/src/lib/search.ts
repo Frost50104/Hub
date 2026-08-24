@@ -20,7 +20,7 @@ export interface SearchTaskHit {
   id: string
   title: string
   seq: number
-  status: 'todo' | 'in_progress' | 'in_review' | 'done'
+  done: boolean
   priority: 'low' | 'medium' | 'high' | 'urgent'
   due_at: string | null
   assignee_id: string | null
@@ -48,7 +48,7 @@ export interface SearchGroup {
 export interface ParsedDsl {
   text: string
   assignee: string | null
-  status: string | null
+  done: boolean | null
   priority: string | null
   due_op: '<' | '>' | '=' | null
   due_date: string | null

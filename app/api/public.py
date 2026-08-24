@@ -183,7 +183,7 @@ async def _build_task_view(session: AsyncSession, task_id: UUID) -> PublicTaskVi
     return PublicTaskView(
         title=task.title,
         description=task.description,
-        status=task.status,
+        done=task.done,
         priority=task.priority,
         start_at=task.start_at,
         due_at=task.due_at,
@@ -215,7 +215,7 @@ async def _build_project_view(
         select(
             Task.id,
             Task.title,
-            Task.status,
+            Task.done,
             Task.priority,
             Task.due_at,
             Task.section_id,
@@ -250,7 +250,7 @@ async def _build_project_view(
         return PublicTaskHit(
             id=row.id,
             title=row.title,
-            status=row.status,
+            done=row.done,
             priority=row.priority,
             due_at=row.due_at,
             assignee_initials=(

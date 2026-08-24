@@ -57,7 +57,7 @@ async def _task_counts(
         select(
             Task.project_id,
             func.count(),
-            func.count().filter(Task.status == "done"),
+            func.count().filter(Task.done),
         )
         .where(
             Task.project_id.in_(ids),

@@ -1,9 +1,5 @@
 import { api } from './api'
 
-export type TaskStatus = 'todo' | 'in_progress' | 'in_review' | 'done'
-/** Фильтр статуса списков: конкретный статус или `open` — «не выполнено»
- *  (всё, кроме done). Псевдо-значение понимает бэкенд (`status=open`). */
-export type TaskStatusFilter = TaskStatus | 'open'
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
 
 export interface TaskAssigneeBrief {
@@ -19,8 +15,10 @@ export interface Task {
   parent_task_id: string | null
   title: string
   description: string | null
-  status: TaskStatus
-  /** Этап (колонка доски). Optional: объект из кэша старого бандла поля не несёт. */
+  /** Состояние задачи (0044). Колонка доски к нему отношения не имеет. */
+  done: boolean
+  /** Колонка доски. Optional: объект из кэша старого бандла поля не несёт, и
+   *  доска кладёт такие карточки в бакет «Без колонки», а не теряет. */
   stage_id?: string | null
   priority: TaskPriority
   /** Источник истины по исполнителям. Optional: объекта из кэша, пережившего
@@ -41,16 +39,19 @@ export interface Task {
   /** Ключ проекта — заполняют только кросс-проектные ручки (/me/tasks);
    * в контексте страницы проекта фронт берёт key из project-запроса. */
   project_key?: string | null
+  /** Имя колонки доски — тоже только кросс-проектные ручки: колонки чужого
+   *  проекта фронту взять неоткуда (`useStages` — на текущий проект). */
+  stage_name?: string | null
   created_at: string
   updated_at: string
   completed_at: string | null
   archived_at: string | null
-  /** Может ли текущий пользователь менять статус/этап этой задачи: сервер
-   *  считает роль в проекте ПЛЮС «я среди исполнителей». Заполняют только
-   *  список задач проекта и карточка задачи; `undefined` — «не знаем», решает
-   *  общий can_edit проекта. Ответ PATCH поле не несёт — и не должен: в кэш
-   *  кладётся сам патч, а не ответ (useTasks.ts). */
-  can_set_status?: boolean | null
+  /** Может ли текущий пользователь закрыть задачу и двигать её по доске:
+   *  сервер считает роль в проекте ПЛЮС «я среди исполнителей». Заполняют
+   *  только список задач проекта и карточка задачи; `undefined` — «не знаем»,
+   *  решает общий can_edit проекта. Ответ PATCH поле не несёт — и не должен:
+   *  в кэш кладётся сам патч, а не ответ (useTasks.ts). */
+  can_complete?: boolean | null
   /** Счётчики строки контекста в списке. Заполняет ТОЛЬКО список задач проекта;
    *  у одиночных ручек и оптимистичных объектов их нет. `undefined` = «не знаем,
    *  чип не рисуем», `0` = «знаем, что нет» — иначе чип мигал бы при каждом
@@ -78,7 +79,8 @@ export interface SubtaskStats {
 
 export interface TaskListFilters {
   include_archived?: boolean
-  status?: TaskStatusFilter
+  /** `false` — невыполненные, `true` — выполненные, отсутствие — все. */
+  done?: boolean
   assignee?: string
   section_id?: string
   priority?: TaskPriority
@@ -93,19 +95,18 @@ export interface TaskListFilters {
 
 /** Фильтры, применимые к calendar-эндпоинту (диапазон дат у него свой). */
 export interface CalendarFilters {
-  status?: TaskStatusFilter
+  done?: boolean
   assignee?: string
   priority?: TaskPriority
 }
 
 export interface TaskCreateBody {
-  /** Этап; без него сервер берёт первый этап статуса. */
+  /** Колонка; без неё сервер кладёт задачу в первую по позиции. */
   stage_id?: string | null
   title: string
   description?: string
   section_id?: string | null
   parent_task_id?: string
-  status?: TaskStatus
   priority?: TaskPriority
   assignee_id?: string | null
   assignee_ids?: string[]
@@ -114,12 +115,13 @@ export interface TaskCreateBody {
 }
 
 export interface TaskUpdateBody {
-  /** Этап; без него сервер берёт первый этап статуса. */
+  /** Колонка доски. Явный null сервер не принимает: колонка нужна всегда. */
   stage_id?: string | null
   title?: string
   description?: string
   section_id?: string | null
-  status?: TaskStatus
+  /** Выполнена или нет — независимо от колонки. */
+  done?: boolean
   priority?: TaskPriority
   /** @deprecated Прислать легаси-поле = заменить весь набор одним человеком. */
   assignee_id?: string | null
@@ -194,17 +196,10 @@ export interface TaskImportReport {
   dry_run: boolean
 }
 
-export const STATUS_LABEL: Record<TaskStatus, string> = {
-  todo: 'К выполнению',
-  in_progress: 'В работе',
-  in_review: 'На проверке',
-  done: 'Готово',
-}
-
-/** Подписи фильтра статуса: «Не выполнено» первым — это главный срез списка. */
-export const STATUS_FILTER_LABEL: Record<TaskStatusFilter, string> = {
+/** Подписи фильтра состояния: «Не выполнено» первым — главный срез списка. */
+export const DONE_FILTER_LABEL: Record<'open' | 'done', string> = {
   open: 'Не выполнено',
-  ...STATUS_LABEL,
+  done: 'Выполнено',
 }
 
 export const PRIORITY_LABEL: Record<TaskPriority, string> = {

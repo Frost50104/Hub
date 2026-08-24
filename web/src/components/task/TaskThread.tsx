@@ -15,75 +15,8 @@ import {
 } from '@/hooks/useThreads'
 import { DrawerSection } from '@/components/task/DrawerSection'
 import { cn } from '@/lib/cn'
-import { STATUS_LABEL, type TaskStatus } from '@/lib/tasks'
-import { type Activity, type Comment } from '@/lib/threads'
-
-function renderActivity(a: Activity): string | null {
-  const actor = a.actor_full_name || a.actor_email || 'Кто-то'
-  const p = (a.payload ?? {}) as Record<string, unknown>
-  switch (a.kind) {
-    case 'created':
-      return `${actor} создал задачу`
-    case 'updated':
-      return `${actor} обновил задачу`
-    case 'status_changed': {
-      const newStatus = (p['new'] as TaskStatus | undefined) ?? null
-      const label = newStatus ? STATUS_LABEL[newStatus] : ''
-      return `${actor} перевёл в «${label}»`
-    }
-    case 'assigned': {
-      // Новый формат (0034) несёт added/removed со снапшотом имён. Старые
-      // записи в БД остаются на old/new — ветка ниже их и рендерит.
-      const added = Array.isArray(p['added']) ? (p['added'] as string[]) : null
-      const removed = Array.isArray(p['removed']) ? (p['removed'] as string[]) : null
-      if (added || removed) {
-        const addedNames = (p['added_names'] as string[] | undefined) ?? []
-        const removedNames = (p['removed_names'] as string[] | undefined) ?? []
-        const hasAdded = (added?.length ?? 0) > 0
-        const hasRemoved = (removed?.length ?? 0) > 0
-        if (hasAdded && hasRemoved) {
-          return `${actor} изменил исполнителей: +${addedNames.join(', ')}, −${removedNames.join(', ')}`
-        }
-        if (hasAdded) {
-          return addedNames.length === 1
-            ? `${actor} назначил исполнителем ${addedNames[0]}`
-            : `${actor} добавил исполнителей: ${addedNames.join(', ')}`
-        }
-        if (hasRemoved) {
-          return removedNames.length === 1
-            ? `${actor} снял исполнителя ${removedNames[0]}`
-            : `${actor} снял исполнителей: ${removedNames.join(', ')}`
-        }
-        return `${actor} изменил исполнителей`
-      }
-      const isUnassign = !p['new']
-      return isUnassign
-        ? `${actor} снял исполнителя`
-        : `${actor} назначил исполнителя`
-    }
-    case 'archived':
-      return `${actor} архивировал`
-    case 'unarchived':
-      return `${actor} восстановил из архива`
-    case 'watcher_added':
-      return `${actor} подписался на задачу`
-    case 'watcher_removed':
-      return `${actor} отписался от задачи`
-    case 'attached':
-      return `${actor} прикрепил файл «${String(p['filename'] ?? '—')}»`
-    case 'unattached':
-      return `${actor} удалил файл «${String(p['filename'] ?? '—')}»`
-    case 'labeled':
-      return `${actor} добавил метку «${String(p['name'] ?? '—')}»`
-    case 'unlabeled':
-      return `${actor} снял метку «${String(p['name'] ?? '—')}»`
-    case 'commented':
-      // Rendered as the comment itself — skip the activity row.
-      return null
-    default:
-      return `${actor}: ${a.kind}`
-  }
-}
+import { renderActivity } from '@/lib/taskActivity'
+import { type Comment } from '@/lib/threads'
 
 function CommentBubble({
   comment,

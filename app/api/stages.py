@@ -1,12 +1,10 @@
-"""Этапы проекта — колонки доски (редизайн, волна 2).
+"""Колонки доски проекта.
 
 - `GET /projects/{id}/stages` — любой участник; с `task_count` для «N из M».
-- `POST/PATCH/DELETE` — owner/editor. Смена `system_status` этапа переписывает
-  зеркало `status` у всех его задач (уведомления watcher'ам не шлются —
-  массовая операция, только activity не пишется; это смена смысла колонки,
-  а не работа над задачей).
-- `DELETE` требует `move_to`, если в этапе есть задачи; последний этап
-  системного статуса удалить нельзя (409).
+- `POST/PATCH/DELETE` — owner/editor. Колонка — это только имя и позиция
+  (0044): системного смысла у неё нет, состояние задачи живёт в `tasks.done`.
+- `DELETE` требует `move_to`, если в колонке есть задачи; последнюю колонку
+  проекта удалить нельзя (409) — задачам негде лежать.
 
 Позиции непрерывные, сдвиги — как у секций (`SET CONSTRAINTS … DEFERRED`).
 """
@@ -26,11 +24,11 @@ from app.models.task import Task
 from app.schemas.stage import StageCreate, StageResponse, StageUpdate
 from app.services.project_access import require_project_role
 from app.services.stages import (
-    apply_stage,
-    assert_not_last_of_status,
+    assert_not_last_stage,
     get_stage_in_project,
     list_stages,
 )
+from app.services.tasks import reject_legacy_status
 
 router = APIRouter(tags=["stages"])
 
@@ -77,6 +75,7 @@ async def create_stage(
     await enforce_rate_limit(
         bucket="task:write", employee_id=str(principal.employee_id), limit=120, window_sec=60
     )
+    reject_legacy_status(body.system_status)
     await require_project_role(db, project_id, principal, allow=("owner", "editor"))
     await db.execute(_DEFER)
     max_row = await db.execute(
@@ -99,7 +98,6 @@ async def create_stage(
         tenant_id=principal.tenant_id,
         project_id=project_id,
         name=body.name.strip(),
-        system_status=body.system_status,
         position=position,
     )
     db.add(stage)
@@ -118,6 +116,7 @@ async def update_stage(
     await enforce_rate_limit(
         bucket="task:write", employee_id=str(principal.employee_id), limit=120, window_sec=60
     )
+    reject_legacy_status(body.system_status)
     stage = await db.get(ProjectStage, stage_id)
     if stage is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Этап не найден")
@@ -125,17 +124,6 @@ async def update_stage(
 
     if body.name is not None:
         stage.name = body.name.strip()
-
-    if body.system_status is not None and body.system_status != stage.system_status:
-        await assert_not_last_of_status(db, stage, new_status=body.system_status)
-        stage.system_status = body.system_status
-        # Зеркало у всех задач этапа — через apply_stage, чтобы completed_at
-        # считался по тем же правилам, что и точечный перевод.
-        tasks = (
-            await db.execute(select(Task).where(Task.stage_id == stage.id))
-        ).scalars().all()
-        for t in tasks:
-            apply_stage(t, stage, system_status=body.system_status)
 
     if body.position is not None and body.position != stage.position:
         await db.execute(_DEFER)
@@ -192,7 +180,7 @@ async def delete_stage(
     if stage is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Этап не найден")
     await require_project_role(db, stage.project_id, principal, allow=("owner", "editor"))
-    await assert_not_last_of_status(db, stage)
+    await assert_not_last_stage(db, stage)
 
     tasks = (await db.execute(select(Task).where(Task.stage_id == stage.id))).scalars().all()
     if tasks:
@@ -207,7 +195,8 @@ async def delete_stage(
             )
         target = await get_stage_in_project(db, stage.project_id, move_to)
         for t in tasks:
-            apply_stage(t, target, system_status=target.system_status)
+            # Только колонка: перенос при удалении не трогает состояние задачи.
+            t.stage_id = target.id
 
     await db.execute(_DEFER)
     await db.delete(stage)

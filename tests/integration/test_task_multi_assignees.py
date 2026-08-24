@@ -65,6 +65,7 @@ async def _list(db, project_id, principal, *, assignee_id=None):
     return await list_tasks(
         project_id,
         include_archived=False,
+        done=None,
         status_=None,
         assignee_id=assignee_id,
         section_id=None,
@@ -426,7 +427,7 @@ async def test_me_tasks_includes_task_where_i_am_second_assignee(
         db,
     )
     rows = await list_my_tasks(
-        status_=None, due_window=None, include_archived=False, principal=b, db=db
+        done=None, status_=None, due_window=None, include_archived=False, principal=b, db=db
     )
     assert [r.id for r in rows].count(task.id) == 1
 
@@ -450,6 +451,7 @@ async def test_calendar_filter_matches_any_of_without_duplicates(
         project.id,
         from_=(due - timedelta(days=2)).date().isoformat(),
         to=(due + timedelta(days=2)).date().isoformat(),
+        done=None,
         status_=None,
         assignee_id=b.employee_id,
         priority=None,
@@ -516,17 +518,17 @@ async def test_workload_counts_overdue_per_assignee(db: AsyncSession, tenant_id:
         db,
     )
     await create_task(project.id, TaskCreate(title="Ничья и горит", due_at=past), owner, db)
-    await create_task(
+    closed = await create_task(
         project.id,
         TaskCreate(
             title="Закрытая просрочка",
             assignee_ids=[a.employee_id],
             due_at=past,
-            status="done",
         ),
         owner,
         db,
     )
+    await update_task(closed.id, TaskUpdate(done=True), owner, db)
     await create_task(
         project.id,
         TaskCreate(

@@ -75,6 +75,7 @@ async def _tasks(db: AsyncSession, project_id: uuid.UUID, principal: Principal):
     return await list_tasks(
         project_id,
         include_archived=False,
+        done=None,
         status_=None,
         assignee_id=None,
         section_id=None,
@@ -92,6 +93,7 @@ async def _tasks(db: AsyncSession, project_id: uuid.UUID, principal: Principal):
 
 async def _my_tasks(db: AsyncSession, principal: Principal, *, personal: bool = False):
     return await list_my_tasks(
+        done=None,
         status_=None,
         due_window=None,
         include_archived=False,
@@ -117,12 +119,12 @@ async def test_ensure_creates_project_stages_and_owner(db, tenant_id):
 
     stages = (
         await db.execute(
-            select(ProjectStage.system_status)
+            select(ProjectStage.name)
             .where(ProjectStage.project_id == project_id)
             .order_by(ProjectStage.position)
         )
     ).scalars().all()
-    assert stages == ["todo", "in_progress", "in_review", "done"]
+    assert stages == ["К выполнению", "В работе", "На проверке", "Готово"]
 
     role = (
         await db.execute(
@@ -378,8 +380,8 @@ async def test_guest_closes_assigned_task(db, tenant_id):
     _owner, guest, _pid, shared_id, _private = await _shared_personal(
         db, tenant_id, "pp-guest-done"
     )
-    updated = await update_task(shared_id, TaskUpdate(status="done"), guest, db)
-    assert updated.status == "done"
+    updated = await update_task(shared_id, TaskUpdate(done=True), guest, db)
+    assert updated.done is True
 
     # Но переименовать чужую личную задачу он не вправе.
     with pytest.raises(HTTPException) as exc:
@@ -399,7 +401,8 @@ async def test_guest_blocked_from_aggregates(db, tenant_id):
             personal_id,
             from_="2026-08-01",
             to="2026-08-31",
-            status_=None,
+            done=None,
+        status_=None,
             assignee_id=None,
             priority=None,
             principal=guest,

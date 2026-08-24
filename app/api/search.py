@@ -64,7 +64,7 @@ class SearchTaskHit(BaseModel):
     id: UUID
     title: str
     seq: int
-    status: str
+    done: bool
     priority: str
     due_at: datetime | None
     assignee_id: UUID | None
@@ -116,8 +116,8 @@ def _apply_dsl_filters(stmt, parsed: ParsedQuery, *, employee_id: UUID):
         except ValueError:
             # DSL parser already filtered out malformed UUIDs, but be safe.
             pass
-    if parsed.status is not None:
-        stmt = stmt.where(Task.status == parsed.status)
+    if parsed.done is not None:
+        stmt = stmt.where(Task.done.is_(parsed.done))
     if parsed.priority is not None:
         stmt = stmt.where(Task.priority == parsed.priority)
     if parsed.due_date is not None:
@@ -203,7 +203,7 @@ def _parsed_summary(parsed: ParsedQuery) -> dict:
     return {
         "text": parsed.text,
         "assignee": parsed.assignee,
-        "status": parsed.status,
+        "done": parsed.done,
         "priority": parsed.priority,
         "due_op": parsed.due_op,
         "due_date": parsed.due_date.isoformat() if parsed.due_date else None,
@@ -305,7 +305,7 @@ async def search(
                 id=t.id,
                 title=t.title,
                 seq=t.seq,
-                status=t.status,
+                done=t.done,
                 priority=t.priority,
                 due_at=t.due_at,
                 assignee_id=(

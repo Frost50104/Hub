@@ -15,10 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.comments import create_comment
 from app.api.dependencies import add_dependency
 from app.api.projects import create_project, get_project, list_projects
-from app.api.tasks import archive_task, create_task, get_task, list_tasks
+from app.api.tasks import archive_task, create_task, get_task, list_tasks, update_task
 from app.schemas.comment import CommentCreate
 from app.schemas.project import ProjectCreate
-from app.schemas.task import TaskCreate
+from app.schemas.task import TaskCreate, TaskUpdate
 from tests.integration.conftest import make_principal
 from tests.integration.test_project_access import _register
 
@@ -30,6 +30,7 @@ async def _list(db: AsyncSession, project_id: uuid.UUID, principal):
     return await list_tasks(
         project_id,
         include_archived=False,
+        done=None,
         status_=None,
         assignee_id=None,
         section_id=None,
@@ -104,7 +105,8 @@ async def test_project_counts_skip_subtasks_and_archived(
         owner,
         db,
     )
-    await create_task(project.id, TaskCreate(title="Готовая", status="done"), owner, db)
+    finished = await create_task(project.id, TaskCreate(title="Готовая"), owner, db)
+    await update_task(finished.id, TaskUpdate(done=True), owner, db)
     trash = await create_task(project.id, TaskCreate(title="В архив"), owner, db)
     await archive_task(trash.id, owner, db)
 

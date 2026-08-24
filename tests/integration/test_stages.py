@@ -1,6 +1,8 @@
-"""Этапы проекта (редизайн, волна 2): дефолтные этапы, зеркало status,
-legacy-вход status, инвариант «≥1 этап на системный статус», перенос при
-удалении, позиции, RLS-изоляция.
+"""Колонки доски (0044): свободные имена, независимость от «выполнена».
+
+Колонка — это только имя и позиция. Состояние задачи (`done`) живёт отдельно:
+перенос между колонками его не трогает, галочка не двигает карточку. Проекту
+нужна хотя бы одна колонка — иначе задаче негде лежать.
 """
 
 from __future__ import annotations
@@ -23,9 +25,9 @@ from tests.integration.test_project_access import _register
 pytestmark = pytest.mark.integration
 
 
-async def _by_status(db: AsyncSession, project_id: uuid.UUID, owner):
+async def _by_name(db: AsyncSession, project_id: uuid.UUID, owner):
     stages = await list_project_stages(project_id, principal=owner, db=db)
-    return {s.system_status: s for s in stages}
+    return {s.name: s for s in stages}
 
 
 async def _seed(db: AsyncSession, tenant_id: uuid.UUID, slug: str):
@@ -40,120 +42,223 @@ async def _seed(db: AsyncSession, tenant_id: uuid.UUID, slug: str):
 async def test_new_project_gets_four_default_stages(db: AsyncSession, tenant_id: uuid.UUID):
     owner, project = await _seed(db, tenant_id, "st1")
     stages = await list_project_stages(project.id, principal=owner, db=db)
-    assert [s.system_status for s in stages] == ["todo", "in_progress", "in_review", "done"]
+    assert [s.name for s in stages] == ["К выполнению", "В работе", "На проверке", "Готово"]
     assert [s.position for s in stages] == [0, 1, 2, 3]
-    assert stages[3].name == "Готово"
     assert all(s.task_count == 0 for s in stages)
 
 
-async def test_create_task_legacy_status_lands_in_first_stage_of_status(
+async def test_task_without_stage_lands_in_first_column(
     db: AsyncSession, tenant_id: uuid.UUID
 ):
     owner, project = await _seed(db, tenant_id, "st2")
-    stages = await _by_status(db, project.id, owner)
-    task = await create_task(
-        project.id, TaskCreate(title="Legacy", status="in_review"), owner, db
+    stages = await list_project_stages(project.id, principal=owner, db=db)
+    task = await create_task(project.id, TaskCreate(title="Без колонки"), owner, db)
+    assert task.stage_id == stages[0].id
+    assert task.done is False and task.completed_at is None
+
+    explicit = await create_task(
+        project.id, TaskCreate(title="В третью", stage_id=stages[2].id), owner, db
     )
-    assert task.stage_id == stages["in_review"].id
-    assert task.status == "in_review"
-    # stage_id без status — зеркало проставляется из этапа
-    t2 = await create_task(
-        project.id, TaskCreate(title="По этапу", stage_id=stages["done"].id), owner, db
+    assert explicit.stage_id == stages[2].id
+    # Колонка «Готово» больше ничего не означает: задача в ней не выполнена.
+    finish = await create_task(
+        project.id, TaskCreate(title="В Готово", stage_id=stages[3].id), owner, db
     )
-    assert t2.status == "done"
-    assert t2.completed_at is not None
+    assert finish.done is False and finish.completed_at is None
 
 
-async def test_update_stage_id_mirrors_status_and_counts(db: AsyncSession, tenant_id: uuid.UUID):
+async def test_done_and_column_are_independent(db: AsyncSession, tenant_id: uuid.UUID):
     owner, project = await _seed(db, tenant_id, "st3")
-    stages = await _by_status(db, project.id, owner)
-    task = await create_task(project.id, TaskCreate(title="Переезд"), owner, db)
-    moved = await update_task(task.id, TaskUpdate(stage_id=stages["done"].id), owner, db)
-    assert moved.status == "done"
-    assert moved.stage_id == stages["done"].id
-    assert moved.completed_at is not None
-    # legacy PATCH {status} — в первый этап статуса
-    back = await update_task(task.id, TaskUpdate(status="todo"), owner, db)
-    assert back.stage_id == stages["todo"].id
-    assert back.completed_at is None
-    # оба и не согласованы → 422
+    stages = await list_project_stages(project.id, principal=owner, db=db)
+    task = await create_task(project.id, TaskCreate(title="Две оси"), owner, db)
+
+    # Галочка не двигает карточку.
+    done = await update_task(task.id, TaskUpdate(done=True), owner, db)
+    assert done.done is True and done.completed_at is not None
+    assert done.stage_id == stages[0].id
+
+    # Перенос не меняет состояние.
+    moved = await update_task(task.id, TaskUpdate(stage_id=stages[2].id), owner, db)
+    assert moved.stage_id == stages[2].id
+    assert moved.done is True and moved.completed_at is not None
+
+    # Снятие галочки чистит дату закрытия.
+    back = await update_task(task.id, TaskUpdate(done=False), owner, db)
+    assert back.done is False and back.completed_at is None
+    assert back.stage_id == stages[2].id
+
+
+async def test_legacy_status_is_rejected_not_ignored(db: AsyncSession, tenant_id: uuid.UUID):
+    """Старый бандл должен получить ошибку, а не успешный no-op."""
+    owner, project = await _seed(db, tenant_id, "st4")
     with pytest.raises(HTTPException) as exc:
-        await update_task(
-            task.id, TaskUpdate(stage_id=stages["done"].id, status="todo"), owner, db
+        await create_task(project.id, TaskCreate(title="Старый", status="done"), owner, db)
+    assert exc.value.status_code == 422
+    assert "обновите страницу" in exc.value.detail.lower()
+
+    task = await create_task(project.id, TaskCreate(title="Обычная"), owner, db)
+    with pytest.raises(HTTPException) as exc:
+        await update_task(task.id, TaskUpdate(status="done"), owner, db)
+    assert exc.value.status_code == 422
+    fresh = await get_task(task.id, owner, db)
+    assert fresh.done is False, "отвергнутый патч ничего не изменил"
+
+    with pytest.raises(HTTPException) as exc:
+        await create_stage(
+            project.id, StageCreate(name="Колонка", system_status="todo"), owner, db
         )
     assert exc.value.status_code == 422
-    counts = {k: v.task_count for k, v in (await _by_status(db, project.id, owner)).items()}
-    assert counts["todo"] == 1 and counts["done"] == 0
 
 
-async def test_custom_stage_same_status_is_a_real_move(db: AsyncSession, tenant_id: uuid.UUID):
-    """«В работе» → «Проверка ТУ» (оба in_review/in_progress): этап меняется,
-    статус-зеркало — по этапу."""
-    owner, project = await _seed(db, tenant_id, "st4")
-    tu = await create_stage(
-        project.id, StageCreate(name="Проверка ТУ", system_status="in_review"), owner, db
-    )
+async def test_custom_columns_live_freely(db: AsyncSession, tenant_id: uuid.UUID):
+    owner, project = await _seed(db, tenant_id, "st5")
+    idea = await create_stage(project.id, StageCreate(name="Идея", position=0), owner, db)
     stages = await list_project_stages(project.id, principal=owner, db=db)
+    assert [s.name for s in stages][0] == "Идея"
     assert [s.position for s in stages] == [0, 1, 2, 3, 4]
-    task = await create_task(project.id, TaskCreate(title="На ТУ"), owner, db)
-    moved = await update_task(task.id, TaskUpdate(stage_id=tu.id), owner, db)
-    assert moved.stage_id == tu.id and moved.status == "in_review"
+
+    task = await create_task(project.id, TaskCreate(title="Задача", stage_id=idea.id), owner, db)
+    renamed = await update_stage(idea.id, StageUpdate(name="Согласование"), owner, db)
+    assert renamed.name == "Согласование"
     fresh = await get_task(task.id, owner, db)
-    assert fresh.stage_id == tu.id
+    assert fresh.stage_id == idea.id and fresh.done is False
 
 
-async def test_cannot_delete_last_stage_of_status_and_move_on_delete(
+async def test_delete_column_moves_tasks_and_keeps_state(
     db: AsyncSession, tenant_id: uuid.UUID
 ):
-    owner, project = await _seed(db, tenant_id, "st5")
-    stages = await _by_status(db, project.id, owner)
-    with pytest.raises(HTTPException) as exc:
-        await delete_stage(stages["done"].id, move_to=None, principal=owner, db=db)
-    assert exc.value.status_code == 409
-
-    extra = await create_stage(
-        project.id, StageCreate(name="Готово-2", system_status="done"), owner, db
-    )
-    task = await create_task(project.id, TaskCreate(title="В доп", stage_id=extra.id), owner, db)
-    with pytest.raises(HTTPException) as exc:
-        await delete_stage(extra.id, move_to=None, principal=owner, db=db)
-    assert exc.value.status_code == 409, "с задачами нужен move_to"
-    await delete_stage(extra.id, move_to=stages["todo"].id, principal=owner, db=db)
-    fresh = await get_task(task.id, owner, db)
-    assert fresh.stage_id == stages["todo"].id
-    assert fresh.status == "todo" and fresh.completed_at is None
-    left = await list_project_stages(project.id, principal=owner, db=db)
-    assert [s.position for s in left] == [0, 1, 2, 3]
-
-
-async def test_change_system_status_rewrites_mirror(db: AsyncSession, tenant_id: uuid.UUID):
     owner, project = await _seed(db, tenant_id, "st6")
-    extra = await create_stage(
-        project.id, StageCreate(name="Бэклог", system_status="todo"), owner, db
-    )
-    task = await create_task(
-        project.id, TaskCreate(title="В бэклоге", stage_id=extra.id), owner, db
-    )
-    assert task.status == "todo"
-    await update_stage(extra.id, StageUpdate(system_status="in_progress"), owner, db)
-    fresh = await get_task(task.id, owner, db)
-    assert fresh.status == "in_progress"
-    # переименование и перестановка
-    renamed = await update_stage(extra.id, StageUpdate(name="Разбор", position=0), owner, db)
-    assert renamed.name == "Разбор" and renamed.position == 0
     stages = await list_project_stages(project.id, principal=owner, db=db)
-    assert stages[0].id == extra.id
-    assert [s.position for s in stages] == [0, 1, 2, 3, 4]
+    task = await create_task(
+        project.id, TaskCreate(title="Выполненная", stage_id=stages[3].id), owner, db
+    )
+    await update_task(task.id, TaskUpdate(done=True), owner, db)
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_stage(stages[3].id, move_to=None, principal=owner, db=db)
+    assert exc.value.status_code == 409, "с задачами нужен move_to"
+
+    await delete_stage(stages[3].id, move_to=stages[0].id, principal=owner, db=db)
+    fresh = await get_task(task.id, owner, db)
+    assert fresh.stage_id == stages[0].id
+    # Перенос при удалении колонки — не «вернуть в работу».
+    assert fresh.done is True and fresh.completed_at is not None
+    left = await list_project_stages(project.id, principal=owner, db=db)
+    assert [s.position for s in left] == [0, 1, 2]
 
 
-async def test_stats_stage_breakdown(db: AsyncSession, tenant_id: uuid.UUID):
+async def test_last_column_cannot_be_deleted(db: AsyncSession, tenant_id: uuid.UUID):
+    owner, project = await _seed(db, tenant_id, "st7")
+    stages = await list_project_stages(project.id, principal=owner, db=db)
+    for s in stages[1:]:
+        await delete_stage(s.id, move_to=stages[0].id, principal=owner, db=db)
+    left = await list_project_stages(project.id, principal=owner, db=db)
+    assert len(left) == 1
+    with pytest.raises(HTTPException) as exc:
+        await delete_stage(left[0].id, move_to=None, principal=owner, db=db)
+    assert exc.value.status_code == 409
+    assert "единственная колонка" in exc.value.detail.lower()
+    # И задача в проекте с одной колонкой по-прежнему создаётся.
+    task = await create_task(project.id, TaskCreate(title="Одна колонка"), owner, db)
+    assert task.stage_id == left[0].id
+
+
+async def test_stats_counts_by_column_and_state(db: AsyncSession, tenant_id: uuid.UUID):
     from app.api.stats import get_stats
 
-    owner, project = await _seed(db, tenant_id, "st7")
-    stages = await _by_status(db, project.id, owner)
+    owner, project = await _seed(db, tenant_id, "st8")
+    stages = await list_project_stages(project.id, principal=owner, db=db)
     await create_task(project.id, TaskCreate(title="A"), owner, db)
-    await create_task(project.id, TaskCreate(title="B", stage_id=stages["done"].id), owner, db)
+    b = await create_task(
+        project.id, TaskCreate(title="B", stage_id=stages[3].id), owner, db
+    )
+    await update_task(b.id, TaskUpdate(done=True), owner, db)
+
     stats = await get_stats(project.id, principal=owner, db=db)
-    assert stats.stage_breakdown[str(stages["todo"].id)] == 1
-    assert stats.stage_breakdown[str(stages["done"].id)] == 1
-    assert stats.status_breakdown["done"] == 1
+    assert stats.stage_breakdown[str(stages[0].id)] == 1
+    assert stats.stage_breakdown[str(stages[3].id)] == 1
+    assert stats.done_breakdown == {"done": 1, "open": 1}
+    assert stats.total_active == 2
+
+
+async def test_moving_column_is_quiet_but_completing_notifies(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Пуш — только за «выполнена»; перенос карточки людей не будит."""
+    from sqlalchemy import select
+
+    from app.models.notification import Notification
+    from app.models.task import TaskWatcher
+
+    owner, project = await _seed(db, tenant_id, "st9")
+    watcher = make_principal(
+        tenant_id, email="watcher-st9@t.ru", role="member", tenant_slug="st9"
+    )
+    await _register(db, watcher, org_role="office")
+    stages = await list_project_stages(project.id, principal=owner, db=db)
+    task = await create_task(project.id, TaskCreate(title="Наблюдаемая"), owner, db)
+    db.add(
+        TaskWatcher(
+            task_id=task.id,
+            employee_id=watcher.employee_id,
+            tenant_id=tenant_id,
+            added_reason="manual",
+        )
+    )
+    await db.flush()
+
+    async def _inbox() -> list[str]:
+        rows = await db.execute(
+            select(Notification.title).where(
+                Notification.employee_id == watcher.employee_id
+            )
+        )
+        return list(rows.scalars().all())
+
+    await update_task(task.id, TaskUpdate(stage_id=stages[2].id), owner, db)
+    assert await _inbox() == [], "перенос между колонками — не событие для пуша"
+
+    await update_task(task.id, TaskUpdate(done=True), owner, db)
+    assert await _inbox() == ["Задача выполнена"]
+
+    await update_task(task.id, TaskUpdate(done=False), owner, db)
+    assert await _inbox() == ["Задача выполнена", "Задача вернулась в работу"]
+
+
+async def test_db_guards_done_and_completed_at(db: AsyncSession, tenant_id: uuid.UUID):
+    """CHECK-констрейнт, а не только код: рассогласование невозможно."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.task import Task
+
+    owner, project = await _seed(db, tenant_id, "st10")
+    task = await create_task(project.id, TaskCreate(title="Хитрая"), owner, db)
+    row = await db.get(Task, task.id)
+    row.done = True  # без completed_at — ровно то, что ловит CHECK
+    with pytest.raises(IntegrityError):
+        await db.flush()
+    await db.rollback()
+
+
+async def test_partial_index_matches_the_open_predicate(db: AsyncSession):
+    """У «невыполненных со сроком» обязан быть свой частичный индекс.
+
+    Старый `ix_tasks_due_at_active` частичный по `status <> 'done'`: с переходом
+    на `done` запросы просрочки и обе джобы вышли бы из-под него МОЛЧА — без
+    ошибки и без единого падающего теста, — а 0045 унесла бы индекс вместе с
+    колонкой. Сверяем определение, а не план: на пустой таблице планировщик
+    выбирает любой индекс и тест был бы фиктивным.
+    """
+    from sqlalchemy import text
+
+    definition = (
+        await db.execute(
+            text(
+                "SELECT indexdef FROM pg_indexes "
+                "WHERE tablename = 'tasks' AND indexname = 'ix_tasks_due_at_open'"
+            )
+        )
+    ).scalar_one_or_none()
+    assert definition is not None, "индекс-близнец по done не создан миграцией 0044"
+    assert "NOT done" in definition and "archived_at IS NULL" in definition
+    assert "(tenant_id, due_at)" in definition.replace('"', "")

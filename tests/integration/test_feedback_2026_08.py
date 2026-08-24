@@ -21,11 +21,11 @@ from app.api.library import (
 )
 from app.api.me_tasks import list_my_tasks
 from app.api.stats import get_stats
-from app.api.tasks import create_task
+from app.api.tasks import create_task, update_task
 from app.models.library import LibrarySection, MaterialVersion
 from app.models.search_document import SearchDocument
 from app.schemas.library import SectionCreate
-from app.schemas.task import TaskCreate
+from app.schemas.task import TaskCreate, TaskUpdate
 from app.services import taskdates as td
 from tests.integration.test_courses import _mk_member
 from tests.integration.test_library import _mk_material
@@ -37,7 +37,8 @@ pytestmark = pytest.mark.integration
 
 async def _my(db, principal, **kw):
     return await list_my_tasks(
-        status_=kw.get("status_"),
+        done=kw.get("done"),
+        status_=None,
         due_window=kw.get("due_window"),
         include_archived=False,
         principal=principal,
@@ -65,12 +66,12 @@ async def test_due_windows_are_calendar_days(db: AsyncSession, tenant_id: uuid.U
         project.id, TaskCreate(title="Завтра", assignee_ids=[a.employee_id], due_at=tomorrow),
         owner, db,
     )
-    await create_task(
+    closed = await create_task(
         project.id,
-        TaskCreate(title="Вчера, готово", assignee_ids=[a.employee_id], due_at=yesterday,
-                   status="done"),
+        TaskCreate(title="Вчера, готово", assignee_ids=[a.employee_id], due_at=yesterday),
         owner, db,
     )
+    await update_task(closed.id, TaskUpdate(done=True), owner, db)
 
     overdue = {t.id for t in await _my(db, a, due_window="overdue")}
     today = {t.id for t in await _my(db, a, due_window="today")}
@@ -86,27 +87,35 @@ async def test_due_windows_are_calendar_days(db: AsyncSession, tenant_id: uuid.U
     assert by_id[a.employee_id].overdue_count == 1
 
 
-async def test_status_open_filter(db: AsyncSession, tenant_id: uuid.UUID):
+async def test_done_filter(db: AsyncSession, tenant_id: uuid.UUID):
     owner, project, (a, _b) = await _seed(db, tenant_id, "fb2")
     t_open = await create_task(
         project.id, TaskCreate(title="Открыта", assignee_ids=[a.employee_id]), owner, db
     )
-    await create_task(
-        project.id,
-        TaskCreate(title="Готова", assignee_ids=[a.employee_id], status="done"),
-        owner, db,
+    finished = await create_task(
+        project.id, TaskCreate(title="Готова", assignee_ids=[a.employee_id]), owner, db
     )
+    await update_task(finished.id, TaskUpdate(done=True), owner, db)
     rows = await _list(db, project.id, owner)
     assert len(rows) == 2
     from app.api.tasks import list_tasks
 
     open_rows = await list_tasks(
-        project.id, include_archived=False, status_="open", assignee_id=None,
+        project.id, include_archived=False, done=False, status_=None, assignee_id=None,
         section_id=None, priority=None, label=None, due_from=None, due_to=None,
         sort="position", order="asc", stage_id=None, principal=owner, db=db,
     )
     assert [t.id for t in open_rows] == [t_open.id]
-    assert [t.id for t in await _my(db, a, status_="open")] == [t_open.id]
+    assert [t.id for t in await _my(db, a, done=False)] == [t_open.id]
+
+    # Старый параметр не игнорируется молча, а отвечает 422 (0044).
+    with pytest.raises(HTTPException) as exc:
+        await list_tasks(
+            project.id, include_archived=False, done=None, status_="open", assignee_id=None,
+            section_id=None, priority=None, label=None, due_from=None, due_to=None,
+            sort="position", order="asc", stage_id=None, principal=owner, db=db,
+        )
+    assert exc.value.status_code == 422
 
 
 async def test_delete_section_force_detaches_materials(db: AsyncSession, tenant_id: uuid.UUID):

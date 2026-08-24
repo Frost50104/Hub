@@ -1,4 +1,4 @@
-import { TaskStatusControl } from '@/components/task/TaskStatusControl'
+import { TaskDoneControl } from '@/components/task/TaskDoneControl'
 import { PriorityBar } from '@/components/task/PriorityBar'
 import { cn } from '@/lib/cn'
 import { isOverdue, shortDate } from '@/lib/taskDates'
@@ -20,8 +20,8 @@ export function CompactTaskRow({
   onClick?: () => void
   onToggleDone?: () => void
 }) {
-  const done = task.status === 'done'
-  const overdue = isOverdue(task.due_at, task.status)
+  const done = task.done
+  const overdue = isOverdue(task.due_at, task.done)
   return (
     <div
       role="button"
@@ -40,7 +40,7 @@ export function CompactTaskRow({
       )}
     >
       <PriorityBar priority={task.priority} />
-      <TaskStatusControl status={task.status} onToggle={onToggleDone} />
+      <TaskDoneControl done={task.done} onToggle={onToggleDone} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span
           className={cn(

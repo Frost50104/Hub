@@ -66,4 +66,4 @@ def is_overdue(due_at: datetime | None, status: str, now: datetime | None = None
 
 def overdue_clause(now: datetime | None = None) -> ColumnElement[bool]:
     """SQL-условие «просрочена»: день срока раньше сегодняшнего и не done."""
-    return and_(Task.due_at < start_of_today_utc(now), Task.status != "done")
+    return and_(Task.due_at < start_of_today_utc(now), Task.done.is_(False))

@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
 from app.models.task import Task
-from app.schemas.task import TaskPriority, TaskResponse, TaskStatusFilter
+from app.schemas.task import TaskPriority, TaskResponse
 from app.services.personal_projects import assert_full_project_access
 from app.services.project_access import require_project_role
 from app.services.task_assignees import (
@@ -34,7 +34,7 @@ from app.services.task_assignees import (
     serialize_with_assignees,
 )
 from app.services.taskdates import day_start_utc
-from app.services.tasks import apply_status_filter
+from app.services.tasks import apply_done_filter, reject_legacy_status
 
 router = APIRouter(tags=["calendar"])
 
@@ -59,12 +59,15 @@ async def list_calendar_tasks(
     project_id: UUID,
     from_: str = Query(..., alias="from", description="Inclusive YYYY-MM-DD"),
     to: str = Query(..., description="Inclusive YYYY-MM-DD"),
-    status_: TaskStatusFilter | None = Query(default=None, alias="status"),
+    done: bool | None = Query(default=None),
+    # LEGACY (0044): см. `_reject_legacy_status` в api/tasks.py.
+    status_: str | None = Query(default=None, alias="status"),
     assignee_id: UUID | None = Query(default=None, alias="assignee"),
     priority: TaskPriority | None = Query(default=None),
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> list[TaskResponse]:
+    reject_legacy_status(status_)
     project, _ = await require_project_role(db, project_id, principal)
     assert_full_project_access(project, principal)
 
@@ -106,7 +109,7 @@ async def list_calendar_tasks(
         )
         .order_by(Task.start_at.nulls_last(), Task.due_at)
     )
-    stmt = apply_status_filter(stmt, status_)
+    stmt = apply_done_filter(stmt, done)
     if assignee_id is not None:
         stmt = stmt.where(assignee_exists(assignee_id))
     if priority is not None:

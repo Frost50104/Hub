@@ -19,13 +19,13 @@ import { type SubtaskStats, type Task } from '@/lib/tasks'
 import { KanbanCard } from './KanbanCard'
 
 export interface ColumnDef {
-  /** Этап колонки; `null` — «Без этапа» (задачи из окна деплоя 0040). */
+  /** Колонка доски; `null` — бакет «Без колонки» (объекты из старого кэша). */
   stage: TaskStage | null
   /** dnd-kit identifier — must be unique per column. */
   dndId: string
   name: string
   tasks: Task[]
-  /** Тотал по этапу с сервера — правая часть «N из M». */
+  /** Тотал по колонке с сервера — правая часть «N из M». */
   total: number | null
 }
 
@@ -42,7 +42,7 @@ interface KanbanColumnProps {
   isOver?: boolean
   /** Первая колонка принимает фокус от «Новая задача» в сайдбаре. */
   quickCreateTarget?: boolean
-  /** Меню этапа («…»): переименовать / удалить. Только при canEdit и у настоящего этапа. */
+  /** Меню колонки («…»): переименовать / удалить. Только при canEdit и у настоящей колонки. */
   onRenameStage?: (stage: TaskStage) => void
   onDeleteStage?: (stage: TaskStage) => void
   /** Дополнительные пункты меню (перестановка). */
@@ -52,9 +52,9 @@ interface KanbanColumnProps {
 /**
  * Колонка доски = ЭТАП задачи: 288px (`sm:w-72`), отбивка 4px, радиус 12.
  * Имя колонки — пользовательское, 14/600 обычным шрифтом, без точки и без
- * цветовой кодировки: цвет принадлежит приоритету и просрочке, а не этапу.
+ * цветовой кодировки: цвет принадлежит приоритету и просрочке, а не колонке.
  * Счётчик — «N из M»: слева отрисовано (фильтры могли сузить), справа
- * тотал по этапу с сервера.
+ * тотал по колонке с сервера.
  *
  * Состояние приёма — пунктир `--amber` 50% и фон 5%, БЕЗ сплошной рамки.
  */
@@ -98,7 +98,7 @@ export function KanbanColumn({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                aria-label={`Действия с этапом «${column.name}»`}
+                aria-label={`Действия с колонкой «${column.name}»`}
                 className="-my-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
               >
                 <MoreHorizontal className="h-4 w-4" />
@@ -107,7 +107,7 @@ export function KanbanColumn({
             <DropdownMenuContent align="end">
               {onRenameStage && (
                 <DropdownMenuItem onSelect={() => onRenameStage(column.stage!)}>
-                  Переименовать / статус
+                  Переименовать
                 </DropdownMenuItem>
               )}
               {extraMenu}
@@ -115,7 +115,7 @@ export function KanbanColumn({
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem destructive onSelect={() => onDeleteStage(column.stage!)}>
-                    Удалить этап
+                    Удалить колонку
                   </DropdownMenuItem>
                 </>
               )}
@@ -138,7 +138,7 @@ export function KanbanColumn({
               draggable={canEdit}
               onClick={() => onTaskClick(t.id)}
               onToggleDone={
-                t.can_set_status === false ? undefined : () => onToggleDone(t)
+                t.can_complete === false ? undefined : () => onToggleDone(t)
               }
             />
           ))}

@@ -7,15 +7,15 @@ import { cn } from '@/lib/cn'
 import { useLabels } from '@/hooks/useLabels'
 import {
   activeFilterCount,
+  type DoneFilter,
   type DuePreset,
   type TaskViewFilters,
 } from '@/lib/taskFilters'
 import {
+  DONE_FILTER_LABEL,
   PRIORITY_LABEL,
-  STATUS_FILTER_LABEL,
   type TaskPriority,
   type TaskSortField,
-  type TaskStatusFilter,
 } from '@/lib/tasks'
 
 const DUE_LABEL: Record<DuePreset, string> = {
@@ -171,15 +171,15 @@ export function TaskFilterBar({
 
       <FilterSelect
         stack={stack}
-        ariaLabel="Фильтр по статусу"
-        label={value.status ? STATUS_FILTER_LABEL[value.status] : 'Статус: все'}
-        value={value.status ?? ''}
-        onChange={(v) => set({ status: (v || undefined) as TaskStatusFilter | undefined })}
+        ariaLabel="Фильтр по состоянию"
+        label={value.done ? DONE_FILTER_LABEL[value.done] : 'Состояние: все'}
+        value={value.done ?? ''}
+        onChange={(v) => set({ done: (v || undefined) as DoneFilter | undefined })}
       >
-        <option value="">Статус: все</option>
-        {(Object.keys(STATUS_FILTER_LABEL) as TaskStatusFilter[]).map((s) => (
+        <option value="">Состояние: все</option>
+        {(Object.keys(DONE_FILTER_LABEL) as DoneFilter[]).map((s) => (
           <option key={s} value={s}>
-            {STATUS_FILTER_LABEL[s]}
+            {DONE_FILTER_LABEL[s]}
           </option>
         ))}
       </FilterSelect>

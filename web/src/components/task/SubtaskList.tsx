@@ -35,7 +35,7 @@ export function SubtaskList({ taskId, projectId, canEdit, onOpenTask }: SubtaskL
     [tasks.data, taskId],
   )
 
-  const doneCount = subtasks.filter((t) => t.status === 'done').length
+  const doneCount = subtasks.filter((t) => t.done).length
 
   if (!canEdit && subtasks.length === 0) return null
 
@@ -46,7 +46,7 @@ export function SubtaskList({ taskId, projectId, canEdit, onOpenTask }: SubtaskL
     >
       <div className="flex flex-col">
         {subtasks.map((t) => {
-          const done = t.status === 'done'
+          const done = t.done
           return (
             <div
               key={t.id}
@@ -59,8 +59,8 @@ export function SubtaskList({ taskId, projectId, canEdit, onOpenTask }: SubtaskL
                 onClick={() => toggleDone(t)}
                 // Своя подзадача закрывается и наблюдателем — то же правило,
                 // что у статуса в карточке и в строке списка
-                // (TaskResponse.can_set_status). undefined = «не знаем».
-                disabled={!(t.can_set_status ?? canEdit)}
+                // (TaskResponse.can_complete). undefined = «не знаем».
+                disabled={!(t.can_complete ?? canEdit)}
                 aria-label={done ? 'Вернуть в работу' : 'Завершить'}
                 className={cn(
                   'flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full',

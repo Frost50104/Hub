@@ -339,7 +339,7 @@ export function TimelineView({ projectId, onTaskClick }: TimelineViewProps) {
                     style={{ height: rowH }}
                     className="flex w-full items-center border-b border-hair px-3.5 text-left text-[14px] text-text hover:bg-glass focus-visible:outline-none focus-visible:bg-glass focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber"
                   >
-                    <span className={cn('truncate', r.task.status === 'done' && 'text-text2 line-through')}>
+                    <span className={cn('truncate', r.task.done && 'text-text2 line-through')}>
                       {r.task.title}
                     </span>
                   </button>
@@ -444,7 +444,7 @@ function TimelineBar({
     id: task.id,
     disabled: !draggable,
   })
-  const overdue = isOverdue(task.due_at, task.status)
+  const overdue = isOverdue(task.due_at, task.done)
   const style: CSSProperties = {
     transform: CSS.Translate.toString(transform),
     left: bar.leftPx,

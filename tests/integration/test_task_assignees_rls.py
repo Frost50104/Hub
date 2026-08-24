@@ -56,12 +56,28 @@ async def _seed_task_with_assignee(tenant_id: uuid.UUID) -> tuple[uuid.UUID, uui
                 "eid": employee_id,
             },
         )
+        # Колонка доски обязательна (0044): фикстура пишет сырым SQL, минуя
+        # create_project_record, поэтому заводит её сама.
+        stage_id = uuid.uuid4()
         await s.execute(
             text(
-                "INSERT INTO tasks (id, tenant_id, project_id, title, created_by, "
-                "position, seq) VALUES (:id, :tid, :pid, 'Задача', :eid, 1, 1)"
+                "INSERT INTO project_stages (id, tenant_id, project_id, name, position) "
+                "VALUES (:sid, :tid, :pid, 'Колонка', 0)"
             ),
-            {"id": task_id, "tid": tenant_id, "pid": project_id, "eid": employee_id},
+            {"sid": stage_id, "tid": tenant_id, "pid": project_id},
+        )
+        await s.execute(
+            text(
+                "INSERT INTO tasks (id, tenant_id, project_id, stage_id, title, created_by, "
+                "position, seq) VALUES (:id, :tid, :pid, :sid, 'Задача', :eid, 1, 1)"
+            ),
+            {
+                "id": task_id,
+                "tid": tenant_id,
+                "pid": project_id,
+                "sid": stage_id,
+                "eid": employee_id,
+            },
         )
         await s.execute(
             text(

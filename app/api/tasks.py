@@ -6,7 +6,6 @@ land in 3c.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
@@ -17,26 +16,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.shadow import ShadowUser
+from app.models.stage import ProjectStage
 from app.models.task import Task, TaskLabelAssignment, TaskWatcher
 from app.schemas.task import (
     TaskAssigneeAdd,
     TaskCreate,
     TaskPriority,
     TaskResponse,
-    TaskStatusFilter,
     TaskUpdate,
     resolve_assignee_ids,
 )
 from app.services.activity_writer import record_activity
-from app.services.notify import notify_status_changed
+from app.services.notify import notify_done_changed
 from app.services.personal_projects import personal_task_scope, require_task_access
 from app.services.project_access import ProjectRole, is_hub_admin, require_project_role
-from app.services.stages import next_position, resolve_stage, set_stage
+from app.services.stages import get_stage_in_project, set_done, set_stage
 from app.services.task_assignees import (
     add_assignee,
     apply_assignee_side_effects,
     assignee_exists,
-    can_set_status,
+    can_complete,
     is_task_assignee,
     load_assignees,
     remove_assignee,
@@ -46,10 +45,11 @@ from app.services.task_assignees import (
 from app.services.task_counts import load_row_counts
 from app.services.tasks import (
     allocate_task_seq,
-    apply_status_filter,
+    apply_done_filter,
     assert_parent_one_level,
     assert_section_in_project,
     create_task_record,
+    reject_legacy_status,
 )
 
 router = APIRouter(tags=["tasks"])
@@ -59,18 +59,13 @@ router = APIRouter(tags=["tasks"])
 # и без этого правила он не мог бы даже отметить задачу выполненной.
 # `position` сюда НЕ входит: порядок остаётся редакторским, поэтому
 # drag-n-drop доски (шлёт stage_id + position одним PATCH) под правило не подпадает.
-ASSIGNEE_EDITABLE_FIELDS = frozenset({"status", "stage_id"})
+ASSIGNEE_EDITABLE_FIELDS = frozenset({"done", "stage_id"})
 
 # Ранжирование приоритета для ORDER BY (колонка — строковый enum).
 PRIORITY_ORDER: dict[str, int] = {"low": 1, "medium": 2, "high": 3, "urgent": 4}
 
 TaskSortField = Literal["position", "due_at", "priority", "created_at", "title"]
 
-
-async def _next_position(db: AsyncSession, project_id: UUID, status_: str) -> Decimal:
-    """Append в хвост колонки статуса — legacy-обёртка над `stages.next_position`
-    для задач без этапа (окно деплоя 0040)."""
-    return await next_position(db, project_id, stage_id=None, system_status=status_)
 
 
 
@@ -89,18 +84,18 @@ async def _serialize_one(
     *,
     rights_for: tuple[ProjectRole | None, Principal] | None = None,
 ) -> TaskResponse:
-    """`rights_for=(role, principal)` — заполнить `can_set_status`.
+    """`rights_for=(role, principal)` — заполнить `can_complete`.
 
     Передаём только там, где роль уже посчитана и клиенту нужен контрол
-    статуса (get_task). Мутирующие ручки поле не заполняют сознательно: их
-    ответ в кэш клиента не попадает.
+    выполнения (get_task). Мутирующие ручки поле не заполняют сознательно:
+    их ответ в кэш клиента не попадает.
     """
     by_task = await load_assignees(db, [task.id])
     assignees = by_task.get(task.id, [])
     data = _serialize(task, assignees)
     if rights_for is not None:
         role, principal = rights_for
-        data.can_set_status = can_set_status(role, principal.employee_id, assignees)
+        data.can_complete = can_complete(role, principal.employee_id, assignees)
     return data
 
 
@@ -111,7 +106,10 @@ async def _serialize_one(
 async def list_tasks(
     project_id: UUID,
     include_archived: bool = Query(default=False),
-    status_: TaskStatusFilter | None = Query(default=None, alias="status"),
+    done: bool | None = Query(default=None),
+    # LEGACY: неизвестный query FastAPI просто проигнорировал бы, и старый
+    # бандл увидел бы НЕотфильтрованный список вместо ошибки (0044).
+    status_: str | None = Query(default=None, alias="status"),
     assignee_id: UUID | None = Query(default=None, alias="assignee"),
     section_id: UUID | None = Query(default=None),
     priority: TaskPriority | None = Query(default=None),
@@ -154,7 +152,8 @@ async def list_tasks(
         stmt = stmt.where(scope)
     if not include_archived:
         stmt = stmt.where(Task.archived_at.is_(None))
-    stmt = apply_status_filter(stmt, status_)
+    reject_legacy_status(status_)
+    stmt = apply_done_filter(stmt, done)
     if assignee_id is not None:
         # Семантика: «сотрудник СРЕДИ исполнителей».
         stmt = stmt.where(assignee_exists(assignee_id))
@@ -186,7 +185,7 @@ async def list_tasks(
     for t in tasks:
         assignees = by_task.get(t.id, [])
         item = _serialize(t, assignees)
-        item.can_set_status = can_set_status(my_role, principal.employee_id, assignees)
+        item.can_complete = can_complete(my_role, principal.employee_id, assignees)
         c = counts.get(t.id)
         if c is not None:
             item.comment_count = c.comments
@@ -213,6 +212,7 @@ async def create_task(
         limit=120,
         window_sec=60,
     )
+    reject_legacy_status(body.status)
     await require_project_role(db, project_id, principal, allow=("owner", "editor"))
     # Доменная работа — в services/tasks.py: тот же путь использует импорт из
     # CSV (ему нельзя ходить через ручку из-за rate-limit).
@@ -268,6 +268,7 @@ async def update_task(
         limit=120,
         window_sec=60,
     )
+    reject_legacy_status(body.status)
     task = await db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
@@ -348,50 +349,40 @@ async def update_task(
                 actor_name=actor_name,
             )
 
-    # Этап/статус — через services.stages: stage_id побеждает, status —
-    # legacy-вход (первый этап этого статуса). Смена этапа внутри одного
-    # системного статуса («В работе» → «Проверка ТУ») — тоже событие.
+    # Колонка доски и выполнение — независимые оси (0044). Перенос карточки
+    # пишется в ленту, но людей не будит: на доске из пяти колонок пуш за
+    # каждый шаг превратился бы в шум. Пуш остаётся за сменой «выполнена».
     if "stage_id" in body.model_fields_set and body.stage_id is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="stage_id не может быть пустым: у задачи всегда есть этап",
+            detail="stage_id не может быть пустым: у задачи всегда есть колонка",
         )
-    target_stage = await resolve_stage(
-        db, task.project_id, stage_id=body.stage_id, system_status=body.status
-    )
-    stage_changed = target_stage is not None and target_stage.id != task.stage_id
-    status_changed_legacy = (
-        target_stage is None and body.status is not None and body.status != task.status
-    )
-    if stage_changed or status_changed_legacy:
-        old_status = task.status
-        if target_stage is not None:
-            old_status = await set_stage(db, task, target_stage)
-            new_status = target_stage.system_status
-        else:
-            # Проект без этапов (до backfill) — прежний путь по статусу.
-            new_status = body.status  # type: ignore[assignment]
-            task.status = new_status
-            if new_status == "done":
-                task.completed_at = datetime.now(UTC)
-            elif old_status == "done":
-                task.completed_at = None
-            task.position = await _next_position(db, task.project_id, new_status)
+    if body.stage_id is not None and body.stage_id != task.stage_id:
+        target_stage = await get_stage_in_project(db, task.project_id, body.stage_id)
+        previous_id = await set_stage(db, task, target_stage)
+        previous = await db.get(ProjectStage, previous_id)
         await record_activity(
             db,
             tenant_id=principal.tenant_id,
             task_id=task.id,
             actor_id=principal.employee_id,
-            kind="status_changed",
-            # old/new — системные статусы (их парсит TaskThread у старых
-            # записей); stage_to — имя этапа для новых.
+            kind="stage_changed",
             payload={
-                "old": old_status,
-                "new": new_status,
-                "stage_to": target_stage.name if target_stage is not None else None,
+                "stage_from": previous.name if previous is not None else None,
+                "stage_to": target_stage.name,
             },
         )
-        # Notify watchers (except the actor) about the status change.
+
+    if body.done is not None and body.done != task.done:
+        set_done(task, body.done)
+        await record_activity(
+            db,
+            tenant_id=principal.tenant_id,
+            task_id=task.id,
+            actor_id=principal.employee_id,
+            kind="done_changed",
+            payload={"done": task.done},
+        )
         watcher_rows = await db.execute(
             select(TaskWatcher.employee_id).where(
                 TaskWatcher.task_id == task.id,
@@ -399,13 +390,12 @@ async def update_task(
             )
         )
         for (emp_id,) in watcher_rows.all():
-            await notify_status_changed(
+            await notify_done_changed(
                 db,
                 task=task,
-                new_status=new_status,
+                done=task.done,
                 actor_name=actor_name,
                 recipient_id=emp_id,
-                label=target_stage.name if target_stage is not None else None,
             )
 
     if body.position is not None:

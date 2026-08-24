@@ -8,12 +8,6 @@ import { type SearchGroup, type SearchTaskHit } from '@/lib/search'
 
 import { HighlightedSnippet } from './HighlightedSnippet'
 
-const STATUS_LABEL: Record<SearchTaskHit['status'], string> = {
-  todo: 'К выполнению',
-  in_progress: 'В работе',
-  in_review: 'На проверке',
-  done: 'Готово',
-}
 
 const PRIORITY_TONE: Record<SearchTaskHit['priority'], string> = {
   low: 'text-text2',
@@ -100,7 +94,7 @@ export function SearchResults({
                         <span
                           className={cn(
                             'truncate',
-                            t.status === 'done'
+                            t.done
                               ? 'text-text2 line-through'
                               : 'text-text',
                           )}
@@ -126,7 +120,7 @@ export function SearchResults({
                           {PRIORITY_LABEL[t.priority]}
                         </span>
                         <span className="rounded bg-glass px-1.5 py-0.5 text-[12px] text-text2">
-                          {STATUS_LABEL[t.status]}
+                          {t.done ? 'Выполнена' : 'Не выполнена'}
                         </span>
                       </span>
                     </div>

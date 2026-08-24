@@ -31,7 +31,7 @@ export interface PublicTaskView {
   kind: 'task'
   title: string
   description: string | null
-  status: string
+  done: boolean
   priority: string
   start_at: string | null
   due_at: string | null
@@ -47,7 +47,7 @@ export interface PublicTaskView {
 export interface PublicTaskHit {
   id: string
   title: string
-  status: string
+  done: boolean
   priority: string
   due_at: string | null
   /** @deprecated Первые инициалы из `assignees_initials`. */

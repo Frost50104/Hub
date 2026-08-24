@@ -37,10 +37,10 @@ describe('taskDates — календарный день display tz', () => {
     const evening = Date.parse('2026-08-20T20:59:00Z') // 23:59 МСК
     const afterMidnight = Date.parse('2026-08-20T21:00:30Z') // 00:00:30 МСК 21.08
     expect(todayKey(evening, MSK)).toBe('2026-08-20')
-    expect(isOverdue(due, 'todo', evening)).toBe(false)
-    expect(isOverdue(due, 'todo', afterMidnight)).toBe(true)
-    expect(isOverdue(due, 'done', afterMidnight)).toBe(false)
-    expect(isOverdue(null, 'todo', afterMidnight)).toBe(false)
+    expect(isOverdue(due, false, evening)).toBe(false)
+    expect(isOverdue(due, false, afterMidnight)).toBe(true)
+    expect(isOverdue(due, true, afterMidnight)).toBe(false)
+    expect(isOverdue(null, false, afterMidnight)).toBe(false)
     expect(overdueDays(due, afterMidnight)).toBe(1)
     expect(overdueDays(due, Date.parse('2026-08-23T12:00:00Z'))).toBe(3)
   })

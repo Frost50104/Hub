@@ -15,7 +15,6 @@ import {
   type TaskListFilters,
   type TaskUpdateBody,
 } from '@/lib/tasks'
-import { type TaskStage } from '@/lib/stages'
 
 export const taskKeys = {
   all: ['tasks'] as const,
@@ -83,20 +82,9 @@ export function useUpdateTask(projectId: string) {
         qc.cancelQueries({ queryKey: ['me-tasks'] }),
         qc.cancelQueries({ queryKey: taskKeys.detail(id) }),
       ])
+      // Зеркала больше нет: колонка и «выполнена» — независимые оси (0044),
+      // патч применяется как есть.
       const patch: Partial<Task> = { ...(body as Partial<Task>), ...__optimistic }
-      // Зеркало этапа: патч {stage_id} без status оставил бы иконку статуса и
-      // зачёркивание старыми до рефетча — дополняем из кэша этапов проекта.
-      // И наоборот: legacy {status} кладёт в первый этап этого статуса.
-      const stages = qc.getQueryData<TaskStage[]>(['stages', projectId])
-      if (stages) {
-        if (patch.stage_id && patch.status === undefined) {
-          const st = stages.find((s) => s.id === patch.stage_id)
-          if (st) patch.status = st.system_status
-        } else if (patch.status && patch.stage_id === undefined) {
-          const st = stages.find((s) => s.system_status === patch.status)
-          if (st) patch.stage_id = st.id
-        }
-      }
       const apply = (old: Task[] | undefined) =>
         old?.map((t) => (t.id === id ? { ...t, ...patch } : t))
 
@@ -120,8 +108,8 @@ export function useUpdateTask(projectId: string) {
         qc.setQueryData(taskKeys.detail(ctx.id), ctx.prevDetail)
       }
     },
-    // Сервер мог поменять больше, чем мы патчили (completed_at, position
-    // при смене статуса) — сверяемся в любом исходе.
+    // Сервер мог поменять больше, чем мы патчили (completed_at при галочке,
+    // position при переносе) — сверяемся в любом исходе.
     onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: ['tasks', projectId] })
       qc.invalidateQueries({ queryKey: ['me-tasks'] })
@@ -129,7 +117,7 @@ export function useUpdateTask(projectId: string) {
       qc.invalidateQueries({ queryKey: ['task', vars.id, 'activity'] })
       // «N из M» в шапках колонок живёт в кэше этапов; done_count проекта —
       // в его карточке.
-      if (vars.stage_id !== undefined || vars.status !== undefined) {
+      if (vars.stage_id !== undefined || vars.done !== undefined) {
         qc.invalidateQueries({ queryKey: ['stages', projectId] })
         qc.invalidateQueries({ queryKey: ['projects', projectId] })
       }
@@ -211,34 +199,21 @@ export function useToggleAssignee(projectId: string) {
 }
 
 /**
- * Тоггл «готово» с undo-тостом (как в Asana). Возвращает колбэк для
- * чекбоксов в списках/карточках; предыдущий статус восстанавливается
- * кнопкой «Отменить».
- */
-/**
- * «Закрыть»/«вернуть» задачу — в ПЕРВЫЙ этап статуса done/todo; отмена
- * возвращает исходный ЭТАП (не только статус): у проекта может быть
- * несколько этапов одного статуса, и «Проверка ТУ» после undo не должна
- * превращаться в «На проверке».
+ * Тоггл «выполнена» с undo-тостом (как в Asana).
+ *
+ * Карточку никуда не двигаем (0044): состояние и колонка — независимые оси,
+ * поэтому отмена — это просто обратная галочка, а не возврат в прежний этап.
  */
 export function useToggleDone(projectId: string) {
   const update = useUpdateTask(projectId)
-  const qc = useQueryClient()
-  return (task: Pick<Task, 'id' | 'status'> & { stage_id?: string | null }) => {
-    const stages = qc.getQueryData<TaskStage[]>(['stages', projectId])
-    const next = task.status === 'done' ? 'todo' : 'done'
-    const target = stages?.find((s) => s.system_status === next)
-    update.mutate(target ? { id: task.id, stage_id: target.id } : { id: task.id, status: next })
-    if (next === 'done') {
-      toast.success('Задача завершена', {
+  return (task: Pick<Task, 'id' | 'done'>) => {
+    const next = !task.done
+    update.mutate({ id: task.id, done: next })
+    if (next) {
+      toast.success('Задача выполнена', {
         action: {
           label: 'Отменить',
-          onClick: () =>
-            update.mutate(
-              task.stage_id
-                ? { id: task.id, stage_id: task.stage_id }
-                : { id: task.id, status: task.status },
-            ),
+          onClick: () => update.mutate({ id: task.id, done: false }),
         },
       })
     }

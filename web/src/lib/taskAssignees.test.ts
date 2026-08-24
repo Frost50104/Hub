@@ -23,7 +23,7 @@ function task(patch: Partial<Task>): Task {
     parent_task_id: null,
     title: 'Задача',
     description: null,
-    status: 'todo',
+    done: false,
     priority: 'medium',
     assignee_id: null,
     assignee: null,

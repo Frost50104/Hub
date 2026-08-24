@@ -119,7 +119,7 @@ function DesktopHome() {
   )
   const recent = (projects.data ?? []).slice(0, 6)
   const total = myTasks.data?.length ?? 0
-  const done = (myTasks.data ?? []).filter((t) => t.status === 'done').length
+  const done = (myTasks.data ?? []).filter((t) => t.done).length
 
   return (
     <div className="mx-auto flex max-w-[1080px] flex-col gap-[26px] px-6 pb-10 pt-8">

@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
@@ -20,9 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.project import Project
 from app.models.section import Section
 from app.models.task import Task
-from app.schemas.task import TaskCreate, resolve_assignee_ids
+from app.schemas.task import LEGACY_STATUS_DETAIL, TaskCreate, resolve_assignee_ids
 from app.services.activity_writer import record_activity
-from app.services.stages import next_position, resolve_stage, stage_for_status
+from app.services.stages import next_position, require_stage
 from app.services.task_assignees import (
     apply_assignee_side_effects,
     assert_assignees_in_tenant,
@@ -92,27 +91,18 @@ async def create_task_record(
     assignee_ids = resolve_assignee_ids(body) or []
     assignee_names = await assert_assignees_in_tenant(db, assignee_ids)
     await assert_parent_one_level(db, body.parent_task_id)
-    # Этап: явный stage_id либо первый этап присланного статуса (legacy).
-    # `status` у TaskCreate имеет дефолт «todo» — учитываем его только если
-    # прислан явно, иначе stage_id=«Готово» конфликтовал бы с дефолтом.
-    explicit_status = body.status if "status" in body.model_fields_set else None
-    stage = await resolve_stage(
-        db, project_id, stage_id=body.stage_id, system_status=explicit_status
-    )
-    if stage is None:
-        stage = await stage_for_status(db, project_id, body.status)
-    task_status = stage.system_status if stage is not None else body.status
+    # Колонка: явная либо первая по позиции. Колонок нет вовсе → 409 (0044).
+    stage = await require_stage(db, project_id, body.stage_id)
 
     task = Task(
         id=uuid4(),
         tenant_id=principal.tenant_id,
         project_id=project_id,
         section_id=body.section_id,
-        stage_id=stage.id if stage is not None else None,
+        stage_id=stage.id,
         parent_task_id=body.parent_task_id,
         title=body.title,
         description=body.description,
-        status=task_status,
         priority=body.priority,
         created_by=principal.employee_id,
         start_at=body.start_at,
@@ -121,15 +111,8 @@ async def create_task_record(
         # иначе два параллельных create (быстрый ввод Enter-Enter) считают
         # max(position)+1 до лока и получают одинаковую позицию.
         seq=await allocate_task_seq(db, project_id),
-        position=await next_position(
-            db,
-            project_id,
-            stage_id=stage.id if stage is not None else None,
-            system_status=task_status,
-        ),
+        position=await next_position(db, project_id, stage_id=stage.id),
     )
-    if task_status == "done":
-        task.completed_at = datetime.now(UTC)
     db.add(task)
     # Flush so the task INSERT actually hits Postgres before we record an
     # activity row that references task.id (FK on task_activity.task_id).
@@ -174,21 +157,32 @@ async def create_task_record(
         kind="created",
         payload={
             "title": body.title,
-            "status": task_status,
             "section_id": str(body.section_id) if body.section_id else None,
-            "stage_id": str(stage.id) if stage is not None else None,
+            "stage_id": str(stage.id),
+            "stage_name": stage.name,
         },
     )
     return task
 
 
-def apply_status_filter(stmt, status_: str | None):
-    """Фильтр статуса списков: `open` → все незавершённые (`!= done`),
-    иначе равенство. Единственное место, знающее про псевдо-статус `open`
-    (`schemas.task.TaskStatusFilter`)."""
-    if status_ is None:
+def reject_legacy_status(value: object) -> None:
+    """Старое поле/параметр `status` — честная 422, а не тихий no-op.
+
+    Четырёх системных статусов больше нет (0044). Молчаливое игнорирование
+    (дефолт pydantic для лишних полей и FastAPI для неизвестных query) было бы
+    хуже ошибки: старый бандл показал бы «задача закрыта» при незакрытой
+    задаче и НЕотфильтрованный список вместо отфильтрованного.
+    """
+    if value is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=LEGACY_STATUS_DETAIL
+        )
+
+
+def apply_done_filter(stmt, done: bool | None):
+    """Фильтр состояния списков: `False` — невыполненные, `True` — выполненные,
+    `None` — все. Единственное место, где живёт это условие."""
+    if done is None:
         return stmt
-    if status_ == "open":
-        return stmt.where(Task.status != "done")
-    return stmt.where(Task.status == status_)
+    return stmt.where(Task.done.is_(done))
 

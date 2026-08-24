@@ -4,12 +4,13 @@ import { useCallback } from 'react'
 import { useMe } from '@/hooks/useMe'
 import { api } from '@/lib/api'
 import { excludeProject } from '@/lib/personalTasks'
-import { type Task, type TaskStatus } from '@/lib/tasks'
+import { type Task } from '@/lib/tasks'
 
 export type DueWindow = 'overdue' | 'today' | 'upcoming' | 'all'
 
 export interface MyTasksFilters {
-  status?: TaskStatus
+  /** `false` — невыполненные, `true` — выполненные, отсутствие — все. */
+  done?: boolean
   due_window?: DueWindow
   include_archived?: boolean
 }

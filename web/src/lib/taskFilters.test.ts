@@ -16,11 +16,11 @@ import {
 describe('filtersFromSearchParams', () => {
   it('читает все ключи из URL', () => {
     const sp = new URLSearchParams(
-      'f_assignee=u1&f_status=done&f_priority=high&f_label=l1&f_due=week&sort=due_at&order=desc',
+      'f_assignee=u1&f_done=done&f_priority=high&f_label=l1&f_due=week&sort=due_at&order=desc',
     )
     expect(filtersFromSearchParams(sp)).toEqual({
       assignee: 'u1',
-      status: 'done',
+      done: 'done',
       priority: 'high',
       label: 'l1',
       due: 'week',
@@ -30,21 +30,31 @@ describe('filtersFromSearchParams', () => {
   })
 
   it('отбрасывает мусорные значения enum-полей', () => {
-    const sp = new URLSearchParams('f_status=hacked&f_priority=&sort=nope')
+    const sp = new URLSearchParams('f_done=hacked&f_priority=&sort=nope')
     const f = filtersFromSearchParams(sp)
-    expect(f.status).toBeUndefined()
+    expect(f.done).toBeUndefined()
     expect(f.priority).toBeUndefined()
     expect(f.sort).toBeUndefined()
+  })
+
+  it('старая ссылка со статусом не теряет смысл', () => {
+    // Ссылками уже поделились: «в работе» и «на проверке» — это «не выполнено».
+    expect(filtersFromSearchParams(new URLSearchParams('f_status=in_progress')).done).toBe(
+      'open',
+    )
+    expect(filtersFromSearchParams(new URLSearchParams('f_status=open')).done).toBe('open')
+    expect(filtersFromSearchParams(new URLSearchParams('f_status=done')).done).toBe('done')
+    expect(filtersFromSearchParams(new URLSearchParams('f_status=wat')).done).toBeUndefined()
   })
 })
 
 describe('applyFiltersToSearchParams', () => {
   it('пишет активные и стирает пустые, не трогая чужие ключи', () => {
-    const sp = new URLSearchParams('task=t1&f_status=done')
+    const sp = new URLSearchParams('task=t1&f_done=done')
     applyFiltersToSearchParams(sp, { assignee: 'u2' })
     expect(sp.get('task')).toBe('t1')
     expect(sp.get('f_assignee')).toBe('u2')
-    expect(sp.get('f_status')).toBeNull()
+    expect(sp.get('f_done')).toBeNull()
   })
 })
 
@@ -58,7 +68,7 @@ describe('activeFilterCount', () => {
 describe('toListFilters', () => {
   const base: TaskViewFilters = {
     assignee: 'u1',
-    status: 'todo',
+    done: 'open',
     priority: 'low',
     label: 'l1',
     sort: 'due_at',
@@ -68,7 +78,7 @@ describe('toListFilters', () => {
   it('переносит фильтры и сортировку', () => {
     expect(toListFilters(base)).toEqual({
       assignee: 'u1',
-      status: 'todo',
+      done: false,
       priority: 'low',
       label: 'l1',
       sort: 'due_at',
@@ -86,6 +96,8 @@ describe('toListFilters', () => {
   it('due-пресет разворачивается в стабильный диапазон', () => {
     const a = toListFilters({ due: 'overdue' })
     const b = toListFilters({ due: 'overdue' })
+    // «Просрочено» само по себе означает «ещё не выполнено».
+    expect(a.done).toBe(false)
     expect(a.due_to).toBeDefined()
     expect(a.due_from).toBeUndefined()
     // Стабильность в течение дня — иначе queryKey меняется на каждом рендере.
@@ -102,13 +114,13 @@ describe('toCalendarFilters', () => {
     expect(
       toCalendarFilters({
         assignee: 'u1',
-        status: 'done',
+        done: 'done',
         priority: 'high',
         label: 'l1',
         due: 'week',
         sort: 'title',
       }),
-    ).toEqual({ assignee: 'u1', status: 'done', priority: 'high' })
+    ).toEqual({ assignee: 'u1', done: true, priority: 'high' })
   })
 })
 
@@ -141,13 +153,7 @@ describe('narrowableFilter', () => {
 
 describe('describeFilters', () => {
   const labels = {
-    status: {
-      open: 'Не выполнено',
-      todo: 'К выполнению',
-      in_progress: 'В работе',
-      in_review: 'На проверке',
-      done: 'Готово',
-    },
+    done: { open: 'Не выполнено', done: 'Выполнено' },
     priority: { low: 'низкий', medium: 'средний', high: 'высокий', urgent: 'срочно' },
   } as const
   it('перечисляет применённые фильтры с именами', () => {
@@ -166,25 +172,26 @@ describe('describeFilters', () => {
   })
 })
 
-describe('status=open, sinkDone, countOpenDone (ОС 2026-08)', () => {
-  it('f_status=open проходит через URL и в параметры списка', () => {
-    const sp = new URLSearchParams('f_status=open')
-    const f = filtersFromSearchParams(sp)
-    expect(f.status).toBe('open')
-    expect(toListFilters(f).status).toBe('open')
-    expect(filtersFromSearchParams(new URLSearchParams('f_status=whatever')).status).toBeUndefined()
+describe('фильтр состояния, sinkDone, countOpenDone', () => {
+  it('«Не выполнено» проходит через URL и в параметры списка', () => {
+    const f = filtersFromSearchParams(new URLSearchParams('f_done=open'))
+    expect(f.done).toBe('open')
+    expect(toListFilters(f).done).toBe(false)
+    expect(
+      filtersFromSearchParams(new URLSearchParams('f_done=whatever')).done,
+    ).toBeUndefined()
   })
-  it('пресет «просрочено» без статуса фильтрует только незавершённые', () => {
-    expect(toListFilters({ due: 'overdue' }).status).toBe('open')
-    expect(toListFilters({ due: 'overdue', status: 'done' }).status).toBe('done')
-    expect(toListFilters({ due: 'today' }).status).toBeUndefined()
+  it('пресет «просрочено» без состояния фильтрует только невыполненные', () => {
+    expect(toListFilters({ due: 'overdue' }).done).toBe(false)
+    expect(toListFilters({ due: 'overdue', done: 'done' }).done).toBe(true)
+    expect(toListFilters({ due: 'today' }).done).toBeUndefined()
   })
   it('sinkDone стабильно переносит выполненные в конец', () => {
     const tasks = [
-      { id: 'a', status: 'done' },
-      { id: 'b', status: 'todo' },
-      { id: 'c', status: 'done' },
-      { id: 'd', status: 'in_progress' },
+      { id: 'a', done: true },
+      { id: 'b', done: false },
+      { id: 'c', done: true },
+      { id: 'd', done: false },
     ] as const
     expect(sinkDone(tasks).map((t) => t.id)).toEqual(['b', 'd', 'a', 'c'])
     expect(sinkDone([]).length).toBe(0)

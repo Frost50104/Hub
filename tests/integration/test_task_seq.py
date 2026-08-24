@@ -135,6 +135,7 @@ async def test_me_tasks_returns_project_key(db: AsyncSession, tenant_id: uuid.UU
     )
 
     items = await list_my_tasks(
+        done=None,
         status_=None,
         due_window=None,
         include_archived=False,

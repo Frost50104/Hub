@@ -8,7 +8,7 @@ import { useInlineCreateTarget } from '@/lib/quickCreate'
 interface TaskInlineCreateProps {
   projectId: string
   sectionId: string | null
-  /** Колонка доски: задача рождается сразу в этапе. */
+  /** Колонка доски: задача рождается сразу в ней. */
   stageId?: string | null
   parentTaskId?: string | null
   placeholder?: string

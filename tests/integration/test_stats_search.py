@@ -16,6 +16,7 @@ from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
 from app.models.project import Project, ProjectMember
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskAssignee
+from app.services.stages import create_default_stages
 
 pytestmark = pytest.mark.integration
 
@@ -40,6 +41,11 @@ async def _seed_project(db, principal):
     )
     db.add(project)
     await db.flush()
+    # Фикстура конструирует проект напрямую, минуя create_project_record, —
+    # колонки доски создаём сами: у задачи `stage_id` NOT NULL (0044).
+    stages = await create_default_stages(
+        db, tenant_id=principal.tenant_id, project_id=project.id
+    )
     db.add(
         ProjectMember(
             tenant_id=principal.tenant_id,
@@ -51,9 +57,9 @@ async def _seed_project(db, principal):
     task = Task(
         tenant_id=principal.tenant_id,
         project_id=project.id,
+        stage_id=stages[1].id,
         title="Проверить онбординг новых сотрудников",
         description="Чек-лист онбординга и выдача доступов",
-        status="in_progress",
         priority="high",
         created_by=principal.employee_id,
         position=Decimal(1),

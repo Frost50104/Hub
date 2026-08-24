@@ -22,7 +22,8 @@ export interface TimelineResponse {
 export interface DependencyPeer {
   id: string
   title: string
-  status: 'todo' | 'in_progress' | 'in_review' | 'done'
+  /** Выполнена или нет (0044). */
+  done: boolean
   /** Номер в проекте — вместе с key проекта даёт бейдж «KEY-42». */
   seq: number
 }

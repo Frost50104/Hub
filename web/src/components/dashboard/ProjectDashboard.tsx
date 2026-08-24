@@ -13,8 +13,8 @@ import { useProjectStats } from '@/hooks/useProjectStats'
 import { useStages } from '@/hooks/useStages'
 import { cn } from '@/lib/cn'
 import { type CustomFieldStat, type ProjectStats } from '@/lib/stats'
-import { STATUS_LABEL, type TaskPriority, type TaskStatus } from '@/lib/tasks'
-import { PRIORITY_COLOR, STATUS_COLOR } from '@/lib/tone'
+import { type TaskPriority } from '@/lib/tasks'
+import { DONE_COLOR, PRIORITY_COLOR, SERIES_COLOR } from '@/lib/tone'
 import { plural } from '@/lib/typography'
 
 interface ProjectDashboardProps {
@@ -22,7 +22,6 @@ interface ProjectDashboardProps {
 }
 
 /** Порядок и подписи срезов — из макета: статусы в рабочем порядке, приоритеты от частого к редкому. */
-const STATUS_ORDER: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done']
 const PRIORITY_ORDER: TaskPriority[] = ['medium', 'high', 'urgent', 'low']
 const PRIORITY_TITLE: Record<TaskPriority, string> = {
   medium: 'Обычный',
@@ -72,27 +71,21 @@ function ProjectDashboard({ projectId }: ProjectDashboardProps) {
     )
   }
 
-  // Срез по этапам проекта (тон — по системному статусу этапа, цвет графика
-  // не изобретается); проект без этапов — по четырём статусам.
+  // Срез по колонкам доски: имена колонок задаёт пользователь, поэтому цвет
+  // берётся по кругу из палитры графиков (0044 — системных статусов, по
+  // которым раньше красили, больше нет). Без колонок — срез по состоянию.
   const byStages = d.stage_breakdown && stages.data && stages.data.length > 0
   const statusSegments: DonutSegment[] = byStages
-    ? [
-        ...stages.data!.map((st) => ({
-          key: st.id,
-          label: st.name,
-          value: d.stage_breakdown?.[st.id] ?? 0,
-          color: STATUS_COLOR[st.system_status],
-        })),
-        ...((d.stage_breakdown?.['None'] ?? 0) > 0
-          ? [{ key: 'none', label: 'Без этапа', value: d.stage_breakdown!['None']!, color: STATUS_COLOR.todo }]
-          : []),
-      ]
-    : STATUS_ORDER.map((s) => ({
-        key: s,
-        label: STATUS_LABEL[s],
-        value: d.status_breakdown[s] ?? 0,
-        color: STATUS_COLOR[s],
+    ? stages.data!.map((st, i) => ({
+        key: st.id,
+        label: st.name,
+        value: d.stage_breakdown?.[st.id] ?? 0,
+        color: SERIES_COLOR[i % SERIES_COLOR.length]!,
       }))
+    : [
+        { key: 'open', label: 'Не выполнено', value: d.done_breakdown.open ?? 0, color: DONE_COLOR.open },
+        { key: 'done', label: 'Выполнено', value: d.done_breakdown.done ?? 0, color: DONE_COLOR.done },
+      ]
   const prioritySegments: DonutSegment[] = PRIORITY_ORDER.map((p) => ({
     key: p,
     label: PRIORITY_TITLE[p],
@@ -118,7 +111,7 @@ function ProjectDashboard({ projectId }: ProjectDashboardProps) {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card title={byStages ? 'По этапам' : 'По статусу'}>
+        <Card title={byStages ? 'По колонкам' : 'По состоянию'}>
           <Donut segments={statusSegments} />
         </Card>
         <Card title="По приоритету">

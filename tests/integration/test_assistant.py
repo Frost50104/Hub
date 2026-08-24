@@ -156,14 +156,15 @@ async def test_update_single_task_is_immediate(db: AsyncSession, tenant_id: uuid
 
     result = await t_update_task(
         _ctx(db, owner),
-        UpdateTaskArgs(task=f"{project.key}-{task.seq}", status="done", priority="high"),
+        UpdateTaskArgs(task=f"{project.key}-{task.seq}", done=True, priority="high"),
     )
+    assert result["ok"] is True
     assert result["done"] is True
-    assert result["status"] == "Готово"
 
     fresh = await db.get(Task, task.id)
     await db.refresh(fresh)
-    assert fresh.status == "done"
+    assert fresh.done is True
+    assert fresh.completed_at is not None
 
 
 # ─── Жизненный цикл плана ───────────────────────────────────────────────────

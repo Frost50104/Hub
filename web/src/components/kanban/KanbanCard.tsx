@@ -5,7 +5,7 @@ import type { CSSProperties } from 'react'
 
 import { PriorityBar } from '@/components/task/PriorityBar'
 import { TaskLabelChip } from '@/components/task/TaskLabelChip'
-import { TaskStatusControl } from '@/components/task/TaskStatusControl'
+import { TaskDoneControl } from '@/components/task/TaskDoneControl'
 import { AvatarStack } from '@/components/ui/AvatarStack'
 import { cn } from '@/lib/cn'
 import { taskAssignees } from '@/lib/taskAssignees'
@@ -59,8 +59,8 @@ export function KanbanCard({
         opacity: sortable.isDragging ? 0.4 : 1,
       }
   const assignees = taskAssignees(task)
-  const done = task.status === 'done'
-  const overdue = isOverdue(task.due_at, task.status)
+  const done = task.done
+  const overdue = isOverdue(task.due_at, task.done)
   const hasMeta = (labels?.length ?? 0) > 0 || (subtasks?.total ?? 0) > 0
 
   return (
@@ -91,7 +91,7 @@ export function KanbanCard({
       <PriorityBar priority={task.priority} className="inset-y-[10px]" />
 
       <div className="flex items-start gap-2.5">
-        <TaskStatusControl status={task.status} size="card" onToggle={onToggleDone} />
+        <TaskDoneControl done={task.done} size="card" onToggle={onToggleDone} />
         <span
           className={cn(
             'min-w-0 flex-1 text-[16px] font-semibold leading-[1.35]',

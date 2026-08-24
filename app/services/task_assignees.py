@@ -186,10 +186,10 @@ async def is_task_assignee(
     return row.first() is not None
 
 
-def can_set_status(
+def can_complete(
     role: str | None, employee_id: UUID, assignees: Sequence[AssigneeBrief]
 ) -> bool:
-    """Право менять статус/этап задачи — для `TaskResponse.can_set_status`.
+    """Право закрывать задачу и двигать её по доске — для `can_complete`.
 
     Зеркало гейта в `app/api/tasks.py::update_task`; считается из уже
     загруженных исполнителей, без единого запроса. `role is None` — это
