@@ -21,6 +21,13 @@ import structlog
 log = structlog.get_logger("video_progress")
 
 WATCH_THRESHOLD = 0.9
+# Щель короче — считаем одним куском. Полсекунды не хватало: после перемотки
+# первый шаг всегда теряется (клиент не засчитывает шаг с флагом `seeking`), и
+# в записи оставались микро-дыры по 1–2 с — на проде у одного ролика их две,
+# 1.9 с и 1.0 с. Человек их не пропускал, а процент недобирал. Константа
+# обязана совпадать с `GAP_CLOSE` в `web/src/lib/videoWatch.ts`: разойдутся —
+# разойдутся и проценты на экране с гейтом.
+GAP_CLOSE_SEC = 2.0
 # Сколько интервалов храним. Схема приёма (`VideoProgressBody`) обязана быть
 # НЕ МЕНЬШЕ: приём 200 против хранения 500 означал, что на 201-м сохранённом
 # интервале прогресс переставал сохраняться навсегда (422 на каждый пинг).
@@ -125,7 +132,7 @@ def merge_intervals(
     cleaned.sort()
     merged: list[list[float]] = []
     for start, end in cleaned:
-        if merged and start <= merged[-1][1] + 0.5:  # смыкаем щели < 0.5с
+        if merged and start <= merged[-1][1] + GAP_CLOSE_SEC:  # смыкаем щели
             merged[-1][1] = max(merged[-1][1], end)
         else:
             merged.append([start, end])

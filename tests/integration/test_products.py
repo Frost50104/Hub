@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
@@ -17,6 +17,7 @@ from app.models.library import LibraryMaterial
 from app.models.org import Position, Store
 from app.models.product import ProductCard, ProductCardLink
 from app.models.survey import Survey
+from app.services.taskdates import display_today
 from tests.integration.test_courses import _mk_course, _mk_member
 
 pytestmark = pytest.mark.integration
@@ -153,7 +154,9 @@ async def test_learn_profile_tenure(db: AsyncSession, tenant_id: uuid.UUID):
     await db.flush()
     profile.position_id = pos.id
     profile.store_id = store.id
-    profile.hired_at = date.today() - timedelta(days=100)
+    # Стаж считается в display tz — тест обязан брать «сегодня» оттуда же,
+    # иначе он падает каждую ночь между 21:00 MSK и полуночью локальной.
+    profile.hired_at = display_today() - timedelta(days=100)
     await db.flush()
 
     resp = await learn_profile(member, db)

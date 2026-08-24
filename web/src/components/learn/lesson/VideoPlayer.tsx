@@ -7,17 +7,22 @@ import { learnApi } from '@/lib/learn'
 import {
   FLUSH_MESSAGES,
   MAX_INTERVALS,
+  bodySignature,
+  buildWatchView,
   capIntervals,
   classifyFlushError,
-  coverageOf,
   countsAsWatched,
   displayPercent,
+  formatClock,
   isWatched,
   parseEcho,
   pickDuration,
+  sameWatchView,
+  serverCoverageFloor,
   type FlushOutcome,
   type Interval,
   type VideoProgressEcho,
+  type WatchView,
 } from '@/lib/videoWatch'
 
 /**
@@ -110,6 +115,13 @@ export function VideoPlayer({
   className?: string
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  // Подписанный URL медиа переиздаётся при каждом ответе урока, а смена
+  // атрибута `src` перезагружает элемент: позиция слетает на 0, воспроизведение
+  // встаёт на паузу. С `staleTime: 0` у урока это случалось бы при каждом
+  // возврате во вкладку. Ссылка живёт часами, ролик уже играет по ней — держим
+  // ту, с которой стартовали (другое видео получает новый инстанс: `key`
+  // включает `mediaId`).
+  const srcRef = useRef(src)
   // Просмотренное копится микро-интервалами [prev, now] между timeupdate —
   // модель без «открытых сегментов» переживает waiting/паузы/буферизацию,
   // из-за которых сегментная версия теряла куски.
@@ -133,8 +145,12 @@ export function VideoPlayer({
   // приходят оба, и второй запрос был бы ровно тем же телом.
   const sentRef = useRef('')
   const aliveRef = useRef(true)
-  const [coverage, setCoverage] = useState(() =>
-    coverageOf(intervalsRef.current, initialDuration ?? 0),
+  // Покрытие, подтверждённое сервером (эхо ручки). Монотонно: пинг и
+  // keepalive-флаш летят одновременно, ответы приходят в любом порядке, и без
+  // max() полоса прыгала бы назад на устаревшем эхе.
+  const serverCoverageRef = useRef(0)
+  const [view, setView] = useState<WatchView>(() =>
+    buildWatchView(intervalsRef.current, initialDuration ?? 0, 0),
   )
   const [meta, setMeta] = useState(() => ({
     durationKnown: (initialDuration ?? 0) > 0,
@@ -178,8 +194,8 @@ export function VideoPlayer({
 
   const refreshCoverage = useCallback(() => {
     const merged = snapshot()
-    const c = coverageOf(merged, durationRef.current)
-    setCoverage(c)
+    const next = buildWatchView(merged, durationRef.current, serverCoverageRef.current)
+    setView((prev) => (sameWatchView(prev, next) ? prev : next))
     const durationKnown = durationRef.current > 0
     const hasIntervals = merged.length > 0
     setMeta((prev) =>
@@ -187,7 +203,7 @@ export function VideoPlayer({
         ? prev
         : { durationKnown, hasIntervals },
     )
-    onCoverageRef.current?.(c)
+    onCoverageRef.current?.(next.coverage)
   }, [snapshot])
 
   const applyDuration = useCallback(
@@ -214,13 +230,23 @@ export function VideoPlayer({
   const applyEcho = useCallback(
     (echo: VideoProgressEcho | null) => {
       if (!echo || !aliveRef.current) return
+      let changed = false
       // Знаменатель — серверный: длительность он читает из самого файла, и
       // ровно на неё делит гейт. Своего мнения о ней у клиента больше нет —
       // отсюда и невозможность «полоса зелёная, а завершение 409».
       if (echo.duration && echo.duration !== durationRef.current) {
         durationRef.current = echo.duration
-        refreshCoverage()
+        changed = true
       }
+      // И числитель тоже: сервер судит по СВОЕЙ копии интервалов, а клиент
+      // стартует от снимка урока, который мог устареть. Пока эхо приносило
+      // только длительность, разойтись они могли молча.
+      const floor = serverCoverageFloor(echo)
+      if (floor > serverCoverageRef.current) {
+        serverCoverageRef.current = floor
+        changed = true
+      }
+      if (changed) refreshCoverage()
     },
     [refreshCoverage],
   )
@@ -239,7 +265,7 @@ export function VideoPlayer({
         intervals: merged,
         duration,
       })
-      sentRef.current = signatureOf(merged, duration)
+      sentRef.current = bodySignature(merged, duration)
       applyEcho(echo)
       outcomeRef.current = 'ok'
       setSaveState('ok')
@@ -308,7 +334,7 @@ export function VideoPlayer({
       const merged = snapshot()
       if (!merged.length || !tokenRef.current) return
       const duration = durationRef.current > 0 ? durationRef.current : null
-      const sig = signatureOf(merged, duration)
+      const sig = bodySignature(merged, duration)
       if (sig === sentRef.current) return
       sentRef.current = sig
       // Остаёмся на fetch(keepalive): на iOS visibilitychange часто
@@ -401,12 +427,30 @@ export function VideoPlayer({
     }
   }
 
-  const pct = displayPercent(coverage)
-  const watched = isWatched(coverage)
+  /**
+   * Перейти к первому непросмотренному куску.
+   *
+   * Прыжок всегда назад или ровно на достигнутое, поэтому откат `disableSeek`
+   * (`allowed = maxReached + 1`) его не трогает. Интервал от прыжка не
+   * запишется: `onSeeking` поднимает флаг, и ближайший `timeupdate` шаг не
+   * засчитает.
+   */
+  const jumpTo = (at: number) => {
+    const video = videoRef.current
+    if (!video) return
+    video.currentTime = at
+    void video.play().catch(() => undefined)
+  }
+
+  const pct = displayPercent(view.coverage)
+  const watched = isWatched(view.coverage)
   // Длительность неизвестна, а смотреть человек начал: гейт по-честному
   // закрыт (сервер ответит тем же), и молчать об этом нельзя — иначе на
   // экране вечные «сейчас 0%» без объяснения.
   const unmeasured = !meta.durationKnown && meta.hasIntervals
+  // Ролик ещё не открывали: «К непросмотренному · 0:00» — шум, непросмотрено
+  // всё. Подсказка появляется, когда есть что продолжать.
+  const gap = watched || unmeasured || view.segments.length === 0 ? null : view.gap
 
   return (
     <figure
@@ -420,7 +464,7 @@ export function VideoPlayer({
           оболочку — рамку, полосу покрытия и строку условия. */}
       <video
         ref={videoRef}
-        src={src}
+        src={srcRef.current}
         controls
         playsInline
         preload="metadata"
@@ -453,19 +497,29 @@ export function VideoPlayer({
       />
       {requireFullWatch && (
         <>
-          {/* Полоса покрытия: амбер до порога, зелёный после. Знаменатель —
-              серверный (эхо ручки), поэтому полоса не может разойтись с
-              гейтом. disableSeek её не прячет. */}
-          <div className="h-[3px] bg-surface">
-            <div
-              className={cn(
-                'h-full transition-[width] duration-300 ease-out',
-                watched ? 'bg-green' : 'bg-amber',
-              )}
-              style={{ width: `${pct}%` }}
-            />
+          {/* Карта просмотра: закрашено ровно то, что засчитано, пропуски
+              видны фоном. Одна заливка слева на N% врала — при пропуске в
+              середине на экране горело «62%», а ползунок стоял в конце ролика,
+              и понять причину было нечем (ОС 24.08). Не элемент управления:
+              кликов не принимает, вид слайдера не изображает. `overflow-hidden`
+              держит минимальную ширину куска внутри полосы. */}
+          <div className="relative h-[3px] overflow-hidden bg-surface" aria-hidden>
+            {view.segments.map((seg) => (
+              <span
+                key={seg.leftPct}
+                className={cn(
+                  'absolute inset-y-0 transition-[width] duration-300 ease-out',
+                  watched ? 'bg-green' : 'bg-amber',
+                )}
+                style={{
+                  left: `${seg.leftPct}%`,
+                  width: `${seg.widthPct}%`,
+                  minWidth: '2px',
+                }}
+              />
+            ))}
           </div>
-          <figcaption className="flex items-center gap-2.5 px-3.5 py-3">
+          <figcaption className="flex flex-wrap items-center gap-x-2.5 gap-y-2 px-3.5 py-3">
             <span
               className={cn(
                 'flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full',
@@ -476,13 +530,26 @@ export function VideoPlayer({
             >
               <Check className="h-[15px] w-[15px]" strokeWidth={2.4} />
             </span>
-            <p className="flex-1 text-sm leading-[1.45] text-text2 lg:text-[15px]">
+            <p className="min-w-0 flex-1 text-sm leading-[1.45] text-text2 lg:text-[15px]">
               {watched
                 ? 'Видео досмотрено'
                 : unmeasured
                   ? 'Не удалось определить длительность этого видео — завершить урок не выйдет. Сообщите администратору.'
-                  : `Досмотрите минимум 90% — сейчас ${pct}%`}
+                  : gap?.kind === 'skipped'
+                    ? // Обвинять в перемотке того, кто просто не дошёл до конца,
+                      // нельзя — этот текст только для дыры ВНУТРИ.
+                      `Перемотка не засчитывается — вернитесь к пропущенному. Сейчас ${pct}%`
+                    : `Досмотрите минимум 90% — сейчас ${pct}%`}
             </p>
+            {gap && (
+              <button
+                type="button"
+                onClick={() => jumpTo(gap.at)}
+                className="shrink-0 rounded-lg border border-glass-border px-2.5 py-1.5 text-[13px] font-semibold leading-none text-text transition-colors hover:bg-glass focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+              >
+                К непросмотренному · {formatClock(gap.at)}
+              </button>
+            )}
           </figcaption>
         </>
       )}
@@ -497,8 +564,3 @@ export function VideoPlayer({
   )
 }
 
-/** Подпись тела отправки — чтобы не слать дважды одно и то же. */
-function signatureOf(intervals: readonly Interval[], duration: number | null): string {
-  const last = intervals[intervals.length - 1]
-  return `${intervals.length}:${last ? last[1] : 0}:${duration ?? 'x'}`
-}

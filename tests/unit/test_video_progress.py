@@ -11,6 +11,7 @@ from app.schemas.course import VideoProgressBody
 from app.services import video_progress as vp
 from app.services.video_progress import (
     DURATION_TOLERANCE,
+    GAP_CLOSE_SEC,
     MAX_INTERVALS,
     WATCH_THRESHOLD,
     coverage,
@@ -32,11 +33,40 @@ class TestMergeIntervals:
         assert merge_intervals([[0, 10]], [[5, 15]]) == [[0, 15]]
 
     def test_small_gap_closed(self):
-        # Щели < 0.5с смыкаются (пинги раз в 15с неточны на границах).
+        # Щели короче GAP_CLOSE_SEC смыкаются (пинги раз в 15с неточны на
+        # границах, а после перемотки клиент всегда теряет первый шаг).
         assert merge_intervals([[0, 10.0]], [[10.4, 20]]) == [[0, 20]]
 
+    def test_micro_gap_after_seek_closed(self):
+        # Живые данные прода: у одной записи дыры 1.9 с и 1.0 с — след тапа по
+        # полосе, а не пропущенный кусок. При старом пороге 0.5 с они съедали
+        # проценты и человек видел «62%», стоя в конце ролика.
+        assert merge_intervals([[0, 33.5], [35.4, 36.8]], [[37.8, 56.9]]) == [[0, 56.9]]
+
     def test_real_gap_kept(self):
-        assert merge_intervals([[0, 10.0]], [[10.6, 20]]) == [[0, 10.0], [10.6, 20]]
+        assert merge_intervals([[0, 10.0]], [[12.5, 20]]) == [[0, 10.0], [12.5, 20]]
+
+    def test_gap_boundary_is_the_constant(self):
+        # Ровно на границе — смыкаем; чуть шире — дыра. Тест держит константу:
+        # изменить её в одиночку, не тронув фронт, не выйдет незаметно.
+        edge = 10.0 + GAP_CLOSE_SEC
+        assert merge_intervals([[0, 10.0]], [[edge, 20]]) == [[0, 20]]
+        assert merge_intervals([[0, 10.0]], [[edge + 0.1, 20]]) == [
+            [0, 10.0],
+            [edge + 0.1, 20],
+        ]
+
+    def test_same_result_as_the_client(self):
+        """Общий набор с `web/src/lib/videoWatch.test.ts` («тот же набор»).
+
+        Клиент считает процент из СВОЕЙ копии интервалов, сервер — из своей.
+        Разъедься правила склейки — на экране одно число, в гейте другое, и
+        объяснить это человеку нечем. Набор и ожидание продублированы в
+        vitest дословно.
+        """
+        assert merge_intervals(
+            [[0, 10.0], [11.5, 20.0]], [[22.5, 30.0], [30.0, 31.0]]
+        ) == [[0, 20.0], [22.5, 31.0]]
 
     def test_unsorted_input(self):
         assert merge_intervals([[20, 30]], [[0, 10], [5, 25]]) == [[0, 30]]
@@ -95,7 +125,7 @@ class TestTruncation:
     """Переполнение жертвует короткими кусками, а не концовкой ролика."""
 
     def _many(self, count: int, *, start: float = 0.0, step: float = 10.0) -> list[list[float]]:
-        # Щели по 5с — merge их не смыкает (порог 0.5с).
+        # Щели по 5с — merge их не смыкает (порог GAP_CLOSE_SEC = 2с).
         return [[start + i * step, start + i * step + 5.0] for i in range(count)]
 
     def test_capped_at_max(self):

@@ -7,6 +7,8 @@ import time
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
+from app.config import get_settings
+from app.services import learn_media as lm
 from app.services.learn_media import (
     media_size_limit,
     mp4_duration_seconds,
@@ -52,6 +54,43 @@ class TestSignedUrls:
         media_id = uuid4()
         exp, sig = _parse_signed(sign_media_path(media_id))
         assert not verify_media_signature(uuid4(), exp, sig)
+
+    def test_same_file_same_url_within_the_bucket(self, monkeypatch):
+        """Повторный ответ ручки обязан отдать ТОТ ЖЕ URL.
+
+        Прежний `now + ttl` менялся каждую секунду: рефетч урока подставлял
+        `<video>` новый `src`, браузер перезагружал элемент — позиция слетала
+        на 0 и воспроизведение вставало на паузу (staging, 25.08).
+        """
+        media_id = uuid4()
+        base = 1_800_000_000  # кратно часу
+        monkeypatch.setattr(lm.time, "time", lambda: base + 5)
+        first = sign_media_path(media_id)
+        monkeypatch.setattr(lm.time, "time", lambda: base + 1799)
+        assert sign_media_path(media_id) == first
+
+    def test_next_bucket_reissues_and_stays_valid(self, monkeypatch):
+        media_id = uuid4()
+        base = 1_800_000_000
+        monkeypatch.setattr(lm.time, "time", lambda: base + 5)
+        first = sign_media_path(media_id)
+        monkeypatch.setattr(lm.time, "time", lambda: base + 3605)
+        second = sign_media_path(media_id)
+        assert second != first
+        exp, sig = _parse_signed(second)
+        assert verify_media_signature(media_id, exp, sig)
+
+    def test_remaining_life_never_below_half_ttl(self, monkeypatch):
+        # Округление вниз укорачивает жизнь ссылки — но не настолько, чтобы
+        # видео обрывалось на середине просмотра.
+        ttl = get_settings().media_url_ttl_sec
+        media_id = uuid4()
+        base = 1_800_000_000
+        for offset in (0, 1, 1800, 3599):
+            now = base + offset
+            monkeypatch.setattr(lm.time, "time", lambda now=now: now)
+            exp, _sig = _parse_signed(sign_media_path(media_id))
+            assert exp - now >= ttl / 2
 
 
 def _box(box_type: bytes, payload: bytes = b"") -> bytes:

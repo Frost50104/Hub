@@ -255,6 +255,12 @@ export function useLesson(id: string | undefined, preview = false): UseQueryResu
     queryFn: () => learnApi.lesson(id!, preview),
     enabled: Boolean(id),
     retry: false, // 403 «урок заперт» не лечится ретраями
+    // Глобальные 30 секунд «свежести» тут вредны: ответ несёт снимок
+    // прогресса видео, а плеер стартует ровно от него. Вернувшись в урок
+    // сразу после выхода, человек получал устаревшие интервалы и процент
+    // «откатывался» (ОС 24.08). Кэш при этом показывается мгновенно, рефетч
+    // идёт фоном — скелетон не мигает.
+    staleTime: 0,
     meta: { suppressGlobalError: true },
   })
 }

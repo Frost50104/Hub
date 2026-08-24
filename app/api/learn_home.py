@@ -41,6 +41,7 @@ from app.schemas.product import (
 from app.services.audience_resolver import visible_filter
 from app.services.content_access import resolve_content_role
 from app.services.org_scope import get_profile
+from app.services.taskdates import display_today
 
 router = APIRouter(tags=["learn-home"])
 
@@ -340,7 +341,10 @@ async def learn_profile(
 
     tenure_days = None
     if profile.hired_at:
-        tenure_days = (datetime.now(UTC).date() - profile.hired_at).days
+        # Стаж — календарные дни в display tz, как срок задачи: по UTC он на
+        # три часа в сутки отставал на день (тест падал каждую ночь после
+        # 21:00 MSK, а сотрудник в это время видел «99 дней» вместо ста).
+        tenure_days = (display_today() - profile.hired_at).days
 
     return LearnProfileResponse(
         profile_id=profile.id,

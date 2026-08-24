@@ -60,10 +60,28 @@ def _signature(media_id: UUID, exp: int) -> str:
     return hmac.new(_secret(), msg, hashlib.sha256).hexdigest()[:32]
 
 
+# Шаг «времени выдачи»: внутри одного окна URL одного и того же файла
+# получается ПОБАЙТОВО одинаковым.
+_ISSUE_BUCKET_SEC = 3600
+
+
 def sign_media_path(media_id: UUID, *, ttl_sec: int | None = None) -> str:
-    """→ относительный подписанный путь `/api/media/{id}?e=…&s=…`."""
+    """→ относительный подписанный путь `/api/media/{id}?e=…&s=…`.
+
+    `exp` округляется вниз по сетке `_ISSUE_BUCKET_SEC`, поэтому повторный
+    ответ той же ручки отдаёт ТОТ ЖЕ URL. Прежний `now + ttl` менялся каждую
+    секунду: любой рефетч урока подставлял `<video>` новый `src`, браузер
+    перезагружал элемент — позиция слетала на 0 и воспроизведение вставало на
+    паузу (воспроизведено на staging 25.08 фокусом вкладки). Заодно попадания
+    в HTTP-кэш перестают быть случайностью.
+
+    Шаг не больше половины TTL — остаток жизни ссылки всегда ≥ ttl/2.
+    """
     settings = get_settings()
-    exp = int(time.time()) + (ttl_sec or settings.media_url_ttl_sec)
+    ttl = ttl_sec or settings.media_url_ttl_sec
+    bucket = max(1, min(_ISSUE_BUCKET_SEC, ttl // 2))
+    issued = (int(time.time()) // bucket) * bucket
+    exp = issued + ttl
     return f"/api/media/{media_id}?e={exp}&s={_signature(media_id, exp)}"
 
 
