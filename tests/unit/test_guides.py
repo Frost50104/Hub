@@ -43,6 +43,26 @@ class TestWhoGetsWhat:
             assert row.kind in GUIDE_FILES
 
 
+class TestDeadLinkPage:
+    """Протухшая ссылка — страница, а не JSON.
+
+    Адрес инструкции живёт в адресной строке отдельной вкладки: его кладут в
+    закладки и открывают из истории через сутки. `{"detail": …}` в этот момент
+    выглядит поломкой, и уйти с него некуда — в PWA нет обвязки, у новой
+    вкладки пустая история.
+    """
+
+    async def test_expired_signature_returns_html_with_a_way_back(self):
+        from app.api.guides import serve_guide
+
+        resp = await serve_guide("employee", e=1, s="0" * 32)
+        assert resp.status_code == 403
+        body = bytes(resp.body).decode()
+        assert resp.media_type == "text/html"
+        assert "/settings/account" in body
+        assert "устарела" in body.lower()
+
+
 class TestSignature:
     def test_roundtrip(self):
         kind, exp, sig = _parse(guides_for_role("admin")[0].url)

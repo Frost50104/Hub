@@ -62,10 +62,14 @@ SCROLLBAR_CSS = (
 # Правый нижний угол — единственный, где у инструкции нет своих плавающих
 # элементов: сверху полоса прогресса чтения (z-60), слева липкий список
 # разделов со «Сбросить», по центру лайтбокс (z-80).
+#
+# z-70 — МЕЖДУ полосой прогресса и лайтбоксом, и это не мелочь: при z-90
+# кнопка висела поверх открытого во весь экран скриншота, и тап по ней (вместо
+# «закрыть картинку») уносил человека из инструкции целиком.
 BACK_MARK = "/* hub-back */"
 BACK_CSS = (
     BACK_MARK
-    + "[data-hub-back]{position:fixed;z-index:90;right:16px;"
+    + "[data-hub-back]{position:fixed;z-index:70;right:16px;"
     "bottom:max(16px,env(safe-area-inset-bottom));display:inline-flex;align-items:center;"
     "gap:8px;padding:11px 16px;border-radius:999px;"
     "background:var(--sig-white-07,rgba(240,240,245,.07));"
