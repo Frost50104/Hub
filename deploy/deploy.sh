@@ -43,13 +43,25 @@ fi
 # Fallback на sshpass остаётся для машин без установленного ключа.
 SSH_KEY="${SSH_KEY:-}"
 SSH_KEY_PATH="${SSH_KEY/#\~/$HOME}"
+# Пути с пробелом в списке исключений пишутся как --exclude="'Имя с пробелом'":
+# rsync зовётся через `eval`, и одинарные кавычки обязаны пережить первый
+# разбор строки, иначе имя распадается на два аргумента (25.08).
+# SSH_JUMP (deploy/.env, необязательный) — промежуточный узел для ssh и rsync.
+# Нужен, когда сеть разработчика не видит хостинг: 25.08 маршрут до Timeweb
+# оборвался на транзитном IX, при живом сервере (проверено с других узлов).
+# Пустой по умолчанию — поведение обычного деплоя не меняется.
+SSH_JUMP_OPT=""
+if [[ -n "${SSH_JUMP:-}" ]]; then
+  SSH_JUMP_OPT="-J $SSH_JUMP"
+  echo "==> SSH через промежуточный узел: $SSH_JUMP"
+fi
 if [[ -n "${SSH_KEY:-}" && -f "$SSH_KEY_PATH" ]]; then
-  SSH_OPTS="-o StrictHostKeyChecking=accept-new -i $SSH_KEY_PATH"
+  SSH_OPTS="-o StrictHostKeyChecking=accept-new $SSH_JUMP_OPT -i $SSH_KEY_PATH"
   SSH_CMD="ssh $SSH_OPTS ${SERVER_USER}@${SERVER_HOST}"
   RSYNC_CMD="rsync -az -e \"ssh $SSH_OPTS\""
 else
   echo "WARN: SSH_KEY не настроен — используем sshpass (см. deploy/.env.example)."
-  SSH_OPTS="-o StrictHostKeyChecking=accept-new -o PubkeyAuthentication=no"
+  SSH_OPTS="-o StrictHostKeyChecking=accept-new $SSH_JUMP_OPT -o PubkeyAuthentication=no"
   SSH_CMD="sshpass -e ssh $SSH_OPTS ${SERVER_USER}@${SERVER_HOST}"
   RSYNC_CMD="sshpass -e rsync -az -e \"ssh $SSH_OPTS\""
   export SSHPASS="$SERVER_PASS"
@@ -95,7 +107,7 @@ deploy_backend() {
     --exclude='LMS' \
     --exclude='import_bundle' \
     --exclude='redesign' \
-    --exclude='Hub Instructions' \
+    --exclude="'Hub Instructions'" \
     "$PROJECT_DIR/" \
     "${SERVER_USER}@${SERVER_HOST}:${REMOTE_BASE}/"
 
