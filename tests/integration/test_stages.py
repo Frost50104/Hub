@@ -278,6 +278,40 @@ async def test_db_guards_done_and_completed_at(db: AsyncSession, tenant_id: uuid
     await db.rollback()
 
 
+async def test_legacy_columns_are_gone(db: AsyncSession):
+    """0045 унесла колонки старой модели — и ничего лишнего.
+
+    Проверяем СХЕМУ, а не поведение: колонки уже никто не читал, поэтому
+    забытый `DROP COLUMN` не уронил бы ни один другой тест (схема в тестах
+    поднимается прогоном миграций, дрейф модель↔БД никто не сверяет).
+    """
+    from sqlalchemy import text
+
+    rows = await db.execute(
+        text(
+            "SELECT table_name || '.' || column_name FROM information_schema.columns "
+            "WHERE (table_name = 'tasks' AND column_name = 'status') "
+            "   OR (table_name = 'project_stages' AND column_name = 'system_status')"
+        )
+    )
+    assert rows.scalars().all() == []
+
+    # Заодно: индексы-замены на месте, а зависевшие от колонки ушли вместе с ней.
+    names = set(
+        (
+            await db.execute(
+                text("SELECT indexname FROM pg_indexes WHERE tablename = 'tasks'")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert "ix_tasks_project_stage_position" in names
+    assert "ix_tasks_due_at_open" in names
+    assert "ix_tasks_project_status_position" not in names
+    assert "ix_tasks_due_at_active" not in names
+
+
 async def test_partial_index_matches_the_open_predicate(db: AsyncSession):
     """У «невыполненных со сроком» обязан быть свой частичный индекс.
 
