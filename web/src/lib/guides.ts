@@ -15,8 +15,27 @@ import type { Me } from '@/hooks/useMe'
 
 export interface GuideLink {
   kind: string
+  /** Название документа с сервера («Инструкция администратора»). */
   title: string
   url: string
+}
+
+export interface GuideRow extends GuideLink {
+  /** Подпись строки — целиком, без второй надписи справа. */
+  label: string
+}
+
+/**
+ * Подпись строки. Для сотрудницкой — просто «Посмотреть инструкцию»: у
+ * большинства она единственная, и уточнять нечего. Админ видит две строки, и
+ * его инструкция названа явно, иначе они отличались бы только мелким текстом
+ * сбоку.
+ */
+function labelFor(row: GuideLink): string {
+  if (row.kind === 'employee') return 'Посмотреть инструкцию'
+  if (row.kind === 'admin') return 'Посмотреть инструкцию для администратора'
+  // Незнакомый вид (сервер добавит третью) — из названия документа.
+  return `Посмотреть: ${row.title}`
 }
 
 /**
@@ -26,8 +45,10 @@ export interface GuideLink {
  * бэкенда в окне деплоя (поля `guides` в ответе просто нет): секцию в таком
  * случае не рисуем вовсе, а не показываем битую ссылку.
  */
-export function guideRows(me: Me | undefined): GuideLink[] {
+export function guideRows(me: Me | undefined): GuideRow[] {
   const rows = me?.guides
   if (!Array.isArray(rows)) return []
-  return rows.filter((r) => Boolean(r?.url && r?.title))
+  return rows
+    .filter((r) => Boolean(r?.url && r?.title))
+    .map((r) => ({ ...r, label: labelFor(r) }))
 }

@@ -87,7 +87,7 @@ export function AccountTab() {
           {/* Тот же списковый вид, что «Сертификаты»: третьего вида блока на
               этом экране быть не должно (макет «Настройки»). */}
           <ul className="flex flex-col overflow-hidden rounded-[10px] border border-glass-border">
-            {guides.map((guide, i) => (
+            {guides.map((guide) => (
               <li key={guide.kind} className="border-t border-hair first:border-t-0">
                 <a
                   href={guide.url}
@@ -96,17 +96,11 @@ export function AccountTab() {
                   className="flex min-h-12 items-center gap-3 px-3.5 py-2 hover:bg-glass focus-visible:bg-glass focus-visible:outline-none"
                 >
                   <BookOpen className="h-[18px] w-[18px] shrink-0 text-text2" strokeWidth={1.8} />
-                  {/* Первая строка — то, что человек ищет глазами («Посмотреть
-                      инструкцию»), её вид уточняет подпись справа. Вторая
-                      (только у админа) — сотрудницкая, ему она для справки. */}
+                  {/* Подпись целиком в одной надписи: вторая, мелкая справа,
+                      была единственным отличием двух строк у админа. */}
                   <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-text">
-                    {i === 0 ? 'Посмотреть инструкцию' : guide.title}
+                    {guide.label}
                   </span>
-                  {i === 0 && (
-                    <span className="hidden shrink-0 text-[13px] text-text2 sm:block">
-                      {guide.title}
-                    </span>
-                  )}
                   <ExternalLink
                     className="h-4 w-4 shrink-0 text-text2"
                     strokeWidth={1.8}
