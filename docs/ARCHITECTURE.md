@@ -32,9 +32,9 @@
 - `sections` (project_id, name, position)
 
 ### Задачи
-- `tasks` (project_id, section_id, parent_task_id, title, description markdown, done BOOLEAN + completed_at под CHECK, priority: `low` | `medium` | `high` | `urgent`, start_at, due_at, position NUMERIC, search_vector tsvector). Колонка `status` (четыре системных статуса) — legacy, дропает 0045
+- `tasks` (project_id, section_id, parent_task_id, title, description markdown, done BOOLEAN + completed_at под CHECK, priority: `low` | `medium` | `high` | `urgent`, start_at, due_at, position NUMERIC, search_vector tsvector).
   - Подзадачи только 1 уровень — CHECK `parent_task_id IS NULL OR (SELECT parent_task_id FROM tasks t2 WHERE t2.id = parent_task_id) IS NULL`; UI — секция в карточке (SubtaskList), в топ-уровне List/Board не показываются
-- `project_stages` (project_id, name, position; 0040, свободные с 0044) — колонки доски: ТОЛЬКО имя и позиция, системного смысла нет. `tasks.stage_id` NOT NULL (FK без `SET NULL`), у проекта ≥1 колонка; состояние задачи — независимая ось `tasks.done`, пишет её только `app/services/stages.py::set_done`. `create_project` создаёт 4 стартовые колонки, их можно переименовать и удалить. Колонка `system_status` — legacy, дропает 0045. API `app/api/stages.py`
+- `project_stages` (project_id, name, position; 0040, свободные с 0044) — колонки доски: ТОЛЬКО имя и позиция, системного смысла нет. `tasks.stage_id` NOT NULL (FK без `SET NULL`), у проекта ≥1 колонка; состояние задачи — независимая ось `tasks.done`, пишет её только `app/services/stages.py::set_done`. `create_project` создаёт 4 стартовые колонки, их можно переименовать и удалить. API `app/api/stages.py`
 - `tasks.seq` (0032–0033) — номера «KEY-42» внутри проекта, выдача только `allocate_task_seq` под row-lock проекта, `project_id` иммутабелен
 - `task_assignees` (task_id, employee_id, position, assigned_by; PK составной, RLS с 0034) — **единственное место, где живут исполнители**; колонка-зеркало `tasks.assignee_id` удалена ревизией 0036. Пишет только `app/services/task_assignees.py`; в списках — EXISTS/батч, не JOIN
 - `task_watchers` — auto-добавление: assignee + creator + mentioned

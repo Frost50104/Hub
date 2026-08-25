@@ -54,7 +54,7 @@ publisher+. Для аккаунта без прав интерфейс дегр�
 - Inline-создание: blur/unmount коммитят, Escape отменяет; `lib/inlineDraft.ts` — единственное место логики.
 - Гейт теста: `Quiz.is_required` + `services/quiz_gate.py::derive_quiz_state`; `complete_lesson` — три предусловия.
 - Текст файла библиотеки — `material_versions.extracted_text` (воркер), индекс берёт его при каждой переиндексации.
-- Миграции: 0041 — `material_version_text`, 0042 — личные проекты, 0043 — `media_files.duration_sec`, 0044 — свободные колонки доски и `tasks.done`; следующая (0045) дропает legacy-колонки `tasks.status` и `project_stages.system_status`.
+- Миграции: 0041 — `material_version_text`, 0042 — личные проекты, 0043 — `media_files.duration_sec`, 0044 — свободные колонки доски и `tasks.done`, 0045 — дроп legacy-колонок `tasks.status` и `project_stages.system_status` (25.08).
 - Счётчики аудитории (`dimension_counts`) тенант не фильтруют — как и `dry_run`: выборку сужает RLS. В интеграционных тестах (суперпользователь, RLS не действует) числа по общим ключам вроде `org_roles` проверяются ДЕЛЬТОЙ, а не абсолютом.
 
 ## Не проверено живьём / ручные сценарии

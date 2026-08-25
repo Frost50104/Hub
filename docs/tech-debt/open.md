@@ -6,6 +6,7 @@
 
 
 - **`--workers > 1` заблокирован sid-sync'ом.** Deletion-sync к мульти-воркеру готов (супервизор + Redis leader-lock в `app/services/worker_supervisor.py`, этап 4), но revoked-sid store у sid-sync живёт в памяти процесса: не-лидер не узнаёт о ревокациях, а per-process запуск гоняет общий DB-курсор. Для масштабирования нужен Redis-backed revoked-store. Пока `--workers 1`.
+- **Query-ловушка `?status=` в трёх ручках списков (`tasks`, `me/tasks`, `calendar`).** Тело с legacy-полем ловит `extra="forbid"` на схемах (0045), а неизвестный QUERY-параметр FastAPI игнорирует молча — бандл старше 24.08 получил бы НЕотфильтрованный список вместо ошибки (чип «Просроченные» слал `status=open`). Поэтому `reject_legacy_status(status_)` остался. Снимать — когда бандлов той эпохи заведомо не осталось; ориентир **октябрь 2026**, работа на 10 минут: убрать параметр из трёх сигнатур, функцию, `LEGACY_STATUS_DETAIL` и тест `test_legacy_status_query_is_rejected_not_ignored`.
 - **VAPID-ключ единый для prod+staging.** Удобно (как у Desk), но если staging-баг утечёт public key, теоретически prod-подписки можно подделать. Низкая вероятность. Раздельные ключи — future work.
 - **LexoRank-style `tasks.position NUMERIC`** может «насыщаться» при многих DnD-миграциях карточек. Фоновый rebalance колонки так и НЕ реализован (заглушка в `app/api/tasks.py`); при дельте <0.001 порядок может «слипнуться».
 - **Подзадачи только 1 уровень** (`parent_task_id` CHECK depth=1). Глубже потребует tree-CTE в запросах и отдельной миграции.
