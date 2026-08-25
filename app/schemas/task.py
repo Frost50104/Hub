@@ -13,9 +13,10 @@ from pydantic import BaseModel, ConfigDict, Field
 TaskPriority = Literal["low", "medium", "high", "urgent"]
 
 # Четырёх системных статусов больше нет (0044): колонка доски — это имя,
-# состояние задачи — `done`. Поле принимаем ЯВНО и отвечаем 422: pydantic по
-# умолчанию лишние ключи молча игнорирует, и старый бандл получил бы успешный
-# no-op — «задача закрыта» на экране при незакрытой задаче в базе.
+# состояние задачи — `done`. Текст 422 для старых бандлов: им отвечают
+# query-ловушка `reject_legacy_status` (списки) и обработчик лишних полей тела
+# в `app/main.py`. Молча игнорировать legacy нельзя — старый бандл получил бы
+# успешный no-op, «задача закрыта» на экране при незакрытой в базе.
 LEGACY_STATUS_DETAIL = (
     "Статусы задач заменены на «выполнена / не выполнена», а этап — "
     "это колонка доски. Обновите страницу."
@@ -51,14 +52,18 @@ class AssigneeBrief(BaseModel):
 
 
 class TaskCreate(BaseModel):
+    # Лишнее поле = 422, а не тихое игнорирование (0045). Обратная сторона:
+    # клиент обязан слать РОВНО объявленный набор — `mutate({...task})` со
+    # спредом целой задачи теперь ошибка. Текст ответа собирает обработчик
+    # `RequestValidationError` в `app/main.py`.
+    model_config = ConfigDict(extra="forbid")
+
     title: str = Field(min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=20_000)
     section_id: UUID | None = None
     parent_task_id: UUID | None = None
     # Колонка доски; без неё задача уходит в первую по позиции.
     stage_id: UUID | None = None
-    # LEGACY-вход старых бандлов — только чтобы ответить 422 (см. выше).
-    status: str | None = None
     priority: TaskPriority = "medium"
     # DEPRECATED-вход: держим ради PWA-бандлов, которые живут днями после
     # деплоя (registerType: 'prompt'). Разрешение конфликта — resolve_assignee_ids.
@@ -69,6 +74,8 @@ class TaskCreate(BaseModel):
 
 
 class TaskUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # см. TaskCreate
+
     title: str | None = Field(default=None, min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=20_000)
     section_id: UUID | None = None
@@ -76,8 +83,6 @@ class TaskUpdate(BaseModel):
     stage_id: UUID | None = None
     # Состояние задачи — независимая ось: галочку ставят из любой колонки.
     done: bool | None = None
-    # LEGACY-вход старых бандлов — только чтобы ответить 422 (см. выше).
-    status: str | None = None
     priority: TaskPriority | None = None
     assignee_id: UUID | None = None  # DEPRECATED-вход, см. TaskCreate
     assignee_ids: list[UUID] | None = Field(default=None, max_length=MAX_ASSIGNEES)
@@ -86,7 +91,7 @@ class TaskUpdate(BaseModel):
     position: Decimal | None = None
     # Для nullable-полей (section_id/assignee_id/start_at/due_at) endpoint
     # различает «поле не пришло» (нет в model_fields_set → не трогаем) и
-    # «пришёл явный null» (очистить значение). Не-nullable поля (title/status/
+    # «пришёл явный null» (очистить значение). Не-nullable поля (title/
     # priority/position) по-прежнему игнорируют null.
 
 

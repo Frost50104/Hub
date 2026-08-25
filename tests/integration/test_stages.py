@@ -88,26 +88,64 @@ async def test_done_and_column_are_independent(db: AsyncSession, tenant_id: uuid
     assert back.stage_id == stages[2].id
 
 
-async def test_legacy_status_is_rejected_not_ignored(db: AsyncSession, tenant_id: uuid.UUID):
-    """Старый бандл должен получить ошибку, а не успешный no-op."""
+async def test_legacy_status_query_is_rejected_not_ignored(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Старый бандл должен получить ошибку, а не НЕотфильтрованный список.
+
+    Тело с legacy-полем отбивает `extra="forbid"` на схемах (0045, юнит-тесты
+    в `tests/unit/test_legacy_payloads.py`), а вот неизвестный query-параметр
+    FastAPI игнорирует МОЛЧА: старый бандл получил бы 200 и все задачи там,
+    где просил только «в работе». Здесь — две ручки, которых не касается
+    регресс `list_tasks` в `test_feedback_2026_08.py`.
+    """
+    from app.api.calendar import list_calendar_tasks
+    from app.api.me_tasks import list_my_tasks
+
     owner, project = await _seed(db, tenant_id, "st4")
+    await create_task(project.id, TaskCreate(title="Обычная"), owner, db)
+
     with pytest.raises(HTTPException) as exc:
-        await create_task(project.id, TaskCreate(title="Старый", status="done"), owner, db)
+        await list_my_tasks(
+            done=None,
+            status_="in_progress",
+            due_window=None,
+            include_archived=False,
+            include_personal=False,
+            principal=owner,
+            db=db,
+        )
     assert exc.value.status_code == 422
     assert "обновите страницу" in exc.value.detail.lower()
 
-    task = await create_task(project.id, TaskCreate(title="Обычная"), owner, db)
     with pytest.raises(HTTPException) as exc:
-        await update_task(task.id, TaskUpdate(status="done"), owner, db)
-    assert exc.value.status_code == 422
-    fresh = await get_task(task.id, owner, db)
-    assert fresh.done is False, "отвергнутый патч ничего не изменил"
-
-    with pytest.raises(HTTPException) as exc:
-        await create_stage(
-            project.id, StageCreate(name="Колонка", system_status="todo"), owner, db
+        await list_calendar_tasks(
+            project.id,
+            from_="2026-08-01",
+            to="2026-08-31",
+            done=None,
+            status_="done",
+            assignee_id=None,
+            priority=None,
+            principal=owner,
+            db=db,
         )
     assert exc.value.status_code == 422
+
+    # Без legacy-параметра те же ручки работают.
+    assert len(
+        await list_calendar_tasks(
+            project.id,
+            from_="2026-08-01",
+            to="2026-08-31",
+            done=None,
+            status_=None,
+            assignee_id=None,
+            priority=None,
+            principal=owner,
+            db=db,
+        )
+    ) == 0
 
 
 async def test_custom_columns_live_freely(db: AsyncSession, tenant_id: uuid.UUID):

@@ -8,7 +8,7 @@ Aggregates exposed:
 - `done_breakdown` / `priority_breakdown` — `{value: count}` maps.
 - `completed_trend` — list of `{day: YYYY-MM-DD, count: int}` for the
   last 30 days (zero-padded so the chart x-axis is continuous).
-- `overdue_count` — tasks with `due_at < now` and `status != 'done'`.
+- `overdue_count` — tasks with `due_at` before today and `NOT done` (0044).
 - `workload` — top assignees by active (non-done, non-archived) count.
 - `custom_field_stats` — per field:
    - number → {sum, avg, min, max, count}

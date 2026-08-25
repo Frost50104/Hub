@@ -9,18 +9,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class StageCreate(BaseModel):
+    # Лишнее поле = 422 (0045): старый бандл шлёт `system_status`, и молчаливое
+    # игнорирование выглядело бы как успешная смена системного статуса.
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1, max_length=255)
     # None — в конец ленты.
     position: int | None = Field(default=None, ge=0)
-    # LEGACY-вход старых бандлов (0044): системного смысла у колонки больше
-    # нет, поле принимаем явно и отвечаем 422.
-    system_status: str | None = None
 
 
 class StageUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # см. StageCreate
+
     name: str | None = Field(default=None, min_length=1, max_length=255)
     position: int | None = Field(default=None, ge=0)
-    system_status: str | None = None
 
 
 class StageResponse(BaseModel):

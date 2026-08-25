@@ -37,7 +37,9 @@ export function useUpdateStage(projectId: string) {
     meta: { errorMessage: 'Не удалось обновить этап' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: stageKeys.list(projectId) })
-      // Смена system_status переписывает зеркало у задач этапа.
+      // Строки списка показывают имя колонки (`stage_name`), а карточки
+      // доски сгруппированы по `stage_id` — переименование колонки меняет
+      // подпись у всех её задач.
       qc.invalidateQueries({ queryKey: ['tasks', projectId] })
     },
   })

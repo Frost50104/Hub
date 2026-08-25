@@ -580,7 +580,7 @@ function SectionBlock({
                 selected={selectedTaskId === t.id}
                 onClick={() => onTaskClick(t.id)}
                 // Сервер сказал «нельзя» — контрол не рисуем вовсе (у
-                // TaskStatusControl нет disabled: без onToggle он рендерит
+                // TaskDoneControl нет disabled: без onToggle он рендерит
                 // неинтерактивную иконку). undefined ≠ false: «не знаем» —
                 // показываем, как раньше.
                 onToggleDone={
@@ -613,7 +613,7 @@ function SectionBlock({
                 selected={selectedTaskId === t.id}
                 onClick={() => onTaskClick(t.id)}
                 // Сервер сказал «нельзя» — контрол не рисуем вовсе (у
-                // TaskStatusControl нет disabled: без onToggle он рендерит
+                // TaskDoneControl нет disabled: без onToggle он рендерит
                 // неинтерактивную иконку). undefined ≠ false: «не знаем» —
                 // показываем, как раньше.
                 onToggleDone={

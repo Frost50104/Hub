@@ -96,10 +96,6 @@ class Task(Base):
     done: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
-    # LEGACY: четыре системных статуса. Колонка живёт до 0045 (`DROP COLUMN` —
-    # в два деплоя), новый код её не читает и не пишет; server_default держит
-    # INSERT'ы окна деплоя.
-    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="todo")
     priority: Mapped[str] = mapped_column(String(16), nullable=False, server_default="medium")
 
     created_by: Mapped[UUID] = mapped_column(

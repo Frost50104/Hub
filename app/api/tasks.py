@@ -212,7 +212,6 @@ async def create_task(
         limit=120,
         window_sec=60,
     )
-    reject_legacy_status(body.status)
     await require_project_role(db, project_id, principal, allow=("owner", "editor"))
     # Доменная работа — в services/tasks.py: тот же путь использует импорт из
     # CSV (ему нельзя ходить через ручку из-за rate-limit).
@@ -268,7 +267,6 @@ async def update_task(
         limit=120,
         window_sec=60,
     )
-    reject_legacy_status(body.status)
     task = await db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")

@@ -7,13 +7,43 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app import log as log_config
 from app.config import get_settings
 
 log = structlog.get_logger("main")
+
+STALE_PAYLOAD_DETAIL = (
+    "Похоже, открыта старая версия страницы: сервер не понял часть запроса. "
+    "Обновите страницу и повторите."
+)
+
+
+async def validation_error_handler(
+    _request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """422 с человеческим текстом, если тело несёт поля, которых схема не знает.
+
+    Схемы задач и колонок доски запрещают лишние поля (`extra="forbid"`,
+    0045) — это единственная защита от тихого no-op у бандла, живущего с
+    прошлой модели: pydantic по умолчанию лишний ключ игнорирует, и старый
+    клиент получил бы 200 на запрос, который сервер не выполнил. Но ошибки
+    валидации приходят СПИСКОМ, а `extractErrorDetail` на фронте понимает
+    только строку и показал бы «Неизвестная ошибка» вместо инструкции.
+
+    Все прочие ошибки валидации отдаём ровно в дефолтном формате FastAPI
+    (`{"detail": jsonable_encoder(exc.errors())}`): менять поведение всех 422
+    в продукте ради одного случая нельзя, а без `jsonable_encoder` в `ctx`
+    попадают несериализуемые объекты и обработчик сам падает в 500.
+    """
+    if any(err.get("type") == "extra_forbidden" for err in exc.errors()):
+        return JSONResponse(status_code=422, content={"detail": STALE_PAYLOAD_DETAIL})
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
 
 
 @asynccontextmanager
@@ -117,6 +147,8 @@ def create_app() -> FastAPI:
         redoc_url=None,
         openapi_url="/api/openapi.json" if settings.environment != "prod" else None,
     )
+
+    app.add_exception_handler(RequestValidationError, validation_error_handler)
 
     app.add_middleware(
         CORSMiddleware,

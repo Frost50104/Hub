@@ -28,7 +28,6 @@ from app.services.stages import (
     get_stage_in_project,
     list_stages,
 )
-from app.services.tasks import reject_legacy_status
 
 router = APIRouter(tags=["stages"])
 
@@ -75,7 +74,6 @@ async def create_stage(
     await enforce_rate_limit(
         bucket="task:write", employee_id=str(principal.employee_id), limit=120, window_sec=60
     )
-    reject_legacy_status(body.system_status)
     await require_project_role(db, project_id, principal, allow=("owner", "editor"))
     await db.execute(_DEFER)
     max_row = await db.execute(
@@ -116,7 +114,6 @@ async def update_stage(
     await enforce_rate_limit(
         bucket="task:write", employee_id=str(principal.employee_id), limit=120, window_sec=60
     )
-    reject_legacy_status(body.system_status)
     stage = await db.get(ProjectStage, stage_id)
     if stage is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Этап не найден")
