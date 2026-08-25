@@ -283,6 +283,8 @@ a{color:var(--sig-amber);text-decoration:none}
 a:hover{color:var(--sig-amber-deep);text-decoration:underline}
 ::selection{background:rgba(255,178,0,.28);color:#F0F0F5}
 @keyframes sgIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+:root{color-scheme:dark}
+button,input{color-scheme:dark}
 
 .sig-btn{display:inline-flex;align-items:center;gap:9px;padding:12px 20px;border-radius:12px;border:1px solid transparent;background:var(--sig-amber);color:#08080E;font-family:var(--font-body);font-weight:700;font-size:15px;line-height:1.2;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),transform .18s cubic-bezier(.22,1,.36,1)}
 .sig-btn:hover{background:#E09A00}
@@ -293,7 +295,9 @@ a:hover{color:var(--sig-amber-deep);text-decoration:underline}
 .sig-btn-sec:hover{background:var(--sig-white-14)}
 .sig-stat-v{font-family:var(--font-display);font-weight:900;font-size:clamp(28px,3vw,40px);line-height:1;color:var(--sig-white);font-variant-numeric:tabular-nums}
 .sig-stat-l{margin-top:8px;font-size:13px;line-height:1.4;color:var(--text-muted);max-width:180px}
-[data-nav]:hover{background:var(--sig-white-07);color:var(--sig-white)}
+[data-nav]{background-color:transparent;color:var(--text-muted)}
+[data-nav]:hover{background-color:var(--sig-white-07);color:var(--sig-white)}
+[data-nav]:focus-visible{outline:2px solid var(--sig-amber);outline-offset:-2px}
 [data-prof]:hover{color:var(--sig-white)}
 #sg-reset-read:hover,#sg-check-reset:hover{color:var(--sig-white);background:var(--sig-white-07)}
 #sg-box-close:hover{background:var(--sig-white-14)}
@@ -350,67 +354,67 @@ label:hover{background:var(--sig-white-04)}
 
     <nav style="display:flex;flex-wrap:wrap;gap:4px">
       <button type="button" data-nav="start" style="display:flex;align-items:center;gap:10px;flex:1 1 210px;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:14px;line-height:1.3;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),color .18s cubic-bezier(.22,1,.36,1)">
-        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--sig-mid);font-variant-numeric:tabular-nums;min-width:17px">01</span>
+        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:17px">01</span>
         <span style="flex:1">Витрина</span>
         <span data-dot="start" style="width:6px;height:6px;border-radius:50%;background:var(--sig-amber);opacity:0;transition:opacity .2s"></span>
       </button>
       <button type="button" data-nav="learning" style="display:flex;align-items:center;gap:10px;flex:1 1 210px;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:14px;line-height:1.3;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),color .18s cubic-bezier(.22,1,.36,1)">
-        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--sig-mid);font-variant-numeric:tabular-nums;min-width:17px">02</span>
+        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:17px">02</span>
         <span style="flex:1">Обучение</span>
         <span data-dot="learning" style="width:6px;height:6px;border-radius:50%;background:var(--sig-amber);opacity:0;transition:opacity .2s"></span>
       </button>
       <button type="button" data-nav="course" style="display:flex;align-items:center;gap:10px;flex:1 1 210px;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:14px;line-height:1.3;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),color .18s cubic-bezier(.22,1,.36,1)">
-        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--sig-mid);font-variant-numeric:tabular-nums;min-width:17px">03</span>
+        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:17px">03</span>
         <span style="flex:1">Прохождение курса</span>
         <span data-dot="course" style="width:6px;height:6px;border-radius:50%;background:var(--sig-amber);opacity:0;transition:opacity .2s"></span>
       </button>
       <button type="button" data-nav="inbox" style="display:flex;align-items:center;gap:10px;flex:1 1 210px;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:14px;line-height:1.3;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),color .18s cubic-bezier(.22,1,.36,1)">
-        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--sig-mid);font-variant-numeric:tabular-nums;min-width:17px">04</span>
+        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:17px">04</span>
         <span style="flex:1">Входящие</span>
         <span data-dot="inbox" style="width:6px;height:6px;border-radius:50%;background:var(--sig-amber);opacity:0;transition:opacity .2s"></span>
       </button>
       <button type="button" data-nav="search" style="display:flex;align-items:center;gap:10px;flex:1 1 210px;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:14px;line-height:1.3;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),color .18s cubic-bezier(.22,1,.36,1)">
-        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--sig-mid);font-variant-numeric:tabular-nums;min-width:17px">05</span>
+        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:17px">05</span>
         <span style="flex:1">Поиск</span>
         <span data-dot="search" style="width:6px;height:6px;border-radius:50%;background:var(--sig-amber);opacity:0;transition:opacity .2s"></span>
       </button>
       <button type="button" data-nav="library" style="display:flex;align-items:center;gap:10px;flex:1 1 210px;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:14px;line-height:1.3;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),color .18s cubic-bezier(.22,1,.36,1)">
-        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--sig-mid);font-variant-numeric:tabular-nums;min-width:17px">06</span>
+        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:17px">06</span>
         <span style="flex:1">Библиотека</span>
         <span data-dot="library" style="width:6px;height:6px;border-radius:50%;background:var(--sig-amber);opacity:0;transition:opacity .2s"></span>
       </button>
       <button type="button" data-nav="news" style="display:flex;align-items:center;gap:10px;flex:1 1 210px;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:14px;line-height:1.3;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),color .18s cubic-bezier(.22,1,.36,1)">
-        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--sig-mid);font-variant-numeric:tabular-nums;min-width:17px">07</span>
+        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:17px">07</span>
         <span style="flex:1">Новости</span>
         <span data-dot="news" style="width:6px;height:6px;border-radius:50%;background:var(--sig-amber);opacity:0;transition:opacity .2s"></span>
       </button>
       <button type="button" data-nav="assortment" style="display:flex;align-items:center;gap:10px;flex:1 1 210px;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:14px;line-height:1.3;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),color .18s cubic-bezier(.22,1,.36,1)">
-        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--sig-mid);font-variant-numeric:tabular-nums;min-width:17px">08</span>
+        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:17px">08</span>
         <span style="flex:1">Ассортимент</span>
         <span data-dot="assortment" style="width:6px;height:6px;border-radius:50%;background:var(--sig-amber);opacity:0;transition:opacity .2s"></span>
       </button>
       <button type="button" data-nav="rating" style="display:flex;align-items:center;gap:10px;flex:1 1 210px;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:14px;line-height:1.3;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),color .18s cubic-bezier(.22,1,.36,1)">
-        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--sig-mid);font-variant-numeric:tabular-nums;min-width:17px">09</span>
+        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:17px">09</span>
         <span style="flex:1">Рейтинг</span>
         <span data-dot="rating" style="width:6px;height:6px;border-radius:50%;background:var(--sig-amber);opacity:0;transition:opacity .2s"></span>
       </button>
       <button type="button" data-nav="ai" style="display:flex;align-items:center;gap:10px;flex:1 1 210px;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:14px;line-height:1.3;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),color .18s cubic-bezier(.22,1,.36,1)">
-        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--sig-mid);font-variant-numeric:tabular-nums;min-width:17px">10</span>
+        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:17px">10</span>
         <span style="flex:1">AI-помощник</span>
         <span data-dot="ai" style="width:6px;height:6px;border-radius:50%;background:var(--sig-amber);opacity:0;transition:opacity .2s"></span>
       </button>
       <button type="button" data-nav="shifts" style="display:flex;align-items:center;gap:10px;flex:1 1 210px;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:14px;line-height:1.3;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),color .18s cubic-bezier(.22,1,.36,1)">
-        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--sig-mid);font-variant-numeric:tabular-nums;min-width:17px">11</span>
+        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:17px">11</span>
         <span style="flex:1">Биржа смен</span>
         <span data-dot="shifts" style="width:6px;height:6px;border-radius:50%;background:var(--sig-amber);opacity:0;transition:opacity .2s"></span>
       </button>
       <button type="button" data-nav="attest" style="display:flex;align-items:center;gap:10px;flex:1 1 210px;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:14px;line-height:1.3;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),color .18s cubic-bezier(.22,1,.36,1)">
-        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--sig-mid);font-variant-numeric:tabular-nums;min-width:17px">12</span>
+        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:17px">12</span>
         <span style="flex:1">Аттестации</span>
         <span data-dot="attest" style="width:6px;height:6px;border-radius:50%;background:var(--sig-amber);opacity:0;transition:opacity .2s"></span>
       </button>
       <button type="button" data-nav="profile" style="display:flex;align-items:center;gap:10px;flex:1 1 210px;text-align:left;padding:9px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:14px;line-height:1.3;cursor:pointer;transition:background .18s cubic-bezier(.22,1,.36,1),color .18s cubic-bezier(.22,1,.36,1)">
-        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--sig-mid);font-variant-numeric:tabular-nums;min-width:17px">13</span>
+        <span style="font-family:var(--font-display);font-weight:700;font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums;min-width:17px">13</span>
         <span style="flex:1">Профиль</span>
         <span data-dot="profile" style="width:6px;height:6px;border-radius:50%;background:var(--sig-amber);opacity:0;transition:opacity .2s"></span>
       </button>
@@ -788,7 +792,7 @@ function goTo(id){var el=get(id);if(!el)return;window.scrollTo({top:el.getBoundi
 function progress(){var bar=get('sg-bar');if(!bar)return;var h=document.documentElement.scrollHeight-window.innerHeight;bar.style.width=(h>0?Math.min(100,window.pageYOffset/h*100):0)+'%';}
 function paintRead(){IDS.forEach(function(id){var d=document.querySelector('[data-dot="'+id+'"]');if(d)d.style.opacity=read.has(id)?'1':'0';});var l=get('sg-read');if(l)l.textContent='Прочитано '+read.size+' из '+IDS.length;}
 function markRead(id){if(read.has(id))return;read.add(id);try{localStorage.setItem(KEY,JSON.stringify(Array.prototype.slice.call(read)));}catch(e){}paintRead();}
-function setActive(id){q('[data-nav]').forEach(function(b){var on=b.getAttribute('data-nav')===id;b.style.background=on?'rgba(255,178,0,.12)':'';b.style.borderColor=on?'rgba(255,178,0,.3)':'transparent';b.style.color=on?'var(--sig-amber)':'var(--text-muted)';});}
+function setActive(id){q('[data-nav]').forEach(function(b){var on=b.getAttribute('data-nav')===id;b.style.background=on?'rgba(240,240,245,.13)':'transparent';b.style.borderColor=on?'rgba(255,178,0,.5)':'transparent';b.style.color=on?'var(--sig-white)':'var(--text-muted)';b.style.fontWeight=on?'700':'400';var n=b.querySelector('span');if(n)n.style.color=on?'var(--sig-amber)':'var(--text-muted)';});}
 q('[data-nav]').forEach(function(b){b.onclick=function(){goTo(b.getAttribute('data-nav'));};});
 q('[data-go]').forEach(function(b){b.onclick=function(){var t=b.getAttribute('data-go');if(t==='top'){window.scrollTo({top:0,behavior:'smooth'});}else{goTo(t);}};});
 if(window.IntersectionObserver){var obs=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){setActive(e.target.id);markRead(e.target.id);}});},{rootMargin:'-15% 0px -70% 0px'});IDS.forEach(function(id){var el=get(id);if(el)obs.observe(el);});}
