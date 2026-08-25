@@ -55,6 +55,38 @@ SCROLLBAR_CSS = (
     "*::-webkit-scrollbar-corner{background:transparent}"
 )
 
+# Возврат в Hub. В PWA на домашнем экране инструкция открывается ТЕМ ЖЕ окном
+# (адрес свой, `target="_blank"` там ничего не меняет), браузерной обвязки нет,
+# и выйти из неё нечем. В обычной вкладке ситуация не лучше: вкладка новая, её
+# «Назад» пуста. Поэтому ссылка нужна всегда, а не только в standalone.
+# Правый нижний угол — единственный, где у инструкции нет своих плавающих
+# элементов: сверху полоса прогресса чтения (z-60), слева липкий список
+# разделов со «Сбросить», по центру лайтбокс (z-80).
+BACK_MARK = "/* hub-back */"
+BACK_CSS = (
+    BACK_MARK
+    + "[data-hub-back]{position:fixed;z-index:90;right:16px;"
+    "bottom:max(16px,env(safe-area-inset-bottom));display:inline-flex;align-items:center;"
+    "gap:8px;padding:11px 16px;border-radius:999px;"
+    "background:var(--sig-white-07,rgba(240,240,245,.07));"
+    "border:1px solid var(--sig-white-14,rgba(240,240,245,.14));"
+    "color:var(--sig-white,#F0F0F5);font:600 13px/1 var(--font-body,inherit);"
+    "text-decoration:none;white-space:nowrap;backdrop-filter:blur(12px);"
+    "box-shadow:0 4px 16px rgba(0,0,0,.35)}"
+    "[data-hub-back]:hover{background:var(--sig-white-14,rgba(240,240,245,.14))}"
+    "[data-hub-back]:focus-visible{outline:2px solid var(--sig-amber,#FFB200);outline-offset:2px}"
+    "[data-hub-back] [data-short]{display:none}"
+    # На узком экране плавающая кнопка ложится поверх поля «Найти раздел…» —
+    # короткая подпись оставляет ему место.
+    "@media(max-width:560px){[data-hub-back] [data-full]{display:none}"
+    "[data-hub-back] [data-short]{display:inline}}"
+    "@media print{[data-hub-back]{display:none}}"
+)
+BACK_HTML = (
+    '<a data-hub-back href="/settings/account" aria-label="Вернуться в Hub">'
+    "←<span data-full>Вернуться в Hub</span><span data-short>В Hub</span></a>"
+)
+
 
 def check(html: str) -> list[str]:
     """Что мешает отдавать этот файл под нашей CSP."""
@@ -79,14 +111,31 @@ def check(html: str) -> list[str]:
     return problems
 
 
-def with_scrollbar(html: str) -> tuple[str, bool]:
-    """Дописать правила скроллбара в конец первого <style>. Идемпотентно."""
-    if SCROLLBAR_MARK in html:
+def _add_css(html: str, mark: str, css: str) -> tuple[str, bool]:
+    """Дописать правила в конец первого <style>. Идемпотентно."""
+    if mark in html:
         return html, False
     end = html.find("</style>")
     if end == -1:
         return html, False
-    return html[:end] + SCROLLBAR_CSS + html[end:], True
+    return html[:end] + css + html[end:], True
+
+
+def with_scrollbar(html: str) -> tuple[str, bool]:
+    return _add_css(html, SCROLLBAR_MARK, SCROLLBAR_CSS)
+
+
+def with_back_link(html: str) -> tuple[str, bool]:
+    """Плавающая ссылка «Вернуться в Hub» перед </body>."""
+    if BACK_MARK in html:
+        return html, False
+    html, added = _add_css(html, BACK_MARK, BACK_CSS)
+    if not added:
+        return html, False
+    end = html.rfind("</body>")
+    if end == -1:
+        return html, False
+    return html[:end] + BACK_HTML + html[end:], True
 
 
 def main() -> int:
@@ -112,10 +161,12 @@ def main() -> int:
             failed = True
             continue
 
-        html, added = with_scrollbar(html)
+        html, scrollbar_added = with_scrollbar(html)
+        html, back_added = with_back_link(html)
         title = (re.search(r"<title>([^<]*)", html) or ["", "?"])[1]
         print(f"  ✓ самодостаточна, {len(html) / 1e6:.1f} МБ, «{title.strip()}»")
-        print(f"  {'+ скроллбар как в Hub' if added else '· скроллбар уже был'}")
+        print(f"  {'+ скроллбар как в Hub' if scrollbar_added else '· скроллбар уже был'}")
+        print(f"  {'+ ссылка «Вернуться в Hub»' if back_added else '· ссылка возврата уже была'}")
 
         if args.apply:
             target.write_text(html, encoding="utf-8")
