@@ -88,6 +88,9 @@ class Settings(BaseSettings):
 
     # Attachments (Hub-MVP.5)
     attachments_root: Path = Field(default=Path("/opt/signaris-hub/attachments"))
+    # Инструкции по работе в Hub: две готовые HTML-страницы, приезжают обычным
+    # rsync'ом деплоя вместе с кодом. На staging путь другой — задаётся env.
+    guides_root: Path = Field(default=Path("/opt/signaris-hub/guides"))
     attachment_max_bytes: int = Field(default=20 * 1024 * 1024)
 
     # Learn-медиа (Ф3a): подписанные URL для <video>/<img>/pdf (Bearer в тегах

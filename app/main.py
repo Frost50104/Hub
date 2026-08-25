@@ -178,6 +178,7 @@ def create_app() -> FastAPI:
     from app.api import employees as employees_api
     from app.api import env as env_api
     from app.api import favorites as favorites_api
+    from app.api import guides as guides_api
     from app.api import labels as labels_api
     from app.api import learn_analytics as learn_analytics_api
     from app.api import learn_home as learn_home_api
@@ -210,6 +211,7 @@ def create_app() -> FastAPI:
     from app.api import watchers as watchers_api
 
     app.include_router(env_api.router, prefix="/api")
+    app.include_router(guides_api.router, prefix="/api")
     app.include_router(me_api.router, prefix="/api")
     app.include_router(me_tasks_api.router, prefix="/api")
     app.include_router(projects_api.router, prefix="/api")

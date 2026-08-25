@@ -1,8 +1,9 @@
-import { Award } from 'lucide-react'
+import { Award, BookOpen, ExternalLink } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { useLearnProfile, useMyCertificates } from '@/hooks/useLearn'
 import { useMe } from '@/hooks/useMe'
+import { guideRows } from '@/lib/guides'
 import { ORG_ROLE_LABEL } from '@/lib/learn'
 
 function tenureLabel(days: number): string {
@@ -18,15 +19,18 @@ function fmtDate(iso: string): string {
 }
 
 /**
- * «Учётная запись» — данные сотрудника: блок «Работа» (должность, точка,
- * отдел, контур, стаж — из учебного профиля) и «Сертификаты». Профиля может
- * не быть вовсе (сотрудник только трекера): тогда блок «Работа» не рисуется,
- * а 404 от `/learn/profile` — не ошибка экрана.
+ * «Учётная запись» — данные сотрудника: «Работа» (должность, точка, отдел,
+ * контур, стаж — из учебного профиля), «Инструкция» и «Сертификаты». Профиля
+ * может не быть вовсе (сотрудник только трекера): тогда блок «Работа» не
+ * рисуется, а 404 от `/learn/profile` — не ошибка экрана.
  */
 export function AccountTab() {
   const me = useMe()
   const learn = useLearnProfile()
   const certificates = useMyCertificates()
+  // Ссылки подписаны сервером и приходят вместе с /me: получать их по клику
+  // нельзя — `window.open` после await блокируют попап-фильтры.
+  const guides = guideRows(me.data)
 
   const work: [string, string | null][] = learn.data?.profile_id
     ? [
@@ -74,6 +78,49 @@ export function AccountTab() {
           <p className="text-[14px] text-text2">Данных о должности и точке пока нет.</p>
         )}
       </section>
+
+      {guides.length > 0 && (
+        <section className="flex flex-col gap-[11px]">
+          <h2 className="font-display text-[17px] font-bold leading-[1.25] text-text">
+            Инструкция
+          </h2>
+          {/* Тот же списковый вид, что «Сертификаты»: третьего вида блока на
+              этом экране быть не должно (макет «Настройки»). */}
+          <ul className="flex flex-col overflow-hidden rounded-[10px] border border-glass-border">
+            {guides.map((guide, i) => (
+              <li key={guide.kind} className="border-t border-hair first:border-t-0">
+                <a
+                  href={guide.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex min-h-12 items-center gap-3 px-3.5 py-2 hover:bg-glass focus-visible:bg-glass focus-visible:outline-none"
+                >
+                  <BookOpen className="h-[18px] w-[18px] shrink-0 text-text2" strokeWidth={1.8} />
+                  {/* Первая строка — то, что человек ищет глазами («Посмотреть
+                      инструкцию»), её вид уточняет подпись справа. Вторая
+                      (только у админа) — сотрудницкая, ему она для справки. */}
+                  <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-text">
+                    {i === 0 ? 'Посмотреть инструкцию' : guide.title}
+                  </span>
+                  {i === 0 && (
+                    <span className="hidden shrink-0 text-[13px] text-text2 sm:block">
+                      {guide.title}
+                    </span>
+                  )}
+                  <ExternalLink
+                    className="h-4 w-4 shrink-0 text-text2"
+                    strokeWidth={1.8}
+                    aria-hidden
+                  />
+                </a>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[13px] leading-[1.45] text-text2">
+            Откроется в новой вкладке. Ссылка личная — она работает несколько часов.
+          </p>
+        </section>
+      )}
 
       <section className="flex flex-col gap-[11px]">
         <h2 className="font-display text-[17px] font-bold leading-[1.25] text-text">Сертификаты</h2>

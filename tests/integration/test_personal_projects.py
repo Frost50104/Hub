@@ -12,7 +12,7 @@ import uuid
 
 import pytest
 from signaris_auth import Principal
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.calendar import list_calendar_tasks
@@ -31,10 +31,11 @@ from app.api.projects import (
 from app.api.search import search
 from app.api.share import create_project_share
 from app.api.stats import get_stats
-from app.api.tasks import create_task, get_task, list_tasks
+from app.api.tasks import create_task, delete_task, get_task, list_tasks
 from app.api.timeline import get_timeline
 from app.models.project import Project, ProjectMember
 from app.models.stage import ProjectStage
+from app.models.task import Task
 from app.schemas.project import (
     ProjectCreate,
     ProjectFolderAssign,
@@ -43,6 +44,7 @@ from app.schemas.project import (
 )
 from app.schemas.share import ShareCreate
 from app.schemas.task import TaskCreate
+from app.services.onboarding import GUIDE_TASK_TITLE
 from app.services.personal_projects import (
     PERSONAL_KEY_BASE,
     PERSONAL_PROJECT_NAME,
@@ -106,6 +108,42 @@ async def _my_tasks(db: AsyncSession, principal: Principal, *, personal: bool = 
 # ─── Создание ───────────────────────────────────────────────────────────────
 
 
+async def test_guide_task_is_created_once(db, tenant_id):
+    """Задача-инструкция привязана к СОЗДАНИЮ проекта, а не к каждому входу."""
+    principal = await _member(db, tenant_id, "pp-guide-once")
+    project_id = await ensure_personal_project(db, principal)
+    await db.commit()
+
+    for _ in range(3):
+        assert await ensure_personal_project(db, principal) == project_id
+        await db.commit()
+
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(Task)
+            .where(Task.project_id == project_id, Task.title == GUIDE_TASK_TITLE)
+        )
+    ).scalar_one()
+    assert count == 1
+
+    # Удалили — обратно не возвращается: повторное создание задачи было бы
+    # спамом (бэкфилл для нынешних сотрудников гоняется один раз вручную).
+    task_id = (
+        await db.execute(select(Task.id).where(Task.project_id == project_id))
+    ).scalar_one()
+    await delete_task(task_id, principal, db)
+    await db.commit()
+    assert await ensure_personal_project(db, principal) == project_id
+    await db.commit()
+    left = (
+        await db.execute(
+            select(func.count()).select_from(Task).where(Task.project_id == project_id)
+        )
+    ).scalar_one()
+    assert left == 0
+
+
 async def test_ensure_creates_project_stages_and_owner(db, tenant_id):
     principal = await _member(db, tenant_id, "pp-create")
     project_id = await ensure_personal_project(db, principal)
@@ -125,6 +163,12 @@ async def test_ensure_creates_project_stages_and_owner(db, tenant_id):
         )
     ).scalars().all()
     assert stages == ["К выполнению", "В работе", "На проверке", "Готово"]
+
+    # Первый вход заводит и задачу-инструкцию — ровно одну, в этом же проекте.
+    guide_titles = (
+        await db.execute(select(Task.title).where(Task.project_id == project_id))
+    ).scalars().all()
+    assert guide_titles == [GUIDE_TASK_TITLE]
 
     role = (
         await db.execute(
@@ -159,6 +203,24 @@ async def test_ensure_bypasses_can_create_gate(db, tenant_id):
     me = await get_me(principal=principal, db=db)
     assert me.can_create_projects is False
     assert me.personal_project_id is not None
+
+
+async def test_me_carries_ready_guide_links(db, tenant_id):
+    """Ссылка на инструкцию приходит ГОТОВОЙ вместе с /me.
+
+    Получать её по клику нельзя: `window.open` после await блокируют
+    попап-фильтры. Роль решает здесь, а не на отдаче — та проверяет подпись.
+    """
+    member = await _member(db, tenant_id, "pp-guide-links")
+    rows = (await get_me(principal=member, db=db)).guides
+    assert [r.kind for r in rows] == ["employee"]
+    assert rows[0].url.startswith("/api/guides/employee?e=")
+
+    admin = await _member(db, tenant_id, "pp-guide-adm", role="admin", org_role=None)
+    assert [r.kind for r in (await get_me(principal=admin, db=db)).guides] == [
+        "admin",
+        "employee",
+    ]
 
 
 async def test_ensure_for_hub_viewer(db, tenant_id):
@@ -323,6 +385,11 @@ async def test_assistant_hides_foreign_personal(db, tenant_id):
         await resolve_project(admin_ctx, str(resolved.id))
 
 
+def _guide_id(tasks):
+    """Id задачи-инструкции, которую Hub заводит вместе с личным проектом."""
+    return next(t.id for t in tasks if t.title == GUIDE_TASK_TITLE)
+
+
 # ─── Приватность внутри чужого личного ──────────────────────────────────────
 
 
@@ -355,7 +422,10 @@ async def test_guest_sees_only_assigned_task(db, tenant_id):
     assert [t.id for t in visible] == [shared_id]
 
     owner_view = await _tasks(db, personal_id, owner)
-    assert {t.id for t in owner_view} == {shared_id, private_id}
+    # Третья задача — та, что Hub завёл при создании личного проекта
+    # (`onboarding.create_guide_task`): она тоже принадлежит владельцу.
+    assert {t.id for t in owner_view} == {shared_id, private_id, _guide_id(owner_view)}
+    assert GUIDE_TASK_TITLE in {t.title for t in owner_view}
 
 
 async def test_guest_cannot_open_private_task(db, tenant_id):
@@ -430,7 +500,8 @@ async def test_admin_keeps_pointwise_access(db, tenant_id):
     admin = await _member(db, tenant_id, "pp-adm-point-a", role="admin", org_role=None)
     await db.commit()
     assert (await get_task(private_id, admin, db)).id == private_id
-    assert len(await _tasks(db, personal_id, admin)) == 2
+    # Две созданные тестом задачи + задача-инструкция от первого входа.
+    assert len(await _tasks(db, personal_id, admin)) == 3
 
 
 # ─── /me/tasks ──────────────────────────────────────────────────────────────

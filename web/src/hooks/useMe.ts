@@ -34,6 +34,9 @@ export interface Me {
    *  Optional, а не `string | null`: старый бэкенд в окне деплоя поля не
    *  отдаёт, и strict-тип врал бы про рантайм. */
   personal_project_id?: string | null
+  /** Готовые ПОДПИСАННЫЕ ссылки на инструкции (какие — решает сервер по роли).
+   *  Optional по той же причине, что и `personal_project_id`. */
+  guides?: { kind: string; title: string; url: string }[]
 }
 
 export function useMe(): UseQueryResult<Me> {

@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project
 from app.models.task import Task, TaskAssignee, TaskWatcher
+from app.services.onboarding import create_guide_task
 from app.services.project_access import is_hub_admin, require_project_role
 from app.services.projects import create_project_record
 
@@ -146,6 +147,11 @@ async def ensure_personal_project(
                     key=key,
                     personal_owner_id=principal.employee_id,
                 )
+            # Первый вход = момент создания личного проекта (партиальный
+            # UNIQUE делает его однократным), поэтому задача-инструкция
+            # заводится здесь и отдельного флага «уже показывали» не требует.
+            # Ветку гонки ниже НЕ трогаем: там всё создал победитель.
+            await create_guide_task(db, principal=principal, project_id=project.id)
             return project.id
         except IntegrityError:
             # Откат SAVEPOINT'а выбрасывает из сессии объекты, УСПЕВШИЕ

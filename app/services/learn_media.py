@@ -33,9 +33,11 @@ __all__ = [
     "check_free_space",
     "mp4_duration_seconds",
     "mp4_has_faststart",
+    "issue_token",
     "sign_media_path",
     "storage_key_for_media",
     "verify_media_signature",
+    "verify_token",
 ]
 
 MEDIA_MIME_KINDS: dict[str, str] = {
@@ -55,40 +57,49 @@ def _secret() -> bytes:
     return hashlib.sha256(f"hub-media:{settings.database_url}".encode()).digest()
 
 
-def _signature(media_id: UUID, exp: int) -> str:
-    msg = f"{media_id}:{exp}".encode()
-    return hmac.new(_secret(), msg, hashlib.sha256).hexdigest()[:32]
+def _signature(key: str, exp: int) -> str:
+    return hmac.new(_secret(), f"{key}:{exp}".encode(), hashlib.sha256).hexdigest()[:32]
 
 
-# Шаг «времени выдачи»: внутри одного окна URL одного и того же файла
+# Шаг «времени выдачи»: внутри одного окна URL одного и того же ресурса
 # получается ПОБАЙТОВО одинаковым.
 _ISSUE_BUCKET_SEC = 3600
 
 
-def sign_media_path(media_id: UUID, *, ttl_sec: int | None = None) -> str:
-    """→ относительный подписанный путь `/api/media/{id}?e=…&s=…`.
+def issue_token(key: str, ttl_sec: int) -> tuple[int, str]:
+    """`(exp, sig)` для произвольного ключа подписи.
 
     `exp` округляется вниз по сетке `_ISSUE_BUCKET_SEC`, поэтому повторный
     ответ той же ручки отдаёт ТОТ ЖЕ URL. Прежний `now + ttl` менялся каждую
     секунду: любой рефетч урока подставлял `<video>` новый `src`, браузер
     перезагружал элемент — позиция слетала на 0 и воспроизведение вставало на
-    паузу (воспроизведено на staging 25.08 фокусом вкладки). Заодно попадания
-    в HTTP-кэш перестают быть случайностью.
+    паузу (воспроизведено на staging 25.08 фокусом вкладки). Для
+    многомегабайтной страницы инструкции цена та же: перекачка вместо 304.
 
     Шаг не больше половины TTL — остаток жизни ссылки всегда ≥ ttl/2.
+
+    КЛЮЧ — часть подписываемого сообщения: подпись, выданную на один ресурс,
+    нельзя предъявить другому (`{media_id}` против `guide:{kind}`).
     """
-    settings = get_settings()
-    ttl = ttl_sec or settings.media_url_ttl_sec
-    bucket = max(1, min(_ISSUE_BUCKET_SEC, ttl // 2))
-    issued = (int(time.time()) // bucket) * bucket
-    exp = issued + ttl
-    return f"/api/media/{media_id}?e={exp}&s={_signature(media_id, exp)}"
+    bucket = max(1, min(_ISSUE_BUCKET_SEC, ttl_sec // 2))
+    exp = (int(time.time()) // bucket) * bucket + ttl_sec
+    return exp, _signature(key, exp)
+
+
+def verify_token(key: str, exp: int, sig: str) -> bool:
+    if exp < time.time():
+        return False
+    return hmac.compare_digest(_signature(key, exp), sig)
+
+
+def sign_media_path(media_id: UUID, *, ttl_sec: int | None = None) -> str:
+    """→ относительный подписанный путь `/api/media/{id}?e=…&s=…`."""
+    exp, sig = issue_token(str(media_id), ttl_sec or get_settings().media_url_ttl_sec)
+    return f"/api/media/{media_id}?e={exp}&s={sig}"
 
 
 def verify_media_signature(media_id: UUID, exp: int, sig: str) -> bool:
-    if exp < time.time():
-        return False
-    return hmac.compare_digest(_signature(media_id, exp), sig)
+    return verify_token(str(media_id), exp, sig)
 
 
 def storage_key_for_media(tenant_id: UUID, media_id: UUID, filename: str) -> tuple[str, str]:

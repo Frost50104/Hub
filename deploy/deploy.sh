@@ -95,6 +95,7 @@ deploy_backend() {
     --exclude='LMS' \
     --exclude='import_bundle' \
     --exclude='redesign' \
+    --exclude='Hub Instructions' \
     "$PROJECT_DIR/" \
     "${SERVER_USER}@${SERVER_HOST}:${REMOTE_BASE}/"
 

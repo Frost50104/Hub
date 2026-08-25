@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.learn_home import AUTH_AVATAR_BASE
 from app.deps import get_db, require_auth, require_auth_any
 from app.services.employee_profiles import ensure_profile_for_principal
+from app.services.guides import GuideLink, guides_for_role
 from app.services.personal_projects import ensure_personal_project
 from app.services.project_access import can_create_project
 
@@ -57,6 +58,11 @@ class MeResponse(BaseModel):
     # hub-роли либо проект не удалось создать (фронт деградирует в «секции
     # нет», а не в ошибку).
     personal_project_id: UUID | None = None
+    # Инструкции по работе в Hub: готовые ПОДПИСАННЫЕ ссылки, а не признак
+    # роли. Ссылка обязана быть в руках до клика — `window.open` после `await`
+    # блокируют попап-фильтры; подпись стабильна в пределах часа, поэтому
+    # повторные ответы /me не заставляют браузер перекачивать документ.
+    guides: list[GuideLink] = []
 
 
 @router.get("/me", response_model=MeResponse)
@@ -108,6 +114,7 @@ async def get_me(
         profile_needs_restore=needs_restore,
         can_create_projects=can_create,
         personal_project_id=personal_project_id,
+        guides=guides_for_role(hub_role),
     )
 
 
