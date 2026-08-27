@@ -92,6 +92,29 @@ def verify_token(key: str, exp: int, sig: str) -> bool:
     return hmac.compare_digest(_signature(key, exp), sig)
 
 
+def sign_immutable(key: str) -> str:
+    """Подпись БЕЗ срока — для ресурса, чей URL обязан быть вечно стабильным.
+
+    `issue_token` округляет `exp` по часовой сетке, то есть адрес меняется
+    каждый час. Для `<video>` это оправдано (TTL нужен), а для бейджа проекта —
+    прямой вред: новый URL = новый ключ HTTP-кэша, то есть перекачка вместо
+    304 и мигание пустого квадрата, причём разом по всем бейджам списка
+    проектов.
+
+    Отзыв здесь не по времени, а по СОДЕРЖИМОМУ: версия ресурса входит в
+    подписываемое сообщение (у бейджа это `storage_key` со свежим uuid на
+    каждую заливку), поэтому смена файла сама аннулирует прежний адрес.
+
+    Префикс `static:` отделяет пространство от `{key}:{exp}` — подпись одной
+    схемы нельзя предъявить другой.
+    """
+    return hmac.new(_secret(), f"static:{key}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def verify_immutable(key: str, sig: str) -> bool:
+    return hmac.compare_digest(sign_immutable(key), sig)
+
+
 def sign_media_path(media_id: UUID, *, ttl_sec: int | None = None) -> str:
     """→ относительный подписанный путь `/api/media/{id}?e=…&s=…`."""
     exp, sig = issue_token(str(media_id), ttl_sec or get_settings().media_url_ttl_sec)

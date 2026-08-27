@@ -96,7 +96,7 @@ export function MembersTab({ projectId, canManage }: MembersTabProps) {
       {members.data?.map((m) => (
         <div key={m.id} className="glass flex items-center justify-between gap-3 p-3">
           <div className="flex min-w-0 items-center gap-3">
-            <Avatar name={m.full_name} email={m.email} />
+            <Avatar employeeId={m.employee_id} name={m.full_name} email={m.email} />
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-text">
                 {m.full_name || m.email || m.employee_id}

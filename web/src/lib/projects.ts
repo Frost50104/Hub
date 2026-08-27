@@ -13,6 +13,10 @@ export interface Project {
   key: string
   name: string
   description: string | null
+  /** Бейдж: эмодзи ЛИБО подписанный адрес картинки. Оба пусты — две буквы
+   *  ключа. Опциональны намеренно: в окне деплоя старый бэкенд их не шлёт. */
+  badge_emoji?: string | null
+  badge_url?: string | null
   archived_at: string | null
   /** Общая для тенанта раскладка (не персональная); null — «Без папки». */
   folder_id: string | null
@@ -24,6 +28,10 @@ export interface Project {
   my_role: ProjectRole | null
   /** Личное избранное текущего пользователя. */
   is_favorite: boolean
+  /** Личное пространство сотрудника. Сервер шлёт его давно, а типа не было:
+   *  вкладка «О проекте» прячет по нему архивацию и удаление (сервер на них
+   *  отвечает 409). Опционально — старые фикстуры поля не знают. */
+  is_personal?: boolean
   /** Эффективные права, посчитанные сервером (членство ИЛИ hub:admin-байпас).
    * Свою копию правила на клиенте НЕ заводим — именно она однажды разъехалась
    * с бэкендом и показывала админу чужой проект read-only. */
@@ -42,14 +50,6 @@ export interface ProjectMember {
   added_at: string
   email: string | null
   full_name: string | null
-}
-
-export interface Section {
-  id: string
-  project_id: string
-  name: string
-  position: number
-  created_at: string
 }
 
 export interface CreateProjectBody {
@@ -90,6 +90,23 @@ export const projectsApi = {
     api
       .put<Project>(`/projects/${id}/favorite`, { is_favorite: isFavorite })
       .then((r) => r.data),
+  // Тот же довод, что у setFolder: null означает «сними бейдж», и в PATCH
+  // это не выразить.
+  setBadge: (id: string, emoji: string | null): Promise<Project> =>
+    api.put<Project>(`/projects/${id}/badge`, { emoji }).then((r) => r.data),
+  uploadBadge: (id: string, file: File): Promise<Project> => {
+    const form = new FormData()
+    form.append('file', file)
+    return api
+      .post<Project>(`/projects/${id}/badge/image`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data)
+  },
+  // Ключ проверяет и сервер: он закрывает не опечатку в поле, а рассинхрон
+  // между тем, что человек прочитал в диалоге, и тем, какой id ушёл в запрос.
+  remove: (id: string, key: string): Promise<void> =>
+    api.delete(`/projects/${id}`, { params: { key } }).then(() => undefined),
 }
 
 export const membersApi = {
@@ -110,21 +127,4 @@ export const membersApi = {
       .then((r) => r.data),
   remove: (projectId: string, memberId: string): Promise<void> =>
     api.delete(`/projects/${projectId}/members/${memberId}`).then(() => undefined),
-}
-
-export const sectionsApi = {
-  list: (projectId: string): Promise<Section[]> =>
-    api.get<Section[]>(`/projects/${projectId}/sections`).then((r) => r.data),
-  create: (
-    projectId: string,
-    body: { name: string; position?: number },
-  ): Promise<Section> =>
-    api.post<Section>(`/projects/${projectId}/sections`, body).then((r) => r.data),
-  update: (
-    sectionId: string,
-    body: { name?: string; position?: number },
-  ): Promise<Section> =>
-    api.patch<Section>(`/sections/${sectionId}`, body).then((r) => r.data),
-  remove: (sectionId: string): Promise<void> =>
-    api.delete(`/sections/${sectionId}`).then(() => undefined),
 }

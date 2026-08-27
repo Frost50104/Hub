@@ -14,6 +14,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.project_folders import (
@@ -24,6 +25,7 @@ from app.api.project_folders import (
     update_project_folder,
 )
 from app.api.projects import create_project, list_projects, set_project_folder
+from app.models.project_folder import ProjectFolder
 from app.schemas.project import ProjectCreate, ProjectFolderAssign
 from app.schemas.project_folder import (
     ProjectFolderCreate,
@@ -49,9 +51,15 @@ async def _owner(db: AsyncSession, tenant_id: uuid.UUID, slug: str):
 
 async def test_member_can_create_folder(db: AsyncSession, tenant_id: uuid.UUID):
     owner = await _owner(db, tenant_id, "pf1")
+    # Позиция — max+1 по видимым папкам, а тенант режет RLS. Контейнер тестов
+    # работает под superuser и RLS обходит, поэтому «первая папка = 0» верно
+    # только в пустой базе: считаем ожидание от того, что уже есть.
+    seen = (
+        await db.execute(select(func.coalesce(func.max(ProjectFolder.position) + 1, 0)))
+    ).scalar_one()
     folder = await create_project_folder(ProjectFolderCreate(name="Маркетинг"), owner, db)
     assert folder.name == "Маркетинг"
-    assert folder.position == 0
+    assert folder.position == seen
 
 
 async def test_viewer_cannot_create_folder(db: AsyncSession, tenant_id: uuid.UUID):

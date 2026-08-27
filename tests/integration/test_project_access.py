@@ -11,15 +11,22 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from fastapi import HTTPException
 from signaris_auth.shadow import upsert_shadow_tenant, upsert_shadow_user
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.projects import archive_project, create_project, get_project
-from app.api.sections import create_section
+from app.api.projects import (
+    add_member,
+    archive_project,
+    create_project,
+    delete_project,
+    get_project,
+    unarchive_project,
+    update_project,
+)
 from app.models.employee_profile import EmployeeProfile
 from app.models.project import ProjectMember
-from app.schemas.project import ProjectCreate
-from app.schemas.section import SectionCreate
+from app.schemas.project import ProjectCreate, ProjectMemberAdd, ProjectUpdate
 from tests.integration.conftest import make_principal
 
 pytestmark = pytest.mark.integration
@@ -96,21 +103,6 @@ async def test_admin_outside_membership_gets_full_rights(
     assert resp.can_manage is True
 
 
-async def test_admin_outside_membership_can_create_section(
-    db: AsyncSession, tenant_id: uuid.UUID
-):
-    """Замыкает контракт: то, что UI теперь показывает, бэкенд реально даёт."""
-    _owner, project = await _project_with_owner(db, tenant_id, "adms")
-    admin = make_principal(
-        tenant_id, email="admin@t.ru", role="admin", tenant_slug="adms"
-    )
-    await _register(db, admin)
-
-    section = await create_section(
-        project.id, SectionCreate(name="Бэклог"), admin, db
-    )
-    assert section.name == "Бэклог"
-
 
 async def test_owner_gets_both_flags(db: AsyncSession, tenant_id: uuid.UUID):
     owner, project = await _project_with_owner(db, tenant_id, "own")
@@ -182,3 +174,142 @@ async def _sole_member_id(db: AsyncSession, project_id: uuid.UUID) -> uuid.UUID:
         select(ProjectMember.id).where(ProjectMember.project_id == project_id)
     )
     return row.scalar_one()
+
+
+# ─── Профиль проекта правит редактор (27.08) ────────────────────────────────
+#
+# До этого PATCH и обе ручки бейджа требовали владельца, и редактор — на проде
+# это сотрудницы, ведущие 13 проектов, — не мог исправить даже опечатку в
+# названии. Гейт стал edit-tier, то есть совпал с тем, что клиенту обещает
+# `can_edit`. Тесты ниже держат ОБЕ границы: что открылось и что осталось
+# закрытым, потому что послабление легко «заодно» протащить в управление.
+
+
+async def _member(db: AsyncSession, tenant_id: uuid.UUID, project_id: uuid.UUID, role: str):
+    slug = uuid.uuid4().hex[:6]
+    principal = make_principal(
+        tenant_id, email=f"{role}-{slug}@t.ru", tenant_slug=f"{role}{slug}"
+    )
+    await _register(db, principal)
+    await _add_member(db, tenant_id, project_id, principal, role)
+    return principal
+
+
+async def test_editor_can_rename_project(db: AsyncSession, tenant_id: uuid.UUID):
+    _owner, project = await _project_with_owner(db, tenant_id, "ren")
+    editor = await _member(db, tenant_id, project.id, "editor")
+
+    resp = await update_project(project.id, ProjectUpdate(name="Новое имя"), editor, db)
+    assert resp.name == "Новое имя"
+
+
+async def test_editor_can_clear_description(db: AsyncSession, tenant_id: uuid.UUID):
+    """Пустая строка стирает, `None` означает «не менять» — пинаем идиому."""
+    _owner, project = await _project_with_owner(db, tenant_id, "clr")
+    editor = await _member(db, tenant_id, project.id, "editor")
+    await update_project(project.id, ProjectUpdate(description="было"), editor, db)
+
+    resp = await update_project(project.id, ProjectUpdate(description=""), editor, db)
+    assert resp.description == ""
+
+
+async def test_viewer_cannot_update_project(db: AsyncSession, tenant_id: uuid.UUID):
+    """Граница, которая не должна съехать вместе с послаблением."""
+    _owner, project = await _project_with_owner(db, tenant_id, "vw")
+    viewer = await _member(db, tenant_id, project.id, "viewer")
+
+    with pytest.raises(HTTPException) as exc:
+        await update_project(project.id, ProjectUpdate(name="Нельзя"), viewer, db)
+    assert exc.value.status_code == 403
+
+
+async def test_stranger_gets_404_not_403(db: AsyncSession, tenant_id: uuid.UUID):
+    """Посторонний не должен узнать, что проект существует."""
+    _owner, project = await _project_with_owner(db, tenant_id, "str")
+    slug = uuid.uuid4().hex[:6]
+    stranger = make_principal(
+        tenant_id, email=f"str-{slug}@t.ru", tenant_slug=f"str{slug}"
+    )
+    await _register(db, stranger)
+
+    with pytest.raises(HTTPException) as exc:
+        await update_project(project.id, ProjectUpdate(name="Нельзя"), stranger, db)
+    assert exc.value.status_code == 404
+
+
+async def test_editor_cannot_archive_or_unarchive(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Архив прячет проект у ВСЕЙ команды — остаётся у владельца."""
+    _owner, project = await _project_with_owner(db, tenant_id, "arch")
+    editor = await _member(db, tenant_id, project.id, "editor")
+
+    for handler in (archive_project, unarchive_project):
+        with pytest.raises(HTTPException) as exc:
+            await handler(project.id, editor, db)
+        assert exc.value.status_code == 403
+
+
+async def test_editor_cannot_delete_project(db: AsyncSession, tenant_id: uuid.UUID):
+    _owner, project = await _project_with_owner(db, tenant_id, "del")
+    editor = await _member(db, tenant_id, project.id, "editor")
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_project(project.id, key=project.key, principal=editor, db=db)
+    assert exc.value.status_code == 403
+
+
+async def test_editor_cannot_add_member(db: AsyncSession, tenant_id: uuid.UUID):
+    """Доказывает, что послабление не протекло в управление доступом."""
+    _owner, project = await _project_with_owner(db, tenant_id, "mem")
+    editor = await _member(db, tenant_id, project.id, "editor")
+    outsider = await _member(db, tenant_id, project.id, "viewer")
+
+    with pytest.raises(HTTPException) as exc:
+        await add_member(
+            project.id,
+            ProjectMemberAdd(employee_id=outsider.employee_id, role="editor"),
+            editor,
+            db,
+        )
+    assert exc.value.status_code == 403
+
+
+async def test_admin_outside_membership_renames_and_keeps_null_role(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Сторожит перечитывание членства: require_project_role отдаёт None
+    ЛЮБОМУ админу, и брать роль из неё для ответа нельзя."""
+    _owner, project = await _project_with_owner(db, tenant_id, "adm2")
+    slug = uuid.uuid4().hex[:6]
+    admin = make_principal(
+        tenant_id, email=f"adm-{slug}@t.ru", role="admin", tenant_slug=f"adm{slug}"
+    )
+    await _register(db, admin)
+
+    resp = await update_project(project.id, ProjectUpdate(name="От админа"), admin, db)
+    assert resp.name == "От админа"
+    assert resp.my_role is None
+    assert resp.can_edit and resp.can_manage
+
+
+async def test_editor_update_is_audited(db: AsyncSession, tenant_id: uuid.UUID):
+    from sqlalchemy import select
+
+    from app.models.audit import AuditLog
+
+    _owner, project = await _project_with_owner(db, tenant_id, "aud")
+    editor = await _member(db, tenant_id, project.id, "editor")
+
+    await update_project(project.id, ProjectUpdate(name="Переименовано"), editor, db)
+
+    row = (
+        await db.execute(
+            select(AuditLog)
+            .where(AuditLog.object_type == "project", AuditLog.object_id == project.id)
+            .order_by(AuditLog.id.desc())
+        )
+    ).scalars().first()
+    assert row is not None
+    assert row.action == "update"
+    assert row.actor_id == editor.employee_id

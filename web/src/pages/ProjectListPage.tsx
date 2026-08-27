@@ -30,13 +30,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/Dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/DropdownMenu'
 import { dropZoneClass } from '@/components/ui/DropZone'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorBanner } from '@/components/ui/ErrorBanner'
@@ -49,7 +42,6 @@ import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMe } from '@/hooks/useMe'
 import {
   useCreateProject,
-  useDeleteFolder,
   useProjectFolders,
   useProjects,
   useRenameFolder,
@@ -60,10 +52,12 @@ import {
 import { cn } from '@/lib/cn'
 import { dataAgeLabel } from '@/lib/dates'
 import { groupProjectsByFolder, UNFILED, type ProjectGroup } from '@/lib/groupProjects'
+import { projectContext } from '@/lib/projectAbout'
+import { FolderActionsMenu } from '@/components/project/FolderActionsMenu'
 import { folderDropId, resolveFolderMove, type ProjectDragData } from '@/lib/projectDnd'
 import { type ProjectFolder } from '@/lib/projectFolders'
 import { PROJECT_ROLE_LABEL, type Project } from '@/lib/projects'
-import { NBSP, plural } from '@/lib/typography'
+import { plural } from '@/lib/typography'
 import { useFolderCollapse } from '@/stores/projectFolders'
 
 const createSchema = z.object({
@@ -74,19 +68,6 @@ const createSchema = z.object({
 type CreateFormValues = z.infer<typeof createSchema>
 
 /** «312 задач · 48 закрыто · описание» — вторая строка проекта. */
-function projectContext(project: Project): string {
-  const parts: string[] = []
-  if (project.task_count != null) {
-    if (project.task_count === 0) parts.push('Пока нет задач')
-    else {
-      parts.push(plural(project.task_count, 'задача', 'задачи', 'задач'))
-      if ((project.done_count ?? 0) > 0) parts.push(`${project.done_count}${NBSP}закрыто`)
-    }
-  }
-  if (project.description) parts.push(project.description)
-  return parts.join(' · ')
-}
-
 // ─── Строка проекта ──────────────────────────────────────────────────────────
 
 function ProjectRow({
@@ -158,7 +139,6 @@ function ProjectRow({
             >
               <Star className={cn('h-[15px] w-[15px]', project.is_favorite && 'fill-current')} />
             </button>
-            {project.archived_at && <Badge variant="secondary">архив</Badge>}
             {project.my_role && project.my_role !== 'viewer' && (
               <Badge variant="secondary" className="hidden sm:inline-flex">
                 {PROJECT_ROLE_LABEL[project.my_role]}
@@ -238,10 +218,8 @@ function FolderSection({
 
   const rename = useRenameFolder()
   const reorder = useReorderFolders()
-  const remove = useDeleteFolder()
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState(folder?.name ?? '')
-  const [confirmDelete, setConfirmDelete] = useState(false)
 
   // Тенант без папок видит плоский список — без заголовков.
   const headless = folder === null && folders.length === 0
@@ -306,38 +284,17 @@ function FolderSection({
     // «Без папки» — не папка: её нельзя переименовать, передвинуть или удалить,
     // поэтому меню только у настоящих папок и только при can_manage.
     folder && canManage && !renaming ? (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className={cn(
-              'flex items-center justify-center rounded-lg text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
-              isDesktop ? 'h-8 w-8' : 'h-11 w-11',
-            )}
-            aria-label={`Действия с папкой «${folder.name}»`}
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            onSelect={() => {
-              setDraft(folder.name)
-              // Radix возвращает фокус на триггер после закрытия —
-              // без отложенного монтирования autoFocus не сработает.
-              setTimeout(() => setRenaming(true), 0)
-            }}
-          >
-            Переименовать
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => move(-1)}>Выше</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => move(1)}>Ниже</DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
-            Удалить папку
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <FolderActionsMenu
+        folder={folder}
+        projectCount={group.projects.length}
+        onRenameStart={() => {
+          setDraft(folder.name)
+          setRenaming(true)
+        }}
+        onMoveUp={() => move(-1)}
+        onMoveDown={() => move(1)}
+        size={isDesktop ? 'md' : 'lg'}
+      />
     ) : null
 
   return (
@@ -355,6 +312,9 @@ function FolderSection({
           <div className="px-1.5 py-1">
             <input
               autoFocus
+              // Выделяем при фокусе: переименование — это почти всегда замена
+              // имени целиком.
+              onFocus={(e) => e.target.select()}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onBlur={submitRename}
@@ -379,32 +339,6 @@ function FolderSection({
 
       {!collapsed && rows}
 
-      {folder && (
-        <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Удалить папку «{folder.name}»?</DialogTitle>
-              <DialogDescription>
-                Проекты ({group.projects.length}) останутся — они переедут в «Без
-                папки».
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="secondary" onClick={() => setConfirmDelete(false)}>
-                Отмена
-              </Button>
-              <Button
-                onClick={() => {
-                  remove.mutate(folder.id)
-                  setConfirmDelete(false)
-                }}
-              >
-                Удалить
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
     </section>
   )
 }
@@ -693,7 +627,7 @@ export function ProjectListPage() {
                 Проекты
               </h1>
               <p className="mt-[5px] text-[15px] text-text2">
-                Командные пространства с задачами, секциями и участниками.
+                Командные пространства с задачами, досками и участниками.
               </p>
             </div>
             {createButtons}

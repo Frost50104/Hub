@@ -49,6 +49,18 @@ CREATE_PROJECT_DENIED = (
 
 # Две ступени прав. Держим их РЯДОМ с require_project_role: списки обязаны
 # совпадать с `allow=` в ручках, иначе UI снова разъедется с бэкендом.
+#
+# `EDIT_ROLES` — это ровно то, что клиенту обещает `ProjectResponse.can_edit`
+# (см. capabilities ниже). Поэтому ручки профиля проекта берут КОНСТАНТУ, а не
+# литерал: гейт и флаг обязаны быть одним предикатом, иначе экран «О проекте»
+# нарисует поля и получит 403. Связаны `app/api/projects.py`: PATCH
+# /projects/{id}, PUT /projects/{id}/badge, POST /projects/{id}/badge/image.
+#
+# Литералами `("owner", "editor")` осознанно оставлены пять call-site'ов, где
+# ступень совпала случайно, а не по смыслу: `tasks_import.py`, `stages.py`
+# (три ручки) и создание задачи в `tasks.py`. Это не недосмотр — сметать их
+# под константу стоит отдельной правкой, вместе с решением, что именно
+# «edit-tier» означает для задач.
 EDIT_ROLES: tuple[ProjectRole, ...] = ("owner", "editor")
 MANAGE_ROLES: tuple[ProjectRole, ...] = ("owner",)
 

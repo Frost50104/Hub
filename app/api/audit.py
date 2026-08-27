@@ -38,6 +38,12 @@ class AuditListResponse(BaseModel):
     total: int
 
 
+# Два пути на один handler. Журнал перестал быть learn-только: с этого
+# релиза в него пишет и трекер (удаление проекта, архивация,
+# переименование), и искать эти записи под `/learn/` никто не
+# додумается. Старый путь оставлен навсегда — на него смотрят
+# существующие бандлы (тот же приём, что у `/api/learn/ai/*`).
+@router.get("/audit", response_model=AuditListResponse)
 @router.get("/learn/audit", response_model=AuditListResponse)
 async def list_audit(
     object_type: str | None = Query(default=None, max_length=32),

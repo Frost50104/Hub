@@ -39,7 +39,12 @@ _MAX_LEN = 16  # leave room for numeric suffix without exceeding 32 char limit
 
 def _candidate(name: str) -> str:
     """Compute the base candidate key from a name (without collision check)."""
-    transliterated = name.translate(_CYRILLIC_MAP).upper()
+    # ВЕРХНИЙ РЕГИСТР ПЕРВЫМ. В таблице только заглавные буквы, поэтому
+    # обратный порядок транслитерировал лишь первую букву обычного
+    # русского названия, а остальные (строчные) выбрасывал фильтр ниже:
+    # «Подбор линейного персонала» давал ключ «P», и все проекты подряд
+    # получали P, P2, P3… вместо PLP.
+    transliterated = name.upper().translate(_CYRILLIC_MAP)
     words = re.findall(r"[A-Z0-9]+", transliterated)
     if not words:
         return _FALLBACK

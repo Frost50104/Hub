@@ -1,4 +1,5 @@
 import {
+  Archive,
   CheckSquare,
   ChevronDown,
   ChevronRight,
@@ -30,6 +31,9 @@ import { useState } from 'react'
 import { NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
+import { FolderActionsMenu } from '@/components/project/FolderActionsMenu'
+import { nextName } from '@/lib/renameDraft'
+
 import { SidebarSearch } from './SidebarSearch'
 import { SpaceSwitcher } from './SpaceSwitcher'
 import { CreateFolderDialog } from '@/components/project/CreateFolderDialog'
@@ -59,6 +63,7 @@ import {
   useCreateProject,
   useProjectFolders,
   useProjects,
+  useRenameFolder,
   useSetProjectFolder,
 } from '@/hooks/useProjects'
 import { authClient } from '@/lib/auth'
@@ -93,6 +98,11 @@ const NAV_ITEMS = [
 interface SidebarDragData extends ProjectDragData {
   name: string
   projectKey: string
+  /** Бейдж тоже снапшотим: без него под курсором окажутся буквы вместо
+   *  значка — ровно в тех 260px, где значок и нужен. */
+  badgeEmoji?: string | null
+  badgeUrl?: string | null
+  isFavorite: boolean
 }
 
 /** Превью под курсором. bg-bg-alt, а не bg-surface/95: токены в
@@ -102,7 +112,12 @@ function ProjectDragPreview({ drag }: { drag: SidebarDragData }) {
   return (
     <div className="flex h-full w-full items-center gap-2 rounded-md border border-glass-border bg-bg-alt px-2 py-1.5 text-sm text-text shadow-glass">
       <ProjectKeyChip
-        project={{ key: drag.projectKey, is_favorite: false }}
+        project={{
+          key: drag.projectKey,
+          is_favorite: drag.isFavorite,
+          badge_emoji: drag.badgeEmoji,
+          badge_url: drag.badgeUrl,
+        }}
         size="sm"
       />
       <span className="truncate">{drag.name}</span>
@@ -114,12 +129,16 @@ function FolderNavGroup({
   group,
   drag,
   dndEnabled,
+  canManageFolders,
   onItemClick,
 }: {
   group: ProjectGroup
   /** null — перетаскивания сейчас нет. */
   drag: SidebarDragData | null
   dndEnabled: boolean
+  /** Может ли этот человек управлять папками — от этого зависит, показывать
+   *  ли ему пустые. */
+  canManageFolders: boolean
   onItemClick?: () => void
 }) {
   const folder = group.folder
@@ -133,13 +152,32 @@ function FolderNavGroup({
     folder ? (s.collapsed[folder.id] ?? false) : false,
   )
   const toggle = useFolderCollapse((s) => s.toggle)
+  const [renaming, setRenaming] = useState(false)
+  const [draft, setDraft] = useState(folder?.name ?? '')
+  const rename = useRenameFolder()
 
-  // Пустые ИМЕНОВАННЫЕ папки показываем всегда: папку можно создать прямо
-  // отсюда, и она обязана быть видна там, где создана, — иначе это читается
-  // как «создал, а её нет». Прячем только пустую группу «Без папки»: её
-  // заголовок с нулём — чистый шум (во время драга он нужен как зона
-  // «вынуть из папки»).
+  const submitRename = () => {
+    setRenaming(false)
+    if (!folder) return
+    // Пустое и неизменённое имя запроса не порождают — правило общее с
+    // `/projects`, поэтому живёт в lib и покрыто тестом.
+    const name = nextName(draft, folder.name)
+    if (name) rename.mutate({ id: folder.id, name })
+  }
+
+  // Пустую группу «Без папки» прячем всегда: заголовок с нулём — чистый шум
+  // (во время драга он нужен как зона «вынуть из папки»).
   if (!folder && group.projects.length === 0 && !dragging) return null
+
+  // Пустую ИМЕНОВАННУЮ папку показываем только тому, кто папками управляет:
+  // он мог её только что создать, и она обязана быть видна там, где создана,
+  // а во время драга она — единственная зона, куда можно перенести проект.
+  // Остальным восемь строк со счётчиком 0, которые лишь сворачиваются, —
+  // такой же шум, как «Без папки»: у линейного сотрудника доступных проектов
+  // внутри нет и не появится.
+  if (folder && group.projects.length === 0 && !dragging && !canManageFolders) {
+    return null
+  }
 
   // Проекты без папки — плоскими пунктами: фальшивый заголовок «Без папки»
   // в узкой колонке читается хуже простого списка. Во время драга заголовок
@@ -176,21 +214,67 @@ function FolderNavGroup({
       )}
     >
       {folder ? (
-        <button
-          type="button"
-          onClick={() => toggle(folder.id)}
-          className="flex w-full items-center gap-1 px-2 py-0.5 text-left text-[12px] font-semibold uppercase tracking-wider text-text2 hover:text-text2"
-        >
-          {collapsed ? (
-            <ChevronRight className="h-3 w-3 shrink-0" />
-          ) : (
-            <ChevronDown className="h-3 w-3 shrink-0" />
-          )}
-          <span className="truncate">{folder.name}</span>
-          <span className="ml-auto font-normal normal-case">
-            {group.projects.length}
-          </span>
-        </button>
+        renaming ? (
+          <div className="px-2 py-0.5">
+            <input
+              autoFocus
+              // Выделяем при фокусе: переименование почти всегда — замена
+              // имени целиком, а без выделения набранное дописывается к
+              // старому и человек получает «ОТДЕЛ ПЕРСОНАЛАНОВОЕ».
+              onFocus={(e) => e.target.select()}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={submitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitRename()
+                if (e.key === 'Escape') setRenaming(false)
+              }}
+              aria-label={`Новое имя папки «${folder.name}»`}
+              className="h-6 w-full rounded-md border border-glass-border bg-glass px-1.5 text-[12px] font-semibold uppercase tracking-wider text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+            />
+          </div>
+        ) : (
+          // Группа ИМЕНОВАННАЯ и висит на СТРОКЕ ЗАГОЛОВКА, а не на обёртке-
+          // дропзоне: `:hover` истинен и на потомках, поэтому группа на обёртке
+          // зажигала бы «…» при наведении на любой проект внутри папки. Имя
+          // обязательно — у NavLink проекта ниже уже объявлен безымянный
+          // `group`, и безымянный `group-hover:` здесь привязался бы к
+          // несуществующему предку: не сработал бы и ошибки не выдал.
+          <div className="group/folder flex items-center gap-1 px-2 py-0.5">
+            <button
+              type="button"
+              onClick={() => toggle(folder.id)}
+              className="flex min-w-0 flex-1 items-center gap-1 text-left text-[12px] font-semibold uppercase tracking-wider text-text2 hover:text-text2"
+            >
+              {collapsed ? (
+                <ChevronRight className="h-3 w-3 shrink-0" />
+              ) : (
+                <ChevronDown className="h-3 w-3 shrink-0" />
+              )}
+              <span className="truncate">{folder.name}</span>
+              <span className="ml-auto font-normal normal-case">
+                {group.projects.length}
+              </span>
+            </button>
+            {canManageFolders && !dragging && (
+              <FolderActionsMenu
+                folder={folder}
+                projectCount={group.projects.length}
+                onRenameStart={() => {
+                  setDraft(folder.name)
+                  setRenaming(true)
+                }}
+                size="xs"
+                // Каждый класс лечит свой отказ: наведение, клавиатуру,
+                // открытое меню (Radix ставит data-state на триггер, а строка
+                // теряет :hover, пока курсор на портале) и тач ≥1024px, где
+                // hover не наступает никогда, а opacity-0 оставляет кнопку
+                // кликабельной, но невидимой.
+                triggerClassName="opacity-0 transition-opacity group-hover/folder:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
+              />
+            )}
+          </div>
+        )
       ) : (
         <div className="flex w-full items-center gap-1 px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wider text-text2">
           {/* спейсер вместо шеврона — текст на одной вертикали с папками */}
@@ -221,6 +305,7 @@ function ProjectsList({
   const { data, isLoading, isError, refetch } = useProjects()
   const foldersQuery = useProjectFolders()
   const folders = foldersQuery.data?.folders ?? []
+  const canManageFolders = foldersQuery.data?.can_manage ?? false
   const groups = groupProjectsByFolder(data ?? [], folders)
   // Папок нет — тащить некуда, аффорданс не даём.
   const dndEnabled = folders.length > 0
@@ -272,6 +357,7 @@ function ProjectsList({
             group={group}
             drag={drag}
             dndEnabled={dndEnabled}
+            canManageFolders={canManageFolders}
             onItemClick={onItemClick}
           />
         ))}
@@ -315,6 +401,9 @@ function ProjectLinkItem({
       folderId: project.folder_id,
       name: project.name,
       projectKey: project.key,
+      badgeEmoji: project.badge_emoji,
+      badgeUrl: project.badge_url,
+      isFavorite: project.is_favorite,
     } satisfies SidebarDragData,
     // Дефолт useDraggable — role="button": на <a> это ломает семантику ссылки.
     attributes: {
@@ -442,6 +531,8 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
   const unreadCount = unread.data?.count ?? 0
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
   const [createTaskOpen, setCreateTaskOpen] = useState(false)
+  /** Проект, открытый в момент нажатия: подставляется в запасной диалог. */
+  const [createTaskProjectId, setCreateTaskProjectId] = useState<string | undefined>()
   const [createFolderOpen, setCreateFolderOpen] = useState(false)
   // Тот же queryKey, что читает ProjectsList — TanStack дедуплицирует,
   // лишнего запроса нет. Права считает сервер, копии правила тут не заводим.
@@ -520,6 +611,11 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
         onClick={() => {
           const m = /^\/projects\/([^/]+)/.exec(location.pathname)
           if (m?.[1] && requestInlineCreate(m[1])) return
+          // Диалог — ЗАПАСНОЙ путь: инлайн-поля нет, например, на вкладках
+          // «Участники» и «Дашборд». Проект подставляем текущий, иначе
+          // «Новая задача» внутри проекта молча заводит ЛИЧНУЮ задачу — а с
+          // открытием карточки это ещё и уводит человека на /my.
+          setCreateTaskProjectId(m?.[1])
           setCreateTaskOpen(true)
         }}
       >
@@ -604,6 +700,28 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
         <ProjectsList drag={drag} onItemClick={onItemClick} />
       </div>
 
+      {/* ВНЕ скролла проектов и над футером: внутри контейнера «Архив» уезжал
+          бы вниз вместе с длинным деревом папок. Рисуем всегда — чтобы узнать,
+          пуст ли архив, сайдбару пришлось бы тянуть второй полный список
+          проектов на каждой загрузке ради строки в 34px. */}
+      <nav className="flex flex-col gap-0.5">
+        <NavLink
+          to="/projects/archived"
+          onClick={onItemClick}
+          className={({ isActive }) =>
+            cn(
+              'flex h-[34px] items-center gap-[9px] rounded-[9px] px-2 text-[14px] transition-colors',
+              isActive
+                ? 'bg-surface font-semibold text-text'
+                : 'font-medium text-text2 hover:bg-glass hover:text-text',
+            )
+          }
+        >
+          <Archive className="h-4 w-4" />
+          <span className="flex-1">Архив</span>
+        </NavLink>
+      </nav>
+
       <div className="flex items-center justify-between gap-2 border-t border-glass-border pt-3">
         <div className="flex items-center gap-2 overflow-hidden">
           <Avatar
@@ -654,7 +772,12 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
         open={createProjectOpen}
         onOpenChange={setCreateProjectOpen}
       />
-      <CreateTaskDialog open={createTaskOpen} onOpenChange={setCreateTaskOpen} />
+      <CreateTaskDialog
+        open={createTaskOpen}
+        onOpenChange={setCreateTaskOpen}
+        initialProjectId={createTaskProjectId}
+        openAfterCreate
+      />
       <CreateFolderDialog
         open={createFolderOpen}
         onOpenChange={setCreateFolderOpen}

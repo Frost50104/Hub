@@ -1,15 +1,14 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 
+import { isProjectScopedQueryKey } from '@/lib/projectCache'
 import { foldersApi, type ProjectFolderList } from '@/lib/projectFolders'
 import {
   membersApi,
   projectsApi,
-  sectionsApi,
   type CreateProjectBody,
   type Project,
   type ProjectMember,
   type ProjectRole,
-  type Section,
   type UpdateProjectBody,
 } from '@/lib/projects'
 
@@ -24,7 +23,6 @@ export const projectKeys = {
   list: (includeArchived: boolean) => ['projects', { includeArchived }] as const,
   detail: (id: string) => ['projects', id] as const,
   members: (id: string) => ['projects', id, 'members'] as const,
-  sections: (id: string) => ['projects', id, 'sections'] as const,
 }
 
 export function useProjects(includeArchived = false): UseQueryResult<Project[]> {
@@ -46,14 +44,6 @@ export function useProjectMembers(id: string | undefined): UseQueryResult<Projec
   return useQuery({
     queryKey: id ? projectKeys.members(id) : ['projects', 'none', 'members'],
     queryFn: () => membersApi.list(id!),
-    enabled: !!id,
-  })
-}
-
-export function useProjectSections(id: string | undefined): UseQueryResult<Section[]> {
-  return useQuery({
-    queryKey: id ? projectKeys.sections(id) : ['projects', 'none', 'sections'],
-    queryFn: () => sectionsApi.list(id!),
     enabled: !!id,
   })
 }
@@ -88,6 +78,56 @@ export function useArchiveProject(id: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.detail(id) })
       qc.invalidateQueries({ queryKey: projectKeys.all })
+    },
+  })
+}
+
+export function useSetProjectBadge(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (emoji: string | null) => projectsApi.setBadge(id, emoji),
+    meta: { errorMessage: 'Не удалось обновить значок' },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: projectKeys.detail(id) })
+      qc.invalidateQueries({ queryKey: projectKeys.all })
+    },
+  })
+}
+
+export function useUploadProjectBadge(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => projectsApi.uploadBadge(id, file),
+    meta: { errorMessage: 'Не удалось загрузить картинку' },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: projectKeys.detail(id) })
+      qc.invalidateQueries({ queryKey: projectKeys.all })
+    },
+  })
+}
+
+/**
+ * Удаление проекта — необратимое.
+ *
+ * Кэш чистим ДВУМЯ разными способами, и это не придирка: всё, что принадлежит
+ * проекту, надо СНЕСТИ (иначе пережившие запросы перерисуют мёртвые данные), а
+ * списки — ИНВАЛИДИРОВАТЬ, чтобы они перезапросились уже без удалённого.
+ * Границу между этими двумя множествами держит `isProjectScopedQueryKey`
+ * (там же и тест: `['projects', {includeArchived}]` — список, а не проект).
+ *
+ * `projectKeys.detail(id)` — префикс `members(id)`, поэтому предикат уносит и
+ * участников одним махом. Не «чинить».
+ */
+export function useDeleteProject(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (key: string) => projectsApi.remove(id, key),
+    meta: { errorMessage: 'Не удалось удалить проект' },
+    onSuccess: () => {
+      qc.removeQueries({ predicate: (q) => isProjectScopedQueryKey(q.queryKey, id) })
+      qc.invalidateQueries({ queryKey: projectKeys.all })
+      qc.invalidateQueries({ queryKey: ['me-tasks'] })
+      qc.invalidateQueries({ queryKey: ['me-stats'] })
     },
   })
 }
@@ -129,44 +169,6 @@ export function useRemoveMember(projectId: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.members(projectId) }),
   })
 }
-
-export function useCreateSection(projectId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (body: { name: string; position?: number }) =>
-      sectionsApi.create(projectId, body),
-    meta: { errorMessage: 'Не удалось создать секцию' },
-    onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.sections(projectId) }),
-  })
-}
-
-export function useUpdateSection(projectId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({
-      sectionId,
-      ...body
-    }: {
-      sectionId: string
-      name?: string
-      position?: number
-    }) => sectionsApi.update(sectionId, body),
-    meta: { errorMessage: 'Не удалось обновить секцию' },
-    onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.sections(projectId) }),
-  })
-}
-
-export function useDeleteSection(projectId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (sectionId: string) => sectionsApi.remove(sectionId),
-    meta: { errorMessage: 'Не удалось удалить секцию' },
-    onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.sections(projectId) }),
-  })
-}
-
-
-// ─── Папки проектов ─────────────────────────────────────────────────────────
 
 export function useProjectFolders(): UseQueryResult<ProjectFolderList> {
   return useQuery({

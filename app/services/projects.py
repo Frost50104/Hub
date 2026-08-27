@@ -1,10 +1,11 @@
 """Создание проекта — общий путь для ручки POST /projects и для личного
 пространства (`services/personal_projects.py`).
 
-Здесь только доменная работа: строка проекта + 4 дефолтных этапа + owner-
-членство создателя. Права, подбор ключа и commit — на вызывающем (тот же
-контракт, что у `services/tasks.py::create_task_record`). Вынесено из ручки,
-чтобы два пути создания не разъехались на первой же новой дефолтной сущности.
+Здесь только доменная работа: строка проекта + owner-членство создателя
+(колонок у нового проекта нет — см. `services/stages.py`). Права, подбор ключа
+и commit — на вызывающем (тот же контракт, что у
+`services/tasks.py::create_task_record`). Вынесено из ручки, чтобы два пути
+создания не разъехались на первой же новой дефолтной сущности.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project, ProjectMember
-from app.services.stages import create_default_stages
 
 
 async def create_project_record(
@@ -44,9 +44,10 @@ async def create_project_record(
     )
     db.add(project)
     await db.flush()
-    # Четыре этапа по умолчанию — в той же транзакции: проект без этапов не
-    # знает, куда класть задачи (инвариант «≥1 этап на системный статус»).
-    await create_default_stages(db, tenant_id=tenant_id, project_id=project.id)
+    # Колонок у нового проекта НЕТ. Четыре стартовые («К выполнению», «В
+    # работе», «На проверке», «Готово») выглядели готовой раскладкой, которую
+    # никто не выбирал; теперь доска пуста, пока человек не создаст первую
+    # колонку сам, а задачи до этого живут без колонки (0046).
     db.add(
         ProjectMember(
             id=uuid4(),

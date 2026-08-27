@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse, Response
 from signaris_auth import Principal
-from sqlalchemy import func, select
+from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_db, require_auth
+from app.config import get_settings
+from app.db import tenant_scoped_session
+from app.deps import enforce_rate_limit, get_db, require_auth
+from app.models.attachment import TaskAttachment
+from app.models.notification import Notification
 from app.models.project import Project, ProjectMember
 from app.models.project_folder import ProjectFolder
 from app.models.shadow import ShadowUser
+from app.models.share import PublicShareToken
 from app.models.task import Task
 from app.schemas.project import (
+    ProjectBadgeUpdate,
     ProjectCreate,
     ProjectFavoriteUpdate,
     ProjectFolderAssign,
@@ -26,14 +34,31 @@ from app.schemas.project import (
     ProjectResponse,
     ProjectUpdate,
 )
+from app.services import audit
+from app.services.attachments import (
+    SNIFF_HEAD_BYTES,
+    absolute_path,
+    purge_blobs,
+    resolve_mime,
+    sniff_mismatch,
+)
+from app.services.learn_media import check_free_space
 from app.services.personal_projects import assert_not_personal, not_personal
 from app.services.project_access import (
     CREATE_PROJECT_DENIED,
+    EDIT_ROLES,
     can_create_project,
     capabilities,
     fetch_project_or_404,
     is_hub_admin,
     require_project_role,
+)
+from app.services.project_badge import (
+    BADGE_MAX_BYTES,
+    BADGE_MIME_EXT,
+    badge_url,
+    storage_key_for_badge,
+    verify_badge_signature,
 )
 from app.services.project_key import generate_unique_key
 from app.services.projects import create_project_record
@@ -86,6 +111,10 @@ def _project_to_response(
         key=project.key,
         name=project.name,
         description=project.description,
+        badge_emoji=project.badge_emoji,
+        # Чистая функция от строки и секрета, без обращения к БД — поэтому её
+        # можно звать на каждой строке списка проектов без N+1.
+        badge_url=badge_url(project),
         archived_at=project.archived_at,
         folder_id=project.folder_id,
         created_by=project.created_by,
@@ -315,12 +344,27 @@ async def update_project(
     db: AsyncSession = Depends(get_db),
 ) -> ProjectResponse:
     project, _ = await require_project_role(
-        db, project_id, principal, allow=("owner",)
+        db, project_id, principal, allow=EDIT_ROLES
     )
-    if body.name is not None:
+    changed: dict[str, object] = {}
+    if body.name is not None and body.name != project.name:
+        changed["name"] = {"old": project.name, "new": body.name}
         project.name = body.name
-    if body.description is not None:
+    if body.description is not None and body.description != project.description:
+        # Только факт: 20 000 знаков в JSONB на каждую правку — не метаполе.
+        changed["description"] = {"changed": True}
         project.description = body.description
+    if changed:
+        audit.record(
+            db,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.employee_id,
+            action="update",
+            object_type="project",
+            object_id=project.id,
+            object_label=f"{project.key} · {project.name}",
+            diff=changed,
+        )
     await db.commit()
     await db.refresh(project)
     # Членство перечитываем, а не берём роль из require_project_role: та отдаёт
@@ -346,6 +390,15 @@ async def archive_project(
     assert_not_personal(project, action="архивировать")
     if project.archived_at is None:
         project.archived_at = datetime.now(UTC)
+        audit.record(
+            db,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.employee_id,
+            action="archive",
+            object_type="project",
+            object_id=project.id,
+            object_label=f"{project.key} · {project.name}",
+        )
         await db.commit()
         await db.refresh(project)
     member_role, is_favorite = await _my_membership(
@@ -365,6 +418,15 @@ async def unarchive_project(
     )
     if project.archived_at is not None:
         project.archived_at = None
+        audit.record(
+            db,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.employee_id,
+            action="restore",
+            object_type="project",
+            object_id=project.id,
+            object_label=f"{project.key} · {project.name}",
+        )
         await db.commit()
         await db.refresh(project)
     member_role, is_favorite = await _my_membership(
@@ -372,6 +434,301 @@ async def unarchive_project(
     )
     return _project_to_response(project, member_role, is_favorite, principal=principal)
 
+
+@router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project(
+    project_id: UUID,
+    key: str = Query(..., max_length=32, description="Ключ проекта — подтверждение"),
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Удалить проект НАВСЕГДА, вместе со всем содержимым.
+
+    Мягкий вариант — архивация: она уже есть и ничего не теряет. Корзины нет
+    сознательно: второй предикат скрытости пришлось бы вкручивать в каждый
+    кросс-проектный запрос (поиск, «Мои задачи», статистика, календарь,
+    ассистент) — ровно туда, где сегодня прячется личный проект.
+
+    `key` обязателен и проверяется СЕРВЕРОМ, хотя власти не добавляет: право
+    уже проверено выше. Он закрывает другой класс багов — рассинхрон id и
+    того, что человек прочитал в диалоге. Без него удаление не того проекта
+    вернуло бы 204 как ни в чём не бывало.
+    """
+    await enforce_rate_limit(
+        bucket="project:delete",
+        employee_id=str(principal.employee_id),
+        limit=5,
+        window_sec=60,
+    )
+    project, _ = await require_project_role(
+        db, project_id, principal, allow=("owner",)
+    )
+    assert_not_personal(project, action="удалить")
+    if key != project.key:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ключ не совпадает — проверьте, тот ли проект",
+        )
+
+    # Глобальных таймаутов в приложении нет (только в миграциях). Каскад по
+    # проекту в тысячу задач трогает больше десятка таблиц и держит локи, а
+    # прод крутится на ОДНОМ воркере — занятый лок обязан уронить запрос, а не
+    # заморозить трекер.
+    await db.execute(text("SET LOCAL lock_timeout = '5s'"))
+    await db.execute(text("SET LOCAL statement_timeout = '30s'"))
+
+    # Что снимать с диска — собираем ДО каскада: после него строк не будет.
+    blob_keys = list(
+        (
+            await db.execute(
+                select(TaskAttachment.storage_key)
+                .join(Task, Task.id == TaskAttachment.task_id)
+                .where(Task.project_id == project_id)
+            )
+        ).scalars()
+    )
+    if project.badge_storage_key:
+        blob_keys.append(project.badge_storage_key)
+    task_total = (
+        await db.execute(
+            select(func.count()).select_from(Task).where(Task.project_id == project_id)
+        )
+    ).scalar_one()
+
+    # Журнал — в ЭТОЙ ЖЕ транзакции и ДО удаления: «нет действия без записи и
+    # наоборот». `object_label` задуман ровно для этого — переживает объект.
+    audit.record(
+        db,
+        tenant_id=principal.tenant_id,
+        actor_id=principal.employee_id,
+        action="delete",
+        object_type="project",
+        object_id=project_id,
+        object_label=f"{project.key} · {project.name}",
+        diff={"tasks": task_total, "attachments": len(blob_keys)},
+    )
+    await db.flush()  # сессия autoflush=False
+
+    # public_share_tokens — одна из четырёх таблиц БЕЗ RLS, то есть
+    # единственное место продукта, где DELETE может выйти за тенант. Явный
+    # tenant_id обязателен. Подзапрос по tasks идёт под RLS и сам ограничен.
+    await db.execute(
+        delete(PublicShareToken).where(
+            PublicShareToken.tenant_id == principal.tenant_id,
+            or_(
+                and_(
+                    PublicShareToken.scope == "project",
+                    PublicShareToken.entity_id == project_id,
+                ),
+                and_(
+                    PublicShareToken.scope == "task",
+                    PublicShareToken.entity_id.in_(
+                        select(Task.id).where(Task.project_id == project_id)
+                    ),
+                ),
+            ),
+        )
+    )
+    # Уведомление связано с проектом только адресом (`/projects/{id}?task=…`).
+    # Оставленная строка навсегда висела бы во «Входящих» и вела на 404.
+    await db.execute(
+        delete(Notification).where(Notification.url.like(f"/projects/{project_id}%"))
+    )
+
+    # Core DELETE, не `db.delete(project)`. У Project.members стоит
+    # cascade="all, delete-orphan" с lazy="noload": ORM захотел бы загрузить
+    # коллекцию, noload отдал бы пустую, дочерних DELETE не выпустилось бы — и
+    # верный результат получился бы по случайности, на каскаде БД. Core-DELETE
+    # делает контракт «каскадит база» явным.
+    res = await db.execute(delete(Project).where(Project.id == project_id))
+    if res.rowcount != 1:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Проект не найден")
+    await db.commit()
+
+    # Файлы — ПОСЛЕ commit и в отдельном потоке (см. докстринг purge_blobs).
+    if blob_keys:
+        await asyncio.to_thread(purge_blobs, blob_keys)
+
+# ─── Бейдж проекта ──────────────────────────────────────────────────────────
+
+
+@router.put("/projects/{project_id}/badge", response_model=ProjectResponse)
+async def set_project_badge(
+    project_id: UUID,
+    body: ProjectBadgeUpdate,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> ProjectResponse:
+    """Поставить эмодзи или снять бейдж совсем (`emoji: null` → буквы).
+
+    Гейт — edit-tier (`EDIT_ROLES`), как у переименования: бейдж это профиль
+    проекта, а не управление им. Владелец и редактор ставят его одинаково.
+
+    Личный проект НЕ исключаем: `assert_not_personal` сторожит инвариант
+    скрытости (архив, папка, публичная ссылка), а бейдж его не трогает —
+    ровно как переименование, которое личному проекту разрешено намеренно.
+    """
+    await enforce_rate_limit(
+        bucket="project:write",
+        employee_id=str(principal.employee_id),
+        limit=60,
+        window_sec=60,
+    )
+    project, _ = await require_project_role(
+        db, project_id, principal, allow=EDIT_ROLES
+    )
+
+    # Картинка и эмодзи взаимоисключающи (CHECK ck_projects_badge_exclusive),
+    # поэтому установка эмодзи обязана снять картинку. Ключ запоминаем ДО
+    # правки: после commit его уже негде взять.
+    old_key = project.badge_storage_key
+    project.badge_emoji = body.emoji
+    project.badge_storage_key = None
+    project.badge_mime = None
+    await db.commit()
+    await db.refresh(project)
+    if old_key:
+        await asyncio.to_thread(purge_blobs, [old_key])
+
+    member_role, is_favorite = await _my_membership(
+        db, project_id, principal.employee_id
+    )
+    return _project_to_response(project, member_role, is_favorite, principal=principal)
+
+
+@router.post("/projects/{project_id}/badge/image", response_model=ProjectResponse)
+async def upload_project_badge(
+    project_id: UUID,
+    file: UploadFile = File(...),
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> ProjectResponse:
+    """Загрузить картинку бейджа. Ставит её и снимает эмодзи."""
+    await enforce_rate_limit(
+        bucket="attach:upload",
+        employee_id=str(principal.employee_id),
+        limit=30,
+        window_sec=60,
+    )
+    project, _ = await require_project_role(
+        db, project_id, principal, allow=EDIT_ROLES
+    )
+
+    settings = get_settings()
+    if check_free_space() < settings.media_min_free_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+            detail="На сервере кончилось место — обратитесь к администратору",
+        )
+
+    mime = resolve_mime(file.content_type, file.filename or "")
+    if mime not in BADGE_MIME_EXT:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Бейдж — картинка PNG, JPG или WebP",
+        )
+    # Магические байты. У бейджа это строже, чем у вложений: вложение уходит
+    # с `Content-Disposition: attachment`, а бейдж отдаётся INLINE в <img>.
+    head = await file.read(SNIFF_HEAD_BYTES)
+    await file.seek(0)
+    if sniff_mismatch(mime, head):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Содержимое файла не соответствует заявленному типу",
+        )
+
+    storage_key = storage_key_for_badge(project.tenant_id, project.id, mime)
+    dest = absolute_path(storage_key)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    written = 0
+    try:
+        with dest.open("wb") as fh:
+            while True:
+                chunk = await file.read(64 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > BADGE_MAX_BYTES:
+                    fh.close()
+                    dest.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"Картинка больше {BADGE_MAX_BYTES // 1024} КБ",
+                    )
+                fh.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось сохранить картинку",
+        ) from exc
+
+    # Порядок обязателен: файл записан, СТАРЫЙ ключ запомнили, строку
+    # обновили, commit — и только потом сносим старый файл. Обратный порядок
+    # при неудачном commit оставил бы строку, указывающую в пустоту.
+    old_key = project.badge_storage_key
+    project.badge_storage_key = storage_key
+    project.badge_mime = mime
+    project.badge_emoji = None
+    try:
+        await db.commit()
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
+    await db.refresh(project)
+    if old_key:
+        await asyncio.to_thread(purge_blobs, [old_key])
+
+    member_role, is_favorite = await _my_membership(
+        db, project_id, principal.employee_id
+    )
+    return _project_to_response(project, member_role, is_favorite, principal=principal)
+
+
+@router.get("/projects/{project_id}/badge")
+async def serve_project_badge(project_id: UUID, s: str = Query(..., max_length=64)):
+    """Отдать картинку бейджа по подписи.
+
+    `require_auth` НЕТ намеренно: `<img>` не несёт заголовок Authorization —
+    тот же довод, что у медиа и у инструкций. Авторизует подпись, а вместе с
+    ней и tenant: ключ хранения начинается с tenant_id и входит в подписанное
+    сообщение.
+
+    Нет проекта / нет бейджа / подпись не сходится — 404 во всех трёх случаях:
+    зонд не должен различать «не существует» и «не та подпись».
+    """
+    async with tenant_scoped_session(None, bypass_rls=True) as scan:
+        project = await scan.get(Project, project_id)
+        if project is None or not project.badge_storage_key or not project.badge_mime:
+            raise HTTPException(status_code=404, detail="Не найдено")
+        storage_key, mime = project.badge_storage_key, project.badge_mime
+
+    if not verify_badge_signature(project_id, storage_key, s):
+        raise HTTPException(status_code=404, detail="Не найдено")
+
+    settings = get_settings()
+    if not settings.media_accel_enabled:
+        path = absolute_path(storage_key)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Не найдено")
+        return FileResponse(
+            path=path, media_type=mime, content_disposition_type="inline"
+        )
+    return Response(
+        status_code=200,
+        headers={
+            "X-Accel-Redirect": f"/_protected_media/{storage_key}",
+            "Content-Type": mime,
+            "Content-Disposition": "inline",
+            # Адрес меняется вместе с картинкой (uuid в ключе), поэтому год и
+            # immutable безопасны: устаревшая запись кэша никому не покажется.
+            "Cache-Control": "private, max-age=31536000, immutable",
+        },
+    )
 
 # ─── Members ────────────────────────────────────────────────────────────────
 
