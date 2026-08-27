@@ -44,6 +44,8 @@ fi
 SSH_KEY="${SSH_KEY:-}"
 SSH_KEY_PATH="${SSH_KEY/#\~/$HOME}"
 # Пути с пробелом в списке исключений пишутся как --exclude="'Имя с пробелом'":
+# CLAUDE.md и SESSIONS.md исключены нарочно: они локально вне git и содержат
+# реальные пароли, а на сервере лежали 644 — читаемые любым пользователем хоста.
 # rsync зовётся через `eval`, и одинарные кавычки обязаны пережить первый
 # разбор строки, иначе имя распадается на два аргумента (25.08).
 # SSH_JUMP (deploy/.env, необязательный) — промежуточный узел для ssh и rsync.
@@ -106,7 +108,11 @@ deploy_backend() {
     --exclude='uploads' \
     --exclude='LMS' \
     --exclude='import_bundle' \
+    --exclude='weeek-bundle' \
+    --exclude='.weeek-cache' \
     --exclude='redesign' \
+    --exclude='CLAUDE.md' \
+    --exclude='SESSIONS.md' \
     --exclude="'Hub Instructions'" \
     "$PROJECT_DIR/" \
     "${SERVER_USER}@${SERVER_HOST}:${REMOTE_BASE}/"

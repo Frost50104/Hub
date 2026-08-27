@@ -34,6 +34,15 @@
 3. Frontend: **собирается ЛОКАЛЬНО** (`npm install && npm run build[:staging]` в `web/`, проверка `dist/index.html`), затем `rsync --delete` только внутри `web/dist/` на VPS. С 2026-08-21 `vite build` на сервере не запускается: на VPS 2 ГБ без swap сборка росла до ~970 МБ RSS и падала по OOM даже при остановленном STT. node на сервере для деплоя больше не нужен.
 4. Smoke-check на `https://hub[-staging].signaris.ru/api/env`. **Сверить версию:** `curl …/version.json` должен совпасть с `git rev-parse --short HEAD` (дважды ловили деплой, уехавший без последнего коммита / со старым dist).
 
+**`SSH_JUMP` в `deploy/.env` — деплой через промежуточный узел.** 2026-08-25 маршрут от машины разработчика до Timeweb оборвался на транзитном IX: недоступны оба сервера сети (`hub` и `auth`), при этом сторонний российский хостинг отвечал, а с узлов tailnet владельца прод отдавал 200 — то есть ломалась дорога, а не сервер. `SSH_JUMP=root@<узел>` подставляет `ssh -J` в ssh И rsync; пустой по умолчанию, обычный деплой не меняет. Диагностика в такой ситуации: `traceroute` до обоих IP (обрыв на одном хопе = проблема сети провайдера), `whois` сетей, проверка прода с любого стороннего узла.
+
+**Тяжёлые локальные артефакты исключены из rsync поимённо** (`deploy/deploy.sh`): `LMS/`,
+`import_bundle`, `weeek-bundle`, `.weeek-cache`, `redesign`, `'Hub Instructions'`. Бандл переноса
+из WEEEK — 377 МБ, без строки в `--exclude` он уезжал бы на VPS каждым деплоем; на сервер он
+кладётся отдельным `rsync` в `/opt/signaris-hub[-staging]/weeek-bundle/`.
+
+**Пути с пробелом в `--exclude` пишутся `--exclude="'Имя с пробелом'"`.** rsync зовётся через `eval`, и одинарные кавычки обязаны пережить ПЕРВЫЙ разбор строки — иначе имя распадается на два аргумента, rsync ругается на несуществующий путь и молча уносит папку на сервер (так `Hub Instructions/` уехала на staging 25.08).
+
 ## Rollback
 
 Релизного каталога нет (rsync поверх `/opt/...`), откат = redeploy предыдущего git-состояния + при необходимости откат БД.
@@ -163,7 +172,7 @@ INTEGRATED_PRODUCTS: frozenset[str] = frozenset({"net", "sonar", "hub"})
 3. Получить service-key для deletion-sync → `SIGNARIS_HUB_SIGNARIS_SERVICE_KEY` в `/opt/signaris-hub/.env`
 4. `systemctl restart signaris-hub`
 
-## Ключевые env-переменные (`SIGNARIS_HUB_*`, полный список — `app/config.py`, 54 поля)
+## Ключевые env-переменные (`SIGNARIS_HUB_*`, полный список — `app/config.py`, 57 полей)
 
 Значения живут ТОЛЬКО в `/opt/signaris-hub[-staging]/.env` на VPS (+ секреты в локальном CLAUDE.md → СЕКРЕТЫ). Операционно-значимые:
 

@@ -7,12 +7,21 @@
 - **Private key** — файл `/opt/signaris-hub/vapid_private.pem` (mode 600 root:signaris). В env только путь `SIGNARIS_HUB_VAPID_PRIVATE_KEY_PATH`. **В коде не хранится никогда.**
 - `vapid_subject` = `mailto:ops@signaris.ru`.
 - **Ключ единый для prod + staging** (как у Desk). Раздельные ключи — будущая работа, см. `docs/TECH_DEBT.md`.
+- **В `pywebpush` ключ уходит ОБЪЕКТОМ `Vapid`** (`push_sender.load_vapid()`), не текстом и не путём. Библиотека разбирает аргумент так: объект `Vapid01` — как есть, путь — через `Vapid.from_file` (понимает PEM), **любая другая строка — через `Vapid.from_string`, а он PEM с заголовками не понимает** и падает с «ASN.1 parsing error». Именно на этом push не доставлялся 29.07–26.08 (`docs/tech-debt/incidents.md`). Путь тоже сработал бы, но заставлял бы читать файл на каждую отправку.
+- **Существование файла проверяется ДО вызова библиотеки:** `Vapid.from_file` при отсутствии файла молча генерирует НОВУЮ пару и пишет её на диск — публичный ключ в env остаётся прежним, и все подписки превращаются в мусор. Пропавший ключ обязан быть громкой ошибкой.
+- **Приватный ключ сверяется с `vapid_public_key`** из env: не совпали — пуш выключается с `vapid.public_key_mismatch`, потому что браузер такую подпись не примет.
+- Состояние ключа наружу: `GET /api/health/push` → `{"vapid": "ok"|"absent"|"invalid"|"mismatch"}`. Дёргает `scripts/healthcheck.sh` каждые 5 минут, при не-`ok` шлёт в Telegram. Числа подписок в ручке нет и быть не может: она анонимная, а `push_subscriptions` под RLS.
+- Успех отправки логируется (`push.sent`) наравне с отказом: пустой журнал не должен читаться как «всё хорошо».
+- Таймаут транспорта — 10 с. Без него `requests` внутри `asyncio.to_thread` держал бы поток общего executor'а (там же чистятся блобы вложений).
 
 ## Подписка
 
 1. При первом логине в PWA — **не auto-prompt**. Кнопка «Включить уведомления» в Settings или баннер `PushPermissionPrompt` после логина (только при `Notification.permission === 'default'`).
 2. `usePush().subscribe()` — `Notification.requestPermission()` → `pushManager.subscribe({userVisibleOnly: true, applicationServerKey: <vapid_public_key>})`.
 3. `POST /api/push/subscribe` — `{endpoint, keys: {p256dh, auth}}`. Backend делает UPSERT по `endpoint` (`ON CONFLICT (endpoint) DO UPDATE SET employee_id=EXCLUDED.employee_id, last_seen_at=NOW()`).
+4. **Тихая переподписка при запуске приложения** — `usePushAutoRefresh` в `Shell` (корневой лэйаут!), правила в `web/src/lib/pushRefresh.ts`. Восстанавливает подписку, которую отозвал iOS, и продлевает `last_seen_at`. Живёт НЕ в `usePush`: тот монтируется только в `PushPermissionPrompt` (главная трекера) и в настройках — PWA, открытая на «Обучении» или по ссылке из пуша, его бы не смонтировала. Три условия: разрешение `granted`, отметка `hub:push-opted-in` (её снимает «Отписаться» — иначе тихая логика вернула бы то, что человек выключил) и не чаще раза в 12 ч.
+5. **Гейт свежести** (`settings.push_freshness_days`, 30): шлём только по подпискам, подтверждённым за этот срок. Пара «гейт + продление» неразделима — гейт без продления просто выключает пуши. Разово продлить существующие подписки: `app/jobs/touch_push_subscriptions.py` (только `bypass_session_factory()` — таблица под RLS, а джоба кросс-тенантная).
+6. **Самопроверка** — `POST /api/push/test` (rate-limit 10/час) и кнопка «Проверить» в «Настройки → Уведомления». Текст ответа собирает `push_sender.describe_push_result`: «не настроено на сервере», «устройство не подписано», «подписка давно не подтверждалась», «устройство больше не принимает» — пять разных бед выглядят для человека одинаково, и каждая обязана назвать себя.
 
 ## Триггеры: task-домен (6 kinds)
 
