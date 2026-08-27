@@ -1,5 +1,5 @@
 import { CircleHelp, GripVertical, Pencil, Plus, Trash2, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/Button'
@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/Dialog'
+import { canonicalJson, DISCARD_QUIZ_CONFIRM } from '@/lib/quizDraft'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select } from '@/components/ui/Select'
@@ -49,11 +50,16 @@ export function QuizBuilder({ lessonId }: { lessonId: string }) {
   const [settings, setSettings] = useState<QuizSettings>(DEFAULT_SETTINGS)
   const [questions, setQuestions] = useState<QuizQuestionDraft[]>([])
   const [editIndex, setEditIndex] = useState<number | 'new' | null>(null)
+  const [seeded, setSeeded] = useState(false)
 
-  // Подхват сохранённого теста при загрузке.
+  // Подхват сохранённого теста — РОВНО ОДИН РАЗ (см. инцидент 26.08 в
+  // LearnAssessmentsPage): `refetchOnWindowFocus` возвращает новый объект на
+  // каждый возврат в окно, и пересев по смене ссылки затирал бы набранные, но
+  // ещё не сохранённые вопросы.
   useEffect(() => {
     const quiz = quizQuery.data
-    if (quiz) {
+    if (!seeded && quiz) {
+      setSeeded(true)
       setEnabled(true)
       setSettings({
         title: quiz.title,
@@ -77,7 +83,7 @@ export function QuizBuilder({ lessonId }: { lessonId: string }) {
         })),
       )
     }
-  }, [quizQuery.data])
+  }, [seeded, quizQuery.data])
 
   const save = useQuizMutation((status: 'draft' | 'published') =>
     learnApi.upsertLessonQuiz(lessonId, { ...settings, status, questions }),
@@ -85,6 +91,18 @@ export function QuizBuilder({ lessonId }: { lessonId: string }) {
   const remove = useQuizMutation(() => learnApi.deleteQuiz(quizQuery.data!.id))
 
   if (quizQuery.isLoading) return <SkeletonRows rows={2} />
+
+  if (quizQuery.isError) {
+    // Ошибку нельзя показывать как «теста нет»: у автора ЧУЖОГО курса ручка
+    // отвечает 403 «Это не ваш курс» (`_require_manage`), и кнопка «Добавить
+    // тест» звала завести ВТОРОЙ тест поверх существующего.
+    return (
+      <p className="rounded-lg border border-dashed border-glass-border p-3 text-sm text-text2">
+        Тест урока не открылся: возможно, курс ведёт другой автор. Попросите
+        владельца курса или администратора.
+      </p>
+    )
+  }
 
   if (!enabled) {
     return (
@@ -307,6 +325,20 @@ export function QuestionDialog({
     (initial?.options.items as string[]) ?? ['', ''],
   )
 
+  // Снимок формы, каким её открыли. Сравниваем сырые поля, а не собранный
+  // черновик: пока форма невалидна, черновик не собирается вовсе. Захват на
+  // первом рендере — ленивая инициализация ref'а, побочных эффектов нет.
+  const openedAs = useRef<string | null>(null)
+  const formNow = canonicalJson({ qtype, prompt, points, options, correct, pairs, items })
+  if (openedAs.current === null) openedAs.current = formNow
+
+  // Закрытие — крестиком, Escape, кликом мимо или «Отменой» — не должно
+  // выбрасывать набранное молча (инцидент 26.08).
+  const closeGuarded = () => {
+    if (openedAs.current !== formNow && !window.confirm(DISCARD_QUIZ_CONFIRM)) return
+    onClose()
+  }
+
   const buildDraft = (): QuizQuestionDraft | string => {
     if (!prompt.trim()) return 'Введите вопрос'
     if (qtype === 'single' || qtype === 'multi') {
@@ -355,7 +387,7 @@ export function QuestionDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
+    <Dialog open onOpenChange={(v) => !v && closeGuarded()}>
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{initial ? 'Вопрос' : 'Новый вопрос'}</DialogTitle>
@@ -541,7 +573,7 @@ export function QuestionDialog({
           )}
         </div>
         <DialogFooter>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={closeGuarded}>
             Отмена
           </Button>
           <Button onClick={submit}>Сохранить вопрос</Button>

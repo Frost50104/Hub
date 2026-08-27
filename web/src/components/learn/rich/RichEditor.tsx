@@ -25,7 +25,7 @@ import {
   Table as TableIcon,
   Underline as UnderlineIcon,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { cn } from '@/lib/cn'
 
@@ -381,6 +381,7 @@ export default function RichEditor({
   extraExtensions,
   extraNodeTypes,
   extraToolbar,
+  onNodeDoubleClick,
 }: {
   value: RichDoc | null
   onChange: (doc: RichDoc) => void
@@ -392,7 +393,17 @@ export default function RichEditor({
   extraNodeTypes?: ReadonlySet<string>
   /** Дополнительные кнопки тулбара (загрузка медиа и т.п.). */
   extraToolbar?: (editor: Editor) => React.ReactNode
+  /**
+   * Двойной клик по доменной ноде — «открыть на правку». `true` гасит дефолт
+   * ProseMirror (он выделил бы слово под курсором).
+   */
+  onNodeDoubleClick?: (type: string, pos: number) => boolean
 }) {
+  // Конфиг `useEditor` собирается ОДИН раз, поэтому колбэк читаем через ref:
+  // прямое замыкание застыло бы на первом рендере вместе со своим состоянием.
+  const doubleClickRef = useRef(onNodeDoubleClick)
+  doubleClickRef.current = onNodeDoubleClick
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -429,6 +440,8 @@ export default function RichEditor({
         class:
           'prose-hub min-h-[160px] max-w-none px-3 py-2 text-sm text-text focus:outline-none',
       },
+      handleDoubleClickOn: (_view, pos, node) =>
+        doubleClickRef.current?.(node.type.name, pos) ?? false,
     },
     onUpdate: ({ editor: e }) => {
       // Санитизация на ВЫХОДЕ: editor-state не трогаем (undo цел), наружу

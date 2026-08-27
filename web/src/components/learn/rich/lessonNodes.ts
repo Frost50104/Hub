@@ -320,6 +320,9 @@ export const LessonCheckQuestion = Node.create({
         `${options.length} вариантов · верный: №${Number(node.attrs.correct) + 1}` +
           (node.attrs.gateNext ? ' · гейт завершения' : ''),
       ],
+      // Подсказка видна ТОЛЬКО автору: сотруднику этот блок рисует
+      // LessonRenderer, а этот файл живёт в чанке редактора.
+      ['p', { class: 'text-xs text-text3' }, 'Двойной клик — изменить'],
     ]
   },
 

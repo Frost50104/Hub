@@ -6,11 +6,12 @@ import {
   ChevronRight,
   CircleDashed,
   Lock,
+  Pencil,
   Play,
 } from 'lucide-react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 
-import { coursesSectionTitle } from '@/components/layout/learnNav'
+import { canManageCourses, coursesSectionTitle } from '@/components/layout/learnNav'
 import { courseTypeBadgeClass } from '@/components/learn/CourseCover'
 import { QueryError } from '@/components/QueryError'
 import { RailRow, RailSection, RightRail } from '@/components/ui/RightRail'
@@ -33,7 +34,8 @@ type RowKind = 'done' | 'current' | 'locked' | 'draft'
 
 /** Верхний отступ мобильной шапки: safe-area iPhone + 16px; десктоп — 56px.
  *  Класс, а не inline-style: inline перебил бы `lg:pt-14`. */
-const TOP_PAD = 'pt-[calc(env(safe-area-inset-top,0px)+1rem)] lg:pt-14'
+// Вырез статус-бара даёт Shell мобильному <main> — здесь свой отступ.
+const TOP_PAD = 'pt-4 lg:pt-14'
 
 function rowKind(lesson: LessonMeta, isCurrent: boolean): RowKind {
   if (lesson.status === 'draft') return 'draft'
@@ -272,6 +274,9 @@ export function LearnCoursePage() {
   // с замками, как новому сотруднику.
   const preview = params.get('preview') === '1'
   const course = useCourse(courseId, preview)
+  const me = useMe()
+  const canEditContent =
+    !preview && canManageCourses(me.data?.profile?.content_role, me.data?.hub_role)
   const certificates = useMyCertificates()
 
   const data = course.data
@@ -322,6 +327,21 @@ export function LearnCoursePage() {
             </div>
           )}
           <CourseHeader data={data} hrefSuffix={preview ? '?preview=1' : ''} />
+
+          {canEditContent && (
+            // Обратная дорога в конструктор с ОБЫЧНОГО просмотра курса: до
+            // 26.08 она существовала только в режиме `?preview=1`, куда
+            // попадают лишь из самого конструктора.
+            <div className="px-5 lg:px-0">
+              <Link
+                to={`/learn/courses/${courseId}/edit`}
+                className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-glass-border bg-glass px-3 text-[14px] font-semibold text-text hover:bg-surface"
+              >
+                <Pencil className="h-4 w-4" strokeWidth={1.9} />
+                Редактировать курс
+              </Link>
+            </div>
+          )}
 
           <div className="flex flex-col gap-3.5 px-5 pb-8 pt-6">
             {data.completed && myCert && (

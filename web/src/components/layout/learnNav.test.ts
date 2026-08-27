@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { adminSegmentsFor } from './learnNav'
+import { adminSegmentsFor, canManageCourses, coursesSectionTitle } from './learnNav'
 
 /** Гейты «Управления» повторяют бэкенд: офис без publisher не видит ни
  *  «Проверку», ни «Аналитику» (оба 403 на сервере — QA-0821 #24). */
@@ -38,5 +38,33 @@ describe('adminSegmentsFor', () => {
     expect(adminSegmentsFor(me('member', 'employee'))).toEqual([])
     expect(adminSegmentsFor({ hub_role: 'member', profile: null })).toEqual([])
     expect(adminSegmentsFor(undefined)).toEqual([])
+  })
+})
+
+describe('canManageCourses', () => {
+  it.each([
+    ['admin' as const, 'none' as const],
+    ['member' as const, 'author' as const],
+    ['member' as const, 'publisher' as const],
+    ['viewer' as const, 'admin' as const],
+  ])('hub=%s content=%s — ведёт курсы', (hubRole, contentRole) => {
+    expect(canManageCourses(contentRole, hubRole)).toBe(true)
+  })
+
+  it('обычный сотрудник курсы только проходит', () => {
+    expect(canManageCourses('none', 'member')).toBe(false)
+    expect(canManageCourses(null, null)).toBe(false)
+    expect(canManageCourses(undefined, undefined)).toBe(false)
+  })
+
+  it('совпадает с заголовком раздела — правило одно', () => {
+    for (const [content, hub] of [
+      ['none', 'admin'],
+      ['author', 'member'],
+      ['none', 'member'],
+    ] as const) {
+      const manages = canManageCourses(content, hub)
+      expect(coursesSectionTitle(content, hub)).toBe(manages ? 'Учебные курсы' : 'Моё обучение')
+    }
   })
 })

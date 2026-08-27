@@ -12,6 +12,7 @@ import {
   ScrollText,
   ShoppingBag,
   Sparkles,
+  Star,
   Trophy,
   Users,
   Workflow,
@@ -46,12 +47,28 @@ export function coursesSectionTitle(
   contentRole: 'none' | 'author' | 'publisher' | 'admin' | null | undefined,
   hubRole?: 'admin' | 'member' | 'viewer' | null,
 ): string {
-  const manages =
+  return canManageCourses(contentRole, hubRole) ? 'Учебные курсы' : 'Моё обучение'
+}
+
+/**
+ * Кто ведёт курсы, а не проходит их. Зеркало серверного гейта
+ * `require_content_role(..., "author")` (`app/api/courses.py`, `app/api/quizzes.py`):
+ * hub-admin проходит всегда, из учебных ролей — author и publisher.
+ *
+ * ОДНА функция на заголовок раздела И на кнопки «Редактировать» со страниц
+ * курса и урока: если правила разъедутся, человек с «Учебными курсами» в меню
+ * не увидит кнопку правки — или увидит её и получит 403 при сохранении.
+ */
+export function canManageCourses(
+  contentRole: 'none' | 'author' | 'publisher' | 'admin' | null | undefined,
+  hubRole?: 'admin' | 'member' | 'viewer' | null,
+): boolean {
+  return (
     hubRole === 'admin' ||
     contentRole === 'author' ||
     contentRole === 'publisher' ||
     contentRole === 'admin'
-  return manages ? 'Учебные курсы' : 'Моё обучение'
+  )
 }
 
 // Разделы включаются по мере этапов Ф1–Ф4; до готовности — «скоро» (disabled).
@@ -63,6 +80,7 @@ export const LEARN_NAV: LearnNavItem[] = [
   { to: '/learn/surveys', label: 'Опросы', icon: ClipboardList },
   { to: '/learn/products', label: 'Ассортимент', icon: ShoppingBag },
   { to: '/learn/rating', label: 'Рейтинг', icon: Trophy },
+  { to: '/learn/favorites', label: 'Избранное', icon: Star },
   { to: '/assistant', label: 'AI-помощник', icon: Bot },
   { to: '/learn/shifts', label: 'Биржа смен', icon: Handshake },
   { to: '/learn/assessments', label: 'Аттестации', icon: BadgeCheck },

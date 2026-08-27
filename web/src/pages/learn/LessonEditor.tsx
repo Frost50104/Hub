@@ -56,6 +56,8 @@ import {
   useSurveys,
 } from '@/hooks/useLearn'
 
+import { buildCheckAttrs, type CheckQuestionAttrs } from '@/lib/checkQuestion'
+
 import { QuizBuilder } from './QuizBuilder'
 import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
@@ -160,7 +162,8 @@ function LessonEditorInner({
   const [pdfUrl, setPdfUrl] = useState<string | null>(lesson.pdf_url)
   const [pdfMediaId, setPdfMediaId] = useState<string | null>(null)
 
-  const [checkOpen, setCheckOpen] = useState(false)
+  // null — форма закрыта; {} — вставка; {attrs} — правка существующего блока.
+  const [checkForm, setCheckForm] = useState<{ attrs: CheckQuestionAttrs | null } | null>(null)
   const [surveyOpen, setSurveyOpen] = useState(false)
   const [blockPropsOpen, setBlockPropsOpen] = useState(false)
   const [videoUpload, setVideoUpload] = useState<File | null>(null)
@@ -280,13 +283,24 @@ function LessonEditorInner({
         <ToolButton title="Вложенный PDF" onClick={() => pdfEmbedInput.current?.click()} disabled={uploading}>
           <FileText className="h-4 w-4" /> PDF
         </ToolButton>
-        <ToolButton title="Контрольный вопрос" onClick={() => setCheckOpen(true)}>
+        <ToolButton title="Контрольный вопрос" onClick={() => setCheckForm({ attrs: null })}>
           <CircleHelp className="h-4 w-4" /> Вопрос
         </ToolButton>
         <ToolButton title="Встроить опрос" onClick={() => setSurveyOpen(true)}>
           <ClipboardList className="h-4 w-4" /> Опрос
         </ToolButton>
-        <BlockPropsButton editor={editor} onOpen={() => setBlockPropsOpen(true)} />
+        <BlockPropsButton
+          editor={editor}
+          onOpen={() => {
+            // У контрольного вопроса «свойства» — это и есть его форма: второй
+            // редактор того же набора полей разъехался бы с первым.
+            if (editor.isActive('checkQuestion')) {
+              setCheckForm({ attrs: readCheckAttrs(editor) })
+              return
+            }
+            setBlockPropsOpen(true)
+          }}
+        />
         {uploading && <span className="px-1 text-xs text-text3">Загрузка…</span>}
       </>
     )
@@ -388,6 +402,16 @@ function LessonEditorInner({
             extraExtensions={LESSON_NODE_EXTENSIONS}
             extraNodeTypes={LESSON_NODE_TYPES}
             extraToolbar={lessonToolbar}
+            onNodeDoubleClick={(type, pos) => {
+              if (type !== 'checkQuestion') return false
+              const editor = editorRef.current
+              if (!editor) return false
+              // Выделение обязательно: `updateAttributes` пишет в АКТИВНУЮ
+              // ноду, и без него сохранение ушло бы в никуда.
+              editor.commands.setNodeSelection(pos)
+              setCheckForm({ attrs: readCheckAttrs(editor) })
+              return true
+            }}
           />
         </Suspense>
       )}
@@ -463,12 +487,22 @@ function LessonEditorInner({
       <input ref={pdfEmbedInput} type="file" accept="application/pdf" hidden onChange={(e) => void onPdfEmbedPick(e)} />
       <input ref={pdfLessonInput} type="file" accept="application/pdf" hidden onChange={(e) => void onLessonPdfPick(e)} />
 
-      {checkOpen && (
+      {checkForm && (
         <CheckQuestionDialog
-          onClose={() => setCheckOpen(false)}
-          onInsert={(attrs) => {
-            editorRef.current?.chain().focus().insertCheckQuestion(attrs).run()
-            setCheckOpen(false)
+          initial={checkForm.attrs}
+          onClose={() => setCheckForm(null)}
+          onSubmit={(attrs) => {
+            const editor = editorRef.current
+            if (editor) {
+              if (checkForm.attrs) {
+                // Правка: БЕЗ .focus() — выделение блока живёт в состоянии
+                // ProseMirror и переживает модалку (как в BlockPropsDialog).
+                editor.chain().updateAttributes('checkQuestion', attrs).run()
+              } else {
+                editor.chain().focus().insertCheckQuestion(attrs).run()
+              }
+            }
+            setCheckForm(null)
           }}
         />
       )}
@@ -523,32 +557,39 @@ function LessonEditorInner({
 
 // ─── Диалоги ─────────────────────────────────────────────────────────────────
 
+/**
+ * Контрольный вопрос: вставка И правка одной формой.
+ *
+ * `initial` — атрибуты существующего блока (правка). Его `blockId` уходит в
+ * `buildCheckAttrs` и не заменяется новым: на нём висят ответы сотрудников и
+ * гейт завершения урока.
+ */
 function CheckQuestionDialog({
+  initial,
   onClose,
-  onInsert,
+  onSubmit,
 }: {
+  initial?: CheckQuestionAttrs | null
   onClose: () => void
-  onInsert: (attrs: {
-    blockId: string
-    question: string
-    options: string[]
-    correct: number
-    gateNext: boolean
-  }) => void
+  onSubmit: (attrs: CheckQuestionAttrs) => void
 }) {
-  const [question, setQuestion] = useState('')
-  const [options, setOptions] = useState<string[]>(['', ''])
-  const [correct, setCorrect] = useState(0)
-  const [gateNext, setGateNext] = useState(true)
+  const [question, setQuestion] = useState(initial?.question ?? '')
+  const [options, setOptions] = useState<string[]>(initial?.options ?? ['', ''])
+  const [correct, setCorrect] = useState(initial?.correct ?? 0)
+  const [gateNext, setGateNext] = useState(initial?.gateNext ?? true)
 
-  const filled = options.map((o) => o.trim()).filter(Boolean)
-  const valid = question.trim().length > 0 && filled.length >= 2 && correct < filled.length
+  // Валидность и итоговые атрибуты считает ОДНА чистая функция — она же
+  // пересчитывает индекс правильного при выброшенных пустых вариантах.
+  const attrs = buildCheckAttrs(
+    { question, options, correct, gateNext },
+    initial?.blockId,
+  )
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Контрольный вопрос</DialogTitle>
+          <DialogTitle>{initial ? 'Изменить вопрос' : 'Контрольный вопрос'}</DialogTitle>
         </DialogHeader>
         <div className="space-y-2">
           <div>
@@ -607,19 +648,8 @@ function CheckQuestionDialog({
           <Button variant="secondary" onClick={onClose}>
             Отмена
           </Button>
-          <Button
-            disabled={!valid}
-            onClick={() =>
-              onInsert({
-                blockId: crypto.randomUUID(),
-                question: question.trim(),
-                options: filled,
-                correct,
-                gateNext,
-              })
-            }
-          >
-            Вставить
+          <Button disabled={attrs === null} onClick={() => attrs && onSubmit(attrs)}>
+            {initial ? 'Сохранить' : 'Вставить'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -777,11 +807,31 @@ function SurveyEmbedDialog({
  * отсюда «Шаг 1, Шаг 2» вместо текста), а галочки видео жили ТОЛЬКО в диалоге
  * загрузки — «потеряла кнопку, чтобы запретить перемотку».
  */
-const EDITABLE_BLOCKS = ['figure', 'gallery', 'video'] as const
+// Медийные блоки правит BlockPropsDialog; у контрольного вопроса своя форма —
+// та же, что и при вставке, поэтому он в отдельном списке.
+const PROPS_BLOCKS = ['figure', 'gallery', 'video'] as const
+type PropsBlock = (typeof PROPS_BLOCKS)[number]
+const EDITABLE_BLOCKS = [...PROPS_BLOCKS, 'checkQuestion'] as const
 type EditableBlock = (typeof EDITABLE_BLOCKS)[number]
 
 function activeBlock(editor: Editor): EditableBlock | null {
   return EDITABLE_BLOCKS.find((type) => editor.isActive(type)) ?? null
+}
+
+/** Атрибуты выделенного `checkQuestion` в форму правки. */
+function readCheckAttrs(editor: Editor): CheckQuestionAttrs {
+  const attrs = editor.getAttributes('checkQuestion')
+  return {
+    blockId: String(attrs.blockId ?? ''),
+    question: String(attrs.question ?? ''),
+    options: Array.isArray(attrs.options) ? attrs.options.map((o) => String(o)) : [],
+    correct: Number(attrs.correct ?? 0),
+    gateNext: Boolean(attrs.gateNext),
+  }
+}
+
+function activePropsBlock(editor: Editor): PropsBlock | null {
+  return PROPS_BLOCKS.find((type) => editor.isActive(type)) ?? null
 }
 
 /**
@@ -803,7 +853,7 @@ function BlockPropsButton({ editor, onOpen }: { editor: Editor; onOpen: () => vo
       title={
         block
           ? 'Свойства выделенного блока'
-          : 'Свойства блока — сначала выделите фото, галерею или видео'
+          : 'Свойства блока — сначала выделите фото, галерею, видео или вопрос'
       }
       disabled={block === null}
       onClick={onOpen}
@@ -814,7 +864,7 @@ function BlockPropsButton({ editor, onOpen }: { editor: Editor; onOpen: () => vo
 }
 
 function BlockPropsDialog({ editor, onClose }: { editor: Editor; onClose: () => void }) {
-  const type = activeBlock(editor)
+  const type = activePropsBlock(editor)
   const attrs = type ? editor.getAttributes(type) : {}
   const [caption, setCaption] = useState(String(attrs.caption ?? ''))
   const [items, setItems] = useState<GalleryItemAttrs[]>(

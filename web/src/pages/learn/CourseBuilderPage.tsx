@@ -25,8 +25,8 @@ import {
   UserPlus,
   Users,
 } from 'lucide-react'
-import { useState, type CSSProperties, type FormEvent } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { coursesSectionTitle } from '@/components/layout/learnNav'
@@ -101,6 +101,12 @@ export function CourseBuilderPage() {
   )
 
   const [editingLesson, setEditingLesson] = useState<LessonMeta | null>(null)
+  const [params, setParams] = useSearchParams()
+  // `?lesson=` — вход со страницы урока («Редактировать урок и тест»).
+  // Применяем РОВНО ОДИН раз: параметр живёт в URL, и без сторожа закрытый
+  // редактор урока открывался бы заново на каждом ререндере, а «назад» в
+  // браузере возвращал бы его же. Сразу после применения параметр снимаем.
+  const deepLinkUsed = useRef(false)
   const [audienceOpen, setAudienceOpen] = useState(false)
   const [assignOpen, setAssignOpen] = useState(false)
   const navigate = useNavigate()
@@ -108,6 +114,18 @@ export function CourseBuilderPage() {
     learnApi.setCourseStatus(courseId!, status),
   )
   const duplicate = useCourseMutation(() => learnApi.duplicateCourse(courseId!))
+
+  const wanted = params.get('lesson')
+  useEffect(() => {
+    if (deepLinkUsed.current || !wanted || !data) return
+    deepLinkUsed.current = true
+    // Урок из чужого курса просто не найдётся — молча ничего не открываем.
+    const target = data.lessons.find((l) => l.id === wanted) ?? null
+    if (target) setEditingLesson(target)
+    const next = new URLSearchParams(params)
+    next.delete('lesson')
+    setParams(next, { replace: true })
+  }, [wanted, data, params, setParams])
 
   const publishedLessons = data?.lessons.filter((l) => l.status === 'published').length ?? 0
   const topbarMeta = data

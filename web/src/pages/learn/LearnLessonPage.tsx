@@ -8,12 +8,14 @@ import {
   ExternalLink,
   FileText,
   Lock,
+  Pencil,
   Trophy,
 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
+import { canManageCourses } from '@/components/layout/learnNav'
 import { LessonRenderer } from '@/components/learn/lesson/LessonRenderer'
 import {
   extractSections,
@@ -24,6 +26,7 @@ import { flushMessage, flushVideoProgress } from '@/components/learn/lesson/Vide
 import { coverageOf } from '@/lib/videoWatch'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useCourse, useLesson } from '@/hooks/useLearn'
+import { useMe } from '@/hooks/useMe'
 import { useScrollProgress } from '@/hooks/useScrollProgress'
 import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
@@ -120,6 +123,7 @@ export function LearnLessonPage() {
   const preview = params.get('preview') === '1'
   const previewSuffix = preview ? '?preview=1' : ''
   const qc = useQueryClient()
+  const me = useMe()
   const lesson = useLesson(lessonId, preview)
   const progress = useScrollProgress()
 
@@ -218,6 +222,13 @@ export function LearnLessonPage() {
   const quizBlocked = data ? quizBlocksCompletion(data) : false
   const quizHint = data?.quiz_required ? QUIZ_GATE_LABEL[data.quiz_state] : undefined
   const courseHref = data ? `/learn/courses/${data.course_id}${previewSuffix}` : '/learn/courses'
+  // Дорога В КОНСТРУКТОР с экрана прохождения: раньше её не было вовсе, и
+  // автор, открывший свой курс обычным путём, не мог попасть к тесту урока
+  // (вопрос сотрудницы 26.08). В `preview` не показываем — там уже есть
+  // «Вернуться в конструктор» на странице курса.
+  const canEditContent =
+    !preview && canManageCourses(me.data?.profile?.content_role, me.data?.hub_role)
+  const editHref = data ? `/learn/courses/${data.course_id}/edit?lesson=${data.id}` : null
   const showMini = progress.top > MINI_HEADER_AT
 
   const sections = useMemo(
@@ -286,7 +297,7 @@ export function LearnLessonPage() {
         )}
 
         {lesson.isLoading && (
-          <div className="space-y-4 px-5 pt-[calc(env(safe-area-inset-top,0px)+1rem)] lg:pt-14">
+          <div className="space-y-4 px-5 pt-4 lg:pt-14">
             <Skeleton className="h-3 w-24" />
             <Skeleton className="h-[30px] w-3/4" />
             <Skeleton className="h-[30px] w-1/2" />
@@ -340,7 +351,7 @@ export function LearnLessonPage() {
 
         {data && (
           <>
-            <header className="px-5 pt-[calc(env(safe-area-inset-top,0px)+1rem)] lg:pt-14">
+            <header className="px-5 pt-4 lg:pt-14">
               <Link
                 to={courseHref}
                 replace
@@ -363,6 +374,17 @@ export function LearnLessonPage() {
               <h1 className="font-display text-[28px] font-bold leading-[1.18] tracking-[0.01em] text-text [text-wrap:balance] lg:text-[34px] lg:leading-[1.15]">
                 {data.title}
               </h1>
+              {canEditContent && editHref && (
+                // Ведёт в конструктор С ОТКРЫТЫМ этим уроком: тест урока живёт
+                // там же, под содержимым, и другого входа к нему нет.
+                <Link
+                  to={editHref}
+                  className="mt-3 inline-flex h-11 items-center gap-1.5 rounded-lg border border-glass-border bg-glass px-3 text-[14px] font-semibold text-text hover:bg-surface"
+                >
+                  <Pencil className="h-4 w-4" strokeWidth={1.9} />
+                  Редактировать урок и тест
+                </Link>
+              )}
               {overdue && course.data?.due_at && (
                 <p className="mt-2 text-[15px] text-red">
                   Дедлайн был{' '}
