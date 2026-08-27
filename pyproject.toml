@@ -81,10 +81,14 @@ ignore = [
 # в stdout (T201), разбор СВОИХ же xlsx через stdlib-xml (S314), ffmpeg из
 # PATH (S607), краткий алиас модуля маппинга (N812).
 "tools/import_lms/*" = ["T201", "S314", "S607", "N812"]
+# tools/import_weeek — разовый локальный CLI переноса задач из WEEEK:
+# печать отчёта в stdout (T201) и разбор ЧУЖОГО html через lxml (S320 —
+# внешние сущности lxml не резолвит, а вход мы уже держим в руках).
+"tools/import_weeek/*" = ["T201", "S320"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests", "tools/import_lms/tests"]
+testpaths = ["tests", "tools/import_lms/tests", "tools/import_weeek/tests"]
 filterwarnings = [
     "ignore::DeprecationWarning:passlib.*",
 ]
