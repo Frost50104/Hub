@@ -66,7 +66,7 @@ function ProjectDashboard({ projectId }: ProjectDashboardProps) {
         layout="card"
         icon={<BarChart3 className="h-[26px] w-[26px]" strokeWidth={1.6} />}
         title="Считать пока нечего"
-        text="Дашборд оживает с первыми задачами: разрезы по статусу и приоритету, тренд закрытий, загрузка по людям."
+        text="Дашборд оживает с первыми задачами: разрезы по колонкам и приоритету, тренд закрытий, загрузка по людям."
       />
     )
   }
@@ -75,13 +75,22 @@ function ProjectDashboard({ projectId }: ProjectDashboardProps) {
   // берётся по кругу из палитры графиков (0044 — системных статусов, по
   // которым раньше красили, больше нет). Без колонок — срез по состоянию.
   const byStages = d.stage_breakdown && stages.data && stages.data.length > 0
+  // Задачи без статуса приходят в срезе ключом "None" (сервер делает str(None)
+  // от NULL). Без отдельного сегмента пончик молча терял бы их — а после
+  // переноса из WEEEK это больше половины живых задач.
+  const noStage = d.stage_breakdown?.['None'] ?? 0
   const statusSegments: DonutSegment[] = byStages
-    ? stages.data!.map((st, i) => ({
-        key: st.id,
-        label: st.name,
-        value: d.stage_breakdown?.[st.id] ?? 0,
-        color: SERIES_COLOR[i % SERIES_COLOR.length]!,
-      }))
+    ? [
+        ...stages.data!.map((st, i) => ({
+          key: st.id,
+          label: st.name,
+          value: d.stage_breakdown?.[st.id] ?? 0,
+          color: SERIES_COLOR[i % SERIES_COLOR.length]!,
+        })),
+        ...(noStage > 0
+          ? [{ key: 'none', label: 'Без статуса', value: noStage, color: DONE_COLOR.open }]
+          : []),
+      ]
     : [
         { key: 'open', label: 'Не выполнено', value: d.done_breakdown.open ?? 0, color: DONE_COLOR.open },
         { key: 'done', label: 'Выполнено', value: d.done_breakdown.done ?? 0, color: DONE_COLOR.done },
@@ -206,7 +215,12 @@ function WorkloadTable({ workload }: { workload: ProjectStats['workload'] }) {
             const overdue = w.overdue_count ?? 0
             const pct = (w.active_count / maxActive) * 100
             const avatar = w.employee_id ? (
-              <Avatar name={w.full_name} email={w.email} className="h-6 w-6 shrink-0 text-[12px]" />
+              <Avatar
+                employeeId={w.employee_id}
+                name={w.full_name}
+                email={w.email}
+                className="h-6 w-6 shrink-0 text-[12px]"
+              />
             ) : (
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-dashed border-glass-border text-[12px] text-text2">
                 —

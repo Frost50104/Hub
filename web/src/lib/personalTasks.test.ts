@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DONE_PREVIEW_LIMIT,
   excludeProject,
+  JUST_CREATED_TTL_MS,
   personalListView,
   personalSectionState,
   resolvePersonalTaskParam,
@@ -13,7 +14,6 @@ import { type Task } from './tasks'
 function task(over: Partial<Task> & { id: string }): Task {
   return {
     project_id: 'p1',
-    section_id: null,
     parent_task_id: null,
     title: over.id,
     description: null,
@@ -167,5 +167,62 @@ describe('shouldFocusPersonalCreate', () => {
     expect(shouldFocusPersonalCreate(new URLSearchParams('new=personal'))).toBe(true)
     expect(shouldFocusPersonalCreate(new URLSearchParams('new=task'))).toBe(false)
     expect(shouldFocusPersonalCreate(new URLSearchParams(''))).toBe(false)
+  })
+})
+
+describe('resolvePersonalTaskParam: только что созданная задача', () => {
+  const hint = { taskId: 'NEW', at: 1_000_000 }
+  const now = hint.at + 500
+
+  it('РЕГРЕССИЯ: список уже резолвнут и БЕЗ новой задачи — всё равно открываем', () => {
+    // Ровно та гонка, из-за которой карточка закрывалась сама: инвалидация с
+    // refetchType:'active' не трогает неактивный кэш, и на маунте приходит
+    // старый массив.
+    expect(
+      resolvePersonalTaskParam('NEW', { tasks: [{ id: 'OLD' }], isPending: false }, hint, now),
+    ).toEqual({ kind: 'open', taskId: 'NEW' })
+  })
+
+  it('список ещё грузится — открываем сразу, без мигания скелетоном', () => {
+    expect(
+      resolvePersonalTaskParam('NEW', { tasks: undefined, isPending: true }, hint, now),
+    ).toEqual({ kind: 'open', taskId: 'NEW' })
+  })
+
+  it('задача уже приехала в списке — тот же ответ, хинт ничего не портит', () => {
+    expect(
+      resolvePersonalTaskParam('NEW', { tasks: [{ id: 'NEW' }], isPending: false }, hint, now),
+    ).toEqual({ kind: 'open', taskId: 'NEW' })
+  })
+
+  it('хинт на ДРУГУЮ задачу не открывает чужую карточку', () => {
+    // Это не белый список: иначе на /my открылась бы задача чужого проекта с
+    // чужими этапами и чужим can_edit.
+    expect(
+      resolvePersonalTaskParam('OTHER', { tasks: [], isPending: false }, hint, now),
+    ).toEqual({ kind: 'drop' })
+  })
+
+  it('протухший хинт не действует', () => {
+    expect(
+      resolvePersonalTaskParam(
+        'NEW',
+        { tasks: [], isPending: false },
+        hint,
+        hint.at + JUST_CREATED_TTL_MS,
+      ),
+    ).toEqual({ kind: 'drop' })
+  })
+
+  it('без параметра задачи хинт не заставляет ничего открывать', () => {
+    expect(resolvePersonalTaskParam(null, { tasks: [], isPending: false }, hint, now)).toEqual({
+      kind: 'none',
+    })
+  })
+
+  it('без хинта поведение прежнее', () => {
+    expect(
+      resolvePersonalTaskParam('NEW', { tasks: [{ id: 'OLD' }], isPending: false }),
+    ).toEqual({ kind: 'drop' })
   })
 })

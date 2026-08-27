@@ -88,15 +88,43 @@ export type PersonalTaskParam =
   | { kind: 'drop' }
 
 /**
+ * «Эту задачу мы только что создали»: списка с ней ещё нет, но id заведомо наш
+ * и заведомо личный — его вернул POST в этой же вкладке.
+ */
+export interface JustCreatedHint {
+  taskId: string
+  /** `Date.now()` в момент создания. */
+  at: number
+}
+
+/** Хинт живёт минуту: он едет в `history.state` и переживает перезагрузку. */
+export const JUST_CREATED_TTL_MS = 60_000
+
+/**
  * Карточку на `/my` открываем ТОЛЬКО для задач личного проекта: у drawer'а
  * `projectId` фиксирован, и для чужой задачи он показал бы чужие этапы,
  * чужую секцию и чужой `can_edit`.
+ *
+ * `hint` — единственное послабление, и оно НЕ белый список: id обязан совпасть.
+ * Без него создание личной задачи молча закрывало бы карточку: `useCreateTask`
+ * инвалидирует список с `refetchType: 'active'`, а неактивный кэш только
+ * помечается протухшим и на маунте отдаётся синхронно — то есть без новой
+ * задачи. Мы попадали в `drop`, и эффект страницы стирал `?task=`. Ждать
+ * рефетча негде: тот же промах случается, когда человек УЖЕ на `/my`.
+ *
+ * `now` параметром — чтобы срок годности проверялся тестом (приём
+ * `dates.ts::dataAgeLabel`, `taskDates.ts::todayKey`).
  */
 export function resolvePersonalTaskParam(
   taskId: string | null,
   personal: { tasks: readonly Pick<Task, 'id'>[] | undefined; isPending: boolean },
+  hint?: JustCreatedHint | null,
+  now: number = Date.now(),
 ): PersonalTaskParam {
   if (!taskId) return { kind: 'none' }
+  if (hint && hint.taskId === taskId && now - hint.at < JUST_CREATED_TTL_MS) {
+    return { kind: 'open', taskId }
+  }
   if (personal.isPending || personal.tasks === undefined) return { kind: 'wait' }
   return personal.tasks.some((t) => t.id === taskId)
     ? { kind: 'open', taskId }

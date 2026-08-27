@@ -129,6 +129,7 @@ export const MentionTextarea = forwardRef<HTMLTextAreaElement, MentionTextareaPr
                 }
               >
                 <Avatar
+                  employeeId={m.employee_id}
                   name={m.full_name}
                   email={m.email}
                   className="h-6 w-6 text-[12px]"

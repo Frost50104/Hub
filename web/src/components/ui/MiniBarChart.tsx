@@ -16,6 +16,13 @@ interface MiniBarChartProps {
   endLabel?: string
   /** Строка справа от заголовка: «Максимум за день — 3». */
   maxLabel?: string
+  /**
+   * Потолок ширины столбика, px. Нужен коротким рядам: `flex-1` на семи
+   * точках раздувает столбик до 44px, и график читается как одна плашка,
+   * а не как динамика. У длинных рядов (30 дней на дашборде) ограничитель
+   * не нужен — по умолчанию его и нет.
+   */
+  maxBarWidth?: number
   className?: string
 }
 
@@ -31,6 +38,7 @@ export function MiniBarChart({
   startLabel,
   endLabel,
   maxLabel,
+  maxBarWidth,
   className,
 }: MiniBarChartProps) {
   const max = Math.max(0, ...points.map((p) => p.value))
@@ -39,7 +47,12 @@ export function MiniBarChart({
       {maxLabel && (
         <p className="text-right text-[13px] text-text2">{maxLabel}</p>
       )}
-      <div className="flex items-end gap-1" style={{ height }} role="img" aria-label="Тренд">
+      <div
+        className={cn('flex items-end gap-1', maxBarWidth && 'justify-center')}
+        style={{ height }}
+        role="img"
+        aria-label="Тренд"
+      >
         {points.map((p) => {
           const h = max > 0 && p.value > 0 ? Math.max(4, Math.round((p.value / max) * height)) : 0
           return (
@@ -50,7 +63,10 @@ export function MiniBarChart({
                 'flex-1 rounded-t-[3px]',
                 h > 0 ? 'bg-amber' : 'h-[2px] bg-hair',
               )}
-              style={h > 0 ? { height: h } : undefined}
+              style={{
+                ...(h > 0 ? { height: h } : null),
+                ...(maxBarWidth ? { maxWidth: maxBarWidth } : null),
+              }}
             />
           )
         })}

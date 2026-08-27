@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
-import { useProject, useProjectSections } from '@/hooks/useProjects'
+import { useProject } from '@/hooks/useProjects'
 import {
   useAddDependency,
   useRemoveDependency,
@@ -63,11 +63,9 @@ export function TaskDependencies({
 
   // Всё уже в кэше страницы проекта — дополнительного трафика нет.
   const projectKey = useProject(projectId).data?.key ?? null
-  const sections = useProjectSections(projectId)
   const labels = useLabels(projectId)
   const assignments = useLabelAssignments(projectId)
 
-  const sectionName = new Map((sections.data ?? []).map((s) => [s.id, s.name]))
   const labelById = new Map((labels.data ?? []).map((l) => [l.id, l]))
   const labelsByTask = new Map<string, Label[]>()
   for (const a of assignments.data ?? []) {
@@ -203,9 +201,6 @@ export function TaskDependencies({
               {visible.map((c) => {
                 const StateIcon = c.done ? CheckCircle2 : Circle
                 const cLabels = labelsByTask.get(c.id) ?? []
-                const section = c.section_id
-                  ? sectionName.get(c.section_id)
-                  : undefined
                 return (
                   <DropdownMenuItem key={c.id} onSelect={() => onAdd(c.id)}>
                     <div className="flex min-w-0 flex-1 items-start gap-2">
@@ -221,9 +216,8 @@ export function TaskDependencies({
                           )}
                           <span className="line-clamp-2 inline">{c.title}</span>
                         </p>
-                        {(section || cLabels.length > 0) && (
+                        {cLabels.length > 0 && (
                           <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-text2">
-                            {section && <span className="truncate">{section}</span>}
                             {cLabels.slice(0, 3).map((l) => (
                               <span
                                 key={l.id}

@@ -32,6 +32,7 @@ function CommentBubble({
   return (
     <div className="group flex gap-3">
       <Avatar
+        employeeId={comment.author_id}
         name={comment.author_full_name}
         email={comment.author_email}
         className="h-8 w-8 shrink-0 text-[12px]"

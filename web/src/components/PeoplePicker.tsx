@@ -78,7 +78,12 @@ export function PeoplePicker({
         >
           <div className="flex min-w-0 items-center gap-2">
             {value ? (
-              <Avatar name={label} email={email} className="h-5 w-5 text-[12px]" />
+              <Avatar
+                employeeId={value}
+                name={label}
+                email={email}
+                className="h-5 w-5 text-[12px]"
+              />
             ) : (
               isFilter && (
                 <span className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-glass-border text-text2">
@@ -120,6 +125,7 @@ export function PeoplePicker({
             onSelect={() => onChange(m.employee_id)}
           >
             <Avatar
+              employeeId={m.employee_id}
               name={m.full_name}
               email={m.email}
               className="mr-2 h-5 w-5 text-[12px]"

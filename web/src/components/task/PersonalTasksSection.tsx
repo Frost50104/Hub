@@ -225,8 +225,7 @@ export function PersonalTasksSection({
           <div className={desktop ? 'py-2 pl-[11px] pr-6' : 'px-4 py-2'}>
             <TaskInlineCreate
               projectId={state.projectId}
-              sectionId={null}
-              placeholder="+ Новая личная задача"
+                  placeholder="+ Новая личная задача"
               quickCreateTarget
             />
           </div>

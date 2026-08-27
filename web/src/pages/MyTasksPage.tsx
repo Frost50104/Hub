@@ -1,6 +1,6 @@
 import { ChevronDown, Filter } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
@@ -128,12 +128,21 @@ interface PersonalPane {
  *  и точка входа из шторки FAB. */
 function usePersonalPane(): PersonalPane {
   const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
   const { projectId, query } = usePersonalTasks()
   const requested = searchParams.get('task')
-  const resolved = resolvePersonalTaskParam(requested, {
-    tasks: query.data,
-    isPending: query.isPending,
-  })
+  // Диалог создания кладёт сюда id только что заведённой личной задачи: списка
+  // с ней ещё нет, и без этого карточка закрылась бы сама.
+  const nav = location.state as { justCreatedTaskId?: string; at?: number } | null
+  const hint =
+    nav?.justCreatedTaskId && typeof nav.at === 'number'
+      ? { taskId: nav.justCreatedTaskId, at: nav.at }
+      : null
+  const resolved = resolvePersonalTaskParam(
+    requested,
+    { tasks: query.data, isPending: query.isPending },
+    hint,
+  )
 
   const setParam = (mutate: (next: URLSearchParams) => void, replace: boolean) => {
     const next = new URLSearchParams(searchParams)

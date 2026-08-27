@@ -5,8 +5,9 @@ interface ProjectViewConfig {
   /** Custom-field IDs that should appear as columns in the List view.
    *  Order = render order; absence = hidden. */
   visibleCustomFields: string[]
-  /** Свёрнутые секции списка. `'__orphan__'` — блок «Без секции».
-   *  Строка выросла до 64px, и сворачивание секций — главное средство
+  /** Свёрнутые секции экрана (сегодня — только «ЛИЧНОЕ» на /my; секций
+   *  списка задач больше нет, см. 0047/0048).
+   *  Строка выросла до 64px, и сворачивание — главное средство
    *  плотности на сотнях задач; в локальном useState оно сбрасывалось при
    *  каждом переключении вкладки вида. */
   collapsedSections?: string[]
@@ -20,8 +21,6 @@ interface ViewConfigState {
   toggleSection: (projectId: string, sectionKey: string) => void
 }
 
-/** Ключ блока «Без секции» в `collapsedSections`. */
-export const ORPHAN_SECTION_KEY = '__orphan__'
 
 /** Ключ секции «ЛИЧНОЕ» на /my: у личного проекта секций нет, свёрнутость
  *  хранится здесь же — под id самого проекта. */

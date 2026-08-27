@@ -51,7 +51,26 @@ export interface ProjectStats {
   total_archived: number
 }
 
+/**
+ * Личные цифры для блока «Ваша статистика» на «Главной».
+ *
+ * Оба окна приезжают одним ответом: переключатель «7 / 30 дней» не должен
+ * ходить в сеть. `daily` — всегда 30 точек (последняя — сегодня), вид «7 дней»
+ * это её хвост (`lib/homeStats.ts`).
+ */
+export interface MyStats {
+  completed_7: number
+  completed_30: number
+  created_7: number
+  created_30: number
+  /** Состояние на сейчас — от выбранного периода НЕ зависит. */
+  overdue_now: number
+  open_now: number
+  daily: TrendPoint[]
+}
+
 export const statsApi = {
   forProject: (projectId: string): Promise<ProjectStats> =>
     api.get<ProjectStats>(`/projects/${projectId}/stats`).then((r) => r.data),
+  forMe: (): Promise<MyStats> => api.get<MyStats>('/me/stats').then((r) => r.data),
 }

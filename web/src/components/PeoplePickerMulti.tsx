@@ -99,7 +99,12 @@ export function PeoplePickerMulti({
               key={p.employee_id}
               className="inline-flex h-8 items-center gap-[7px] rounded-full border border-glass-border py-0 pl-1 pr-2.5 text-[14px] font-medium text-text"
             >
-              <Avatar name={p.full_name} email={p.email} className="h-6 w-6" />
+              <Avatar
+                employeeId={p.employee_id}
+                name={p.full_name}
+                email={p.email}
+                className="h-6 w-6"
+              />
               <span className="max-w-[180px] truncate">{label(p)}</span>
               {!disabled && (
                 <button
@@ -176,6 +181,7 @@ export function PeoplePickerMulti({
               }}
             >
               <Avatar
+                employeeId={m.employee_id}
                 name={m.full_name}
                 email={m.email}
                 className="mr-2 h-5 w-5 text-[12px]"

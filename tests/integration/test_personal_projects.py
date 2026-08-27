@@ -35,7 +35,7 @@ from app.api.tasks import create_task, delete_task, get_task, list_tasks
 from app.api.timeline import get_timeline
 from app.models.project import Project, ProjectMember
 from app.models.stage import ProjectStage
-from app.models.task import Task
+from app.models.task import Task, TaskAssignee
 from app.schemas.project import (
     ProjectCreate,
     ProjectFolderAssign,
@@ -52,7 +52,7 @@ from app.services.personal_projects import (
     get_personal_project_id,
 )
 from app.services.project_access import ensure_project_member
-from tests.integration.conftest import make_principal
+from tests.integration.conftest import make_principal, seed_stages
 from tests.integration.test_project_access import _register
 
 pytestmark = pytest.mark.integration
@@ -80,7 +80,6 @@ async def _tasks(db: AsyncSession, project_id: uuid.UUID, principal: Principal):
         done=None,
         status_=None,
         assignee_id=None,
-        section_id=None,
         priority=None,
         label=None,
         due_from=None,
@@ -144,7 +143,7 @@ async def test_guide_task_is_created_once(db, tenant_id):
     assert left == 0
 
 
-async def test_ensure_creates_project_stages_and_owner(db, tenant_id):
+async def test_ensure_creates_project_without_stages(db, tenant_id):
     principal = await _member(db, tenant_id, "pp-create")
     project_id = await ensure_personal_project(db, principal)
     await db.commit()
@@ -155,6 +154,9 @@ async def test_ensure_creates_project_stages_and_owner(db, tenant_id):
     assert project.key.startswith(PERSONAL_KEY_BASE)
     assert project.personal_owner_id == principal.employee_id
 
+    # Колонок нет: личное пространство — список дел, а не доска, и задачи здесь
+    # и так заводятся без колонки. Раньше проект получал четвёрку стартовых,
+    # которую владелец не видел ни на одном экране.
     stages = (
         await db.execute(
             select(ProjectStage.name)
@@ -162,7 +164,7 @@ async def test_ensure_creates_project_stages_and_owner(db, tenant_id):
             .order_by(ProjectStage.position)
         )
     ).scalars().all()
-    assert stages == ["К выполнению", "В работе", "На проверке", "Готово"]
+    assert stages == []
 
     # Первый вход заводит и задачу-инструкцию — ровно одну, в этом же проекте.
     guide_titles = (
@@ -625,3 +627,149 @@ async def test_get_personal_project_id_is_tenant_scoped(db, tenant_id):
 
     stranger = uuid.uuid4()
     assert await get_personal_project_id(db, stranger) is None
+
+
+# ─── Статус личной задачи ───────────────────────────────────────────────────
+
+
+async def test_personal_task_is_created_without_stage(db, tenant_id):
+    """Личное — список дел, а не доска: у новой задачи статус пустой.
+
+    До этого `create_task_record` клал задачу в первую колонку проекта, и
+    каждая личная задача молча оседала в «К выполнению» — колонке, которую
+    владелец никогда не выбирал и на доску которой не смотрит.
+    """
+    owner = await _member(db, tenant_id, "pp-nostage")
+    personal_id = await ensure_personal_project(db, owner)
+    await db.commit()
+
+    task = await create_task(personal_id, TaskCreate(title="Купить хлеб"), owner, db)
+    await db.commit()
+    assert task.stage_id is None
+
+    # Задача-инструкция заводится тем же путём — значит тоже без статуса.
+    guide = (
+        await db.execute(
+            select(Task.stage_id).where(
+                Task.project_id == personal_id, Task.title == GUIDE_TASK_TITLE
+            )
+        )
+    ).scalar_one()
+    assert guide is None
+
+
+async def test_personal_task_keeps_explicit_stage(db, tenant_id):
+    """Прочерк — только ДЕФОЛТ. Попросили колонку — задача в ней."""
+    owner = await _member(db, tenant_id, "pp-explicit")
+    personal_id = await ensure_personal_project(db, owner)
+    await db.commit()
+
+    # Колонку заводим явно: проект (и личный тоже) рождается без колонок, и без
+    # сида `stage_id` был бы None — тест сравнивал бы None с None и молчал.
+    [stage] = await seed_stages(db, personal_id, owner, names=("Сегодня",))
+    task = await create_task(
+        personal_id, TaskCreate(title="На доску", stage_id=stage.id), owner, db
+    )
+    await db.commit()
+    assert task.stage_id == stage.id
+
+
+async def test_work_task_still_lands_in_first_stage(db, tenant_id):
+    """Регресс: в проекте С КОЛОНКАМИ дефолт прежний — первая по позиции.
+
+    Колонки создаём сами: проект их больше не приносит, а без сида тест
+    сравнивал бы None с None и проходил бы, ничего не проверяя.
+    """
+    owner = await _member(db, tenant_id, "pp-work-default")
+    work = await create_project(ProjectCreate(name="Рабочий по умолчанию"), owner, db)
+    stages = await seed_stages(db, work.id, owner, names=("Первая", "Вторая"))
+    await db.commit()
+
+    task = await create_task(work.id, TaskCreate(title="Рабочая"), owner, db)
+    await db.commit()
+    assert task.stage_id == stages[0].id
+
+
+async def test_stageless_tasks_get_distinct_positions(db, tenant_id):
+    """У «без статуса» своя очередь позиций — иначе порядок списка случаен."""
+    owner = await _member(db, tenant_id, "pp-positions")
+    personal_id = await ensure_personal_project(db, owner)
+    await db.commit()
+
+    first = await create_task(personal_id, TaskCreate(title="Первая"), owner, db)
+    second = await create_task(personal_id, TaskCreate(title="Вторая"), owner, db)
+    await db.commit()
+    assert first.position != second.position
+    assert second.position > first.position
+
+
+# ─── Исполнитель личной задачи ──────────────────────────────────────────────
+
+
+async def test_personal_task_assigns_owner(db, tenant_id):
+    """Задача «на себя»: владелец личного — сразу исполнитель.
+
+    Без этого личная задача оставалась ничьей: пустой стек аватаров в строке
+    и промах фильтра «Исполнитель».
+    """
+    owner = await _member(db, tenant_id, "pp-selfassign")
+    personal_id = await ensure_personal_project(db, owner)
+    await db.commit()
+
+    task = await create_task(personal_id, TaskCreate(title="Купить хлеб"), owner, db)
+    await db.commit()
+    assert [a.employee_id for a in task.assignees] == [owner.employee_id]
+
+    # Задача-инструкция заводится тем же путём.
+    guide_assignees = (
+        await db.execute(
+            select(TaskAssignee.employee_id)
+            .join(Task, Task.id == TaskAssignee.task_id)
+            .where(Task.project_id == personal_id, Task.title == GUIDE_TASK_TITLE)
+        )
+    ).scalars().all()
+    assert list(guide_assignees) == [owner.employee_id]
+
+
+async def test_personal_task_respects_explicit_empty_assignees(db, tenant_id):
+    """Пустой список — ЯВНОЕ «никого», его не перебиваем.
+
+    `resolve_assignee_ids` различает «поля нет» (None) и «снять всех» ([]);
+    авто-назначение работает только на первом.
+    """
+    owner = await _member(db, tenant_id, "pp-noassign")
+    personal_id = await ensure_personal_project(db, owner)
+    await db.commit()
+
+    task = await create_task(
+        personal_id, TaskCreate(title="Ничья", assignee_ids=[]), owner, db
+    )
+    await db.commit()
+    assert task.assignees == []
+
+
+async def test_work_task_stays_unassigned(db, tenant_id):
+    """Регресс: в обычном проекте создатель исполнителем НЕ становится."""
+    owner = await _member(db, tenant_id, "pp-work-assign")
+    work = await create_project(ProjectCreate(name="Рабочий без исполнителя"), owner, db)
+    await db.commit()
+
+    task = await create_task(work.id, TaskCreate(title="Рабочая"), owner, db)
+    await db.commit()
+    assert task.assignees == []
+
+
+async def test_admin_in_foreign_personal_does_not_self_assign(db, tenant_id):
+    """В ЧУЖОМ личном пространстве авто-назначения нет.
+
+    Точечный доступ hub-admin по прямой ссылке сохранён (0042), но задача,
+    заведённая им у сотрудника, не должна становиться задачей админа.
+    """
+    owner = await _member(db, tenant_id, "pp-foreign-owner")
+    personal_id = await ensure_personal_project(db, owner)
+    admin = await _member(db, tenant_id, "pp-foreign-admin", role="admin")
+    await db.commit()
+
+    task = await create_task(personal_id, TaskCreate(title="Чужая"), admin, db)
+    await db.commit()
+    assert task.assignees == []

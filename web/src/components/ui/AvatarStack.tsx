@@ -67,6 +67,7 @@ export function AvatarStack({
       {shown.map((p, i) => (
         <Avatar
           key={p.employee_id}
+          employeeId={p.employee_id}
           name={p.full_name}
           email={p.email}
           className={cn(

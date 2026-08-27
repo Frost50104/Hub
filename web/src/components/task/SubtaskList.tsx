@@ -90,7 +90,6 @@ export function SubtaskList({ taskId, projectId, canEdit, onOpenTask }: SubtaskL
       {canEdit && (
         <TaskInlineCreate
           projectId={projectId}
-          sectionId={null}
           parentTaskId={taskId}
           placeholder="+ Подзадача"
         />

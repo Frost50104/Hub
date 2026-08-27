@@ -32,7 +32,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project
 from app.models.task import Task, TaskAssignee, TaskWatcher
-from app.services.onboarding import create_guide_task
 from app.services.project_access import is_hub_admin, require_project_role
 from app.services.projects import create_project_record
 
@@ -81,6 +80,21 @@ def not_my_personal(employee_id: UUID) -> ColumnElement[bool]:
 
 
 # ─── Чтение и создание ──────────────────────────────────────────────────────
+
+
+async def personal_owner_of(db: AsyncSession, project_id: UUID) -> UUID | None:
+    """Владелец личного пространства или None у обычного проекта.
+
+    Не просто «личный ли» — по владельцу решаются ДВА правила создания задачи
+    (`tasks.create_task_record`): статуса нет ни у кого в личном, а исполнителем
+    задача получает владельца, только если он же её и создаёт. Вызывается там,
+    где проект существует и доступ проверен, поэтому «строки нет» = «не личный».
+    """
+    return (
+        await db.execute(
+            select(Project.personal_owner_id).where(Project.id == project_id)
+        )
+    ).scalar_one_or_none()
 
 
 async def get_personal_project_id(db: AsyncSession, employee_id: UUID) -> UUID | None:
@@ -151,6 +165,13 @@ async def ensure_personal_project(
             # UNIQUE делает его однократным), поэтому задача-инструкция
             # заводится здесь и отдельного флага «уже показывали» не требует.
             # Ветку гонки ниже НЕ трогаем: там всё создал победитель.
+            # Импорт внутри функции: онбординг знает про задачи, задачи —
+            # про личное пространство, и модульный импорт замкнул бы кольцо
+            # `personal_projects → onboarding → tasks → personal_projects`.
+            # Развязываем в перевёрнутой зависимости: создание проекта не
+            # обязано знать про содержимое первой задачи.
+            from app.services.onboarding import create_guide_task
+
             await create_guide_task(db, principal=principal, project_id=project.id)
             return project.id
         except IntegrityError:

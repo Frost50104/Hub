@@ -6,6 +6,7 @@ import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { SpaceSwitcher } from '@/components/layout/SpaceSwitcher'
 import { ProjectKeyChip, projectMeta } from '@/components/project/ProjectKeyChip'
+import { UserStatsCard } from '@/components/home/UserStatsCard'
 import { PushPermissionPrompt } from '@/components/PushPermissionPrompt'
 import { QueryError } from '@/components/QueryError'
 import { SkeletonRows } from '@/components/ui/Skeleton'
@@ -18,7 +19,7 @@ import { useProjects } from '@/hooks/useProjects'
 import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { capitalizeFirst } from '@/lib/dates'
-import { NBSP, plural } from '@/lib/typography'
+import { NBSP } from '@/lib/typography'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -118,8 +119,6 @@ function DesktopHome() {
     }),
   )
   const recent = (projects.data ?? []).slice(0, 6)
-  const total = myTasks.data?.length ?? 0
-  const done = (myTasks.data ?? []).filter((t) => t.done).length
 
   return (
     <div className="mx-auto flex max-w-[1080px] flex-col gap-[26px] px-6 pb-10 pt-8">
@@ -129,10 +128,9 @@ function DesktopHome() {
         <h1 className="font-display text-[30px] font-bold leading-[1.18] text-text">
           {greetingText}
         </h1>
-        <p className="text-[15px] text-text2">
-          {plural(total, 'задача', 'задачи', 'задач')} · выполнено {done}
-        </p>
       </header>
+
+      <UserStatsCard />
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
         <Panel title="Мои задачи" href="/my">
@@ -272,6 +270,8 @@ function MobileHome() {
 
       <div className="flex flex-col gap-3.5 px-3 py-3.5">
         <PushPermissionPrompt />
+
+        <UserStatsCard />
 
         <MobilePanel title="Недавние" href="/my">
           {myTasks.isLoading ? (

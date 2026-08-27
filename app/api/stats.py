@@ -28,22 +28,45 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from signaris_auth import Principal
-from sqlalchemy import Double, Integer, Text, and_, bindparam, cast, func, select, text
+from sqlalchemy import (
+    Double,
+    Integer,
+    String,
+    Text,
+    and_,
+    bindparam,
+    cast,
+    func,
+    select,
+    text,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_db, require_auth
+from app.config import get_settings
+from app.deps import get_db, require_auth, require_auth_any
 from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskAssignee
-from app.services.personal_projects import assert_full_project_access
+from app.services.personal_projects import (
+    assert_full_project_access,
+)
 from app.services.project_access import require_project_role
-from app.services.task_assignees import has_no_assignees
-from app.services.taskdates import start_of_today_utc
+from app.services.task_assignees import assignee_exists, has_no_assignees
+from app.services.taskdates import (
+    display_today,
+    start_of_today_utc,
+    start_of_tomorrow_utc,
+    start_of_window_utc,
+)
 
 router = APIRouter(tags=["stats"])
 
 _TREND_DAYS = 30
 _WORKLOAD_TOP = 10
+
+# Личная статистика на «Главной»: длинное окно и короткое.
+_MY_DAYS = 30
+_MY_SHORT_DAYS = 7
 
 
 class TrendPoint(BaseModel):
@@ -440,3 +463,207 @@ async def get_stats(
         total_active=total_active,
         total_archived=total_archived,
     )
+
+
+class MyStatsResponse(BaseModel):
+    """Личные цифры для блока «Ваша статистика» на «Главной».
+
+    ОБА окна приезжают одним ответом: переключатель «7 / 30 дней» на клиенте
+    не должен ходить в сеть, а разница в стоимости — лишний `sum(...)` в том
+    же запросе. `daily` всегда `_MY_DAYS` точек (последняя — сегодня), вид
+    «7 дней» — её хвост, режется на клиенте.
+    """
+
+    completed_7: int
+    completed_30: int
+    created_7: int
+    created_30: int
+    # Состояние на сейчас, от периода НЕ зависит — фронт подписывает отдельно.
+    overdue_now: int
+    open_now: int
+    daily: list[TrendPoint]
+
+
+def _mine(employee_id: UUID):
+    """Мои задачи для личной статистики — тот же набор, что на `/me/tasks`.
+
+    «Мои» — только через `assignee_exists` (EXISTS): наивный JOIN на
+    `task_assignees` размножил бы задачу по числу исполнителей и завысил цифры.
+
+    Больше НИЧЕГО не фильтруем, и это не упущение:
+
+    * `personal_visible_to` здесь был бы вреден. Приватность обеспечивает сам
+      скоуп — считаются только задачи, где я исполнитель. А предикат выкинул
+      бы мою работу в ЧУЖОМ личном пространстве: коллега вправе поручить мне
+      задачу у себя, и я вправе её закрыть (`test_guest_closes_assigned_task`).
+      `/me/tasks` такие задачи показывает — блок обязан их считать.
+    * `Project.archived_at` тоже не трогаем. Во-первых, `/me/tasks` его не
+      фильтрует, а блок — сводка того же экрана. Во-вторых, фильтр переписывал
+      бы прошлое: архивация проекта задним числом стирала бы столбики из
+      графика за месяцы, когда работа была сделана.
+
+    Членство в проекте не проверяем — ровно как `/me/tasks`. (Инвариант
+    «исполнитель всегда участник» на самом деле дырявый: удаление участника
+    не чистит `task_assignees`. Но расходиться с `/me/tasks` в цифрах хуже.)
+    """
+    return and_(assignee_exists(employee_id), Task.archived_at.is_(None))
+
+
+def _in_window(column, start: datetime, end: datetime, label: str):
+    """`count(*) FILTER (WHERE column ∈ [start, end))`.
+
+    `.filter()`, а не `sum(cast(..., Integer))`: CAST — ровно то, на чём
+    ручка статистики уже молча ломалась апгрейдом SQLAlchemy (докстринг
+    `tests/integration/test_stats_search.py`), а `count` вдобавок возвращает
+    0 вместо NULL на пустой выборке. Прецедент — `app/api/projects.py`.
+
+    Верхняя граница обязательна: без неё задача с датой из будущего (рассинхрон
+    часов, ручная правка) попала бы в счётчик, но не нашла бы себе столбика в
+    `daily`, и числа под графиком разошлись бы с самим графиком.
+    """
+    return (
+        func.count()
+        .filter(and_(column.is_not(None), column >= start, column < end))
+        .label(label)
+    )
+
+
+def my_counters_stmt(employee_id: UUID, now: datetime):
+    """Четыре числа по МОИМ задачам одним запросом."""
+    end = start_of_tomorrow_utc(now)
+    return (
+        select(
+            _in_window(
+                Task.completed_at,
+                start_of_window_utc(_MY_SHORT_DAYS, now),
+                end,
+                "completed_7",
+            ),
+            _in_window(
+                Task.completed_at,
+                start_of_window_utc(_MY_DAYS, now),
+                end,
+                "completed_30",
+            ),
+            func.count().filter(Task.done.is_(False)).label("open_now"),
+            func.count()
+            .filter(
+                and_(Task.done.is_(False), Task.due_at < start_of_today_utc(now))
+            )
+            .label("overdue_now"),
+        )
+        .select_from(Task)
+        .where(_mine(employee_id))
+    )
+
+
+def my_created_stmt(employee_id: UUID, now: datetime):
+    """Заведённые МНОЙ — другая выборка, чем «мои по исполнителю».
+
+    Отдельный запрос, а не колонка в предыдущем: задачу можно завести другому,
+    и совмещать две популяции в одном WHERE значит считать не то. Именно
+    поэтому руководитель, раздающий задачи, увидит здесь не ноль.
+    """
+    end = start_of_tomorrow_utc(now)
+    return (
+        select(
+            _in_window(
+                Task.created_at,
+                start_of_window_utc(_MY_SHORT_DAYS, now),
+                end,
+                "created_7",
+            ),
+            _in_window(
+                Task.created_at,
+                start_of_window_utc(_MY_DAYS, now),
+                end,
+                "created_30",
+            ),
+        )
+        .select_from(Task)
+        .where(Task.created_by == employee_id, Task.archived_at.is_(None))
+    )
+
+
+def my_daily_stmt(employee_id: UUID, now: datetime):
+    """Выполненные по дням за `_MY_DAYS`.
+
+    Сутки режутся в display tz, а не в UTC: иначе день переключался бы в
+    03:00 МСК и «сегодня» на графике не совпадало бы с «сегодня» в сроках
+    задач (инвариант `services/taskdates.py`). Соседний `_completed_trend`
+    как раз этим и болен — здесь мы его не повторяем.
+    """
+    # `type_=String` явно: у `timezone()` есть перегрузка с interval, и
+    # нетипизированный bind полагался бы на правила разрешения перегрузок PG.
+    tz = bindparam("tz", get_settings().display_timezone, type_=String)
+    # Результат — timestamp БЕЗ таймзоны (наивный datetime у asyncpg): берём
+    # у него `.date()` и не сравниваем с aware-значениями.
+    local_day = func.date_trunc("day", func.timezone(tz, Task.completed_at))
+    return (
+        select(local_day.label("day"), func.count(Task.id))
+        .select_from(Task)
+        .where(
+            _mine(employee_id),
+            Task.completed_at >= start_of_window_utc(_MY_DAYS, now),
+            Task.completed_at < start_of_tomorrow_utc(now),
+        )
+        .group_by(text("day"))
+        .order_by(text("day"))
+    )
+
+
+async def _my_counters(
+    session: AsyncSession, employee_id: UUID, now: datetime
+) -> dict[str, int]:
+    row = (await session.execute(my_counters_stmt(employee_id, now))).one()
+    return {
+        "completed_7": int(row.completed_7),
+        "completed_30": int(row.completed_30),
+        "open_now": int(row.open_now),
+        "overdue_now": int(row.overdue_now),
+    }
+
+
+async def _my_created(
+    session: AsyncSession, employee_id: UUID, now: datetime
+) -> dict[str, int]:
+    row = (await session.execute(my_created_stmt(employee_id, now))).one()
+    return {"created_7": int(row.created_7), "created_30": int(row.created_30)}
+
+
+async def _my_daily(
+    session: AsyncSession, employee_id: UUID, now: datetime
+) -> list[TrendPoint]:
+    """Ряд для графика: zero-padded, ровно `_MY_DAYS` точек, последняя — сегодня."""
+    rows = await session.execute(my_daily_stmt(employee_id, now))
+    counts: dict[date, int] = {}
+    for raw_day, count in rows.all():
+        if raw_day is None:
+            continue
+        counts[raw_day.date()] = int(count)
+    first_day = display_today(now) - timedelta(days=_MY_DAYS - 1)
+    out: list[TrendPoint] = []
+    for i in range(_MY_DAYS):
+        d = first_day + timedelta(days=i)
+        out.append(TrendPoint(day=d, count=counts.get(d, 0)))
+    return out
+
+
+@router.get("/me/stats", response_model=MyStatsResponse)
+async def get_my_stats(
+    principal: Principal = Depends(require_auth_any()),
+    db: AsyncSession = Depends(get_db),
+) -> MyStatsResponse:
+    """Личная статистика для «Главной». Скоуп — сам вызывающий, не параметр.
+
+    `require_auth_any`, как у `/me/tasks`: цифры про себя должен видеть любой
+    аутентифицированный, роль в продукте тут ничего не решает.
+
+    `now` берётся ОДИН раз на все три запроса: иначе запрос, стартовавший в
+    23:59:59, посчитал бы счётчики за одни сутки, а график за другие.
+    """
+    now = datetime.now(UTC)
+    counters = await _my_counters(db, principal.employee_id, now)
+    created = await _my_created(db, principal.employee_id, now)
+    daily = await _my_daily(db, principal.employee_id, now)
+    return MyStatsResponse(**counters, **created, daily=daily)
