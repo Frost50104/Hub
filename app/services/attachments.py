@@ -8,12 +8,19 @@ Storage layout (relative to `settings.attachments_root`):
 
 from __future__ import annotations
 
+import contextlib
 import re
 import unicodedata
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import structlog
+from fastapi import HTTPException, UploadFile, status
+
 from app.config import get_settings
+from app.models.attachment import TaskAttachment
+
+log = structlog.get_logger("services.attachments")
 
 # A small but permissive MIME whitelist. Anything else → 415.
 # Зеркалится клиентом (web/src/lib/attachments.ts::ATTACHMENT_ACCEPT) —
@@ -143,10 +150,18 @@ def _sanitize_filename(name: str) -> str:
     return safe or "file"
 
 
-def storage_key_for(tenant_id: UUID, task_id: UUID, filename: str) -> tuple[str, str]:
-    """Return (storage_key_relative, sanitized_original_filename)."""
+def storage_key_for(
+    tenant_id: UUID, task_id: UUID, filename: str, *, unique: str | None = None
+) -> tuple[str, str]:
+    """Return (storage_key_relative, sanitized_original_filename).
+
+    `unique=None` — случайный сегмент, поведение ручки загрузки. Импорт из
+    внешнего трекера передаёт стабильный идентификатор вложения: тогда
+    повторный прогон пишет в ТОТ ЖЕ путь и не оставляет осиротевших файлов
+    на диске (удалять их некому — sweeper'а в Hub нет).
+    """
     sanitized = _sanitize_filename(filename)
-    key = f"{tenant_id}/{task_id}/{uuid4().hex}-{sanitized}"
+    key = f"{tenant_id}/{task_id}/{unique or uuid4().hex}-{sanitized}"
     return key, sanitized
 
 
@@ -160,3 +175,118 @@ def absolute_path(storage_key: str) -> Path:
     if not str(candidate).startswith(str(root) + "/") and candidate != root:
         raise ValueError(f"storage_key escapes attachments root: {storage_key}")
     return candidate
+
+
+def purge_blobs(keys: list[str]) -> None:
+    """Снять файлы с диска — вне транзакции и best-effort. СИНХРОННАЯ.
+
+    Звать только через `asyncio.to_thread`: прод крутится на ОДНОМ
+    uvicorn-воркере, и сотни синхронных `unlink()` в event loop подвесили бы
+    всё приложение.
+
+    Порядок «сначала commit, потом unlink» неслучаен: файловая система не
+    транзакционна, и обратный порядок при неудачном commit оставил бы строки
+    БД, указывающие на несуществующие файлы. Провал unlink после успешного
+    commit — это утечка байтов, а не рассинхрон; ровно эта терпимость уже
+    принята для одиночного вложения (app/api/attachments.py).
+
+    `rmtree` по каталогу задачи не берём: `absolute_path` защищает от выхода
+    за root, но не от «валидный, но не тот» путь — ошибка в одной строке БД
+    при rmtree сносит поддерево, при unlink теряется один файл.
+    """
+    dirs: set[Path] = set()
+    for key in keys:
+        try:
+            path = absolute_path(key)
+        except ValueError:
+            log.warning("blob.purge.bad_storage_key", key=key)
+            continue
+        try:
+            path.unlink(missing_ok=True)
+            dirs.add(path.parent)
+        except OSError as exc:
+            log.warning("blob.purge.unlink_failed", key=key, err=str(exc))
+    for directory in dirs:
+        with contextlib.suppress(OSError):
+            directory.rmdir()  # только пустые; ENOTEMPTY игнорируем
+
+
+async def store_upload(
+    file: UploadFile,
+    *,
+    tenant_id: UUID,
+    task_id: UUID,
+    uploaded_by: UUID,
+) -> TaskAttachment:
+    """Проверить файл и записать его на диск; вернуть НЕсохранённую строку.
+
+    Единственная точка проверок для ВСЕХ путей загрузки — ручки вложений и
+    формы обратной связи. Расходиться им нельзя: whitelist без сниффинга
+    магических байт пропускает html под видом png, а лимит без потоковой
+    записи заполняет диск до отказа.
+
+    Строку в сессию не добавляем — это дело вызывающего: он решает, в какой
+    транзакции и с какой лентой она поедет. Частичный файл при ошибке
+    удаляется здесь же: осиротевший блоб убирать в Hub некому.
+    """
+    settings = get_settings()
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Имя файла обязательно"
+        )
+    mime = resolve_mime(file.content_type, file.filename)
+    if mime not in ALLOWED_MIME:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Тип файла {mime!r} не разрешён",
+        )
+    # Сниффинг магических байт: читаем голову и возвращаем курсор — стриминг
+    # ниже считает лимит размера с нуля.
+    head = await file.read(SNIFF_HEAD_BYTES)
+    await file.seek(0)
+    if sniff_mismatch(mime, head):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Содержимое файла не соответствует заявленному типу",
+        )
+
+    storage_key, sanitized_name = storage_key_for(tenant_id, task_id, file.filename)
+    dest = absolute_path(storage_key)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    max_bytes = settings.attachment_max_bytes
+    written = 0
+    try:
+        with dest.open("wb") as fh:
+            while True:
+                chunk = await file.read(64 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    fh.close()
+                    dest.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"Файл больше лимита {max_bytes // (1024 * 1024)} МБ",
+                    )
+                fh.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось сохранить файл",
+        ) from exc
+
+    return TaskAttachment(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        task_id=task_id,
+        uploaded_by=uploaded_by,
+        filename=sanitized_name,
+        mime=mime,
+        size_bytes=written,
+        storage_key=storage_key,
+    )

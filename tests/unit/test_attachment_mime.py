@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
-from app.services.attachments import ALLOWED_MIME, resolve_mime
+from uuid import uuid4
+
+from app.services.attachments import ALLOWED_MIME, resolve_mime, storage_key_for
 
 
 def test_octet_stream_heic_recovers():
@@ -97,3 +99,44 @@ def test_sniff_skips_text_and_unknown_types():
     assert sniff_mismatch("application/x-unknown", b"MZ") is False
     # Пустой файл — решает whitelist, не сниффер.
     assert sniff_mismatch("image/png", b"") is False
+
+
+class TestStorageKey:
+    """`unique=` — детерминированный путь для разового импорта.
+
+    Осиротевший файл в Hub удалить некому (`unlink` есть только в ручке
+    удаления вложения, sweeper'а нет), поэтому повторный прогон импорта
+    обязан писать в ТОТ ЖЕ путь, а не плодить копии.
+    """
+
+    def test_default_is_random(self):
+        tenant, task = uuid4(), uuid4()
+        first, _ = storage_key_for(tenant, task, "отчёт.pdf")
+        second, _ = storage_key_for(tenant, task, "отчёт.pdf")
+        assert first != second
+
+    def test_explicit_unique_is_stable(self):
+        tenant, task = uuid4(), uuid4()
+        first, name = storage_key_for(tenant, task, "отчёт.pdf", unique="abc123")
+        second, _ = storage_key_for(tenant, task, "отчёт.pdf", unique="abc123")
+        assert first == second
+        assert first == f"{tenant}/{task}/abc123-{name}"
+
+    def test_cyrillic_name_survives_only_outside_the_key(self):
+        """Санитайзер съедает кириллицу целиком — это про путь, не про подпись.
+
+        «отчёт.pdf» на диске становится просто «pdf»: NFKD + ASCII-ignore
+        не оставляет от русского имени ничего. Поэтому импорт из внешнего
+        трекера кладёт в `task_attachments.filename` ОРИГИНАЛ, а
+        санитизированное имя живёт только внутри `storage_key`.
+        """
+        _key, sanitized = storage_key_for(uuid4(), uuid4(), "отчёт.pdf")
+        assert sanitized == "pdf"
+        # «№» переживает NFKD как «No» — единственный уцелевший кусок.
+        _key, sanitized = storage_key_for(uuid4(), uuid4(), "Счёт №17 от 03.02.pdf")
+        assert sanitized == "No17_03.02.pdf"
+
+    def test_unique_does_not_escape_root(self):
+        # Ключ собирается из наших же данных, но путь обязан остаться внутри.
+        key, _ = storage_key_for(uuid4(), uuid4(), "a.pdf", unique="x")
+        assert ".." not in key

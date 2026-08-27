@@ -101,19 +101,43 @@ async def test_done_filter(db: AsyncSession, tenant_id: uuid.UUID):
     from app.api.tasks import list_tasks
 
     open_rows = await list_tasks(
-        project.id, include_archived=False, done=False, status_=None, assignee_id=None,
-        section_id=None, priority=None, label=None, due_from=None, due_to=None,
-        sort="position", order="asc", stage_id=None, principal=owner, db=db,
-    )
+
+            project.id,
+            include_archived=False,
+            done=False,
+            status_=None,
+            assignee_id=None,
+            priority=None,
+            label=None,
+            due_from=None,
+            due_to=None,
+            sort="position",
+            order="asc",
+            stage_id=None,
+            principal=owner,
+            db=db,
+        )
     assert [t.id for t in open_rows] == [t_open.id]
     assert [t.id for t in await _my(db, a, done=False)] == [t_open.id]
 
     # Старый параметр не игнорируется молча, а отвечает 422 (0044).
     with pytest.raises(HTTPException) as exc:
         await list_tasks(
-            project.id, include_archived=False, done=None, status_="open", assignee_id=None,
-            section_id=None, priority=None, label=None, due_from=None, due_to=None,
-            sort="position", order="asc", stage_id=None, principal=owner, db=db,
+
+            project.id,
+            include_archived=False,
+            done=None,
+            status_="open",
+            assignee_id=None,
+            priority=None,
+            label=None,
+            due_from=None,
+            due_to=None,
+            sort="position",
+            order="asc",
+            stage_id=None,
+            principal=owner,
+            db=db,
         )
     assert exc.value.status_code == 422
 

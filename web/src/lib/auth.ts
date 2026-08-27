@@ -66,8 +66,20 @@ const indexedDBTokenStore: TokenStore = {
 // PWA standalone (iOS) has its own cookie jar, so we use IndexedDB tokens
 // and `X-Auth-Mode: api` (set in lib/api.ts). For regular browsers this also
 // works fine — refresh-token in IDB beats localStorage on the XSS surface.
+/**
+ * Адрес auth — ОДНА константа на весь фронт.
+ *
+ * Кроме SSO-клиента к ней ходят настройки: «Редактировать профиль» ведёт на
+ * `/me` (имя, аватар, 2FA, пароль). Второй хардкод домена рано или поздно
+ * разъедется с этим.
+ */
+export const AUTH_BASE_URL = 'https://auth.signaris.ru'
+
+/** Страница профиля сотрудника в auth. */
+export const AUTH_PROFILE_URL = `${AUTH_BASE_URL}/me`
+
 export const authClient: SsoAuthClient = createSsoAuthClient({
-  authBaseUrl: 'https://auth.signaris.ru',
+  authBaseUrl: AUTH_BASE_URL,
   redirectUri: `${window.location.origin}/auth/callback`,
   store: indexedDBTokenStore,
   logoutReturnTo: `${window.location.origin}/login`,

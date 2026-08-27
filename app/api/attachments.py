@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
@@ -12,21 +12,13 @@ from signaris_auth import Principal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.attachment import TaskAttachment
 from app.models.shadow import ShadowUser
 from app.models.task import Task
 from app.schemas.attachment import AttachmentResponse
 from app.services.activity_writer import record_activity
-from app.services.attachments import (
-    ALLOWED_MIME,
-    SNIFF_HEAD_BYTES,
-    absolute_path,
-    resolve_mime,
-    sniff_mismatch,
-    storage_key_for,
-)
+from app.services.attachments import absolute_path, store_upload
 from app.services.personal_projects import require_task_access
 from app.services.project_access import is_hub_admin
 
@@ -116,70 +108,11 @@ async def upload_attachment(
         db, task, principal, allow=("owner", "editor")
     )
 
-    settings = get_settings()
-    mime = resolve_mime(file.content_type, file.filename or "")
-    if mime not in ALLOWED_MIME:
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Тип файла {mime!r} не разрешён",
-        )
-    # Сниффинг магических байт: читаем голову и возвращаем курсор — стриминг
-    # ниже считает лимит размера с нуля.
-    head = await file.read(SNIFF_HEAD_BYTES)
-    await file.seek(0)
-    if sniff_mismatch(mime, head):
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Содержимое файла не соответствует заявленному типу",
-        )
-
-    if not file.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Имя файла обязательно"
-        )
-
-    storage_key, sanitized_name = storage_key_for(task.tenant_id, task.id, file.filename)
-    dest = absolute_path(storage_key)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
-    # Stream to disk in chunks. Reject as soon as we exceed the limit so a
-    # giant upload doesn't waste disk.
-    max_bytes = settings.attachment_max_bytes
-    written = 0
-    try:
-        with dest.open("wb") as fh:
-            while True:
-                chunk = await file.read(64 * 1024)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > max_bytes:
-                    fh.close()
-                    dest.unlink(missing_ok=True)
-                    raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail=f"Файл больше лимита {max_bytes // (1024 * 1024)} МБ",
-                    )
-                fh.write(chunk)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        # Make sure partial files don't linger.
-        dest.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Не удалось сохранить файл",
-        ) from exc
-
-    attachment = TaskAttachment(
-        id=uuid4(),
+    attachment = await store_upload(
+        file,
         tenant_id=task.tenant_id,
         task_id=task.id,
         uploaded_by=principal.employee_id,
-        filename=sanitized_name,
-        mime=mime,
-        size_bytes=written,
-        storage_key=storage_key,
     )
     db.add(attachment)
     await db.flush()
@@ -191,8 +124,8 @@ async def upload_attachment(
         kind="attached",
         payload={
             "attachment_id": str(attachment.id),
-            "filename": sanitized_name,
-            "size_bytes": written,
+            "filename": attachment.filename,
+            "size_bytes": attachment.size_bytes,
         },
     )
     await db.commit()
