@@ -44,7 +44,6 @@ from app.models.push_subscription import PushSubscription
 from app.models.quiz import Quiz, QuizAttempt, QuizQuestion
 from app.models.rate_limit import RateLimit
 from app.models.search_document import SearchDocument, TextExtractionJob
-from app.models.section import Section
 from app.models.shadow import ShadowTenant, ShadowUser
 from app.models.share import PublicShareToken
 from app.models.shift import ShiftApplication, ShiftPosting
@@ -111,7 +110,6 @@ __all__ = [
     "ShiftApplication",
     "ShiftPosting",
     "SearchQueryLog",
-    "Section",
     "ShadowTenant",
     "ShadowUser",
     "Store",

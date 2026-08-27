@@ -67,7 +67,10 @@ export function LabelsManager({ projectId, open, onOpenChange }: LabelsManagerPr
           </DialogDescription>
         </DialogHeader>
 
-        <section className="space-y-1">
+        {/* Скролл обязателен: десктопная модалка (`MODAL_CLASS`) не
+            ограничена по высоте, и после переезда секций в метки их
+            стало до 37 в проекте — форма создания уезжала за экран. */}
+        <section className="max-h-[46vh] space-y-1 overflow-y-auto">
           {labels.isLoading && <p className="text-sm text-text2">Загружаем…</p>}
           {labels.data?.length === 0 && (
             <p className="text-sm text-text2">Пока нет меток.</p>

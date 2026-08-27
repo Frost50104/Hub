@@ -90,7 +90,13 @@ export function TaskLabels({
               <Plus className="h-3 w-3" strokeWidth={2.2} /> Метка
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-[220px]">
+          <DropdownMenuContent
+          align="start"
+          // Без потолка высоты Radix не даёт скролла, и при 37 метках
+          // (столько их стало после переезда секций) нижние были бы
+          // недостижимы.
+          className="max-h-[var(--radix-dropdown-menu-content-available-height)] w-[220px] overflow-y-auto"
+        >
             {!hasLabels && (
               <p className="px-2 py-1.5 text-xs text-text2">
                 {labels.isLoading ? 'Загружаем…' : 'Меток в проекте пока нет'}

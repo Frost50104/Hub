@@ -20,7 +20,7 @@ from app.models.project import ProjectMember
 from app.models.stage import ProjectStage
 from app.schemas.project import ProjectCreate
 from app.schemas.task import TaskCreate, TaskUpdate
-from tests.integration.conftest import make_principal
+from tests.integration.conftest import make_principal, seed_stages
 from tests.integration.test_project_access import _register
 
 pytestmark = pytest.mark.integration
@@ -31,6 +31,9 @@ async def _setup(db: AsyncSession, tenant_id: uuid.UUID, slug: str):
     owner = make_principal(tenant_id, email=f"{slug}-o@t.ru", tenant_slug=slug)
     await _register(db, owner, org_role="office")
     project = await create_project(ProjectCreate(name=f"Проект {slug}"), owner, db)
+    # Колонки — явным сидом: проект их больше не создаёт, а тест проверяет
+    # право исполнителя ПЕРЕНОСИТЬ задачу между колонками.
+    await seed_stages(db, project.id, owner)
 
     assignee = make_principal(tenant_id, email=f"{slug}-a@t.ru", tenant_slug=slug)
     bystander = make_principal(tenant_id, email=f"{slug}-b@t.ru", tenant_slug=slug)
@@ -64,7 +67,6 @@ async def _list(db: AsyncSession, project_id: uuid.UUID, principal):
         done=None,
         status_=None,
         assignee_id=None,
-        section_id=None,
         priority=None,
         label=None,
         due_from=None,

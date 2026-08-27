@@ -60,9 +60,10 @@ class TaskCreate(BaseModel):
 
     title: str = Field(min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=20_000)
-    section_id: UUID | None = None
     parent_task_id: UUID | None = None
-    # Колонка доски; без неё задача уходит в первую по позиции.
+    # Колонка доски; без неё задача уходит в первую по позиции. Снять статус
+    # можно только правкой (PATCH с явным null) — создавать задачу сразу вне
+    # доски незачем.
     stage_id: UUID | None = None
     priority: TaskPriority = "medium"
     # DEPRECATED-вход: держим ради PWA-бандлов, которые живут днями после
@@ -78,8 +79,8 @@ class TaskUpdate(BaseModel):
 
     title: str | None = Field(default=None, min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=20_000)
-    section_id: UUID | None = None
-    # Явный null для stage_id не принимается: колонка задаче нужна всегда.
+    # Явный null снимает статус: задача уходит с доски, оставаясь в списке
+    # (0046). Отличить «не передали» от «передали null» — `model_fields_set`.
     stage_id: UUID | None = None
     # Состояние задачи — независимая ось: галочку ставят из любой колонки.
     done: bool | None = None
@@ -89,7 +90,7 @@ class TaskUpdate(BaseModel):
     start_at: datetime | None = None
     due_at: datetime | None = None
     position: Decimal | None = None
-    # Для nullable-полей (section_id/assignee_id/start_at/due_at) endpoint
+    # Для nullable-полей (assignee_id/start_at/due_at) endpoint
     # различает «поле не пришло» (нет в model_fields_set → не трогаем) и
     # «пришёл явный null» (очистить значение). Не-nullable поля (title/
     # priority/position) по-прежнему игнорируют null.
@@ -106,15 +107,15 @@ class TaskResponse(BaseModel):
 
     id: UUID
     project_id: UUID
-    section_id: UUID | None
     parent_task_id: UUID | None
     title: str
     description: str | None
     # Состояние задачи. Колонка к нему отношения не имеет (0044).
     done: bool
     # Колонка доски; имя фронт берёт из GET /projects/{id}/stages (один запрос
-    # на проект, кэш), не из JOIN'а.
-    stage_id: UUID
+    # на проект, кэш), не из JOIN'а. `None` — «без статуса»: задача есть
+    # в списке и поиске, но не на доске (0046).
+    stage_id: UUID | None
     priority: TaskPriority
     # Источник истины для UI. Уволенные (shadow_users.deleted_at) сюда не
     # попадают, поэтому легаси-поля ниже с ним всегда согласованы — раньше

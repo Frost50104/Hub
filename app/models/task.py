@@ -66,27 +66,24 @@ class Task(Base):
         nullable=False,
         index=True,
     )
-    section_id: Mapped[UUID | None] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("sections.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
     parent_task_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("tasks.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
-    # Колонка доски (0040, NOT NULL с 0044). Имя колонки задаёт пользователь,
-    # никакого системного смысла у неё нет — состояние задачи живёт в `done`.
-    # FK БЕЗ `ON DELETE SET NULL`: под NOT NULL обнуление было бы ошибкой 23502,
-    # а `NO ACTION` проверяется в конце оператора и переживает каскад удаления
-    # проекта. Удаление этапа с задачами API не пускает (409 + move_to).
-    stage_id: Mapped[UUID] = mapped_column(
+    # Колонка доски (0040). NULL — «без статуса»: такая задача живёт в списке,
+    # календаре и поиске, но на доске не показывается (0046). Имя колонки задаёт
+    # пользователь, никакого системного смысла у неё нет — состояние задачи
+    # живёт в `done`.
+    # FK БЕЗ `ON DELETE SET NULL` намеренно: удаление этапа с задачами API не
+    # пускает (409 + move_to), и молчаливое обнуление статуса у чужих задач было
+    # бы сюрпризом. `NO ACTION` проверяется в конце оператора и переживает
+    # каскад удаления проекта.
+    stage_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("project_stages.id"),
-        nullable=False,
+        nullable=True,
     )
 
     title: Mapped[str] = mapped_column(String(500), nullable=False)

@@ -19,7 +19,7 @@ import { cn } from '@/lib/cn'
 import { capitalizeFirst } from '@/lib/dates'
 import { isOverdue } from '@/lib/taskDates'
 import { type Task, type TaskPriority } from '@/lib/tasks'
-import { type TimelineDependency, type TimelineSection } from '@/lib/timeline'
+import { type TimelineDependency } from '@/lib/timeline'
 import { plural } from '@/lib/typography'
 
 type Scale = 'day' | 'week' | 'month'
@@ -75,9 +75,7 @@ function addDays(d: Date, days: number): Date {
   return c
 }
 
-type Row =
-  | { kind: 'section'; key: string; name: string }
-  | { kind: 'task'; key: string; task: Task; leftPx: number | null; widthPx: number }
+type Row = { kind: 'task'; key: string; task: Task; leftPx: number | null; widthPx: number }
 
 interface BarLayout {
   taskId: string
@@ -115,29 +113,17 @@ export function TimelineView({ projectId, onTaskClick }: TimelineViewProps) {
   const tl = useTimeline(projectId, isoDate(viewStart), isoDate(viewEnd), { includeUndated: true })
   const update = useUpdateTask(projectId)
 
-  // Строки: секции в порядке сервера, «Без секции» первой; внутри — задачи.
+  // Строки — плоским списком в порядке сервера: группировать больше не по
+  // чему, секций у задачи нет.
   const { rows, bars, taskById, undatedCount, datedCount } = useMemo(() => {
     const tasks = tl.data?.tasks ?? []
-    const sections: TimelineSection[] = tl.data?.sections ?? []
-    const bySection = new Map<string | null, Task[]>()
-    for (const t of tasks) {
-      const list = bySection.get(t.section_id) ?? []
-      list.push(t)
-      bySection.set(t.section_id, list)
-    }
-    const groups: { section: TimelineSection | null; tasks: Task[] }[] = []
-    if (bySection.has(null)) groups.push({ section: null, tasks: bySection.get(null)! })
-    for (const s of sections) {
-      if (bySection.has(s.id)) groups.push({ section: s, tasks: bySection.get(s.id)! })
-    }
     const rows: Row[] = []
     const bars: BarLayout[] = []
     const taskById = new Map<string, Task>()
     let undatedCount = 0
     let datedCount = 0
-    for (const g of groups) {
-      rows.push({ kind: 'section', key: `sec-${g.section?.id ?? 'none'}`, name: g.section?.name ?? 'Без секции' })
-      for (const t of g.tasks) {
+    {
+      for (const t of tasks) {
         taskById.set(t.id, t)
         if (!t.due_at) {
           undatedCount += 1
@@ -321,16 +307,7 @@ export function TimelineView({ projectId, onTaskClick }: TimelineViewProps) {
               style={{ width: namesW }}
             >
               <div style={{ height: HEADER_HEIGHT }} className="border-b border-hair" />
-              {rows.map((r) =>
-                r.kind === 'section' ? (
-                  <div
-                    key={r.key}
-                    style={{ height: rowH }}
-                    className="flex items-center truncate border-b border-hair bg-tint px-3.5 text-[12px] font-bold uppercase tracking-[0.06em] text-text2"
-                  >
-                    <span className="truncate">{r.name}</span>
-                  </div>
-                ) : (
+              {rows.map((r) => (
                   <button
                     key={r.key}
                     type="button"
@@ -384,7 +361,7 @@ export function TimelineView({ projectId, onTaskClick }: TimelineViewProps) {
                     key={`bg-${r.key}`}
                     aria-hidden
                     style={{ height: rowH }}
-                    className={cn('border-b border-hair', r.kind === 'section' && 'bg-tint')}
+                    className="border-b border-hair"
                   />
                 ))}
                 {/* Полосы */}

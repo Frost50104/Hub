@@ -7,7 +7,6 @@ import { useInlineCreateTarget } from '@/lib/quickCreate'
 
 interface TaskInlineCreateProps {
   projectId: string
-  sectionId: string | null
   /** Колонка доски: задача рождается сразу в ней. */
   stageId?: string | null
   parentTaskId?: string | null
@@ -30,7 +29,6 @@ interface TaskInlineCreateProps {
  */
 export function TaskInlineCreate({
   projectId,
-  sectionId,
   stageId,
   parentTaskId,
   placeholder = '+ Новая задача',
@@ -43,8 +41,8 @@ export function TaskInlineCreate({
 
   // SubtaskList меняет parentTaskId без remount (переключение задачи в
   // панели) — читаем актуальные пропсы из ref в момент коммита.
-  const propsRef = useRef({ sectionId, stageId, parentTaskId })
-  propsRef.current = { sectionId, stageId, parentTaskId }
+  const propsRef = useRef({ stageId, parentTaskId })
+  propsRef.current = { stageId, parentTaskId }
   const createRef = useRef(create)
   createRef.current = create
 
@@ -55,7 +53,6 @@ export function TaskInlineCreate({
         submit: (text) =>
           createRef.current.mutateAsync({
             title: text,
-            section_id: propsRef.current.sectionId,
             stage_id: propsRef.current.stageId ?? undefined,
             parent_task_id: propsRef.current.parentTaskId ?? undefined,
           }),

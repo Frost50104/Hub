@@ -3,8 +3,11 @@
 - `GET /projects/{id}/stages` — любой участник; с `task_count` для «N из M».
 - `POST/PATCH/DELETE` — owner/editor. Колонка — это только имя и позиция
   (0044): системного смысла у неё нет, состояние задачи живёт в `tasks.done`.
-- `DELETE` требует `move_to`, если в колонке есть задачи; последнюю колонку
-  проекта удалить нельзя (409) — задачам негде лежать.
+- `DELETE` с задачами в колонке требует выбора: `move_to` — перенести их в
+  другую колонку, `detach=true` — оставить без колонки (легально с 0046). Без
+  того и другого — 409: молча снять колонку у пачки задач нельзя. Удалить можно
+  ЛЮБУЮ колонку, включая последнюю: проект без колонок — штатное состояние
+  (новый проект рождается именно таким).
 
 Позиции непрерывные, сдвиги — как у секций (`SET CONSTRAINTS … DEFERRED`).
 """
@@ -23,11 +26,7 @@ from app.models.stage import ProjectStage
 from app.models.task import Task
 from app.schemas.stage import StageCreate, StageResponse, StageUpdate
 from app.services.project_access import require_project_role
-from app.services.stages import (
-    assert_not_last_stage,
-    get_stage_in_project,
-    list_stages,
-)
+from app.services.stages import get_stage_in_project, list_stages
 
 router = APIRouter(tags=["stages"])
 
@@ -167,6 +166,10 @@ async def update_stage(
 async def delete_stage(
     stage_id: UUID,
     move_to: UUID | None = Query(default=None),
+    detach: bool = Query(
+        default=False,
+        description="Оставить задачи колонки без колонки вместо переноса",
+    ),
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -177,23 +180,37 @@ async def delete_stage(
     if stage is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Этап не найден")
     await require_project_role(db, stage.project_id, principal, allow=("owner", "editor"))
-    await assert_not_last_stage(db, stage)
+    # Проверки «это последняя колонка» здесь больше нет: проект без колонок —
+    # штатное состояние, и создав первую колонку по ошибке, из него надо уметь
+    # выйти. Судьбу задач по-прежнему выбирает человек, а не сервер.
 
     tasks = (await db.execute(select(Task).where(Task.stage_id == stage.id))).scalars().all()
     if tasks:
-        if move_to is None:
+        # `is not True`, а не `not detach`: ручку зовут напрямую тесты и
+        # джобы, а нерезолвнутый FastAPI-дефолт `Query(False)` истинен —
+        # и защита от молчаливого снятия колонки просто не сработала бы.
+        if move_to is None and detach is not True:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="В этапе есть задачи — укажите, в какой этап их перенести (move_to)",
+                detail=(
+                    "В колонке есть задачи — перенесите их в другую колонку "
+                    "(move_to) или оставьте без колонки (detach)"
+                ),
             )
-        if move_to == stage.id:
+        if move_to is not None and move_to == stage.id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Нельзя перенести в удаляемый этап"
             )
-        target = await get_stage_in_project(db, stage.project_id, move_to)
+        # `move_to` сильнее `detach`: явный адрес переноса — более конкретное
+        # намерение, чем «оставить без колонки».
+        target = (
+            await get_stage_in_project(db, stage.project_id, move_to)
+            if move_to is not None
+            else None
+        )
         for t in tasks:
-            # Только колонка: перенос при удалении не трогает состояние задачи.
-            t.stage_id = target.id
+            # Только колонка: удаление не трогает состояние задачи (`done`).
+            t.stage_id = target.id if target else None
 
     await db.execute(_DEFER)
     await db.delete(stage)

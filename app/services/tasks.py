@@ -13,15 +13,16 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 from signaris_auth import Principal
-from sqlalchemy import select, update
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project
-from app.models.section import Section
+from app.models.stage import ProjectStage
 from app.models.task import Task
 from app.schemas.task import LEGACY_STATUS_DETAIL, TaskCreate, resolve_assignee_ids
 from app.services.activity_writer import record_activity
-from app.services.stages import next_position, require_stage
+from app.services.personal_projects import personal_owner_of
+from app.services.stages import default_stage_for, next_position
 from app.services.task_assignees import (
     apply_assignee_side_effects,
     assert_assignees_in_tenant,
@@ -44,22 +45,16 @@ async def allocate_task_seq(db: AsyncSession, project_id: UUID) -> int:
         .values(next_task_seq=Project.next_task_seq + 1)
         .returning(Project.next_task_seq - 1)
     )
-    return row.scalar_one()
-
-
-async def assert_section_in_project(
-    db: AsyncSession, project_id: UUID, section_id: UUID | None
-) -> None:
-    if section_id is None:
-        return
-    row = await db.execute(
-        select(Section.id).where(Section.id == section_id, Section.project_id == project_id)
-    )
-    if row.scalar_one_or_none() is None:
+    seq = row.scalar_one_or_none()
+    if seq is None:
+        # Проект удалили, пока мы шли к этой строке (UPDATE ждал на её локе до
+        # конца удаляющей транзакции). `scalar_one()` бросил бы NoResultFound —
+        # то есть 500 вместо честного «проекта больше нет».
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Секция не принадлежит этому проекту",
+            status_code=status.HTTP_404_NOT_FOUND, detail="Проект не найден"
         )
+    return seq
+
 
 
 async def assert_parent_one_level(db: AsyncSession, parent_task_id: UUID | None) -> None:
@@ -78,28 +73,57 @@ async def assert_parent_one_level(db: AsyncSession, parent_task_id: UUID | None)
 
 
 async def create_task_record(
-    db: AsyncSession, *, principal: Principal, project_id: UUID, body: TaskCreate
+    db: AsyncSession,
+    *,
+    principal: Principal,
+    project_id: UUID,
+    body: TaskCreate,
+    watch_creator: bool = True,
 ) -> Task:
     """Создать задачу БЕЗ commit'а. Вызывающий проверил права проекта.
+
+    `watch_creator=False` — для форм, которые кладут задачу в ЧУЖОЙ проект
+    (обратная связь): подписка автора на задачу, которую он не может открыть,
+    привела бы его по пушу в 403. Дефолт `True` менять нельзя — на нём держится
+    то, что автор узнаёт о комментариях и переносах СВОЕЙ задачи.
 
     Порядок обязателен: все валидации — до `allocate_task_seq` (он держит
     row-lock проекта до конца транзакции; 404 на третьем исполнителе не должен
     оставлять лок и первых двух записанными); `flush()` — до activity и
     исполнителей (FK на tasks.id).
     """
-    await assert_section_in_project(db, project_id, body.section_id)
-    assignee_ids = resolve_assignee_ids(body) or []
+    # Один запрос на два правила личного пространства ниже: колонка и исполнитель.
+    personal_owner = await personal_owner_of(db, project_id)
+
+    resolved = resolve_assignee_ids(body)
+    if resolved is None and personal_owner == principal.employee_id:
+        # Задача «на себя»: в своём личном пространстве других исполнителей не
+        # бывает, и без этого задача оставалась ничьей — пустой стек аватаров
+        # и промах фильтра «Исполнитель». Само-назначение уведомления не шлёт
+        # (`apply_assignee_side_effects`), а `record=False` в create оставляет
+        # ленту с одной записью «создал задачу».
+        #
+        # `resolved is None`, а не `not resolved`: пустой список — это ЯВНОЕ
+        # «снять всех» от клиента (`resolve_assignee_ids`), и перебивать его
+        # нельзя.
+        resolved = [principal.employee_id]
+    assignee_ids = resolved or []
     assignee_names = await assert_assignees_in_tenant(db, assignee_ids)
     await assert_parent_one_level(db, body.parent_task_id)
-    # Колонка: явная либо первая по позиции. Колонок нет вовсе → 409 (0044).
-    stage = await require_stage(db, project_id, body.stage_id)
+    # Колонка: явная — всегда, без явной — первая по позиции, а если колонок в
+    # проекте нет — никакой (это штатно, см. `default_stage_for`). Личное
+    # пространство — исключение: это список дел, а не доска, и задача заводится
+    # БЕЗ колонки. Иначе каждая личная задача молча оседала бы в первой
+    # колонке, которую владелец никогда не выбирал.
+    stage: ProjectStage | None = None
+    if body.stage_id is not None or personal_owner is None:
+        stage = await default_stage_for(db, project_id, body.stage_id)
 
     task = Task(
         id=uuid4(),
         tenant_id=principal.tenant_id,
         project_id=project_id,
-        section_id=body.section_id,
-        stage_id=stage.id,
+        stage_id=stage.id if stage else None,
         parent_task_id=body.parent_task_id,
         title=body.title,
         description=body.description,
@@ -111,7 +135,9 @@ async def create_task_record(
         # иначе два параллельных create (быстрый ввод Enter-Enter) считают
         # max(position)+1 до лока и получают одинаковую позицию.
         seq=await allocate_task_seq(db, project_id),
-        position=await next_position(db, project_id, stage_id=stage.id),
+        position=await next_position(
+            db, project_id, stage_id=stage.id if stage else None
+        ),
     )
     db.add(task)
     # Flush so the task INSERT actually hits Postgres before we record an
@@ -121,13 +147,14 @@ async def create_task_record(
     await db.flush()
     # Auto-watchers per INTEGRATION.md §14: creator + assignee subscribe on
     # task creation. Reason is the *first* edge they joined through.
-    await ensure_watcher(
-        db,
-        task_id=task.id,
-        tenant_id=task.tenant_id,
-        employee_id=principal.employee_id,
-        reason="creator",
-    )
+    if watch_creator:
+        await ensure_watcher(
+            db,
+            task_id=task.id,
+            tenant_id=task.tenant_id,
+            employee_id=principal.employee_id,
+            reason="creator",
+        )
     # Строго ПОСЛЕ flush(): FK task_assignees.task_id требует, чтобы строка
     # задачи уже была в Postgres.
     diff = await set_task_assignees(
@@ -157,9 +184,8 @@ async def create_task_record(
         kind="created",
         payload={
             "title": body.title,
-            "section_id": str(body.section_id) if body.section_id else None,
-            "stage_id": str(stage.id),
-            "stage_name": stage.name,
+            "stage_id": str(stage.id) if stage else None,
+            "stage_name": stage.name if stage else None,
         },
     )
     return task

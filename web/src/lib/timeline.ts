@@ -7,16 +7,9 @@ export interface TimelineDependency {
   created_at: string
 }
 
-export interface TimelineSection {
-  id: string
-  name: string
-  position: number
-}
-
 export interface TimelineResponse {
   tasks: Task[]
   dependencies: TimelineDependency[]
-  sections: TimelineSection[]
 }
 
 export interface DependencyPeer {

@@ -19,7 +19,6 @@ function task(patch: Partial<Task>): Task {
   return {
     id: 't1',
     project_id: 'p1',
-    section_id: null,
     parent_task_id: null,
     title: 'Задача',
     description: null,

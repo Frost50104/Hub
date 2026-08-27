@@ -6,46 +6,38 @@ import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { SheetPicker } from '@/components/ui/SheetPicker'
-import { useCreateStage, useDeleteStage, useUpdateStage } from '@/hooks/useStages'
+import { useCreateStage, useDeleteStage } from '@/hooks/useStages'
+import { stageDeletePrompt } from '@/lib/boardHints'
 import { type TaskStage } from '@/lib/stages'
 
 /**
- * «+ Колонка» / «Переименовать»: только имя. Системного смысла у колонки нет
- * (0044) — выполнение задачи живёт в её галочке, а не в месте на доске.
+ * «+ Колонка»: только имя. Системного смысла у колонки нет (0044) —
+ * выполнение задачи живёт в её галочке, а не в месте на доске.
+ *
+ * Режима правки у диалога НЕТ: имя меняется кликом прямо по заголовку колонки
+ * (26.08). Модалка ради одного поля, которое видно на доске, была лишним шагом.
  */
 export function StageFormDialog({
   open,
   onOpenChange,
   projectId,
-  stage,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   projectId: string
-  /** Редактирование; без него — создание. */
-  stage?: TaskStage | null
 }) {
   const create = useCreateStage(projectId)
-  const update = useUpdateStage(projectId)
   const [name, setName] = useState('')
   useEffect(() => {
-    if (open) {
-      setName(stage?.name ?? '')
-    }
-  }, [open, stage])
-  const pending = create.isPending || update.isPending
+    if (open) setName('')
+  }, [open])
 
   const submit = async () => {
     const trimmed = name.trim()
     if (!trimmed) return
     try {
-      if (stage) {
-        await update.mutateAsync({ stageId: stage.id, name: trimmed })
-        toast.success('Этап обновлён')
-      } else {
-        await create.mutateAsync({ name: trimmed })
-        toast.success(`Колонка «${trimmed}» добавлена`)
-      }
+      await create.mutateAsync({ name: trimmed })
+      toast.success(`Колонка «${trimmed}» добавлена`)
       onOpenChange(false)
     } catch {
       // тост показывает глобальный onError мутаций
@@ -56,16 +48,16 @@ export function StageFormDialog({
     <ResponsiveDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={stage ? `Колонка «${stage.name}»` : 'Новая колонка'}
+      title="Новая колонка"
       description="Имя колонки — ваше: «Идея», «Согласование», «Печать». Выполненность задачи от колонки не зависит — её отмечают галочкой."
       desktopWidth={480}
       footer={
         <>
-          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={pending}>
+          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={create.isPending}>
             Отмена
           </Button>
-          <Button onClick={() => void submit()} disabled={pending || !name.trim()}>
-            {pending ? 'Сохраняем…' : stage ? 'Сохранить' : 'Добавить колонку'}
+          <Button onClick={() => void submit()} disabled={create.isPending || !name.trim()}>
+            {create.isPending ? 'Сохраняем…' : 'Добавить колонку'}
           </Button>
         </>
       }
@@ -94,10 +86,20 @@ export function StageFormDialog({
   )
 }
 
+/** Сентинел «оставить без колонки» в списке приёмников. */
+const DETACH = '__detach__'
+
 /**
- * Удаление колонки: если в ней есть задачи — сначала выбрать, куда их
- * перенести (список остальных колонок). Последнюю колонку проекта сервер
- * удалить не даст (409) — текст отказа придёт тостом.
+ * Удаление колонки.
+ *
+ * С задачами внутри выбор обязателен: перенести их в другую колонку или
+ * оставить без колонки (`stage_id = null` — легальное состояние с 0046).
+ * Сервер тот же выбор требует и от API: без `move_to` и без `detach` он
+ * отвечает 409, чтобы раскладка не пропала молча.
+ *
+ * Последнюю колонку удалить МОЖНО (26.08): проект без колонок — норма, и
+ * создавший колонку по ошибке обязан иметь выход. Тогда переносить некуда, и
+ * вместо пикера показываем честное подтверждение.
  */
 export function DeleteStageDialog({
   open,
@@ -118,34 +120,43 @@ export function DeleteStageDialog({
   if (!stage) return null
   const others = stages.filter((s) => s.id !== stage.id)
 
-  const run = async (moveTo: string | null) => {
+  const run = async (target: string | null) => {
     try {
-      await remove.mutateAsync({ stageId: stage.id, moveTo })
+      await remove.mutateAsync(
+        target === null || target === DETACH
+          ? { stageId: stage.id, detach: taskCount > 0 }
+          : { stageId: stage.id, moveTo: target },
+      )
       toast.success(`Колонка «${stage.name}» удалена`)
       onOpenChange(false)
     } catch {
-      // тост показывает глобальный onError мутаций (в т.ч. 409 «последняя колонка»)
+      // тост показывает глобальный onError мутаций
     }
   }
 
-  if (taskCount > 0) {
+  if (taskCount > 0 && others.length > 0) {
     return (
       <SheetPicker
         open={open}
         onOpenChange={onOpenChange}
         title={`Удалить «${stage.name}»`}
-        description={`В колонке ${taskCount} задач — выберите, куда их перенести.`}
-        items={others.map((s) => ({ id: s.id, label: s.name }))}
+        description={stageDeletePrompt(taskCount, true)}
+        items={[
+          ...others.map((s) => ({ id: s.id, label: s.name })),
+          { id: DETACH, label: 'Оставить без колонки', meta: 'Задачи останутся в списке' },
+        ]}
         onSelect={(id) => void run(id)}
       />
     )
   }
+
   return (
     <ResponsiveDialog
       open={open}
       onOpenChange={onOpenChange}
       title={`Удалить колонку «${stage.name}»?`}
-      description="Колонка пуста — задачи переносить не нужно."
+      // Последняя колонка: переносить некуда, поэтому диалог называет цену.
+      description={stageDeletePrompt(taskCount, false)}
       desktopWidth={440}
       footer={
         <>

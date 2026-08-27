@@ -360,7 +360,14 @@ async def t_list_projects(ctx: ToolContext, a: BaseModel) -> dict[str, Any]:
     # Личное не перечисляем даже владельцу: «покажи мои проекты» не должно
     # возвращать то, что убрано из всех списков. Резолв по имени («создай
     # задачу в личном») при этом работает — он идёт через visible_projects_stmt.
-    stmt = visible_projects_stmt(ctx).where(not_personal()).limit(50)
+    # order_by обязателен: без него «какие 200» решает планировщик, и после
+    # переноса из WEEEK (47 проектов сверху) выпадение было бы случайным.
+    stmt = (
+        visible_projects_stmt(ctx)
+        .where(not_personal())
+        .order_by(func.lower(Project.name))
+        .limit(200)
+    )
     rows = (await ctx.db.execute(stmt)).scalars().all()
     return {
         "projects": [

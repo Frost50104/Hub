@@ -51,6 +51,7 @@ export function FloatingActionButton({
 }: FloatingActionButtonProps) {
   const [sheetOpen, setSheetOpen] = useState(false)
   const [taskOpen, setTaskOpen] = useState(false)
+  const [taskProjectId, setTaskProjectId] = useState<string | undefined>()
   const [projectOpen, setProjectOpen] = useState(false)
   const [folderOpen, setFolderOpen] = useState(false)
   // Права считает сервер; тот же queryKey, что у сайдбара и страницы —
@@ -91,6 +92,10 @@ export function FloatingActionButton({
           icon={<CircleCheck className="h-5 w-5" />}
           onClick={() => {
             setSheetOpen(false)
+            // Тот же довод, что в сайдбаре: внутри проекта задача по умолчанию
+            // должна попадать в этот проект, а не в личное.
+            const m = /^\/projects\/([^/]+)/.exec(location.pathname)
+            setTaskProjectId(m?.[1])
             setTaskOpen(true)
           }}
         >
@@ -141,7 +146,12 @@ export function FloatingActionButton({
         )}
       </BottomSheet>
 
-      <CreateTaskDialog open={taskOpen} onOpenChange={setTaskOpen} />
+      <CreateTaskDialog
+        open={taskOpen}
+        onOpenChange={setTaskOpen}
+        initialProjectId={taskProjectId}
+        openAfterCreate
+      />
       <MobileCreateProjectDialog open={projectOpen} onOpenChange={setProjectOpen} />
       <CreateFolderDialog open={folderOpen} onOpenChange={setFolderOpen} />
     </>

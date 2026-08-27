@@ -154,3 +154,24 @@ def make_principal(
         product_roles={"hub": role},
         jti=str(uuid.uuid4()),
     )
+
+
+async def seed_stages(
+    db,
+    project_id: uuid.UUID,
+    owner: Principal,
+    names: tuple[str, ...] = ("К выполнению", "В работе", "На проверке", "Готово"),
+) -> list:
+    """Колонки доски для теста.
+
+    Новый проект колонок НЕ получает (26.08): стартовая четвёрка навязывала
+    раскладку, которую никто не выбирал. Тестам, которые проверяют не доску, а
+    что-то поверх неё, колонки всё ещё нужны — заводим той же ручкой, что и
+    человек, чтобы сид не разъехался с продовым путём.
+    """
+    from app.api.stages import create_stage
+    from app.schemas.stage import StageCreate
+
+    return [
+        await create_stage(project_id, StageCreate(name=name), owner, db) for name in names
+    ]

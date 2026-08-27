@@ -15,8 +15,8 @@ import pytest
 from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
 from app.models.project import Project, ProjectMember
 from app.models.shadow import ShadowUser
+from app.models.stage import ProjectStage
 from app.models.task import Task, TaskAssignee
-from app.services.stages import create_default_stages
 
 pytestmark = pytest.mark.integration
 
@@ -42,10 +42,20 @@ async def _seed_project(db, principal):
     db.add(project)
     await db.flush()
     # Фикстура конструирует проект напрямую, минуя create_project_record, —
-    # колонки доски создаём сами: у задачи `stage_id` NOT NULL (0044).
-    stages = await create_default_stages(
-        db, tenant_id=principal.tenant_id, project_id=project.id
-    )
+    # колонки доски создаём сами: тест проверяет срез статистики ПО колонкам,
+    # а сам проект их больше не заводит (26.08).
+    stages = [
+        ProjectStage(
+            tenant_id=principal.tenant_id,
+            project_id=project.id,
+            name=name,
+            position=position,
+        )
+        for position, name in enumerate(("К выполнению", "В работе", "На проверке", "Готово"))
+    ]
+    for stage in stages:
+        db.add(stage)
+    await db.flush()
     db.add(
         ProjectMember(
             tenant_id=principal.tenant_id,
@@ -155,3 +165,138 @@ async def test_project_stats_workload_and_cf(db, tenant_id):
     assert by_name["Бюджет"].number.sum == 1500
     opt_counts = {o.id: o.count for o in by_name["Магазин"].select.options}
     assert opt_counts[OPT_A] == 1
+
+
+# ─── GET /api/me/stats ──────────────────────────────────────────────────────
+# Та же мотивация, что у всего файла: ручка собирает CAST'ы и date_trunc по
+# timezone(), и молчаливая поломка после апгрейда SQLAlchemy видна только на
+# исполнении. Сессия не коммитится — читаем через неё же, хватает flush.
+
+
+async def _add_task(db, principal, project, *, seq, mine=True, **fields):
+    """Ещё одна задача в проекте фикстуры. `mine=False` — без исполнителя."""
+    from sqlalchemy import select as sa_select
+
+
+    stage_id = (
+        await db.execute(
+            sa_select(ProjectStage.id)
+            .where(ProjectStage.project_id == project.id)
+            .order_by(ProjectStage.position)
+        )
+    ).scalars().first()
+    task = Task(
+        tenant_id=principal.tenant_id,
+        project_id=project.id,
+        stage_id=stage_id,
+        title=f"Задача {seq}",
+        priority="medium",
+        created_by=principal.employee_id,
+        position=Decimal(seq),
+        seq=seq,
+        **fields,
+    )
+    db.add(task)
+    await db.flush()
+    if mine:
+        db.add(
+            TaskAssignee(
+                task_id=task.id,
+                employee_id=principal.employee_id,
+                tenant_id=principal.tenant_id,
+                position=0,
+            )
+        )
+        await db.flush()
+    return task
+
+
+async def test_my_stats_windows_and_daily(db, tenant_id):
+    """Оба окна одним ответом, `daily` — ровно 30 точек, последняя сегодня."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.api.stats import get_my_stats
+    from app.services.taskdates import display_today
+    from tests.integration.conftest import make_principal
+
+    principal = make_principal(tenant_id, role="member")
+    project, _ = await _seed_project(db, principal)
+
+    now = datetime.now(UTC)
+    # Вчера — в оба окна; 10 дней назад — только в 30; 40 — ни в одно.
+    await _add_task(db, principal, project, seq=2, done=True,
+                    completed_at=now - timedelta(days=1))
+    await _add_task(db, principal, project, seq=3, done=True,
+                    completed_at=now - timedelta(days=10))
+    await _add_task(db, principal, project, seq=4, done=True,
+                    completed_at=now - timedelta(days=40))
+
+    stats = await get_my_stats(principal=principal, db=db)
+    assert stats.completed_7 == 1
+    assert stats.completed_30 == 2
+    assert len(stats.daily) == 30
+    assert sum(p.count for p in stats.daily) == 2
+    # Последняя точка — сегодня: график не должен обрываться вчерашним днём.
+    assert stats.daily[-1].day == display_today(now)
+
+
+async def test_my_stats_counts_only_mine(db, tenant_id):
+    """Чужая задача в общем проекте в «выполнено» не попадает.
+
+    А «создано» считается по автору, а не по исполнителю — это ДРУГАЯ
+    популяция, и задача без исполнителя туда входит.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from app.api.stats import get_my_stats
+    from tests.integration.conftest import make_principal
+
+    principal = make_principal(tenant_id, role="member")
+    project, _ = await _seed_project(db, principal)
+
+    now = datetime.now(UTC)
+    await _add_task(db, principal, project, seq=2, mine=False, done=True,
+                    completed_at=now - timedelta(days=1))
+
+    stats = await get_my_stats(principal=principal, db=db)
+    assert stats.completed_7 == 0
+    assert stats.created_7 == 2  # задача фикстуры + эта
+
+
+async def test_my_stats_skips_archived(db, tenant_id):
+    """Архивную задачу не считаем — её нет ни на одном экране."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.api.stats import get_my_stats
+    from tests.integration.conftest import make_principal
+
+    principal = make_principal(tenant_id, role="member")
+    project, _ = await _seed_project(db, principal)
+
+    now = datetime.now(UTC)
+    await _add_task(db, principal, project, seq=2, done=True,
+                    completed_at=now - timedelta(days=1), archived_at=now)
+
+    stats = await get_my_stats(principal=principal, db=db)
+    assert stats.completed_7 == 0
+    assert stats.completed_30 == 0
+
+
+async def test_my_stats_open_and_overdue(db, tenant_id):
+    """«В работе» и «просрочено» — состояние на сейчас, окна их не касаются."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.api.stats import get_my_stats
+    from tests.integration.conftest import make_principal
+
+    principal = make_principal(tenant_id, role="member")
+    project, _ = await _seed_project(db, principal)  # 1 открытая без срока
+
+    now = datetime.now(UTC)
+    await _add_task(db, principal, project, seq=2, due_at=now - timedelta(days=3))
+    await _add_task(db, principal, project, seq=3, done=True,
+                    completed_at=now - timedelta(days=100))
+
+    stats = await get_my_stats(principal=principal, db=db)
+    assert stats.open_now == 2
+    assert stats.overdue_now == 1

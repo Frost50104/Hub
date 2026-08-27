@@ -7,19 +7,18 @@ import io
 import uuid
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile
 
 from app.api.labels import create_label
 from app.api.projects import create_project
-from app.api.sections import create_section
 from app.api.stages import list_project_stages
 from app.api.tasks import list_tasks
 from app.api.tasks_import import import_tasks
 from app.schemas.label import LabelCreate
 from app.schemas.project import ProjectCreate
-from app.schemas.section import SectionCreate
-from tests.integration.conftest import make_principal
+from tests.integration.conftest import make_principal, seed_stages
 from tests.integration.test_project_access import _register
 
 pytestmark = pytest.mark.integration
@@ -36,7 +35,6 @@ async def _list(db, project_id, owner):
         done=None,
         status_=None,
         assignee_id=None,
-        section_id=None,
         priority=None,
         label=None,
         due_from=None,
@@ -55,12 +53,26 @@ async def _seed(db: AsyncSession, tenant_id: uuid.UUID, slug: str):
     )
     await _register(db, owner, org_role="office")
     project = await create_project(ProjectCreate(name=f"Import {slug}"), owner, db)
+    # CSV ссылается на колонки по имени — заводим их явно, проект больше не
+    # приносит стартовую четвёрку.
+    await seed_stages(db, project.id, owner)
     return owner, project
+
+
+async def _labels_of(db: AsyncSession, task_id: uuid.UUID) -> set[str]:
+    from app.models.task import TaskLabel, TaskLabelAssignment
+
+    rows = await db.execute(
+        select(TaskLabel.name)
+        .join(TaskLabelAssignment, TaskLabelAssignment.label_id == TaskLabel.id)
+        .where(TaskLabelAssignment.task_id == task_id)
+    )
+    return set(rows.scalars().all())
 
 
 async def test_import_creates_tasks_with_refs_and_warnings(db: AsyncSession, tenant_id: uuid.UUID):
     owner, project = await _seed(db, tenant_id, "imp1")
-    await create_section(project.id, SectionCreate(name="Плейлисты"), owner, db)
+    await create_label(project.id, LabelCreate(name="Плейлисты", color="#55556A"), owner, db)
     await create_label(project.id, LabelCreate(name="Контент", color="#00B4A8"), owner, db)
     stage_rows = await list_project_stages(project.id, principal=owner, db=db)
     stages = {s.name: s for s in stage_rows}
@@ -78,7 +90,9 @@ async def test_import_creates_tasks_with_refs_and_warnings(db: AsyncSession, ten
     assert report.created == 2 and report.skipped == 1 and not report.dry_run
     joined = "\n".join(report.errors)
     assert "исполнитель nobody@t.ru не найден" in joined
-    assert "секция «Нет такой» не найдена" in joined
+    # `section` в CSV — алиас на метку: секций больше нет, но заготовленные
+    # файлы с этой колонкой обязаны работать, а не терять разбивку молча.
+    assert "метка «Нет такой» не найдена" in joined
     assert "метка «Нет метки» не найдена" in joined
     assert "Строка 4: пустой title" in joined
 
@@ -88,6 +102,9 @@ async def test_import_creates_tasks_with_refs_and_warnings(db: AsyncSession, ten
     assert first.due_at is not None and first.due_at.day == 14
     assert first.stage_id == stages["В работе"].id and first.done is False
     assert [a.employee_id for a in first.assignees] == [owner.employee_id]
+    # «Контент» из labels и «Плейлисты» из section-алиаса — обе.
+    first_labels = await _labels_of(db, first.id)
+    assert first_labels == {"Контент", "Плейлисты"}
     second = tasks["Перезалить ролики"]
     # Колонка «Готово» — обычная колонка: импорт кладёт туда, но не закрывает.
     assert second.stage_id == stages["Готово"].id and second.done is False

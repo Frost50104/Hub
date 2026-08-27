@@ -32,15 +32,23 @@ export const stagesApi = {
     api.post<TaskStage>(`/projects/${projectId}/stages`, body).then((r) => r.data),
   update: (stageId: string, body: StageUpdateBody): Promise<TaskStage> =>
     api.patch<TaskStage>(`/stages/${stageId}`, body).then((r) => r.data),
-  remove: (stageId: string, moveTo?: string | null): Promise<void> =>
+  /**
+   * Удаление колонки. С задачами внутри выбор обязателен: `moveTo` — перенести,
+   * `detach` — оставить их без колонки. Без того и другого сервер отвечает 409
+   * — молча снимать колонку у пачки задач нельзя.
+   */
+  remove: (
+    stageId: string,
+    opts: { moveTo?: string | null; detach?: boolean } = {},
+  ): Promise<void> =>
     api
-      .delete(`/stages/${stageId}`, { params: moveTo ? { move_to: moveTo } : undefined })
+      .delete(`/stages/${stageId}`, {
+        params: {
+          ...(opts.moveTo ? { move_to: opts.moveTo } : {}),
+          ...(opts.detach ? { detach: true } : {}),
+        },
+      })
       .then(() => undefined),
-}
-
-/** Первая колонка проекта — дом для задачи, созданной без явной колонки. */
-export function firstStage(stages: TaskStage[] | undefined): TaskStage | undefined {
-  return stages?.[0]
 }
 
 export function stageById(stages: TaskStage[] | undefined, id: string | null | undefined) {

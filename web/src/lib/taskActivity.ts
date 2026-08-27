@@ -36,8 +36,9 @@ export function renderActivity(a: ActivityLike): string | null {
     case 'done_changed':
       return p['done'] ? `${actor} выполнил задачу` : `${actor} вернул задачу в работу`
     case 'stage_changed': {
+      // stage_to пуст — статус сняли (0046), задача ушла с доски.
       const to = p['stage_to'] ? String(p['stage_to']) : null
-      return to ? `${actor} перенёс в «${to}»` : `${actor} перенёс задачу`
+      return to ? `${actor} перенёс в «${to}»` : `${actor} убрал статус`
     }
     case 'status_changed': {
       // LEGACY: записи до 0044 (на проде их 68). Имя колонки в них есть не

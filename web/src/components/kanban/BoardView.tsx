@@ -3,30 +3,36 @@ import {
   DragOverlay,
   PointerSensor,
   TouchSensor,
+  closestCenter,
   closestCorners,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
+import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable'
 import { Plus } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 import { TaskEmptyState } from '@/components/task/TaskListStates'
 import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
+import { useIsTouch } from '@/hooks/useMediaQuery'
 import { useStages, useUpdateStage } from '@/hooks/useStages'
 import { useTasks, useToggleDone, useUpdateTask } from '@/hooks/useTasks'
 import { dataAgeLabel } from '@/lib/dates'
 import { type Label } from '@/lib/labels'
 import { type TaskStage } from '@/lib/stages'
+import { boardHint } from '@/lib/boardHints'
+import { reorderStages } from '@/lib/stageOrder'
 import { activeFilterCount, toListFilters, type TaskViewFilters } from '@/lib/taskFilters'
 import { type Task } from '@/lib/tasks'
 
 import { KanbanCard } from './KanbanCard'
 import { KanbanColumn, type ColumnDef } from './KanbanColumn'
 import { DeleteStageDialog, StageFormDialog } from './StageDialogs'
-import { DropdownMenuItem } from '@/components/ui/DropdownMenu'
+import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/DropdownMenu'
 
 interface BoardViewProps {
   projectId: string
@@ -43,6 +49,26 @@ interface BoardViewProps {
 // пилюлю вида и таб-бар (макет: отступ 96px).
 const LANE_CLASS =
   'flex snap-x snap-mandatory items-start gap-3 overflow-x-auto overscroll-x-contain pb-24 md:snap-none lg:pb-4'
+
+/**
+ * «+ Колонка» — призрачная колонка той же ширины, что соседи.
+ *
+ * Один компонент на два места: она замыкает ленту справа И стоит на месте
+ * первой колонки в проекте, где колонок ещё нет. Две копии разъехались бы по
+ * стилям на первой же правке.
+ */
+function AddStageButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex min-h-12 w-[85%] max-w-[320px] shrink-0 snap-start items-center justify-center gap-2 rounded-xl border border-dashed border-glass-border text-[14px] font-semibold text-text2 transition-colors hover:border-amber hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 sm:w-72 sm:max-w-none lg:min-h-11"
+    >
+      <Plus className="h-4 w-4" strokeWidth={2.2} />
+      Колонка
+    </button>
+  )
+}
 
 /**
  * Скелетон доски повторяет раскладку колонок. Без пульсации — то же правило,
@@ -67,17 +93,23 @@ function BoardSkeleton({ columns = 4 }: { columns?: number }) {
   )
 }
 
-const ORPHAN_ID = '__orphan__'
-
 /**
  * Доска: колонка = `project_stages`, имена пользовательские, колонок сколько
- * угодно; справа ленту замыкает «+ Колонка». Перетаскивание патчит `stage_id`
- * — сервер меняет колонку и позицию в хвост, состояние задачи (`done`) при
- * этом НЕ трогается (0044).
+ * угодно; справа ленту замыкает «+ Колонка». Перетаскивание карточки патчит
+ * `stage_id` — сервер меняет колонку и позицию в хвост, состояние задачи
+ * (`done`) при этом НЕ трогается (0044). Перетаскивание КОЛОНКИ патчит её
+ * `position`; тип перетаскиваемого различается по `active.data.type`.
  *
- * «Без колонки» появляется, только если такие карточки есть: у задачи в БД
- * колонка обязательна, но объект из УСТАРЕВШЕГО кэша PWA приходит без
- * `stage_id`, и без этого бакета он исчез бы с доски вовсе.
+ * Доска показывает ТОЛЬКО задачи с колонкой. Задача с `stage_id === null`
+ * (прочерк в поле «Колонка», 0046) сюда не попадает вовсе — она живёт в
+ * списке, календаре и поиске; их число называет строка над лентой
+ * (`lib/boardHints.ts`). Бакета «Без колонки» нет: пустой `stage_id` —
+ * легальное состояние, отдельный столбец под него был бы вторым списком.
+ *
+ * **Колонки видно всегда, если они есть** (решение владельца 26.08). Прежде
+ * доска, где ни одна задача не разложена, пряталась целиком — и человек,
+ * создавший колонку в новом проекте, не видел её до первой разложенной задачи.
+ * Пустое состояние осталось ровно одно: колонок нет вовсе.
  */
 export function BoardView({
   projectId,
@@ -96,15 +128,16 @@ export function BoardView({
   const updateStage = useUpdateStage(projectId)
   const toggleDone = useToggleDone(projectId)
   const [activeId, setActiveId] = useState<string | null>(null)
+  // Что именно в руках: в одной ленте тащат и карточки, и колонки. Тип берём у
+  // dnd-kit (`data.type`), а не по форме id — правило должно быть видимым.
+  const [activeType, setActiveType] = useState<'task' | 'column' | null>(null)
   // Колонка-приёмник считается ЗДЕСЬ, а не из useDroppable в самой колонке:
   // карточки — тоже droppable, и closestCorners почти всегда отдаёт id
   // карточки, из-за чего `isOver` у колонки не поднимался и подсветка приёма
   // не появлялась нигде, кроме пустого места под последней карточкой.
   const [overColumnId, setOverColumnId] = useState<string | null>(null)
-  const [stageForm, setStageForm] = useState<{ open: boolean; stage: TaskStage | null }>({
-    open: false,
-    stage: null,
-  })
+  // Диалог остался ТОЛЬКО на создание: имя правится прямо в заголовке колонки.
+  const [newStageOpen, setNewStageOpen] = useState(false)
   const [stageDelete, setStageDelete] = useState<TaskStage | null>(null)
 
   // Перетаскивание — редакторское действие: PATCH шлёт stage_id ВМЕСТЕ с
@@ -112,12 +145,16 @@ export function BoardView({
   // на самой карточке (`KanbanCard draggable={canEdit}`): так снимаются и
   // обработчики, и a11y-атрибуты «draggable». Свою колонку наблюдатель меняет
   // селектом в карточке задачи.
+  // 5px у мыши и 200мс у пальца держат ДВА жеста разом: клик по имени колонки
+  // (переименование) и перетаскивание за тот же заголовок. Тронешь порог —
+  // сломается либо правка имени, либо свайп ленты на телефоне.
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, {
       activationConstraint: { delay: 200, tolerance: 5 },
     }),
   )
+  const isTouch = useIsTouch()
 
   const labels = useLabels(projectId)
   const labelAssignments = useLabelAssignments(projectId)
@@ -149,47 +186,52 @@ export function BoardView({
   }, [tasks.data])
 
   const columns: ColumnDef[] = useMemo(() => {
-    const orphan: Task[] = []
     const map = new Map<string, Task[]>()
     for (const t of tasks.data ?? []) {
       // Подзадачи живут в карточке родителя, а не отдельными карточками.
       if (t.parent_task_id) continue
-      if (!t.stage_id) {
-        orphan.push(t)
-      } else {
-        const list = map.get(t.stage_id) ?? []
-        list.push(t)
-        map.set(t.stage_id, list)
-      }
+      // Без статуса — не на доске (0046).
+      if (!t.stage_id) continue
+      const list = map.get(t.stage_id) ?? []
+      list.push(t)
+      map.set(t.stage_id, list)
     }
     const byPos = (a: Task, b: Task) => Number(a.position) - Number(b.position)
-    const cols: ColumnDef[] = []
-    if (orphan.length > 0) {
-      cols.push({
-        dndId: ORPHAN_ID,
-        stage: null,
-        name: 'Без колонки',
-        tasks: orphan.sort(byPos),
-        total: null,
-      })
-    }
-    for (const s of stages.data ?? []) {
-      cols.push({
-        dndId: `stage-${s.id}`,
-        stage: s,
-        name: s.name,
-        tasks: (map.get(s.id) ?? []).sort(byPos),
-        total: s.task_count ?? null,
-      })
-    }
-    return cols
+    return (stages.data ?? []).map((s) => ({
+      dndId: `stage-${s.id}`,
+      stage: s,
+      name: s.name,
+      tasks: (map.get(s.id) ?? []).sort(byPos),
+      total: s.task_count ?? null,
+    }))
   }, [tasks.data, stages.data])
 
   const activeTask = (tasks.data ?? []).find((t) => t.id === activeId) ?? null
+  const activeColumn = columns.find((c) => c.dndId === activeId) ?? null
 
   const onDragStart = (e: DragStartEvent) => {
     setActiveId(String(e.active.id))
+    setActiveType(e.active.data.current?.type === 'column' ? 'column' : 'task')
   }
+
+  /**
+   * Цели зависят от того, что тащим. Колонку сравниваем ТОЛЬКО с колонками:
+   * `closestCorners` на смешанной ленте почти всегда отдаёт карточку (их больше
+   * и они ближе к курсору) — тот же дефект, из-за которого `overColumnId`
+   * считается здесь, а не в самой колонке.
+   */
+  const collisionDetection = useCallback<CollisionDetection>(
+    (args) => {
+      if (args.active.data.current?.type !== 'column') return closestCorners(args)
+      return closestCenter({
+        ...args,
+        droppableContainers: args.droppableContainers.filter(
+          (c) => c.data.current?.type === 'column',
+        ),
+      })
+    },
+    [],
+  )
 
   const columnIdFor = (overId: string): string | null => {
     const byId = columns.find((c) => c.dndId === overId)
@@ -198,12 +240,36 @@ export function BoardView({
   }
 
   const onDragOver = (e: DragOverEvent) => {
+    // У колонки приёмника нет: она встаёт между соседями, а не «внутрь».
+    if (e.active.data.current?.type === 'column') {
+      setOverColumnId(null)
+      return
+    }
     setOverColumnId(e.over ? columnIdFor(String(e.over.id)) : null)
   }
 
+  const onColumnDragEnd = (e: DragEndEvent) => {
+    if (!e.over) return
+    const list = stages.data ?? []
+    const byDndId = (dndId: string) => columns.find((c) => c.dndId === dndId)?.stage.id ?? ''
+    const move = reorderStages(
+      list,
+      byDndId(String(e.active.id)),
+      byDndId(String(e.over.id)),
+    )
+    if (!move) return
+    updateStage.mutate({ stageId: move.stageId, position: move.position })
+  }
+
   const onDragEnd = (e: DragEndEvent) => {
+    const wasColumn = e.active.data.current?.type === 'column'
     setActiveId(null)
+    setActiveType(null)
     setOverColumnId(null)
+    if (wasColumn) {
+      onColumnDragEnd(e)
+      return
+    }
     if (!e.over) return
     const taskId = String(e.active.id)
     const overId = String(e.over.id)
@@ -219,8 +285,6 @@ export function BoardView({
       overTaskIndex = targetColumn?.tasks.findIndex((t) => t.id === overId)
     }
     if (!targetColumn) return
-    // В «Без колонки» бросать нельзя — это не колонка, а остаток кэша.
-    if (!targetColumn.stage) return
 
     // No-op if hovering over the same task without moving anywhere new.
     if (sourceColumn.dndId === targetColumn.dndId && overId === taskId) return
@@ -285,23 +349,11 @@ export function BoardView({
       />
     )
   }
-  const visible = (tasks.data ?? []).filter((t) => !t.parent_task_id)
-  if (visible.length === 0) {
-    return activeFilterCount(filters ?? {}) > 0 ? (
-      <TaskEmptyState
-        title="Под фильтры не попала ни одна задача"
-        text="Снимите часть условий — или посмотрите список целиком."
-        cta="Сбросить фильтры"
-        onCta={onResetFilters}
-      />
-    ) : (
-      <TaskEmptyState
-        title="Пока нет задач. Создайте первую."
-        text="Колонки доски оживут с первой задачей."
-      />
-    )
-  }
-
+  // ВЫШЕ гардов: колонками управляют и из пустых состояний, иначе проект без
+  // задач оказывается заперт — управление колонками живёт только здесь.
+  // Это `const` и обычная функция, не хуки, так что порядок хуков не задет.
+  // ОСТОРОЖНО: обернуть `moveStage` в useCallback значит увести хук ниже
+  // ранних возвратов и сломать правило хуков.
   const stageList = stages.data ?? []
   const moveStage = (stage: TaskStage, dir: -1 | 1) => {
     const idx = stageList.findIndex((s) => s.id === stage.id)
@@ -309,68 +361,15 @@ export function BoardView({
     if (idx < 0 || next < 0 || next >= stageList.length) return
     updateStage.mutate({ stageId: stage.id, position: next })
   }
-
-  const firstStageIdx = columns.findIndex((c) => c.stage !== null)
-  return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCorners}
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDragEnd={onDragEnd}
-      onDragCancel={() => {
-        setActiveId(null)
-        setOverColumnId(null)
-      }}
-    >
-      <div className={LANE_CLASS}>
-        {columns.map((col, i) => (
-          <KanbanColumn
-            key={col.dndId}
-            // Первая НАСТОЯЩАЯ колонка: у «Без колонки» (индекс 0, если есть)
-            // инпута нет — «Новая задача» из сайдбара молча падала в диалог.
-            quickCreateTarget={i === firstStageIdx}
-            column={col}
-            projectId={projectId}
-            canEdit={canEdit}
-            isOver={overColumnId === col.dndId}
-            childrenByParent={childrenByParent}
-            labelsByTask={labelsByTask}
-            onTaskClick={onTaskClick}
-            onToggleDone={toggleDone}
-            onRenameStage={(s) => setStageForm({ open: true, stage: s })}
-            onDeleteStage={(s) => setStageDelete(s)}
-            extraMenu={
-              col.stage ? (
-                <>
-                  <DropdownMenuItem onSelect={() => moveStage(col.stage!, -1)}>Левее</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => moveStage(col.stage!, 1)}>Правее</DropdownMenuItem>
-                </>
-              ) : null
-            }
-          />
-        ))}
-        {/* «+ Колонка» — призрачная колонка той же ширины, что соседи. */}
-        {canEdit && (
-          <button
-            type="button"
-            onClick={() => setStageForm({ open: true, stage: null })}
-            className="flex min-h-12 w-[85%] max-w-[320px] shrink-0 snap-start items-center justify-center gap-2 rounded-xl border border-dashed border-glass-border text-[14px] font-semibold text-text2 transition-colors hover:border-amber hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 sm:w-72 sm:max-w-none lg:min-h-11"
-          >
-            <Plus className="h-4 w-4" strokeWidth={2.2} />
-            Колонка
-          </button>
-        )}
-      </div>
-      <DragOverlay>
-        {activeTask && <KanbanCard task={activeTask} overlay />}
-      </DragOverlay>
-
+  const openNewStage = () => setNewStageOpen(true)
+  // Диалоги колонок монтируются ОДИН раз и подмешиваются к любому состоянию:
+  // иначе у каждой ветки завелась бы своя копия.
+  const stageDialogs = (
+    <>
       <StageFormDialog
-        open={stageForm.open}
-        onOpenChange={(v) => setStageForm((s) => ({ ...s, open: v }))}
+        open={newStageOpen}
+        onOpenChange={setNewStageOpen}
         projectId={projectId}
-        stage={stageForm.stage}
       />
       <DeleteStageDialog
         open={stageDelete !== null}
@@ -382,6 +381,140 @@ export function BoardView({
         stages={stageList}
         taskCount={stageDelete ? (stageDelete.task_count ?? 0) : 0}
       />
+    </>
+  )
+
+  // `columns` бакетит только задачи С колонкой; `tasks.data` — весь список.
+  // Разница между ними — это задачи, которых на доске нет: подсказка обязана
+  // называть их число, иначе пустая лента читается как «задачи пропали».
+  // Подзадачи не считаем — они живут в карточке родителя, а не столбцом.
+  const stageless = (tasks.data ?? []).filter((t) => !t.parent_task_id && !t.stage_id).length
+  const visible = columns.reduce((n, c) => n + c.tasks.length, 0)
+  const hint = boardHint({ stages: stageList.length, stageless, visible })
+
+  // Колонок нет вовсе — штатное состояние нового проекта (26.08): стартовую
+  // четвёрку больше никто не навязывает. Показываем ровно то, чего не хватает,
+  // — призрачную «+ Колонка» на месте первой колонки, ту же самую, что
+  // замыкает ленту справа.
+  if (stageList.length === 0) {
+    return (
+      <>
+        {hint && (
+          // Молчать здесь нельзя: у «Подбора» таких задач 1 277, и пустая
+          // лента прочиталась бы как «задачи пропали».
+          <p className="px-1 pb-3 text-[14px] leading-[1.45] text-text2">{hint}</p>
+        )}
+        {canEdit ? (
+          <div className={LANE_CLASS}>
+            <AddStageButton onClick={openNewStage} />
+          </div>
+        ) : (
+          <TaskEmptyState
+            title="Колонок пока нет"
+            text="Их создаёт владелец или редактор проекта — до этого задачи живут в списке."
+          />
+        )}
+        {stageDialogs}
+      </>
+    )
+  }
+
+  if (visible === 0 && activeFilterCount(filters ?? {}) > 0) {
+    // Отдельной веткой и одним блоком: колонки с инпутами приглашали бы
+    // создать задачу, которая тут же исчезнет — она не попадёт под фильтр.
+    return (
+      <TaskEmptyState
+        title="Под фильтры не попала ни одна задача"
+        text="Снимите часть условий — или посмотрите список целиком."
+        cta="Сбросить фильтры"
+        onCta={onResetFilters}
+      />
+    )
+  }
+
+  // Инпут быстрого создания — только в первой колонке: «Новая задача» из
+  // сайдбара иначе молча падала в диалог.
+  const firstStageIdx = 0
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={collisionDetection}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragEnd={onDragEnd}
+      onDragCancel={() => {
+        setActiveId(null)
+        setActiveType(null)
+        setOverColumnId(null)
+      }}
+    >
+      {hint && (
+        // ОДНА строка вместо плейсхолдера в каждой колонке: четыре одинаковых
+        // сообщения читались бы как четыре разные проблемы (см. правило ниже).
+        // Текст считает `lib/boardHints.ts` — там же он и покрыт тестами.
+        <p className="px-1 pb-3 text-[14px] leading-[1.45] text-text2">{hint}</p>
+      )}
+      <div className={LANE_CLASS}>
+        <SortableContext
+          items={columns.map((c) => c.dndId)}
+          strategy={horizontalListSortingStrategy}
+        >
+          {columns.map((col, i) => (
+            <KanbanColumn
+              key={col.dndId}
+              boardEmpty={visible === 0}
+              // Первая НАСТОЯЩАЯ колонка: у «Без колонки» (индекс 0, если есть)
+              // инпута нет — «Новая задача» из сайдбара молча падала в диалог.
+              quickCreateTarget={i === firstStageIdx}
+              column={col}
+              projectId={projectId}
+              canEdit={canEdit}
+              isOver={overColumnId === col.dndId}
+              childrenByParent={childrenByParent}
+              labelsByTask={labelsByTask}
+              onTaskClick={onTaskClick}
+              onToggleDone={toggleDone}
+              onDeleteStage={(s) => setStageDelete(s)}
+              extraMenu={
+                // Порядок колонок меняют перетаскиванием за заголовок. На тач-
+                // устройствах это неудобно: колонка шире экрана на 85%, а лента
+                // листается свайпом — поэтому там пункты меню остаются.
+                isTouch ? (
+                  <>
+                    <DropdownMenuItem onSelect={() => moveStage(col.stage, -1)}>
+                      Левее
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => moveStage(col.stage, 1)}>
+                      Правее
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                ) : null
+              }
+            />
+          ))}
+        </SortableContext>
+        {canEdit && <AddStageButton onClick={openNewStage} />}
+      </div>
+      <DragOverlay>
+        {activeType === 'column' ? (
+          activeColumn && (
+            // Копия шапки, а не вся колонка с карточками: тащить визуально
+            // тяжёлый столбец на телефоне — это лаг и мусор под пальцем.
+            <div className="flex w-72 items-center gap-2 rounded-xl border border-amber/50 bg-bg-alt px-2.5 py-2 shadow-lg">
+              <span className="min-w-0 truncate font-body text-[14px] font-semibold text-text">
+                {activeColumn.name}
+              </span>
+              <span className="ml-auto font-mono text-[13px] text-text2">
+                {activeColumn.tasks.length}
+              </span>
+            </div>
+          )
+        ) : (
+          activeTask && <KanbanCard task={activeTask} overlay />
+        )}
+      </DragOverlay>
+      {stageDialogs}
     </DndContext>
   )
 }

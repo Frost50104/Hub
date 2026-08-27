@@ -6,9 +6,13 @@
 колонки, и карточка остаётся на месте.
 
 Инварианты:
-- у задачи ВСЕГДА есть колонка (`tasks.stage_id` NOT NULL) — новая задача без
-  явного `stage_id` уходит в первую по позиции;
-- у проекта всегда есть хотя бы одна колонка: удаление последней → 409;
+- **колонок у проекта может не быть вовсе.** Новый проект рождается пустым:
+  четыре стартовые колонки навязывали раскладку, которую никто не выбирал.
+  Пока колонок нет, задача заводится без колонки (`stage_id IS NULL`, 0046) —
+  она есть в списке, календаре и поиске, но не на доске. Отсюда же следует, что
+  удалить можно ЛЮБУЮ колонку, включая последнюю;
+- новая задача с колонками в проекте, но без явного `stage_id`, уходит в первую
+  по позиции. Явный `stage_id` проверяется на принадлежность проекту;
 - `done` и `completed_at` пишет только `set_done` (БД сторожит их связь
   CHECK-констрейнтом `ck_tasks_done_completed_at`).
 """
@@ -17,7 +21,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -25,34 +29,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.stage import ProjectStage
 from app.models.task import Task
-
-# Колонки нового проекта. Это стартовый набор, а не системный смысл: любую
-# можно переименовать, удалить и добавить свои.
-DEFAULT_STAGES: tuple[str, ...] = (
-    "К выполнению",
-    "В работе",
-    "На проверке",
-    "Готово",
-)
-
-
-async def create_default_stages(
-    db: AsyncSession, *, tenant_id: UUID, project_id: UUID
-) -> list[ProjectStage]:
-    """Стартовые колонки нового проекта в той же транзакции, что и сам проект."""
-    out: list[ProjectStage] = []
-    for position, name in enumerate(DEFAULT_STAGES):
-        stage = ProjectStage(
-            id=uuid4(),
-            tenant_id=tenant_id,
-            project_id=project_id,
-            name=name,
-            position=position,
-        )
-        db.add(stage)
-        out.append(stage)
-    await db.flush()
-    return out
 
 
 async def list_stages(db: AsyncSession, project_id: UUID) -> list[ProjectStage]:
@@ -80,8 +56,8 @@ async def get_stage_in_project(
 async def first_stage(db: AsyncSession, project_id: UUID) -> ProjectStage | None:
     """Первая по позиции колонка проекта — дом для задачи без явного этапа.
 
-    None означает проект вообще без колонок: API такого не допускает (удаление
-    последней → 409), но падать на этом нельзя — вызывающий отвечает 409.
+    None означает проект без колонок — штатное состояние нового проекта, а не
+    поломка: задача просто заводится без колонки.
     """
     row = await db.execute(
         select(ProjectStage)
@@ -92,39 +68,46 @@ async def first_stage(db: AsyncSession, project_id: UUID) -> ProjectStage | None
     return row.scalar_one_or_none()
 
 
-async def require_stage(
+async def default_stage_for(
     db: AsyncSession, project_id: UUID, stage_id: UUID | None
-) -> ProjectStage:
-    """Колонка для задачи: явная либо первая. 409, если колонок нет вовсе."""
+) -> ProjectStage | None:
+    """Колонка для новой задачи: явная — всегда, без явной — первая ИЛИ никакой.
+
+    `None` означает «в проекте нет колонок» и это НЕ ошибка: задача без колонки
+    легальна с 0046, а проект теперь рождается пустым. Раньше здесь был 409
+    «создайте её на доске» — он опирался на снятый инвариант «≥1 колонка» и
+    ронял бы создание задачи в каждом новом проекте.
+    """
     if stage_id is not None:
         return await get_stage_in_project(db, project_id, stage_id)
-    stage = await first_stage(db, project_id)
-    if stage is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="В проекте нет ни одной колонки — создайте её на доске",
-        )
-    return stage
+    return await first_stage(db, project_id)
 
 
 async def next_position(
-    db: AsyncSession, project_id: UUID, *, stage_id: UUID
+    db: AsyncSession, project_id: UUID, *, stage_id: UUID | None
 ) -> Decimal:
-    """Append в хвост колонки."""
+    """Append в хвост колонки; `stage_id=None` — в хвост задач без статуса.
+
+    Своя очередь у «без статуса» нужна, чтобы порядок в списке был устойчивым:
+    общий `max(position)+1` по проекту дал бы всем таким задачам единицу.
+    """
+    same_stage = (
+        Task.stage_id.is_(None) if stage_id is None else Task.stage_id == stage_id
+    )
     row = await db.execute(
         select(func.coalesce(func.max(Task.position) + 1, 1)).where(
-            Task.project_id == project_id, Task.stage_id == stage_id
+            Task.project_id == project_id, same_stage
         )
     )
     return Decimal(row.scalar_one())
 
 
-async def set_stage(db: AsyncSession, task: Task, stage: ProjectStage) -> UUID:
+async def set_stage(db: AsyncSession, task: Task, stage: ProjectStage) -> UUID | None:
     """Перенести задачу в колонку: `stage_id` + позиция в хвост.
 
     Состояние задачи (`done`) НЕ трогаем — это независимая ось. Возвращает
-    прежний `stage_id` (вызывающему он нужен для ленты и уведомлений);
-    побочки (activity, watchers) — у вызывающего, ему известен актор.
+    прежний `stage_id` — `None`, если задача была без статуса (0046);
+    вызывающему он нужен для ленты, побочки на нём.
     """
     previous = task.stage_id
     task.stage_id = stage.id
@@ -144,20 +127,3 @@ def set_done(task: Task, value: bool) -> bool:
     task.done = value
     task.completed_at = datetime.now(UTC) if value else None
     return was
-
-
-async def assert_not_last_stage(db: AsyncSession, stage: ProjectStage) -> None:
-    """У проекта остаётся хотя бы одна колонка — иначе задаче негде лежать."""
-    row = await db.execute(
-        select(func.count())
-        .select_from(ProjectStage)
-        .where(
-            ProjectStage.project_id == stage.project_id,
-            ProjectStage.id != stage.id,
-        )
-    )
-    if int(row.scalar_one()) == 0:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Это единственная колонка проекта — задачам негде лежать",
-        )

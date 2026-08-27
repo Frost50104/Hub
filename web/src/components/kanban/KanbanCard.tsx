@@ -50,7 +50,13 @@ export function KanbanCard({
   // в дереве доступности гасла бы вся карточка вместе с кнопкой статуса —
   // а её исполнителю-наблюдателю как раз нажимать можно.
   const interactive = !overlay && draggable
-  const sortable = useSortable({ id: task.id, disabled: !interactive })
+  // `type` читает BoardView: в одной ленте теперь тащат и карточки, и
+  // колонки, а обработчик обязан понимать, что именно у него в руках.
+  const sortable = useSortable({
+    id: task.id,
+    data: { type: 'task' },
+    disabled: !interactive,
+  })
   const style: CSSProperties = overlay
     ? {}
     : {

@@ -37,6 +37,9 @@ export function ImportTasksDialog({
         toast.success(`Импорт завершён: создано ${result.created}, пропущено ${result.skipped}`)
         qc.invalidateQueries({ queryKey: ['tasks', projectId] })
         qc.invalidateQueries({ queryKey: ['stages', projectId] })
+        // Импорт — это созданные мной задачи: «Ваша статистика» их считает.
+        qc.invalidateQueries({ queryKey: ['me-tasks'] })
+        qc.invalidateQueries({ queryKey: ['me-stats'] })
         qc.invalidateQueries({ queryKey: ['projects'] })
         // Импорт создаёт метки и вешает их на строки — без инвалидации
         // назначений чипы появлялись только после F5 (QA-0821 #8).

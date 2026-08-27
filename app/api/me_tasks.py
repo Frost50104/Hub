@@ -59,7 +59,9 @@ async def list_my_tasks(
         # key проекта — для бейджа «KEY-42» в кросс-проектном списке,
         # имя колонки — единственный признак прогресса в чужом проекте.
         .join(Project, Project.id == Task.project_id)
-        .join(ProjectStage, ProjectStage.id == Task.stage_id)
+        # LEFT JOIN обязателен: у задачи может не быть статуса (0046), и INNER
+        # выкинул бы её из «Моих задач» целиком — вместе с назначением.
+        .outerjoin(ProjectStage, ProjectStage.id == Task.stage_id)
         .where(assignee_exists(principal.employee_id))
         .order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
     )

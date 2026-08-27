@@ -1,20 +1,23 @@
-"""Tasks API (Hub-MVP.3a). CRUD + status/section/assignee/due changes +
+"""Tasks API (Hub-MVP.3a). CRUD + status/assignee/due changes +
 archive. Drag-reorder via PATCH `position` lands in 3b; watchers/comments
 land in 3c.
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from signaris_auth import Principal
-from sqlalchemy import case, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import enforce_rate_limit, get_db, require_auth
+from app.models.attachment import TaskAttachment
+from app.models.notification import Notification
 from app.models.shadow import ShadowUser
 from app.models.stage import ProjectStage
 from app.models.task import Task, TaskLabelAssignment, TaskWatcher
@@ -27,9 +30,15 @@ from app.schemas.task import (
     resolve_assignee_ids,
 )
 from app.services.activity_writer import record_activity
+from app.services.attachments import purge_blobs
 from app.services.notify import notify_done_changed
 from app.services.personal_projects import personal_task_scope, require_task_access
-from app.services.project_access import ProjectRole, is_hub_admin, require_project_role
+from app.services.project_access import (
+    EDIT_ROLES,
+    ProjectRole,
+    is_hub_admin,
+    require_project_role,
+)
 from app.services.stages import get_stage_in_project, set_done, set_stage
 from app.services.task_assignees import (
     add_assignee,
@@ -47,7 +56,6 @@ from app.services.tasks import (
     allocate_task_seq,
     apply_done_filter,
     assert_parent_one_level,
-    assert_section_in_project,
     create_task_record,
     reject_legacy_status,
 )
@@ -72,7 +80,6 @@ TaskSortField = Literal["position", "due_at", "priority", "created_at", "title"]
 
 # Алиасы старых имён: update_task/тесты зовут их отсюда.
 _allocate_task_seq = allocate_task_seq
-_assert_section_in_project = assert_section_in_project
 _assert_parent_one_level = assert_parent_one_level
 
 _serialize = serialize_with_assignees
@@ -111,7 +118,6 @@ async def list_tasks(
     # бандл увидел бы НЕотфильтрованный список вместо ошибки (0044).
     status_: str | None = Query(default=None, alias="status"),
     assignee_id: UUID | None = Query(default=None, alias="assignee"),
-    section_id: UUID | None = Query(default=None),
     priority: TaskPriority | None = Query(default=None),
     label: UUID | None = Query(default=None),
     due_from: datetime | None = Query(default=None),
@@ -145,8 +151,16 @@ async def list_tasks(
     stmt = (
         select(Task)
         .where(Task.project_id == project_id)
-        # Вторичный ключ position — стабильный порядок при равных значениях.
-        .order_by(sort_expr, Task.position)
+        # Тай-брейкер `seq` обязателен, и это не косметика. `position`
+        # считается ВНУТРИ колонки (`stages.next_position`), поэтому в проекте
+        # позиции массово совпадают: на проде у «Ввода/вывода сотрудников» 214
+        # задач на 56 различных позиций. При сортировке по умолчанию
+        # (`sort=position`) выражение вырождалось в `ORDER BY position,
+        # position` — второго ключа не было вовсе, и порядок равных строк
+        # Postgres вправе менять от запроса к запросу. Пока задачи
+        # группировались по секциям, совпадений внутри блока было мало и это не
+        # бросалось в глаза; в плоском списке список бы «плавал».
+        .order_by(sort_expr, Task.position, Task.seq)
     )
     if scope is not None:
         stmt = stmt.where(scope)
@@ -157,8 +171,6 @@ async def list_tasks(
     if assignee_id is not None:
         # Семантика: «сотрудник СРЕДИ исполнителей».
         stmt = stmt.where(assignee_exists(assignee_id))
-    if section_id is not None:
-        stmt = stmt.where(Task.section_id == section_id)
     if stage_id is not None:
         stmt = stmt.where(Task.stage_id == stage_id)
     if priority is not None:
@@ -293,14 +305,6 @@ async def update_task(
 
     # Nullable-поля различают «не пришло» (нет в model_fields_set — не трогаем)
     # и «пришёл явный null» (очистить значение).
-    if "section_id" in body.model_fields_set and body.section_id != task.section_id:
-        if body.section_id is not None:
-            await _assert_section_in_project(db, task.project_id, body.section_id)
-        changes["section_id"] = {
-            "old": str(task.section_id) if task.section_id else None,
-            "new": str(body.section_id) if body.section_id else None,
-        }
-        task.section_id = body.section_id
 
     if body.priority is not None and body.priority != task.priority:
         changes["priority"] = {"old": task.priority, "new": body.priority}
@@ -350,15 +354,30 @@ async def update_task(
     # Колонка доски и выполнение — независимые оси (0044). Перенос карточки
     # пишется в ленту, но людей не будит: на доске из пяти колонок пуш за
     # каждый шаг превратился бы в шум. Пуш остаётся за сменой «выполнена».
-    if "stage_id" in body.model_fields_set and body.stage_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="stage_id не может быть пустым: у задачи всегда есть колонка",
+    clearing_stage = "stage_id" in body.model_fields_set and body.stage_id is None
+    if clearing_stage and task.stage_id is not None:
+        # Прочерк в поле «Статус» (0046): задача уходит с доски, оставаясь
+        # в списке, календаре и поиске. Позицию не трогаем — она пригодится,
+        # если статус вернут.
+        previous = await db.get(ProjectStage, task.stage_id)
+        task.stage_id = None
+        await record_activity(
+            db,
+            tenant_id=principal.tenant_id,
+            task_id=task.id,
+            actor_id=principal.employee_id,
+            kind="stage_changed",
+            payload={
+                "stage_from": previous.name if previous is not None else None,
+                "stage_to": None,
+            },
         )
     if body.stage_id is not None and body.stage_id != task.stage_id:
         target_stage = await get_stage_in_project(db, task.project_id, body.stage_id)
         previous_id = await set_stage(db, task, target_stage)
-        previous = await db.get(ProjectStage, previous_id)
+        # previous_id пуст, если статуса не было вовсе: `db.get` с None
+        # не «не нашёл», а некорректный первичный ключ.
+        previous = await db.get(ProjectStage, previous_id) if previous_id else None
         await record_activity(
             db,
             tenant_id=principal.tenant_id,
@@ -566,14 +585,51 @@ async def delete_task(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    """Жёсткое удаление задачи. Корзины нет — это решение владельца.
+
+    Право у владельца, редактора и hub-admin (26.08): гейт совпал с тем, что
+    клиенту обещает `can_edit`, — кнопка удаления живёт в том же меню карточки,
+    что и «В архив», и показывать её тому, кто получит 403, нельзя.
+
+    Каскад БД уносит подзадачи (`tasks.parent_task_id` ondelete CASCADE),
+    комментарии, вложения, наблюдателей, исполнителей, ленту, зависимости и
+    значения кастом-полей. Сверх каскада ручка чистит ДВЕ вещи, которые БД не
+    знает: файлы вложений на диске и уведомления, ведущие на эту задачу.
+    """
     task = await db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
-    # Hard delete: owner only (admin bypasses via is_hub_admin).
     if not is_hub_admin(principal):
-        await require_task_access(db, task, principal, allow=("owner",))
+        await require_task_access(db, task, principal, allow=EDIT_ROLES)
+
+    # Ключи блобов — ДО удаления и вместе с подзадачами: их вложения уедут тем
+    # же каскадом, а файлы остались бы на диске навсегда.
+    doomed = select(Task.id).where(
+        (Task.id == task.id) | (Task.parent_task_id == task.id)
+    )
+    blob_keys = list(
+        (
+            await db.execute(
+                select(TaskAttachment.storage_key).where(
+                    TaskAttachment.task_id.in_(doomed)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # Уведомление переживает задачу, а ссылка в нём ведёт на `?task={id}`
+    # (`services/notify.py::_task_url`) — «Входящие» иначе остаются с живой
+    # строкой, которая открывает пустую карточку.
+    await db.execute(
+        delete(Notification).where(Notification.url.like(f"%task={task.id}"))
+    )
     await db.delete(task)
     await db.commit()
+
+    # Файлы — ПОСЛЕ commit и в отдельном потоке (см. докстринг purge_blobs).
+    if blob_keys:
+        await asyncio.to_thread(purge_blobs, blob_keys)
 
 
 # Keep TaskPriority alive — currently used only as a Field type in schemas;

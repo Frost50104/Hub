@@ -16,6 +16,7 @@ Kinds (extended as features land):
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -33,14 +34,36 @@ async def record_activity(
     actor_id: UUID,
     kind: str,
     payload: dict[str, Any] | None = None,
+    created_at: datetime | None = None,
 ) -> None:
-    """Insert one row into task_activity. Caller must commit later."""
-    await session.execute(
-        insert(TaskActivity).values(
-            tenant_id=tenant_id,
-            task_id=task_id,
-            actor_id=actor_id,
-            kind=kind,
-            payload=payload,
-        )
-    )
+    """Insert one row into task_activity. Caller must commit later.
+
+    `created_at` — ТОЛЬКО для переноса истории из внешнего трекера
+    (`app/jobs/import_weeek_bundle.py`): у события должна стоять дата, когда
+    задачу завели на самом деле, иначе архив 2022 года выглядит созданным
+    в день импорта. Живой код его не передаёт — там прав `server_default now()`.
+    """
+    values: dict[str, Any] = {
+        "tenant_id": tenant_id,
+        "task_id": task_id,
+        "actor_id": actor_id,
+        "kind": kind,
+        "payload": payload,
+    }
+    if created_at is not None:
+        values["created_at"] = created_at
+    await session.execute(insert(TaskActivity).values(**values))
+
+
+async def record_activities(session: AsyncSession, rows: list[dict[str, Any]]) -> None:
+    """Пачка событий одним INSERT. Только для переноса истории.
+
+    Живой код пишет по событию за раз (`record_activity`) — там их и бывает
+    одно. Импорт из внешнего трекера заводит по событию «создана» на каждую
+    из тысяч задач, и 16 703 отдельных round-trip'а к базе — это минуты на
+    ровном месте. Писатель `task_activity` при этом остаётся один: модуль.
+
+    Каждая строка — {tenant_id, task_id, actor_id, kind, payload?, created_at?}.
+    """
+    if rows:
+        await session.execute(insert(TaskActivity), rows)

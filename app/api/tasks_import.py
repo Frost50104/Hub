@@ -12,10 +12,10 @@ bucket `task:import` (5/мин). Row-lock проекта (seq) держится 
 Колонки фиксированного шаблона (заголовок — как в таблице ниже, регистр не
 важен): title* · description · assignee_email · due (ДД.ММ.ГГГГ или ISO) ·
 priority (low|medium|high|urgent или низкий|средний|высокий|срочно) ·
-section (имя существующей секции) · stage (имя существующего этапа) ·
-labels (имена существующих меток через «|»). Неизвестный исполнитель/секция/
-этап/метка — предупреждение в отчёте, задача создаётся без них: импорт не
-плодит структуру проекта и не назначает «похожего» человека.
+section (алиас на метку) · stage (имя существующего этапа) ·
+labels (имена существующих меток через «|»). Неизвестный исполнитель/этап/
+метка — предупреждение в отчёте, задача создаётся без них: импорт не плодит
+структуру проекта и не назначает «похожего» человека.
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import enforce_rate_limit, get_db, require_auth
-from app.models.section import Section
 from app.models.shadow import ShadowUser
 from app.models.stage import ProjectStage
 from app.models.task import TaskLabel, TaskLabelAssignment
@@ -116,12 +115,6 @@ async def import_tasks(
         )
 
     # Справочники проекта — один раз, по имени (lower).
-    sections = {
-        s.name.strip().lower(): s
-        for s in (
-            await db.execute(select(Section).where(Section.project_id == project_id))
-        ).scalars()
-    }
     stages = {
         s.name.strip().lower(): s
         for s in (
@@ -191,14 +184,14 @@ async def import_tasks(
                     "(нужен ДД.ММ.ГГГГ или ГГГГ-ММ-ДД) — без срока"
                 )
 
-        section = sections.get(row.get("section", "").lower()) if row.get("section") else None
-        if row.get("section") and section is None:
-            errors.append(
-                f"Строка {line_no}: секция «{row['section']}» не найдена — без секции"
-            )
         stage = stages.get(row.get("stage", "").lower()) if row.get("stage") else None
         if row.get("stage") and stage is None:
-            errors.append(f"Строка {line_no}: этап «{row['stage']}» не найден — в первый этап")
+            # Куда попадёт задача, зависит от того, есть ли у проекта колонки
+            # вообще: обещать «первый этап» проекту без колонок — враньё.
+            fallback = "в первую колонку" if stages else "без колонки"
+            errors.append(
+                f"Строка {line_no}: колонка «{row['stage']}» не найдена — {fallback}"
+            )
 
         assignee_ids: list[UUID] = []
         if row.get("assignee_email"):
@@ -211,19 +204,25 @@ async def import_tasks(
             else:
                 assignee_ids = [emp]
 
+        # `section` — алиас на метку. Секций больше нет, но у людей остались
+        # заготовленные файлы с этой колонкой, а имена совпадают один в один:
+        # переезд секций в метки сохранил их дословно. Молча ронять колонку
+        # значило бы потерять разбивку без единого слова в отчёте.
+        label_names = [x.strip() for x in (row.get("labels") or "").split("|") if x.strip()]
+        if row.get("section"):
+            label_names.append(row["section"].strip())
+
         label_ids: list[UUID] = []
-        if row.get("labels"):
-            for name in [x.strip() for x in row["labels"].split("|") if x.strip()]:
-                label = labels.get(name.lower())
-                if label is None:
-                    errors.append(f"Строка {line_no}: метка «{name}» не найдена — пропущена")
-                else:
-                    label_ids.append(label.id)
+        for name in label_names:
+            label = labels.get(name.lower())
+            if label is None:
+                errors.append(f"Строка {line_no}: метка «{name}» не найдена — пропущена")
+            else:
+                label_ids.append(label.id)
 
         body = TaskCreate(
             title=title[:500],
             description=(row.get("description") or None),
-            section_id=section.id if section else None,
             stage_id=stage.id if stage else None,
             priority=priority,  # type: ignore[arg-type]
             assignee_ids=assignee_ids or None,

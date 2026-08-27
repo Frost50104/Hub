@@ -1,8 +1,9 @@
 """Колонки доски (0044): свободные имена, независимость от «выполнена».
 
 Колонка — это только имя и позиция. Состояние задачи (`done`) живёт отдельно:
-перенос между колонками его не трогает, галочка не двигает карточку. Проекту
-нужна хотя бы одна колонка — иначе задаче негде лежать.
+перенос между колонками его не трогает, галочка не двигает карточку. Колонок у
+проекта может не быть вовсе (26.08): новый проект рождается пустым, задача в
+нём заводится без колонки, а удалить можно любую колонку, включая последнюю.
 """
 
 from __future__ import annotations
@@ -13,13 +14,15 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.me_tasks import list_my_tasks
 from app.api.projects import create_project
 from app.api.stages import create_stage, delete_stage, list_project_stages, update_stage
-from app.api.tasks import create_task, get_task, update_task
+from app.api.stats import get_stats
+from app.api.tasks import create_task, get_task, list_tasks, update_task
 from app.schemas.project import ProjectCreate
 from app.schemas.stage import StageCreate, StageUpdate
 from app.schemas.task import TaskCreate, TaskUpdate
-from tests.integration.conftest import make_principal
+from tests.integration.conftest import make_principal, seed_stages
 from tests.integration.test_project_access import _register
 
 pytestmark = pytest.mark.integration
@@ -36,15 +39,59 @@ async def _seed(db: AsyncSession, tenant_id: uuid.UUID, slug: str):
     )
     await _register(db, owner, org_role="office")
     project = await create_project(ProjectCreate(name=f"Stages {slug}"), owner, db)
+    # Колонки — явным сидом: новый проект их не создаёт, а тестам ниже нужна
+    # именно доска, а не пустой проект.
+    await seed_stages(db, project.id, owner)
     return owner, project
 
 
-async def test_new_project_gets_four_default_stages(db: AsyncSession, tenant_id: uuid.UUID):
-    owner, project = await _seed(db, tenant_id, "st1")
-    stages = await list_project_stages(project.id, principal=owner, db=db)
-    assert [s.name for s in stages] == ["К выполнению", "В работе", "На проверке", "Готово"]
-    assert [s.position for s in stages] == [0, 1, 2, 3]
-    assert all(s.task_count == 0 for s in stages)
+async def test_new_project_has_no_stages(db: AsyncSession, tenant_id: uuid.UUID):
+    """Новый проект рождается БЕЗ колонок — их создаёт человек, когда захочет.
+
+    До 26.08 здесь была четвёрка «К выполнению / В работе / На проверке /
+    Готово»: раскладка, которую никто не выбирал, но которая занимала доску.
+    """
+    owner = make_principal(
+        tenant_id, email="owner-st1@t.ru", role="member", tenant_slug="st1"
+    )
+    await _register(db, owner, org_role="office")
+    project = await create_project(ProjectCreate(name="Stages st1"), owner, db)
+    assert await list_project_stages(project.id, principal=owner, db=db) == []
+
+
+async def test_task_in_project_without_columns_has_none(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Проект без колонок задачи принимает: они просто без колонки (0046).
+
+    Регресс-тест на 409 «В проекте нет ни одной колонки»: он опирался на снятый
+    инвариант и ронял бы создание задачи в КАЖДОМ новом проекте.
+    """
+    owner = make_principal(
+        tenant_id, email="owner-st1b@t.ru", role="member", tenant_slug="st1b"
+    )
+    await _register(db, owner, org_role="office")
+    project = await create_project(ProjectCreate(name="Stages st1b"), owner, db)
+    task = await create_task(project.id, TaskCreate(title="Без доски"), owner, db)
+    assert task.stage_id is None
+    # И она видна в списке проекта — доска не единственный экран.
+    rows = await list_tasks(
+        project.id,
+        include_archived=False,
+        done=None,
+        status_=None,
+        assignee_id=None,
+        priority=None,
+        label=None,
+        due_from=None,
+        due_to=None,
+        sort="position",
+        order="asc",
+        principal=owner,
+        db=db,
+        stage_id=None,
+    )
+    assert [t.id for t in rows] == [task.id]
 
 
 async def test_task_without_stage_lands_in_first_column(
@@ -173,10 +220,10 @@ async def test_delete_column_moves_tasks_and_keeps_state(
     await update_task(task.id, TaskUpdate(done=True), owner, db)
 
     with pytest.raises(HTTPException) as exc:
-        await delete_stage(stages[3].id, move_to=None, principal=owner, db=db)
+        await delete_stage(stages[3].id, move_to=None, detach=False, principal=owner, db=db)
     assert exc.value.status_code == 409, "с задачами нужен move_to"
 
-    await delete_stage(stages[3].id, move_to=stages[0].id, principal=owner, db=db)
+    await delete_stage(stages[3].id, move_to=stages[0].id, detach=False, principal=owner, db=db)
     fresh = await get_task(task.id, owner, db)
     assert fresh.stage_id == stages[0].id
     # Перенос при удалении колонки — не «вернуть в работу».
@@ -185,20 +232,45 @@ async def test_delete_column_moves_tasks_and_keeps_state(
     assert [s.position for s in left] == [0, 1, 2]
 
 
-async def test_last_column_cannot_be_deleted(db: AsyncSession, tenant_id: uuid.UUID):
+async def test_last_column_can_be_deleted(db: AsyncSession, tenant_id: uuid.UUID):
+    """Из проекта с одной колонкой можно вернуться к пустой доске.
+
+    Раньше здесь стоял 409 «единственная колонка»: он охранял инвариант «≥1
+    колонка», который сам же и делал ловушкой — создав первую колонку по
+    ошибке, выйти было нельзя.
+    """
     owner, project = await _seed(db, tenant_id, "st7")
     stages = await list_project_stages(project.id, principal=owner, db=db)
     for s in stages[1:]:
-        await delete_stage(s.id, move_to=stages[0].id, principal=owner, db=db)
+        await delete_stage(s.id, move_to=stages[0].id, detach=False, principal=owner, db=db)
     left = await list_project_stages(project.id, principal=owner, db=db)
     assert len(left) == 1
+
+    await delete_stage(left[0].id, move_to=None, detach=False, principal=owner, db=db)
+    assert await list_project_stages(project.id, principal=owner, db=db) == []
+    # И задача в проекте без колонок по-прежнему создаётся — просто без колонки.
+    task = await create_task(project.id, TaskCreate(title="Пустая доска"), owner, db)
+    assert task.stage_id is None
+
+
+async def test_delete_with_tasks_needs_move_to_or_detach(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Судьбу задач выбирает человек: молча снять колонку у пачки нельзя."""
+    owner, project = await _seed(db, tenant_id, "st7b")
+    stages = await list_project_stages(project.id, principal=owner, db=db)
+    task = await create_task(
+        project.id, TaskCreate(title="Живая", stage_id=stages[0].id), owner, db
+    )
     with pytest.raises(HTTPException) as exc:
-        await delete_stage(left[0].id, move_to=None, principal=owner, db=db)
+        await delete_stage(stages[0].id, move_to=None, detach=False, principal=owner, db=db)
     assert exc.value.status_code == 409
-    assert "единственная колонка" in exc.value.detail.lower()
-    # И задача в проекте с одной колонкой по-прежнему создаётся.
-    task = await create_task(project.id, TaskCreate(title="Одна колонка"), owner, db)
-    assert task.stage_id == left[0].id
+
+    await delete_stage(stages[0].id, move_to=None, detach=True, principal=owner, db=db)
+    fresh = await get_task(task.id, owner, db)
+    assert fresh.stage_id is None
+    # Задача цела и осталась в проекте — «без колонки», а не удалена.
+    assert fresh.title == "Живая" and fresh.done is False
 
 
 async def test_stats_counts_by_column_and_state(db: AsyncSession, tenant_id: uuid.UUID):
@@ -334,3 +406,108 @@ async def test_partial_index_matches_the_open_predicate(db: AsyncSession):
     assert definition is not None, "индекс-близнец по done не создан миграцией 0044"
     assert "NOT done" in definition and "archived_at IS NULL" in definition
     assert "(tenant_id, due_at)" in definition.replace('"', "")
+
+
+# ─── Задача без статуса (0046) ───────────────────────────────────────────────
+
+
+async def test_explicit_null_clears_the_status(db: AsyncSession, tenant_id: uuid.UUID):
+    """Прочерк в поле «Статус» снимает колонку, а не отвечает 422.
+
+    До 0046 у задачи колонка была обязательна, и явный `null` отвергался.
+    Требование изменилось: доска показывает только задачи со статусом, а
+    остальные живут в списке.
+    """
+    owner, project = await _seed(db, tenant_id, "st11")
+    stages = await list_project_stages(project.id, principal=owner, db=db)
+    task = await create_task(project.id, TaskCreate(title="Хвост из архива"), owner, db)
+    assert task.stage_id == stages[0].id
+
+    cleared = await update_task(task.id, TaskUpdate(stage_id=None), owner, db)
+    assert cleared.stage_id is None
+    # Состояние задачи — независимая ось: снятие статуса её не трогает.
+    assert cleared.done is False
+
+    back = await update_task(task.id, TaskUpdate(stage_id=stages[1].id), owner, db)
+    assert back.stage_id == stages[1].id
+
+
+async def test_task_without_status_stays_in_lists(db: AsyncSession, tenant_id: uuid.UUID):
+    """Снятый статус убирает задачу с ДОСКИ, а не из продукта.
+
+    Самое опасное место — `/me/tasks`: там INNER JOIN на `project_stages`
+    выкинул бы такую задачу вместе с назначением, то есть с главного экрана
+    исполнителя.
+    """
+    owner, project = await _seed(db, tenant_id, "st12")
+    task = await create_task(
+        project.id,
+        TaskCreate(title="Без статуса", assignee_ids=[owner.employee_id]),
+        owner,
+        db,
+    )
+    await update_task(task.id, TaskUpdate(stage_id=None), owner, db)
+
+    rows = await list_tasks(
+        project.id,
+        include_archived=False,
+        done=None,
+        status_=None,
+        assignee_id=None,
+        priority=None,
+        label=None,
+        due_from=None,
+        due_to=None,
+        sort="position",
+        order="asc",
+        principal=owner,
+        db=db,
+        stage_id=None,
+    )
+    assert [t.id for t in rows] == [task.id]
+    assert rows[0].stage_id is None
+
+    mine = await list_my_tasks(
+        done=None, status_=None, due_window=None, include_archived=False,
+        include_personal=False, principal=owner, db=db,
+    )
+    assert task.id in [t.id for t in mine]
+    assert next(t for t in mine if t.id == task.id).stage_name is None
+
+
+async def test_stats_counts_tasks_without_status(db: AsyncSession, tenant_id: uuid.UUID):
+    """Срез дашборда не должен терять задачи без статуса.
+
+    `group_by(stage_id)` отдаёт их ключом «None» — фронт рисует по нему
+    отдельный сегмент, иначе пончик молча недосчитывает.
+    """
+    owner, project = await _seed(db, tenant_id, "st13")
+    stages = await list_project_stages(project.id, principal=owner, db=db)
+    kept = await create_task(project.id, TaskCreate(title="В колонке"), owner, db)
+    dropped = await create_task(project.id, TaskCreate(title="Без статуса"), owner, db)
+    await update_task(dropped.id, TaskUpdate(stage_id=None), owner, db)
+
+    stats = await get_stats(project.id, principal=owner, db=db)
+    assert stats.stage_breakdown[str(stages[0].id)] == 1
+    assert stats.stage_breakdown["None"] == 1
+    assert sum(stats.stage_breakdown.values()) == 2
+    assert kept.stage_id is not None
+
+
+async def test_assignee_viewer_may_clear_the_status(db: AsyncSession, tenant_id: uuid.UUID):
+    """Исполнитель двигает СВОЮ задачу по колонкам даже с ролью viewer — значит
+    и убирает её с доски. Это следствие `ASSIGNEE_EDITABLE_FIELDS`, а не
+    случайность: фиксируем, чтобы правка гейта не сняла право молча."""
+    owner, project = await _seed(db, tenant_id, "st14")
+    worker = make_principal(
+        tenant_id, email="worker-st14@t.ru", role="member", tenant_slug="st14"
+    )
+    await _register(db, worker)
+    task = await create_task(
+        project.id,
+        TaskCreate(title="Моя задача", assignee_ids=[worker.employee_id]),
+        owner,
+        db,
+    )
+    cleared = await update_task(task.id, TaskUpdate(stage_id=None), worker, db)
+    assert cleared.stage_id is None

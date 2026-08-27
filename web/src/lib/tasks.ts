@@ -11,14 +11,14 @@ export interface TaskAssigneeBrief {
 export interface Task {
   id: string
   project_id: string
-  section_id: string | null
   parent_task_id: string | null
   title: string
   description: string | null
   /** Состояние задачи (0044). Колонка доски к нему отношения не имеет. */
   done: boolean
-  /** Колонка доски. Optional: объект из кэша старого бандла поля не несёт, и
-   *  доска кладёт такие карточки в бакет «Без колонки», а не теряет. */
+  /** Колонка доски. `null` — «без статуса»: задача есть в списке, календаре
+   *  и поиске, но на доске её нет (0046). Поле необязательное ещё и потому,
+   *  что объект из кэша старого бандла его не несёт. */
   stage_id?: string | null
   priority: TaskPriority
   /** Источник истины по исполнителям. Optional: объекта из кэша, пережившего
@@ -82,7 +82,6 @@ export interface TaskListFilters {
   /** `false` — невыполненные, `true` — выполненные, отсутствие — все. */
   done?: boolean
   assignee?: string
-  section_id?: string
   priority?: TaskPriority
   /** id метки — задачи, на которых она висит. */
   label?: string
@@ -105,7 +104,6 @@ export interface TaskCreateBody {
   stage_id?: string | null
   title: string
   description?: string
-  section_id?: string | null
   parent_task_id?: string
   priority?: TaskPriority
   assignee_id?: string | null
@@ -115,11 +113,12 @@ export interface TaskCreateBody {
 }
 
 export interface TaskUpdateBody {
-  /** Колонка доски. Явный null сервер не принимает: колонка нужна всегда. */
+  /** Колонка доски. Явный `null` — прочерк в поле «Статус»: задача уходит
+   *  с доски, оставаясь в списке и поиске (0046). Не передать поле и
+   *  передать null — разные вещи. */
   stage_id?: string | null
   title?: string
   description?: string
-  section_id?: string | null
   /** Выполнена или нет — независимо от колонки. */
   done?: boolean
   priority?: TaskPriority

@@ -7,7 +7,6 @@ returns:
   a row for them without a bar and counts «N без срока» (redesign 2026-08).
   The parameter is new, so older PWA bundles keep getting dated tasks only.
 - dependencies among them (edges where BOTH endpoints land in the window)
-- sections (UI groups bars by section)
 
 Same auth rules as `/calendar` — viewer+ on project. MAX 366 day window
 (Calendar caps at 92; Timeline often shows months of work).
@@ -19,14 +18,13 @@ from datetime import date, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 from signaris_auth import Principal
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
 from app.models.dependency import TaskDependency
-from app.models.section import Section
 from app.models.task import Task
 from app.schemas.dependency import TaskDependencyResponse
 from app.schemas.task import TaskResponse
@@ -40,18 +38,9 @@ router = APIRouter(tags=["timeline"])
 _MAX_RANGE_DAYS = 366
 
 
-class SectionBrief(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    name: str
-    position: int
-
-
 class TimelineResponse(BaseModel):
     tasks: list[TaskResponse]
     dependencies: list[TaskDependencyResponse]
-    sections: list[SectionBrief]
 
 
 def _parse_iso_date(raw: str, *, field: str) -> date:
@@ -107,7 +96,10 @@ async def get_timeline(
         # (дубли полос на диаграмме). Исполнители едут батчем ниже.
         select(Task)
         .where(Task.project_id == project_id, Task.archived_at.is_(None), window)
-        .order_by(Task.section_id.nulls_first(), Task.position)
+        # Секции больше нет — сортируем как список задач: позиция плюс
+        # `seq` тай-брейкером, иначе при равных позициях порядок полос
+        # менялся бы от запроса к запросу.
+        .order_by(Task.position, Task.seq)
     )
 
     tasks = (await db.execute(task_stmt)).scalars().all()
@@ -130,16 +122,7 @@ async def get_timeline(
             TaskDependencyResponse.model_validate(d) for d in dep_rows.scalars().all()
         ]
 
-    # ─── Sections — used for row grouping ───────────────────────────────────
-    section_rows = await db.execute(
-        select(Section)
-        .where(Section.project_id == project_id)
-        .order_by(Section.position)
-    )
-    sections = [
-        SectionBrief.model_validate(s) for s in section_rows.scalars().all()
-    ]
 
     return TimelineResponse(
-        tasks=tasks_out, dependencies=dep_out, sections=sections
+        tasks=tasks_out, dependencies=dep_out
     )

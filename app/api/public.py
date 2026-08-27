@@ -29,7 +29,6 @@ from app.config import get_settings
 from app.db import tenant_scoped_session
 from app.models.attachment import TaskAttachment
 from app.models.project import Project
-from app.models.section import Section
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskComment
 from app.schemas.share import (
@@ -203,14 +202,6 @@ async def _build_project_view(
     if project is None or project.archived_at is not None:
         raise _NOT_FOUND
 
-    section_rows = (
-        await session.execute(
-            select(Section)
-            .where(Section.project_id == project_id)
-            .order_by(Section.position)
-        )
-    ).scalars().all()
-
     task_rows = await session.execute(
         select(
             Task.id,
@@ -218,17 +209,13 @@ async def _build_project_view(
             Task.done,
             Task.priority,
             Task.due_at,
-            Task.section_id,
             Task.parent_task_id,
         )
         .where(Task.project_id == project_id, Task.archived_at.is_(None))
         .order_by(Task.position)
     )
-    tasks_by_section: dict[UUID | None, list[tuple]] = {}
-    all_task_ids: list[UUID] = []
-    for row in task_rows.all():
-        tasks_by_section.setdefault(row.section_id, []).append(row)
-        all_task_ids.append(row.id)
+    rows_all = list(task_rows.all())
+    all_task_ids: list[UUID] = [row.id for row in rows_all]
 
     # Pre-fetch attachment counts in one query — avoids N+1 on large boards.
     has_att_rows = await session.execute(
@@ -263,24 +250,20 @@ async def _build_project_view(
             is_subtask=row.parent_task_id is not None,
         )
 
+    # Секций больше нет — отдаём ОДИН синтетический бакет. Ключ `sections` в
+    # ответе обязан остаться: старый бандл публичной страницы читает
+    # `data.sections.length` без проверки, и его исчезновение дало бы белый
+    # экран, а вкладку `/p/` держат открытой днями.
     sections: list[PublicSection] = []
-    # "Без секции" bucket first.
-    orphan = tasks_by_section.get(None, [])
-    if orphan:
+    if rows_all:
         sections.append(
             PublicSection(
                 id=project.id,  # synthetic — UI uses project.id as anchor
-                name="Без секции",
-                tasks=[_row_to_hit(r) for r in orphan],
-            )
-        )
-    for section in section_rows:
-        rows = tasks_by_section.get(section.id, [])
-        sections.append(
-            PublicSection(
-                id=section.id,
-                name=section.name,
-                tasks=[_row_to_hit(r) for r in rows],
+                # Не имя проекта: страница уже озаглавлена им, и заголовок
+                # группы дублировал бы его. Старый бандл рисует `s.name`
+                # как есть, поэтому имя решает сервер.
+                name="Задачи",
+                tasks=[_row_to_hit(r) for r in rows_all],
             )
         )
 

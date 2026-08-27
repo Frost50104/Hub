@@ -7,7 +7,7 @@ body.model_fields_set — эти тесты фиксируют контракт 
 
 from app.schemas.task import TaskUpdate
 
-NULLABLE_FIELDS = ("section_id", "assignee_id", "start_at", "due_at")
+NULLABLE_FIELDS = ("assignee_id", "start_at", "due_at")
 
 
 def test_absent_fields_not_in_fields_set():

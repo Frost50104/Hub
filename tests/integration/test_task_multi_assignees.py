@@ -68,7 +68,6 @@ async def _list(db, project_id, principal, *, assignee_id=None):
         done=None,
         status_=None,
         assignee_id=assignee_id,
-        section_id=None,
         priority=None,
         label=None,
         due_from=None,

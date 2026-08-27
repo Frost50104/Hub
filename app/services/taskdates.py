@@ -44,6 +44,16 @@ def start_of_tomorrow_utc(now: datetime | None = None) -> datetime:
     return day_start_utc(display_today(now) + timedelta(days=1))
 
 
+def start_of_window_utc(days: int, now: datetime | None = None) -> datetime:
+    """Начало окна «последние N дней»: 00:00 дня (сегодня − N + 1) в display tz.
+
+    Именно КАЛЕНДАРНЫЕ дни, а не `now - N*24ч`: человек читает «за 7 дней» как
+    «сегодня и шесть предыдущих», и цифра не должна ползти в течение дня. При
+    `days=1` окно вырождается в сегодня — совпадает со `start_of_today_utc`.
+    """
+    return day_start_utc(display_today(now) - timedelta(days=days - 1))
+
+
 def due_noon_utc(d: date) -> datetime:
     """Единственный писатель «дата → инстант»: полдень display tz."""
     return datetime.combine(d, time(12, 0), tzinfo=display_tz()).astimezone(UTC)

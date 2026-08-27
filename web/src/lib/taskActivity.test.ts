@@ -18,7 +18,15 @@ describe('renderActivity', () => {
     expect(
       renderActivity(act('stage_changed', { stage_from: 'Идея', stage_to: 'Согласование' })),
     ).toBe('Пётр перенёс в «Согласование»')
-    expect(renderActivity(act('stage_changed', {}))).toBe('Пётр перенёс задачу')
+  })
+
+  it('пустой stage_to читается как снятие статуса, а не как перенос', () => {
+    // Прочерк в поле «Статус» (0046): задача ушла с доски. «Перенёс задачу»
+    // на этом месте врало бы — никуда её не переносили.
+    expect(
+      renderActivity(act('stage_changed', { stage_from: 'Идея', stage_to: null })),
+    ).toBe('Пётр убрал статус')
+    expect(renderActivity(act('stage_changed', {}))).toBe('Пётр убрал статус')
   })
 
   it('СТАРЫЕ записи со статусами читаются после смены модели', () => {

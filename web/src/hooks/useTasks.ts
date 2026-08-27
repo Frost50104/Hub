@@ -55,6 +55,12 @@ export function useCreateTask(projectId: string) {
       // Задача, созданная сразу с исполнителем, обязана появиться в «Моих
       // задачах» — раньше она ждала staleTime/фокуса окна.
       qc.invalidateQueries({ queryKey: ['me-tasks'] })
+      // «Ваша статистика» на «Главной» считается на сервере — своей
+      // оптимистики у неё нет, только пересчёт.
+      qc.invalidateQueries({ queryKey: ['me-stats'] })
+      // «N из M» в шапке колонки живёт в кэше этапов (`stage.task_count`):
+      // без инвалидации первая же задача в пустой колонке даёт «1 из 0».
+      qc.invalidateQueries({ queryKey: ['stages', projectId] })
     },
   })
 }
@@ -113,6 +119,9 @@ export function useUpdateTask(projectId: string) {
     onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: ['tasks', projectId] })
       qc.invalidateQueries({ queryKey: ['me-tasks'] })
+      // «Ваша статистика» на «Главной» считается на сервере — своей
+      // оптимистики у неё нет, только пересчёт.
+      qc.invalidateQueries({ queryKey: ['me-stats'] })
       qc.invalidateQueries({ queryKey: taskKeys.detail(vars.id) })
       qc.invalidateQueries({ queryKey: ['task', vars.id, 'activity'] })
       // «N из M» в шапках колонок живёт в кэше этапов; done_count проекта —
@@ -192,6 +201,9 @@ export function useToggleAssignee(projectId: string) {
     onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: ['tasks', projectId] })
       qc.invalidateQueries({ queryKey: ['me-tasks'] })
+      // «Ваша статистика» на «Главной» считается на сервере — своей
+      // оптимистики у неё нет, только пересчёт.
+      qc.invalidateQueries({ queryKey: ['me-stats'] })
       qc.invalidateQueries({ queryKey: taskKeys.detail(vars.taskId) })
       qc.invalidateQueries({ queryKey: ['task', vars.taskId, 'activity'] })
     },
@@ -229,6 +241,9 @@ export function useArchiveTask(projectId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tasks', projectId] })
       qc.invalidateQueries({ queryKey: ['me-tasks'] })
+      // «Ваша статистика» на «Главной» считается на сервере — своей
+      // оптимистики у неё нет, только пересчёт.
+      qc.invalidateQueries({ queryKey: ['me-stats'] })
       qc.invalidateQueries({ queryKey: ['projects', projectId] })
     },
   })
@@ -241,7 +256,14 @@ export function useDeleteTask(projectId: string) {
     meta: { errorMessage: 'Не удалось удалить задачу' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tasks', projectId] })
+      // `me-tasks` тут не хватало: удалённая задача висела на «Моих задачах»
+      // до протухания кэша. `me-stats` — по той же причине.
+      qc.invalidateQueries({ queryKey: ['me-tasks'] })
+      qc.invalidateQueries({ queryKey: ['me-stats'] })
       qc.invalidateQueries({ queryKey: ['projects'] })
+      // Та же причина, что и в create: иначе «N из M» колонки считает
+      // удалённую задачу до перезагрузки страницы.
+      qc.invalidateQueries({ queryKey: ['stages', projectId] })
     },
   })
 }

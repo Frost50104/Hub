@@ -160,6 +160,11 @@ async def list_label_assignments(
         select(TaskLabelAssignment.task_id, TaskLabelAssignment.label_id)
         .join(TaskLabel, TaskLabel.id == TaskLabelAssignment.label_id)
         .where(TaskLabel.project_id == project_id)
+        # Порядок обязателен: на телефоне строка задачи показывает ПЕРВУЮ
+        # метку (`TaskContextLine`, `labels.slice(0, 1)`), и без сортировки
+        # какая именно — решал бы план запроса. До переезда секций в метки
+        # две метки были у единиц задач, после — у полутора тысяч.
+        .order_by(TaskLabel.name, TaskLabelAssignment.label_id)
     )
     return [
         LabelAssignmentResponse(task_id=task_id, label_id=label_id)

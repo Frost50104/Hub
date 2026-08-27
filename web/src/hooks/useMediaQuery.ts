@@ -35,3 +35,15 @@ export function useMediaQuery(query: string): boolean {
 export function useIsDesktop(): boolean {
   return useMediaQuery('(min-width: 1024px)')
 }
+
+/**
+ * Тач-устройство: курсора, который «наводят», у него нет.
+ *
+ * Нужен там, где решение принимает JS, а не CSS: например, перестановка
+ * колонок доски. Мышью колонку тащат за заголовок, а пальцем внутри
+ * свайп-ленты это неудобно — на тач-устройствах в меню колонки остаются
+ * «Левее»/«Правее». CSS-двойник этого правила — вариант `[@media(hover:none)]`.
+ */
+export function useIsTouch(): boolean {
+  return useMediaQuery('(hover: none)')
+}

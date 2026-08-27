@@ -33,7 +33,6 @@ async def _list(db: AsyncSession, project_id: uuid.UUID, principal):
         done=None,
         status_=None,
         assignee_id=None,
-        section_id=None,
         priority=None,
         label=None,
         due_from=None,
