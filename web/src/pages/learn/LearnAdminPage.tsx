@@ -73,7 +73,7 @@ export function LearnAdminPage() {
   const Tab = active ? TAB_COMPONENT[active] : null
 
   return (
-    <div className="mx-auto max-w-[880px] px-5 pb-16 pt-11 lg:px-8">
+    <div className="mx-auto max-w-[880px] px-5 pb-16 pt-4 lg:px-8 lg:pt-11">
       <header className="flex flex-col gap-4">
         <div className="min-w-0">
           <p className="mb-1 text-[12px] leading-[1.35] text-text2 lg:hidden">Управление</p>

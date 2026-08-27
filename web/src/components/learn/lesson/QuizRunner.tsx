@@ -98,7 +98,11 @@ function QuizScreen({
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-bg">
-      <div className="shrink-0 border-b border-hair px-5 pb-3 pt-11">
+      {/* Вырез статус-бара — свой: этот слой живёт вне мобильного <main>, которому отступ раздаёт Shell. */}
+      <div
+        className="shrink-0 border-b border-hair px-5 pb-3"
+        style={{ paddingTop: 'calc(var(--safe-top, 0px) + 1rem)' }}
+      >
         <div className="mx-auto flex max-w-[680px] items-center gap-2.5">
           <button
             type="button"

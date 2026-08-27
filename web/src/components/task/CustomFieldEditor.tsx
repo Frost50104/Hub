@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
 import { Switch } from '@/components/ui/Switch'
+import { MobileDateCell } from '@/components/ui/MobileDateCell'
 import { cn } from '@/lib/cn'
 import { type CustomFieldDefinition } from '@/lib/customFields'
 
@@ -59,7 +60,15 @@ export function CustomFieldEditor({
     case 'number':
       return <NumberEditor value={value} onChange={onChange} disabled={disabled} variant={variant} />
     case 'date':
-      return <DateEditor value={value} onChange={onChange} disabled={disabled} variant={variant} />
+      return (
+        <DateEditor
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          variant={variant}
+          label={definition.name}
+        />
+      )
     case 'select':
       return (
         <SelectEditor
@@ -92,6 +101,8 @@ interface ScalarEditorProps {
   onChange: (v: unknown) => void
   disabled?: boolean
   variant: EditorVariant
+  /** Имя поля — подпись контрола для скринридера (у даты своей нет). */
+  label?: string
 }
 
 function TextEditor({ value, onChange, disabled, variant }: ScalarEditorProps) {
@@ -138,8 +149,22 @@ function NumberEditor({ value, onChange, disabled, variant }: ScalarEditorProps)
   )
 }
 
-function DateEditor({ value, onChange, disabled, variant }: ScalarEditorProps) {
+function DateEditor({ value, onChange, disabled, variant, label }: ScalarEditorProps) {
   const str = typeof value === 'string' ? value : ''
+  // На мобилке — тот же приём, что у «Старта» и «Срока» карточки: общий
+  // `MOBILE_INPUT` содержит `appearance-none`, из-за которого пустое поле даты
+  // на WebKit не показывало ничего и не тапалось (ОС 27.08). Кастом-поле типа
+  // «дата» — то же поле, просто до него ещё не дошли жалобой.
+  if (variant === 'mobile') {
+    return (
+      <MobileDateCell
+        value={str}
+        ariaLabel={label ?? 'Дата'}
+        readOnly={Boolean(disabled)}
+        onChange={(v) => onChange(v || null)}
+      />
+    )
+  }
   return (
     <input
       type="date"
@@ -149,7 +174,7 @@ function DateEditor({ value, onChange, disabled, variant }: ScalarEditorProps) {
         onChange(next || null)
       }}
       disabled={disabled}
-      className={variant === 'mobile' ? MOBILE_INPUT : INPUT_CLASS}
+      className={INPUT_CLASS}
     />
   )
 }

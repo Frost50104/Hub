@@ -243,7 +243,7 @@ function FullscreenSheet({ cert, onClose }: { cert: CertificateInfo; onClose: ()
   }, [onClose])
   return createPortal(
     <div role="dialog" aria-modal="true" aria-label="Сертификат во весь экран" className="fixed inset-0 z-50 flex flex-col" style={{ background: '#0B0B12' }}>
-      <div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-1.5" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}>
+      <div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-1.5 pt-3">
         <button
           type="button"
           onClick={onClose}

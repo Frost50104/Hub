@@ -2,7 +2,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import {
   Archive,
   Calendar,
-  CheckCircle2,
+  Trash2,
   CornerLeftUp,
   Flag,
   Link as LinkIcon,
@@ -20,6 +20,7 @@ import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
 import { DrawerSection } from '@/components/task/DrawerSection'
 import { SubtaskList } from '@/components/task/SubtaskList'
+import { TaskDoneControl } from '@/components/task/TaskDoneControl'
 import { TaskAttachments } from '@/components/task/TaskAttachments'
 import { TaskLabels } from '@/components/task/TaskLabels'
 import { TaskCustomFields } from '@/components/task/TaskCustomFields'
@@ -31,25 +32,32 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
 import { AutoGrowTextarea } from '@/components/ui/AutoGrowTextarea'
+import { Button } from '@/components/ui/Button'
+import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { Textarea } from '@/components/ui/Input'
 import { PropertyRow, PropertyRows } from '@/components/ui/PropertyRows'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
-import { useProject, useProjectMembers, useProjectSections } from '@/hooks/useProjects'
+import { useProject, useProjectMembers } from '@/hooks/useProjects'
 import { useStages } from '@/hooks/useStages'
 import {
   useArchiveTask,
+  useDeleteTask,
   useTask,
+  useTasks,
   useToggleAssignee,
   useToggleDone,
   useUpdateTask,
 } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { taskAssignees } from '@/lib/taskAssignees'
+import { MobileDateCell } from '@/components/ui/MobileDateCell'
 import { dayKey, dueDayToIso, isOverdue, overdueDays } from '@/lib/taskDates'
+import { describeTaskDeletion } from '@/lib/taskDeletion'
 import { PRIORITY_LABEL, taskKey, type TaskPriority } from '@/lib/tasks'
 import { plural } from '@/lib/typography'
 
@@ -65,18 +73,15 @@ interface TaskDetailDrawerProps {
 
 const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
 
-/** Кнопка-вариант в наборе «Статус»/«Приоритет». */
+/** Кнопка-вариант в наборе «Приоритет»: активный — амбер 30% с обводкой. */
 function OptionButton({
   active,
   disabled,
-  tone,
   onClick,
   children,
 }: {
   active: boolean
   disabled: boolean
-  /** Активный статус — плотный амбер, активный приоритет — амбер 30% с обводкой. */
-  tone: 'solid' | 'tint'
   onClick: () => void
   children: React.ReactNode
 }) {
@@ -90,9 +95,7 @@ function OptionButton({
         'inline-flex min-h-[30px] items-center rounded-lg px-2.5 text-[13px] font-semibold transition-colors',
         disabled ? 'cursor-default' : 'cursor-pointer',
         active
-          ? tone === 'solid'
-            ? 'bg-amber text-on-amber'
-            : 'bg-amber/30 text-text shadow-[inset_0_0_0_1px_color-mix(in_srgb,rgb(var(--amber))_55%,transparent)]'
+          ? 'bg-amber/30 text-text shadow-[inset_0_0_0_1px_color-mix(in_srgb,rgb(var(--amber))_55%,transparent)]'
           : disabled
             ? 'bg-tint text-text2'
             : 'bg-surface text-text2 hover:text-text',
@@ -114,6 +117,12 @@ function Dt({ icon: Icon, children }: { icon?: typeof Flag; children: React.Reac
 }
 
 /** Select этапа в карточке: max-width 320, 36px, r9, --surface (макет). */
+/** Значение селекта «Колонка» → тело PATCH. Пустая строка это прочерк, а он
+ *  означает «снять статус» — то есть явный `null`, а не «поле не передали». */
+function stageValue(e: React.ChangeEvent<HTMLSelectElement>): string | null {
+  return e.target.value || null
+}
+
 const STAGE_SELECT =
   'h-9 max-w-[320px] rounded-[9px] border border-glass-border bg-surface px-3 font-body text-[14px] text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 disabled:cursor-default'
 
@@ -145,7 +154,6 @@ export function TaskDetailDrawer({
   const taskQuery = useTask(taskId ?? undefined)
   const { data: task, isLoading } = taskQuery
   const project = useProject(projectId)
-  const sections = useProjectSections(projectId)
   // Этапы проекта: статус в карточке — раскрывающийся список с их именами
   // (имена пользовательские, этапов сколько угодно — ряд чипов не годится).
   const stages = useStages(projectId)
@@ -165,12 +173,17 @@ export function TaskDetailDrawer({
   const toggleAssignee = useToggleAssignee(projectId)
   const toggleDone = useToggleDone(projectId)
   const archive = useArchiveTask(projectId)
+  const remove = useDeleteTask(projectId)
+  // Подзадачи считаем из того же кэша, что и `SubtaskList` — отдельный запрос
+  // ради одной цифры в диалоге не нужен.
+  const projectTasks = useTasks(projectId)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [dueAt, setDueAt] = useState('')
   const [startAt, setStartAt] = useState('')
   const [editingDesc, setEditingDesc] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   useEffect(() => {
     if (task) {
@@ -213,9 +226,6 @@ export function TaskDetailDrawer({
   }
 
   const key = taskKey(project.data?.key, task?.seq)
-  const sectionName = task?.section_id
-    ? (sections.data?.find((s) => s.id === task.section_id)?.name ?? null)
-    : null
   const overdue = task ? isOverdue(task.due_at, task.done) : false
 
   return (
@@ -318,6 +328,11 @@ export function TaskDetailDrawer({
                         <Archive className="mr-2 h-4 w-4" />
                         {task.archived_at ? 'Восстановить' : 'В архив'}
                       </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem destructive onSelect={() => setDeleteOpen(true)}>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Удалить задачу
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 )}
@@ -330,15 +345,9 @@ export function TaskDetailDrawer({
               </span>
             </div>
 
-            {/* Хлебные крошки: проект / секция / родительская задача. */}
+            {/* Хлебные крошки: проект / родительская задача. */}
             <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[13px] text-text2">
               {project.data && <span className="truncate">{project.data.name}</span>}
-              {sectionName && (
-                <>
-                  <span aria-hidden>/</span>
-                  <span className="truncate">{sectionName}</span>
-                </>
-              )}
               {task?.parent_task_id && onOpenTask && (
                 <>
                   <span aria-hidden>/</span>
@@ -355,25 +364,61 @@ export function TaskDetailDrawer({
             </p>
 
             {task && (
-              // Заголовок — редактируемое поле с автовысотой: переименование
-              // здесь основное действие, а без прав поле readOnly.
-              <AutoGrowTextarea
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                onBlur={saveTitle}
-                readOnly={readOnly}
-                aria-label="Название задачи"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    ;(e.target as HTMLTextAreaElement).blur()
-                  }
-                }}
-                className={cn(
-                  'mt-2.5 block w-full rounded-lg border border-transparent bg-transparent px-0 py-0.5 font-display text-[20px] font-bold leading-[1.26] text-text focus-visible:border-amber focus-visible:outline-none lg:text-[22px] lg:leading-[1.24]',
-                  readOnly ? 'cursor-default' : 'cursor-text',
+              // Состояние задачи — кружок слева от названия, тот же контрол,
+              // что в строке списка и на карточке доски. Отдельным полем ниже
+              // он занимал целую строку ради двух значений, а здесь читается
+              // сразу и закрывает задачу одним нажатием.
+              <div className="mt-2.5 flex items-start gap-3">
+                <TaskDoneControl
+                  done={task.done}
+                  size={desktop ? 'row' : 'mobile'}
+                  onToggle={canStatus ? () => toggleDone(task) : undefined}
+                  // Кружок встаёт на оптическую середину ПЕРВОЙ строки
+                  // заголовка (22px на десктопе, 20px на телефоне), а не по
+                  // верху своего бокса. На телефоне вдобавок снимается левый
+                  // отступ: он подобран под строку списка с её `pl-[13px]`,
+                  // а в шапке карточки отступ `px-4`.
+                  className={desktop ? 'mt-[4px]' : '-ml-2.5 -mt-[6px]'}
+                />
+                {/* Без прав контрол рендерится `aria-hidden` (иконка, не
+                    кнопка), и состояние осталось бы только в цвете кружка. */}
+                {!canStatus && (
+                  <span className="sr-only">
+                    {task.done ? 'Выполнена' : 'Не выполнена'}
+                  </span>
                 )}
-              />
+                {/* Обёртка обязательна: className уходит на textarea и её
+                    невидимый двойник, а корень AutoGrowTextarea — grid без
+                    пропа для класса, и без min-w-0/flex-1 длинное название
+                    распирает строку. */}
+                <div className="min-w-0 flex-1">
+                  {/* Заголовок — редактируемое поле с автовысотой:
+                      переименование здесь основное действие, а без прав поле
+                      readOnly. */}
+                  <AutoGrowTextarea
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    onBlur={saveTitle}
+                    readOnly={readOnly}
+                    aria-label="Название задачи"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        ;(e.target as HTMLTextAreaElement).blur()
+                      }
+                    }}
+                    className={cn(
+                      'block w-full rounded-lg border border-transparent bg-transparent px-0 py-0.5 font-display text-[20px] font-bold leading-[1.26] text-text focus-visible:border-amber focus-visible:outline-none lg:text-[22px] lg:leading-[1.24]',
+                      // Зачёркнутое название — тот же признак «сделано», что в
+                      // списке, на доске и в подзадачах. Каретку возвращаем
+                      // явно: она наследует color, и в выполненной задаче
+                      // курсор ввода стал бы блёклым.
+                      task.done && 'text-text2 line-through caret-text',
+                      readOnly ? 'cursor-default' : 'cursor-text',
+                    )}
+                  />
+                </div>
+              </div>
             )}
 
             {readOnly && task && (
@@ -417,30 +462,16 @@ export function TaskDetailDrawer({
               // «свойство → значение», контрол справа, строка 48px. Ряды чипов
               // на телефоне превращались в стену из шести разнородных блоков.
               <PropertyRows>
-                <PropertyRow label="Состояние">
-                  <select
-                    value={task.done ? 'done' : 'open'}
-                    disabled={!canStatus}
-                    aria-label="Состояние"
-                    onChange={(e) =>
-                      update.mutate({ id: task.id, done: e.target.value === 'done' })
-                    }
-                    className={MOBILE_CONTROL}
-                  >
-                    <option value="open">Не выполнена</option>
-                    <option value="done">Выполнена</option>
-                  </select>
-                </PropertyRow>
                 <PropertyRow label="Колонка">
                   {stages.data && stages.data.length > 0 ? (
                     <select
                       value={task.stage_id ?? ''}
                       disabled={!canStatus}
                       aria-label="Колонка"
-                      onChange={(e) => update.mutate({ id: task.id, stage_id: e.target.value })}
+                      onChange={(e) => update.mutate({ id: task.id, stage_id: stageValue(e) })}
                       className={MOBILE_CONTROL}
                     >
-                      {!task.stage_id && <option value="">—</option>}
+                      <option value="">—</option>
                       {stages.data.map((s) => (
                         <option key={s.id} value={s.id}>
                           {s.name}
@@ -467,37 +498,33 @@ export function TaskDetailDrawer({
                   </select>
                 </PropertyRow>
                 <PropertyRow label="Старт">
-                  <input
-                    type="date"
+                  <MobileDateCell
                     value={startAt}
-                    disabled={readOnly}
-                    aria-label="Дата старта"
-                    onChange={(e) => {
-                      setStartAt(e.target.value)
-                      void saveDate('start_at', e.target.value)
+                    ariaLabel="Дата старта"
+                    readOnly={readOnly}
+                    onChange={(v) => {
+                      setStartAt(v)
+                      void saveDate('start_at', v)
                     }}
-                    className={MOBILE_CONTROL}
                   />
                 </PropertyRow>
                 <PropertyRow label="Срок">
-                  <span className="flex items-center gap-2">
+                  <MobileDateCell
+                    value={dueAt}
+                    ariaLabel="Срок"
+                    readOnly={readOnly}
+                    onChange={(v) => {
+                      setDueAt(v)
+                      void saveDate('due_at', v)
+                    }}
+                    className={cn(overdue && 'font-semibold text-red')}
+                  >
                     {overdue && task.due_at && (
-                      <span className="text-[13px] font-semibold text-red">
+                      <span className="shrink-0 text-[13px] font-semibold text-red">
                         −{overdueDays(task.due_at)} дн
                       </span>
                     )}
-                    <input
-                      type="date"
-                      value={dueAt}
-                      disabled={readOnly}
-                      aria-label="Срок"
-                      onChange={(e) => {
-                        setDueAt(e.target.value)
-                        void saveDate('due_at', e.target.value)
-                      }}
-                      className={cn(MOBILE_CONTROL, overdue && 'font-semibold text-red')}
-                    />
-                  </span>
+                  </MobileDateCell>
                 </PropertyRow>
                 {/* Кастом-поля — теми же строками 48px, что Этап/Приоритет/Срок
                     (макет «Задача · мобильный»), а не стопкой «подпись + инпут»
@@ -511,41 +538,21 @@ export function TaskDetailDrawer({
                 <dl className="m-0 grid grid-cols-1 items-start gap-x-3.5 gap-y-3 lg:grid-cols-[112px_1fr] lg:items-center lg:gap-y-2.5">
                   {desktop && (
                     <>
-                      <Dt icon={CheckCircle2}>Состояние</Dt>
-                      <dd className="m-0 flex flex-wrap gap-1">
-                        {/* Две независимые оси (0044): выполнена или нет — здесь,
-                            место на доске — ниже. */}
-                        <OptionButton
-                          active={!task.done}
-                          disabled={!canStatus}
-                          tone="solid"
-                          onClick={() => update.mutate({ id: task.id, done: false })}
-                        >
-                          Не выполнена
-                        </OptionButton>
-                        <OptionButton
-                          active={task.done}
-                          disabled={!canStatus}
-                          tone="solid"
-                          onClick={() => update.mutate({ id: task.id, done: true })}
-                        >
-                          Выполнена
-                        </OptionButton>
-                      </dd>
-
                       <Dt icon={Flag}>Колонка</Dt>
                       <dd className="m-0">
                         {/* Имена колонок пользовательские и их сколько угодно —
-                            раскрывающийся список, а не ряд чипов. */}
+                            раскрывающийся список, а не ряд чипов. Прочерк —
+                            «без статуса»: задача уходит с доски, оставаясь
+                            в списке и поиске (0046). */}
                         {stages.data && stages.data.length > 0 ? (
                           <select
                             value={task.stage_id ?? ''}
                             disabled={!canStatus}
                             aria-label="Колонка"
-                            onChange={(e) => update.mutate({ id: task.id, stage_id: e.target.value })}
+                            onChange={(e) => update.mutate({ id: task.id, stage_id: stageValue(e) })}
                             className={STAGE_SELECT}
                           >
-                            {!task.stage_id && <option value="">—</option>}
+                            <option value="">—</option>
                             {stages.data.map((s) => (
                               <option key={s.id} value={s.id}>
                                 {s.name}
@@ -564,7 +571,6 @@ export function TaskDetailDrawer({
                             key={p}
                             active={task.priority === p}
                             disabled={readOnly}
-                            tone="tint"
                             onClick={() => update.mutate({ id: task.id, priority: p })}
                           >
                             {PRIORITY_LABEL[p]}
@@ -807,6 +813,52 @@ export function TaskDetailDrawer({
           entityId={task.id}
           entityLabel={task.title}
         />
+      )}
+      {task && (
+        <ResponsiveDialog
+          open={deleteOpen}
+          // Пока удаляем — диалог держим: исчезнувшая модалка читается как
+          // «получилось», даже если сервер ответил отказом.
+          onOpenChange={(v) => !remove.isPending && setDeleteOpen(v)}
+          title={`Удалить задачу «${task.title}»?`}
+          description={describeTaskDeletion(
+            (projectTasks.data ?? []).filter(
+              (t) => t.parent_task_id === task.id && !t.archived_at,
+            ).length,
+          )}
+          desktopWidth={440}
+          footer={
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => setDeleteOpen(false)}
+                disabled={remove.isPending}
+              >
+                Отмена
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={remove.isPending}
+                onClick={async () => {
+                  try {
+                    await remove.mutateAsync(task.id)
+                    toast.success('Задача удалена')
+                    setDeleteOpen(false)
+                    // Карточку закрываем ПОСЛЕ успеха: `?task=` иначе остался
+                    // бы висеть на несуществующей задаче.
+                    onClose()
+                  } catch {
+                    // тост показывает глобальный onError мутаций
+                  }
+                }}
+              >
+                {remove.isPending ? 'Удаляем…' : 'Удалить'}
+              </Button>
+            </>
+          }
+        >
+          <span className="sr-only">Подтверждение удаления задачи</span>
+        </ResponsiveDialog>
       )}
     </DialogPrimitive.Root>
   )

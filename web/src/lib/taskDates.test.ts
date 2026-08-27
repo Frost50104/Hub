@@ -6,6 +6,7 @@ import {
   dayKey,
   dayStartIso,
   dueDayToIso,
+  humanDate,
   isOverdue,
   overdueDays,
   todayKey,
@@ -43,5 +44,24 @@ describe('taskDates — календарный день display tz', () => {
     expect(isOverdue(null, false, afterMidnight)).toBe(false)
     expect(overdueDays(due, afterMidnight)).toBe(1)
     expect(overdueDays(due, Date.parse('2026-08-23T12:00:00Z'))).toBe(3)
+  })
+})
+
+describe('humanDate', () => {
+  it('несёт год — в карточке срок бывает и в следующем', () => {
+    // `shortDate` даёт «27 авг» и для 2026-го, и для 2027-го: в списке это
+    // терпимо, в карточке — двусмысленно.
+    expect(humanDate('2026-08-27')).toBe('27.08.2026')
+    expect(humanDate('2027-01-09')).toBe('09.01.2027')
+  })
+
+  it('принимает и ключ дня, и ISO-мгновение', () => {
+    // В мобильной карточке значение приходит прямо из input[type=date]
+    // (`YYYY-MM-DD`), а из API — полным ISO.
+    expect(humanDate('2026-08-27')).toBe(humanDate('2026-08-27T12:00:00Z'))
+  })
+
+  it('мусор возвращает как есть, а не «Invalid Date»', () => {
+    expect(humanDate('позавчера')).toBe('позавчера')
   })
 })

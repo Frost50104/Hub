@@ -82,10 +82,8 @@ export function SettingsPage() {
   if (!isDesktop) {
     return (
       <div className="flex min-h-full flex-col gap-4 pb-8">
-        <header
-          className="flex items-center gap-3 px-4 pb-2"
-          style={{ paddingTop: 'calc(env(safe-area-inset-top, 0) + 1rem)' }}
-        >
+        {/* Вырез даёт Shell — здесь только собственный отступ шапки. */}
+        <header className="flex items-center gap-3 px-4 pb-2 pt-4">
           <Avatar
             name={me.data?.full_name}
             email={me.data?.email}

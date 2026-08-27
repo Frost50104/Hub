@@ -105,6 +105,26 @@ export function shortDate(iso: string): string {
 }
 
 /**
+ * «27.08.2026» — полная дата для карточки задачи.
+ *
+ * В отличие от `shortDate` несёт год: в списке важна краткость, а в карточке
+ * срок бывает и в следующем году, и «16 авг» там читается двусмысленно.
+ * Принимает как ISO-мгновение, так и ключ дня `YYYY-MM-DD` — в мобильной
+ * карточке значение приходит прямо из `input[type=date]`.
+ */
+export function humanDate(value: string): string {
+  const iso = /^\d{4}-\d{2}-\d{2}$/.test(value) ? dueDayToIso(value) : value
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleDateString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: displayTz,
+  })
+}
+
+/**
  * Просрочена ли задача: день срока раньше сегодняшнего (display tz). Готовые
  * не считаются просроченными никогда — иначе закрытая с опозданием задача
  * навсегда осталась бы красной.

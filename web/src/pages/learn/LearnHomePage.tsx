@@ -6,17 +6,20 @@ import {
   CircleAlert,
   ClipboardList,
   Clock,
+  FileText,
   GraduationCap,
   Newspaper,
   ShoppingBag,
   Sparkles,
   Trophy,
+  type LucideIcon,
 } from 'lucide-react'
 import { SpaceSwitcher } from '@/components/layout/SpaceSwitcher'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import { CourseCover, courseTypeBadgeClass } from '@/components/learn/CourseCover'
+import { CoverTile } from '@/components/learn/CoverTile'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useLearnHome, useRecent } from '@/hooks/useLearn'
 import { useMe } from '@/hooks/useMe'
@@ -178,11 +181,35 @@ function UrgentCourseCard({ course }: { course: HomeCourse }) {
   )
 }
 
-function NoveltyIcon({ type }: { type: string }) {
-  if (type === 'product') return <ShoppingBag className="h-5 w-5" />
-  if (type === 'news') return <Newspaper className="h-5 w-5" />
-  if (type === 'course') return <GraduationCap className="h-5 w-5" />
-  return <Sparkles className="h-5 w-5" />
+/**
+ * Плашка новинки: иконка, тон и узор по типу объекта.
+ *
+ * `image_url` сервер заполняет ТОЛЬКО товарам (`app/api/learn_home.py`), то
+ * есть документ, курс и новость всегда шли без картинки — и получали пустой
+ * серый квадрат, в котором ничего нельзя было опознать.
+ *
+ * Тон берётся из общего словаря системы, а не назначается ради разнообразия:
+ * амбер — акцент (новость свежая), `blue-deep` — нейтрально-информативное
+ * (курс, товар), нейтраль на `surface` — документ. Курс и товар при одном тоне
+ * различаются глифом И узором: индекс узора у каждого типа свой.
+ */
+const NOVELTY_COVER: Record<string, { icon: LucideIcon; tone: string; pattern: number }> = {
+  course: { icon: GraduationCap, tone: 'bg-blue-deep text-bg', pattern: 2 },
+  product: { icon: ShoppingBag, tone: 'bg-blue-deep text-bg', pattern: 5 },
+  news: { icon: Newspaper, tone: 'bg-amber text-on-amber', pattern: 0 },
+  news_post: { icon: Newspaper, tone: 'bg-amber text-on-amber', pattern: 0 },
+  material: { icon: FileText, tone: 'border border-hair bg-surface text-text2', pattern: 4 },
+  library_material: {
+    icon: FileText,
+    tone: 'border border-hair bg-surface text-text2',
+    pattern: 4,
+  },
+}
+
+const NOVELTY_FALLBACK = {
+  icon: Sparkles,
+  tone: 'border border-hair bg-surface text-text2',
+  pattern: 1,
 }
 
 export function LearnHomePage() {
@@ -245,10 +272,14 @@ export function LearnHomePage() {
   return (
     // На десктопе шире 680: правый рельс не должен зажимать основную колонку.
     <div className="mx-auto max-w-[680px] lg:max-w-[1000px] lg:px-4">
-      <header className="px-5 pt-11">
+      <header className="px-5 pt-3 lg:pt-11">
         {/* Симметрично HomePage: на мобильном это единственный видимый способ
-            вернуться в «Задачи» — десктопный сайдбар тут не рендерится. */}
-        <SpaceSwitcher size="lg" className="mb-4 lg:hidden" />
+            вернуться в «Задачи» — десктопный сайдбар тут не рендерится.
+            Геометрия обязана совпадать с topSlot'ом MobilePageHeader ПИКСЕЛЬ В
+            ПИКСЕЛЬ (px-4 / pt-3 / mb-3): контрол один и тот же и виден на обеих
+            главных — разъезд в 4–8px читается как дрожание при переключении.
+            Шапка живёт на px-5, поэтому -mx-1 доводит переключатель до px-4. */}
+        <SpaceSwitcher size="lg" className="-mx-1 mb-3 lg:hidden" />
         <p className="mb-1 text-xs leading-[1.35] text-text2 first-letter:uppercase">
           {today}
         </p>
@@ -439,9 +470,18 @@ export function LearnHomePage() {
                           className="block h-28 w-full rounded-xl object-cover"
                         />
                       ) : (
-                        <span className="flex h-28 w-full items-center justify-center rounded-xl bg-surface text-text2">
-                          <NoveltyIcon type={n.object_type} />
-                        </span>
+                        (() => {
+                          const cover = NOVELTY_COVER[n.object_type] ?? NOVELTY_FALLBACK
+                          return (
+                            <CoverTile
+                              icon={cover.icon}
+                              index={cover.pattern}
+                              tone={cover.tone}
+                              className="h-28 w-full"
+                              iconClassName="h-7 w-7"
+                            />
+                          )
+                        })()
                       )}
                       <span className="block text-[15px] font-semibold leading-[1.35] text-text">
                         {n.title}

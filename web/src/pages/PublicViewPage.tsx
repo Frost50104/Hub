@@ -134,7 +134,8 @@ export function PublicViewPage() {
 
 function PageShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen">
+    // Вырез статус-бара — свой: этот слой живёт вне мобильного <main>, которому отступ раздаёт Shell. Публичная ссылка открывается чаще всего с телефона.
+    <div className="min-h-screen" style={{ paddingTop: 'var(--safe-top, 0px)' }}>
       <header className="border-b border-glass-border bg-bg-alt/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center gap-2">
           <img
@@ -255,7 +256,12 @@ function ProjectViewBlock({ data }: { data: PublicProjectView }) {
       <header className="glass space-y-1.5 p-5">
         <h1 className="font-display text-xl font-semibold text-text">{data.name}</h1>
         {data.description && (
-          <p className="whitespace-pre-wrap text-sm text-text2">{data.description}</p>
+          // Markdown, как у описания задачи ниже: с лимитом 20 000 знаков
+          // сырой текст стеной стал бы нечитаемым. Компонент безопасен —
+          // react-markdown без rehype-raw, HTML не интерпретируется.
+          <div className="text-sm text-text2">
+            <Markdown text={data.description} />
+          </div>
         )}
       </header>
 

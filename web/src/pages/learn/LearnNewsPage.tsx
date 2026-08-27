@@ -116,7 +116,7 @@ export function LearnNewsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[760px] px-5 pb-16 pt-11 lg:px-8">
+    <div className="mx-auto max-w-[760px] px-5 pb-16 pt-4 lg:px-8 lg:pt-11">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           {counter && <p className="mb-1 text-[12px] leading-[1.35] text-text2 lg:hidden">{counter}</p>}

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMe } from '@/hooks/useMe'
+import { usePushAutoRefresh } from '@/hooks/usePushAutoRefresh'
 import { authClient } from '@/lib/auth'
 import {
   consumeBootSpaceRedirect,
@@ -69,6 +70,10 @@ export function Shell() {
   const rememberSpace = useWorkspace((s) => s.rememberSpace)
   const me = useMe()
   const space = resolveSpace(location.pathname, lastSpace)
+  // Подтверждение push-подписки — здесь, в корневом лэйауте: `usePush`
+  // монтируется только на главной трекера и в настройках, и до него дело
+  // доходит не у всех. Запускаем после `/api/me`, иначе запрос уйдёт без токена.
+  usePushAutoRefresh(me.data !== undefined)
 
   // ЕДИНЫЙ эффект, boot-redirect строго ПЕРЕД remember: раздельные эффекты —
   // баг (remember успел бы перезаписать lastSpace='tasks' на первом маунте
@@ -102,7 +107,14 @@ export function Shell() {
         className="min-w-0 flex-1 overflow-y-auto pb-20 lg:rounded-[20px] lg:bg-bg lg:pb-0 lg:overflow-y-auto"
         style={
           !isDesktop
-            ? { paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 4rem)' }
+            ? {
+                // Верхний вырез — ЗДЕСЬ, один раз на все экраны. Прежде его
+                // добавляла каждая страница сама: `MobilePageHeader` знал, а 13
+                // экранов — нет, и заголовок проекта (`pt-4` = 16px при вырезе
+                // 59px) уезжал под статус-бар (ОС 27.08).
+                paddingTop: 'var(--safe-top, 0px)',
+                paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 4rem)',
+              }
             : undefined
         }
       >

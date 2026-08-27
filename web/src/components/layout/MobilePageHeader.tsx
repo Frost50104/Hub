@@ -41,8 +41,9 @@ export function MobilePageHeader({
 }: MobilePageHeaderProps) {
   return (
     <header
+      // Вырез статус-бара даёт `Shell` мобильному <main> — здесь только
+      // собственный отступ шапки, иначе он удвоится.
       className={cn('px-4 pb-3 pt-3', className)}
-      style={{ paddingTop: 'calc(env(safe-area-inset-top, 0) + 0.75rem)' }}
     >
       {topSlot && <div className="mb-3">{topSlot}</div>}
       {eyebrow && (

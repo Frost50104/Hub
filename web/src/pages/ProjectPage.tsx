@@ -1,6 +1,4 @@
 import {
-  Archive,
-  ChevronDown,
   Link as LinkIcon,
   Loader2,
   MoreHorizontal,
@@ -8,12 +6,9 @@ import {
   Settings2,
   Star,
   Tags,
-  Trash2,
-  Upload,
 } from 'lucide-react'
 import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { toast } from 'sonner'
 
 // `recharts` is ~370KB minified. Lazy-load the entire dashboard chunk so
 // the main bundle stays light for users who never open this tab.
@@ -30,6 +25,9 @@ import { CustomFieldsManager } from '@/components/project/CustomFieldsManager'
 import { LabelsManager } from '@/components/project/LabelsManager'
 import { MembersTab } from '@/components/project/MembersTab'
 import { MobileFilterSheet } from '@/components/project/MobileFilterSheet'
+import { summarizeProjectDescription } from '@/lib/projectAbout'
+import { AboutTab } from '@/components/project/AboutTab'
+import { ProjectKeyChip } from '@/components/project/ProjectKeyChip'
 import { TaskFilterBar } from '@/components/project/TaskFilterBar'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ShareDialog } from '@/components/share/ShareDialog'
@@ -49,26 +47,13 @@ import { Badge } from '@/components/ui/Badge'
 import { BottomSheet, BottomSheetItem } from '@/components/ui/BottomSheet'
 import { Button } from '@/components/ui/Button'
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/DropdownMenu'
-import { Input } from '@/components/ui/Input'
-import {
   useCustomFieldDefinitions,
   useProjectCustomValues,
 } from '@/hooks/useCustomFields'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import {
-  useArchiveProject,
-  useCreateSection,
-  useDeleteSection,
   useProject,
-  useProjectSections,
   useSetFavorite,
-  useUpdateSection,
   useProjectMembers,
 } from '@/hooks/useProjects'
 import { useLabelAssignments, useLabels } from '@/hooks/useLabels'
@@ -78,13 +63,12 @@ import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
 import { type CustomFieldDefinition, type CustomFieldValue } from '@/lib/customFields'
 import { formatCustomFieldValue } from '@/lib/formatCustomField'
-import { PROJECT_ROLE_LABEL, type Project, type Section } from '@/lib/projects'
+import { PROJECT_ROLE_LABEL, type Project } from '@/lib/projects'
 import {
   type NarrowableFilter,
   type TaskViewFilters,
   activeFilterCount,
   applyFiltersToSearchParams,
-  countOpenDone,
   describeFilters,
   filtersFromSearchParams,
   narrowableFilter,
@@ -96,9 +80,16 @@ import { dataAgeLabel } from '@/lib/dates'
 import { requestInlineCreate } from '@/lib/quickCreate'
 import { type Task, DONE_FILTER_LABEL, PRIORITY_LABEL } from '@/lib/tasks'
 import { plural } from '@/lib/typography'
-import { ORPHAN_SECTION_KEY, useViewConfig } from '@/stores/viewConfig'
+import { useViewConfig } from '@/stores/viewConfig'
 
-type TabKey = 'list' | 'board' | 'calendar' | 'timeline' | 'dashboard' | 'members'
+type TabKey =
+  | 'list'
+  | 'board'
+  | 'calendar'
+  | 'timeline'
+  | 'dashboard'
+  | 'members'
+  | 'about'
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'list', label: 'Список' },
@@ -107,31 +98,26 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'timeline', label: 'Хронология' },
   { key: 'dashboard', label: 'Дашборд' },
   { key: 'members', label: 'Участники' },
+  { key: 'about', label: 'О проекте' },
 ]
 
 // ─── Шапка проекта ──────────────────────────────────────────────────────────
 
 function ProjectHeader({
   project,
-  sectionCount,
-  onArchive,
   onOpenFields,
   onOpenLabels,
   onOpenShare,
   onCreateTask,
-  onImport,
   tab,
   onTab,
   mobileFilters,
 }: {
   project: Project
-  sectionCount: number
-  onArchive: () => void
   onOpenFields: () => void
   onOpenLabels: () => void
   onOpenShare: () => void
   onCreateTask: () => void
-  onImport: () => void
   tab: TabKey
   onTab: (t: TabKey) => void
   /** Телефон: чип «Фильтры (N)» → шторка (MobileFilterSheet); на вкладках без фильтров — нет. */
@@ -139,8 +125,8 @@ function ProjectHeader({
 }) {
   const isArchived = !!project.archived_at
   const setFavorite = useSetFavorite(project.id)
-  // Телефон: действия проекта (Поделиться/Поля/Метки/Импорт/Архив) — те же, что
-  // в десктопной шапке, шторкой «Действия»; без неё менеджер на телефоне не мог
+  // Телефон: действия проекта (Поделиться/Поля/Метки) — те же, что в
+  // десктопной шапке, шторкой «Действия»; без неё менеджер на телефоне не мог
   // создать метку вовсе (ОС 2026-08).
   const [actionsOpen, setActionsOpen] = useState(false)
   const mobileActions: { label: string; icon: ReactNode; onClick: () => void }[] = []
@@ -158,21 +144,10 @@ function ProjectHeader({
     })
     mobileActions.push({ label: 'Метки', icon: <Tags className="h-5 w-5" />, onClick: onOpenLabels })
   }
-  if (project.can_edit && !isArchived)
-    mobileActions.push({
-      label: 'Импорт из CSV…',
-      icon: <Upload className="h-5 w-5" />,
-      onClick: onImport,
-    })
-  if (project.can_manage)
-    mobileActions.push({
-      label: isArchived ? 'Разархивировать' : 'Архивировать',
-      icon: <Archive className="h-5 w-5" />,
-      onClick: onArchive,
-    })
+  // «Импорт из CSV» и «Архивировать» переехали на вкладку «О проекте».
+  const summary = summarizeProjectDescription(project.description)
   const counts = [
     project.task_count != null ? plural(project.task_count, 'задача', 'задачи', 'задач') : null,
-    sectionCount > 0 ? plural(sectionCount, 'секция', 'секции', 'секций') : null,
   ].filter((c): c is string => Boolean(c))
 
   const favoriteButton = project.my_role && (
@@ -193,7 +168,7 @@ function ProjectHeader({
   return (
     <header className="shrink-0 border-b border-hair bg-bg px-4 pt-4 lg:px-6">
       {/* Телефон — компактная шапка макета «Доска · мобильный»: eyebrow
-          «KEY · N задач · M секций», название, бейджи; описание и кнопки
+          «KEY · N задач», название, бейджи; описание и кнопки
           действий — десктопу, фильтры — чипом в шторку (QA-0821 #13). */}
       <div className="lg:hidden">
         <div className="flex items-center justify-between gap-3">
@@ -251,9 +226,7 @@ function ProjectHeader({
             описанием может занимать две строки, и центрированная плашка ключа
             уезжала бы к описанию, а не к названию. */}
         <div className="flex min-w-0 flex-1 items-start gap-3">
-          <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-amber font-display text-base font-bold uppercase text-on-amber">
-            {project.key.slice(0, 2)}
-          </span>
+          <ProjectKeyChip project={project} size="lg" className="mt-0.5" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="min-w-0 font-display text-[22px] font-bold leading-[1.2] text-text">
@@ -272,12 +245,15 @@ function ProjectHeader({
                 многоточием (полный текст — в title), счётчики не переносятся
                 на второй этаж (QA-0821 #3). */}
             <p className="mt-[3px] flex min-w-0 flex-nowrap items-center gap-x-[7px] text-[13px] text-text2">
-              {project.description && (
-                <span className="min-w-0 truncate" title={project.description}>
-                  {project.description}
+              {summary && (
+                // И текст, и title — сводка: описание выросло до 20 000
+                // знаков, и нативный тултип на две страницы это издевательство,
+                // а не подсказка. Полное описание живёт на вкладке «О проекте».
+                <span className="min-w-0 truncate" title={summary}>
+                  {summary}
                 </span>
               )}
-              {project.description && counts.length > 0 && <span aria-hidden>·</span>}
+              {summary && counts.length > 0 && <span aria-hidden>·</span>}
               {counts.map((c, i) => (
                 <span key={c} className="shrink-0 whitespace-nowrap">
                   {i > 0 && <span className="pr-[7px]">·</span>}
@@ -307,30 +283,8 @@ function ProjectHeader({
                 </Button>
               </>
             )}
-            {/* Меню «Действия» — и у редактора: иначе «Импорт из CSV…» в
-                непустом проекте был недостижим (QA-0821 #22). Рендерится,
-                только когда в нём есть хотя бы один пункт. */}
-            {((project.can_edit && !isArchived) || project.can_manage) && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="secondary" size="icon" aria-label="Действия">
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {/* Импорт и в непустой проект: из пустого состояния он
-                      достижим кнопкой, отсюда — всегда. */}
-                  {project.can_edit && !isArchived && (
-                    <DropdownMenuItem onSelect={onImport}>Импорт из CSV…</DropdownMenuItem>
-                  )}
-                  {project.can_manage && (
-                    <DropdownMenuItem onSelect={onArchive}>
-                      {isArchived ? 'Разархивировать' : 'Архивировать'}
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+            {/* Меню «…» здесь больше нет: «Импорт из CSV» и «Архивировать»
+                переехали на вкладку «О проекте», и оно осталось пустым. */}
             {project.can_edit && (
               <Button size="sm" onClick={onCreateTask}>
                 <Plus className="h-4 w-4" strokeWidth={2.2} />
@@ -348,7 +302,11 @@ function ProjectHeader({
 function ViewTabs({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
   return (
     <>
-      <nav className="mt-3.5 hidden gap-0.5 lg:flex">
+      {/* overflow-x-auto — не перестраховка, а замер: шесть вкладок
+          занимают 588px, седьмая добавляет ~113px, а при окне 1024px
+          полосе достаётся 680px (минус сайдбар 260, зазоры оболочки и
+          отступы шапки). Без прокрутки обрезалась бы «О проекте». */}
+      <nav className="mt-3.5 hidden gap-0.5 overflow-x-auto [scrollbar-width:none] lg:flex [&::-webkit-scrollbar]:hidden">
         {TABS.map(({ key, label }) => (
           <button
             key={key}
@@ -356,7 +314,7 @@ function ViewTabs({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
             onClick={() => onTab(key)}
             aria-current={tab === key ? 'page' : undefined}
             className={cn(
-              'inline-flex h-[38px] items-center border-b-2 px-3.5 text-[15px] font-semibold transition-colors',
+              'inline-flex h-[38px] shrink-0 items-center whitespace-nowrap border-b-2 px-3.5 text-[15px] font-semibold transition-colors',
               tab === key
                 ? 'border-amber text-text'
                 : 'border-transparent text-text2 hover:text-text',
@@ -380,55 +338,7 @@ function ViewTabs({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
 
 // ─── Секция списка ──────────────────────────────────────────────────────────
 
-function SectionHeader({
-  title,
-  count,
-  doneCount = 0,
-  collapsed,
-  onToggle,
-  actions,
-}: {
-  title: string
-  /** Незавершённые задачи секции. */
-  count: number
-  /** Выполненные — отдельным приглушённым счётчиком «· M выполнено». */
-  doneCount?: number
-  collapsed: boolean
-  onToggle: () => void
-  actions?: React.ReactNode
-}) {
-  return (
-    <div className="flex items-center border-b border-hair bg-tint">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={!collapsed}
-        className="flex min-h-11 flex-1 items-center gap-2.5 py-[9px] pl-[21px] pr-3 text-left hover:bg-glass focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber lg:min-h-0"
-      >
-        <ChevronDown
-          className={cn(
-            'h-[15px] w-[15px] shrink-0 text-text2 transition-transform',
-            collapsed && '-rotate-90',
-          )}
-          strokeWidth={2.2}
-        />
-        <span className="truncate text-[13px] font-bold uppercase tracking-[0.06em] text-text2">
-          {title}
-        </span>
-        <span className="font-mono text-[12px] text-text2">
-          {count}
-          {doneCount > 0 && (
-            <span className="font-body text-text3"> · {doneCount} выполнено</span>
-          )}
-        </span>
-      </button>
-      {actions && <div className="pr-3">{actions}</div>}
-    </div>
-  )
-}
-
-function SectionBlock({
-  section,
+function TaskListBlock({
   projectId,
   tasks,
   gridColumns,
@@ -438,13 +348,10 @@ function SectionBlock({
   labelsByTask,
   stageNames,
   canEditFlag,
-  canManageFlag,
   isDesktop,
   selectedTaskId,
   onTaskClick,
-  quickCreateTarget = false,
 }: {
-  section: Section | null
   projectId: string
   tasks: Task[]
   gridColumns: string
@@ -456,182 +363,69 @@ function SectionBlock({
    *  задачи по доске после 0044. */
   stageNames?: Map<string, string>
   canEditFlag: boolean
-  canManageFlag: boolean
   isDesktop: boolean
   selectedTaskId: string | null
   onTaskClick: (id: string) => void
-  /** Первый блок на экране принимает фокус от «Новая задача» в сайдбаре. */
-  quickCreateTarget?: boolean
 }) {
-  const key = section ? section.id : ORPHAN_SECTION_KEY
-  const collapsed = useViewConfig(
-    (s) => s.byProject[projectId]?.collapsedSections?.includes(key) ?? false,
-  )
-  const toggleSection = useViewConfig((s) => s.toggleSection)
-  const [renaming, setRenaming] = useState(false)
-  const [draftName, setDraftName] = useState('')
-  const del = useDeleteSection(projectId)
-  const updateSection = useUpdateSection(projectId)
   const toggleDone = useToggleDone(projectId)
-  const title = section ? section.name : 'Без секции'
-
-  const commitRename = async () => {
-    if (!section) return
-    const trimmed = draftName.trim()
-    if (!trimmed || trimmed === section.name) {
-      setRenaming(false)
-      return
-    }
-    try {
-      await updateSection.mutateAsync({ sectionId: section.id, name: trimmed })
-      setRenaming(false)
-    } catch {
-      // тост показывает глобальный onError мутаций; остаёмся в режиме правки
-    }
-  }
 
   return (
     <section>
-      {renaming && section ? (
-        <div className="border-b border-hair bg-tint py-1.5 pl-[21px] pr-3">
-          <Input
-            autoFocus
-            value={draftName}
-            onChange={(e) => setDraftName(e.target.value)}
-            onBlur={() => setRenaming(false)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                void commitRename()
-              } else if (e.key === 'Escape') {
-                setRenaming(false)
-              }
-            }}
-            className="h-8 max-w-[280px] font-display text-base font-semibold"
-          />
+      {/* Инлайн-поле СВЕРХУ, а не под списком. Кнопка «Новая задача» в
+          сайдбаре наводится на него через `scrollIntoView` (lib/quickCreate),
+          и в плоском списке на 2 500 строк поле внизу швыряло бы человека в
+          самый конец проекта. Раньше поле было в первом блоке секции, то есть
+          тоже наверху — поведение сохраняем, а не меняем. */}
+      {canEditFlag && (
+        <div className="px-4 py-2 lg:pl-[21px] lg:pr-6">
+          <TaskInlineCreate projectId={projectId} quickCreateTarget />
         </div>
-      ) : (
-        <SectionHeader
-          title={title}
-          count={countOpenDone(tasks).open}
-          doneCount={countOpenDone(tasks).done}
-          collapsed={collapsed}
-          onToggle={() => toggleSection(projectId, key)}
-          actions={
-            section && (canEditFlag || canManageFlag) ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" aria-label="Действия с секцией">
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      // после закрытия меню Radix вернёт фокус на trigger —
-                      // монтируем input тиком позже, чтобы autoFocus сработал
-                      setTimeout(() => {
-                        setDraftName(section.name)
-                        setRenaming(true)
-                      }, 0)
-                    }}
-                  >
-                    Переименовать
-                  </DropdownMenuItem>
-                  {canManageFlag && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        destructive
-                        onSelect={async () => {
-                          try {
-                            await del.mutateAsync(section.id)
-                            toast.success(`Секция «${section.name}» удалена`)
-                          } catch {
-                            // тост показывает глобальный onError мутаций
-                          }
-                        }}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" /> Удалить секцию
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : null
-          }
-        />
       )}
-
-      {!collapsed && (
-        <>
-          {tasks.map((t) =>
-            isDesktop ? (
-              <TaskRow
-                key={t.id}
-                task={t}
-                gridColumns={gridColumns}
-                labels={labelsByTask?.get(t.id)}
-                subtasks={childrenByParent?.get(t.id)}
-                stage={t.stage_id ? stageNames?.get(t.stage_id) : null}
-                // Без fallback: секция уже подписана шапкой над строками, и
-                // «Без секции» в каждой строке — шум (макет «Список»,
-                // QA-0821 #10). Контекст = проект остаётся в «Моих задачах».
-                selected={selectedTaskId === t.id}
-                onClick={() => onTaskClick(t.id)}
-                // Сервер сказал «нельзя» — контрол не рисуем вовсе (у
-                // TaskDoneControl нет disabled: без onToggle он рендерит
-                // неинтерактивную иконку). undefined ≠ false: «не знаем» —
-                // показываем, как раньше.
-                onToggleDone={
-                  t.can_complete === false ? undefined : () => toggleDone(t)
-                }
-                cells={visibleFields.map((f) => {
-                  const v = valuesByTask.get(t.id)?.get(f.id)?.value
-                  const text = formatCustomFieldValue(f, v)
-                  return (
-                    <span
-                      key={f.id}
-                      className={cn(
-                        'truncate pr-3.5 text-[14px] text-text2',
-                        f.type === 'number' && 'font-mono',
-                      )}
-                      title={`${f.name}: ${text}`}
-                    >
-                      {text}
-                    </span>
-                  )
-                })}
-              />
-            ) : (
-              <MobileTaskRow
-                key={t.id}
-                task={t}
-                labels={labelsByTask?.get(t.id)}
-                subtasks={childrenByParent?.get(t.id)}
-                stage={t.stage_id ? stageNames?.get(t.stage_id) : null}
-                selected={selectedTaskId === t.id}
-                onClick={() => onTaskClick(t.id)}
-                // Сервер сказал «нельзя» — контрол не рисуем вовсе (у
-                // TaskDoneControl нет disabled: без onToggle он рендерит
-                // неинтерактивную иконку). undefined ≠ false: «не знаем» —
-                // показываем, как раньше.
-                onToggleDone={
-                  t.can_complete === false ? undefined : () => toggleDone(t)
-                }
-              />
-            ),
-          )}
-          {canEditFlag && (
-            <div className="px-4 py-2 lg:pl-[21px] lg:pr-6">
-              <TaskInlineCreate
-                projectId={projectId}
-                sectionId={section ? section.id : null}
-                quickCreateTarget={quickCreateTarget}
-              />
-            </div>
-          )}
-        </>
+      {tasks.map((t) =>
+        isDesktop ? (
+          <TaskRow
+            key={t.id}
+            task={t}
+            gridColumns={gridColumns}
+            labels={labelsByTask?.get(t.id)}
+            subtasks={childrenByParent?.get(t.id)}
+            stage={t.stage_id ? stageNames?.get(t.stage_id) : null}
+            selected={selectedTaskId === t.id}
+            onClick={() => onTaskClick(t.id)}
+            // Сервер сказал «нельзя» — контрол не рисуем вовсе (у
+            // TaskDoneControl нет disabled: без onToggle он рендерит
+            // неинтерактивную иконку). undefined ≠ false: «не знаем» —
+            // показываем, как раньше.
+            onToggleDone={t.can_complete === false ? undefined : () => toggleDone(t)}
+            cells={visibleFields.map((f) => {
+              const v = valuesByTask.get(t.id)?.get(f.id)?.value
+              const text = formatCustomFieldValue(f, v)
+              return (
+                <span
+                  key={f.id}
+                  className={cn(
+                    'truncate pr-3.5 text-[14px] text-text2',
+                    f.type === 'number' && 'font-mono',
+                  )}
+                  title={`${f.name}: ${text}`}
+                >
+                  {text}
+                </span>
+              )
+            })}
+          />
+        ) : (
+          <MobileTaskRow
+            key={t.id}
+            task={t}
+            labels={labelsByTask?.get(t.id)}
+            subtasks={childrenByParent?.get(t.id)}
+            stage={t.stage_id ? stageNames?.get(t.stage_id) : null}
+            selected={selectedTaskId === t.id}
+            onClick={() => onTaskClick(t.id)}
+            onToggleDone={t.can_complete === false ? undefined : () => toggleDone(t)}
+          />
+        ),
       )}
     </section>
   )
@@ -663,7 +457,6 @@ function ListTab({
   onImport: () => void
 }) {
   const isDesktop = useIsDesktop()
-  const sections = useProjectSections(projectId)
   const listFilters = useMemo(() => toListFilters(filters), [filters])
   const tasks = useTasks(projectId, listFilters)
   const defs = useCustomFieldDefinitions(projectId)
@@ -671,26 +464,16 @@ function ListTab({
   const visibleIds = useViewConfig(
     (s) => s.byProject[projectId]?.visibleCustomFields ?? [],
   )
-  const create = useCreateSection(projectId)
-  const [newSectionName, setNewSectionName] = useState('')
-  const [addingSection, setAddingSection] = useState(false)
 
   const canEditFlag = project.can_edit
-  const canManageFlag = project.can_manage
 
-  const tasksBySection = useMemo(() => {
-    const map = new Map<string | null, Task[]>()
-    for (const t of tasks.data ?? []) {
-      // Подзадачи живут в карточке родителя, не отдельными строками.
-      if (t.parent_task_id) continue
-      const list = map.get(t.section_id) ?? []
-      list.push(t)
-      map.set(t.section_id, list)
-    }
-    // Выполненные — в конец секции (решение владельца 2026-08-21).
-    for (const [key, list] of map) map.set(key, sinkDone(list))
-    return map
-  }, [tasks.data])
+  // Плоский список: секций больше нет, группировать не по чему. Порядок
+  // задаёт сервер (`position`, тай-брейкер `seq`), а выполненные тонут вниз —
+  // решение владельца 2026-08-21.
+  const rows = useMemo(
+    () => sinkDone((tasks.data ?? []).filter((t) => !t.parent_task_id)),
+    [tasks.data],
+  )
 
   // Счётчик k/N для чипа на строке родителя. При активных фильтрах дети
   // могут быть отфильтрованы — чип занижен; полный счёт виден в карточке.
@@ -752,24 +535,11 @@ function ListTab({
     [stages.data],
   )
 
-  const onAddSection = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const trimmed = newSectionName.trim()
-    if (!trimmed) return
-    try {
-      await create.mutateAsync({ name: trimmed })
-      setNewSectionName('')
-      setAddingSection(false)
-      toast.success(`Секция «${trimmed}» создана`)
-    } catch {
-      // ввод сохраняем в поле; тост показывает глобальный onError мутаций
-    }
-  }
 
-  if (tasks.isLoading || sections.isLoading) {
+  if (tasks.isLoading) {
     return <TaskListSkeleton compact={!isDesktop} />
   }
-  if (tasks.isError || sections.isError) {
+  if (tasks.isError) {
     return (
       <TaskEmptyState
         tone="error"
@@ -777,15 +547,12 @@ function ListTab({
         text="Проверьте соединение и попробуйте ещё раз."
         meta={dataAgeLabel(tasks.dataUpdatedAt)}
         cta="Повторить"
-        onCta={() => {
-          if (tasks.isError) void tasks.refetch()
-          if (sections.isError) void sections.refetch()
-        }}
+        onCta={() => void tasks.refetch()}
       />
     )
   }
 
-  const visibleTasks = (tasks.data ?? []).filter((t) => !t.parent_task_id)
+  const visibleTasks = rows
   const filtersActive = activeFilterCount(filters) > 0
   const narrowable = narrowableFilter(filters)
 
@@ -819,7 +586,10 @@ function ListTab({
     ) : (
       <TaskEmptyState
         title="Пока нет задач. Создайте первую."
-        text="Секции появятся, когда задач станет больше десяти — до этого список плоский."
+        // Обещание секций пережило их самих: секций нет с 0047/0048, список
+        // плоский всегда. Вместо мёртвой функции — то, что правда полезно
+        // знать в пустом проекте.
+        text="Задача может жить без колонки — на доску её кладут, когда доска понадобится."
         cta={canEditFlag ? 'Создать задачу' : undefined}
         // Та же точка входа, что у «Новой задачи» в сайдбаре: курсор в
         // инлайн-поле первого блока; в пустом проекте поля нет — диалог.
@@ -836,50 +606,21 @@ function ListTab({
     )
   }
 
-  const orphanTasks = tasksBySection.get(null) ?? []
-  const showOrphanBlock = orphanTasks.length > 0 || canEditFlag
   const blocks = (
-    <>
-      {showOrphanBlock && (
-        <SectionBlock
-          section={null}
-          projectId={projectId}
-          tasks={orphanTasks}
-          gridColumns={grid.columns}
-          visibleFields={visibleFields}
-          valuesByTask={valuesByTask}
-          childrenByParent={childrenByParent}
-          labelsByTask={labelsByTask}
-          stageNames={stageNames}
-          canEditFlag={canEditFlag}
-          canManageFlag={canManageFlag}
-          isDesktop={isDesktop}
-          selectedTaskId={selectedTaskId}
-          onTaskClick={onTaskClick}
-          quickCreateTarget
-        />
-      )}
-      {sections.data?.map((s, i) => (
-        <SectionBlock
-          key={s.id}
-          quickCreateTarget={!showOrphanBlock && i === 0}
-          section={s}
-          projectId={projectId}
-          tasks={tasksBySection.get(s.id) ?? []}
-          gridColumns={grid.columns}
-          visibleFields={visibleFields}
-          valuesByTask={valuesByTask}
-          childrenByParent={childrenByParent}
-          labelsByTask={labelsByTask}
-          stageNames={stageNames}
-          canEditFlag={canEditFlag}
-          canManageFlag={canManageFlag}
-          isDesktop={isDesktop}
-          selectedTaskId={selectedTaskId}
-          onTaskClick={onTaskClick}
-        />
-      ))}
-    </>
+    <TaskListBlock
+      projectId={projectId}
+      tasks={visibleTasks}
+      gridColumns={grid.columns}
+      visibleFields={visibleFields}
+      valuesByTask={valuesByTask}
+      childrenByParent={childrenByParent}
+      labelsByTask={labelsByTask}
+      stageNames={stageNames}
+      canEditFlag={canEditFlag}
+      isDesktop={isDesktop}
+      selectedTaskId={selectedTaskId}
+      onTaskClick={onTaskClick}
+    />
   )
 
   return (
@@ -897,48 +638,6 @@ function ListTab({
           </div>
         )}
         {blocks}
-        {canEditFlag && (
-          <div className="px-4 py-4 lg:pl-[21px] lg:pr-6">
-            {!addingSection ? (
-              <button
-                type="button"
-                onClick={() => setAddingSection(true)}
-                className="inline-flex min-h-11 items-center gap-1 text-[14px] font-semibold text-text2 hover:text-text lg:min-h-0"
-              >
-                <Plus className="h-4 w-4" /> Добавить секцию
-              </button>
-            ) : (
-              <form onSubmit={onAddSection} className="flex gap-2">
-                <Input
-                  autoFocus
-                  value={newSectionName}
-                  onChange={(e) => setNewSectionName(e.target.value)}
-                  placeholder="Название секции…"
-                  disabled={create.isPending}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
-                      setNewSectionName('')
-                      setAddingSection(false)
-                    }
-                  }}
-                />
-                <Button type="submit" disabled={create.isPending || !newSectionName.trim()}>
-                  Добавить
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => {
-                    setNewSectionName('')
-                    setAddingSection(false)
-                  }}
-                >
-                  Отмена
-                </Button>
-              </form>
-            )}
-          </div>
-        )}
       </div>
     </div>
   )
@@ -950,8 +649,6 @@ export function ProjectPage() {
   const { id } = useParams<{ id: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
   const project = useProject(id)
-  const sections = useProjectSections(id)
-  const archive = useArchiveProject(id ?? '')
   // Вид живёт в URL рядом с фильтрами: ссылка на доску проекта должна
   // открывать доску, а не список.
   const tabParam = searchParams.get('view')
@@ -1049,7 +746,6 @@ export function ProjectPage() {
     <div className="flex flex-col lg:h-full lg:overflow-hidden">
       <ProjectHeader
         project={p}
-        sectionCount={sections.data?.length ?? 0}
         tab={tab}
         onTab={setTab}
         mobileFilters={
@@ -1061,18 +757,9 @@ export function ProjectPage() {
                 ? mobileFilters(false, false)
                 : undefined
         }
-        onArchive={async () => {
-          try {
-            await archive.mutateAsync(!isArchived)
-            toast.success(isArchived ? 'Проект разархивирован' : 'Проект архивирован')
-          } catch {
-            // тост показывает глобальный onError мутаций
-          }
-        }}
         onOpenFields={() => setFieldsOpen(true)}
         onOpenLabels={() => setLabelsOpen(true)}
         onOpenShare={() => setShareOpen(true)}
-        onImport={() => setImportOpen(true)}
         // «Задача» в шапке — та же точка входа, что «Новая задача» в сайдбаре:
         // курсор в инлайн-поле списка; если поля нет (пустой проект, другая
         // вкладка ещё не перерисовалась) — диалог создания.
@@ -1156,11 +843,25 @@ export function ProjectPage() {
         </div>
       )}
 
+      {tab === 'about' && (
+        // pb-28 на мобильном — под плавающей пилюлей вида, иначе она накрывает
+        // «Опасную зону».
+        <div className="min-w-0 flex-1 p-4 pb-28 lg:overflow-auto lg:p-6">
+          <AboutTab project={p} onImport={() => setImportOpen(true)} />
+        </div>
+      )}
+
       {/* FAB над пилюлей вида (132px); только там, где есть куда создавать
           задачу: на дашборде и участниках создание не живёт, в read-only — тоже. */}
       <FloatingActionButton
         bottomOffset={8.25}
-        hidden={tab === 'dashboard' || tab === 'members' || !p.can_edit || isArchived}
+        hidden={
+          tab === 'dashboard' ||
+          tab === 'members' ||
+          tab === 'about' ||
+          !p.can_edit ||
+          isArchived
+        }
       />
 
       <TaskDetailDrawer
@@ -1183,6 +884,7 @@ export function ProjectPage() {
         open={createTaskOpen}
         onOpenChange={setCreateTaskOpen}
         initialProjectId={id}
+        openAfterCreate
       />
       <ImportTasksDialog open={importOpen} onOpenChange={setImportOpen} projectId={id} />
 
