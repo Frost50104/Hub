@@ -76,6 +76,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 hint="pip install 'signaris-hub[sentry]' to enable",
             )
 
+    # VAPID грузим на СТАРТЕ, а не при первой отправке: раньше битый ключ
+    # обнаруживался только warning'ом внутри фоновой задачи, и web push молча
+    # не доставлялся месяц (29.07–26.08). Падать не на чем — трекер и in-app
+    # уведомления работают без пуша, поэтому только громкая запись в журнал.
+    from app.services.push_sender import load_vapid
+
+    if load_vapid() is None:
+        log.error(
+            "push.disabled",
+            reason="VAPID key missing, unreadable or not paired with the public key",
+        )
+    else:
+        log.info("push.ready")
+
     # Auth verifier is created at module import time in app.deps —
     # no explicit init here. JWKSCache fetches keys lazily on first verify.
     log.info(
@@ -154,7 +168,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=[
             "Authorization",
             "Content-Type",
@@ -178,6 +192,7 @@ def create_app() -> FastAPI:
     from app.api import employees as employees_api
     from app.api import env as env_api
     from app.api import favorites as favorites_api
+    from app.api import feedback as feedback_api
     from app.api import guides as guides_api
     from app.api import labels as labels_api
     from app.api import learn_analytics as learn_analytics_api
@@ -198,7 +213,6 @@ def create_app() -> FastAPI:
     from app.api import quizzes as quizzes_api
     from app.api import reports as reports_api
     from app.api import search as search_api
-    from app.api import sections as sections_api
     from app.api import share as share_api
     from app.api import shifts as shifts_api
     from app.api import stages as stages_api
@@ -211,12 +225,12 @@ def create_app() -> FastAPI:
     from app.api import watchers as watchers_api
 
     app.include_router(env_api.router, prefix="/api")
+    app.include_router(feedback_api.router, prefix="/api")
     app.include_router(guides_api.router, prefix="/api")
     app.include_router(me_api.router, prefix="/api")
     app.include_router(me_tasks_api.router, prefix="/api")
     app.include_router(projects_api.router, prefix="/api")
     app.include_router(project_folders_api.router, prefix="/api")
-    app.include_router(sections_api.router, prefix="/api")
     app.include_router(stages_api.router, prefix="/api")
     app.include_router(tasks_api.router, prefix="/api")
     app.include_router(tasks_import_api.router, prefix="/api")

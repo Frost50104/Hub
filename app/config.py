@@ -82,6 +82,11 @@ class Settings(BaseSettings):
     vapid_public_key: str | None = Field(default=None)
     vapid_private_key_path: Path | None = Field(default=None)
     vapid_subject: str = Field(default="mailto:ops@signaris.ru")
+    # Сколько дней подписка живёт без подтверждения. Продлевается на каждом
+    # `POST /push/subscribe`, а его шлёт тихая переподписка при запуске PWA
+    # (`web/src/lib/pushRefresh.ts`). Пара «гейт + продление» неразделима:
+    # гейт без продления — это выключатель пушей.
+    push_freshness_days: int = Field(default=30, ge=1, le=365)
 
     # Sentry (Hub-MVP.5)
     sentry_dsn: str | None = Field(default=None)
@@ -92,6 +97,10 @@ class Settings(BaseSettings):
     # rsync'ом деплоя вместе с кодом. На staging путь другой — задаётся env.
     guides_root: Path = Field(default=Path("/opt/signaris-hub/guides"))
     attachment_max_bytes: int = Field(default=20 * 1024 * 1024)
+
+    # Проект приёма обратной связи из настроек. Ключ, а не id: переживает
+    # переименование проекта и читается человеком в .env.
+    feedback_project_key: str = Field(default="RH")
 
     # Learn-медиа (Ф3a): подписанные URL для <video>/<img>/pdf (Bearer в тегах
     # не работает). Секрет — HMAC-ключ подписей; если не задан, derive из

@@ -63,6 +63,16 @@ export const notificationsApi = {
       .then((r) => r.data),
 }
 
+export interface PushTestResult {
+  ok: boolean
+  subscriptions: number
+  sent: number
+  removed: number
+  stale: number
+  /** Готовая фраза для человека — собрана на сервере (`describe_push_result`). */
+  detail: string
+}
+
 export const pushApi = {
   subscribe: (body: PushSubscribeBody): Promise<void> =>
     api.post('/push/subscribe', body).then(() => undefined),
@@ -70,4 +80,6 @@ export const pushApi = {
     api
       .delete('/push/subscribe', { params: { endpoint } })
       .then(() => undefined),
+  test: (): Promise<PushTestResult> =>
+    api.post<PushTestResult>('/push/test').then((r) => r.data),
 }

@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.services.push_sender import vapid_status
 
 router = APIRouter(tags=["env"])
 
@@ -35,3 +36,25 @@ async def get_env() -> EnvResponse:
         sentry_dsn=settings.sentry_dsn,
         display_timezone=settings.display_timezone,
     )
+
+
+class PushHealthResponse(BaseModel):
+    """Состояние транспорта уведомлений — без секретов и без чисел.
+
+    Числа подписок здесь быть НЕ МОЖЕТ: ручка анонимная, `app.tenant_id` не
+    выставлен, и RLS на `push_subscriptions` честно вернёт пусто — «0 подписок»
+    читалось бы как «никто не подписан». Счётчики отдаёт `POST /api/push/test`,
+    где есть тенант.
+    """
+
+    vapid: str
+
+
+@router.get("/health/push", response_model=PushHealthResponse)
+async def push_health() -> PushHealthResponse:
+    """`ok` | `absent` | `invalid` | `mismatch`.
+
+    Дёргается `scripts/healthcheck.sh` каждые 5 минут: web push однажды уже
+    молча не работал месяц, потому что о поломке транспорта никто не узнавал.
+    """
+    return PushHealthResponse(vapid=vapid_status())

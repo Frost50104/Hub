@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { api } from '@/lib/api'
 import { pushApi } from '@/lib/notifications'
+import { markOptedIn, markOptedOut, urlBase64ToUint8Array } from '@/lib/pushRefresh'
 
 type Permission = 'unsupported' | 'default' | 'granted' | 'denied'
 
@@ -10,15 +11,6 @@ interface EnvResponse {
   environment: string
   vapid_public_key: string | null
   sentry_dsn: string | null
-}
-
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
-  const raw = atob(base64)
-  const out = new Uint8Array(raw.length)
-  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
-  return out
 }
 
 export interface UsePushResult {
@@ -85,6 +77,10 @@ export function usePush(): UsePushResult {
       keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
       user_agent: navigator.userAgent.slice(0, 256),
     })
+    // Отметка «человек включал уведомления» — по ней тихая переподписка знает,
+    // что подписку МОЖНО восстанавливать. Разрешения браузера для этого мало:
+    // оно остаётся `granted` и после нашей кнопки «Отключить».
+    markOptedIn()
     setSubscribed(true)
     return true
   }, [permission])
@@ -102,6 +98,9 @@ export function usePush(): UsePushResult {
         // Best-effort — server might have cleaned it up already.
       }
     }
+    // Снимаем отметку ДО setSubscribed: иначе тихая переподписка при следующем
+    // запуске вернула бы то, что человек только что выключил.
+    markOptedOut()
     setSubscribed(false)
   }, [permission])
 

@@ -1,4 +1,5 @@
 import { Loader2 } from 'lucide-react'
+import { useState } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/Button'
@@ -9,6 +10,8 @@ import {
   useSetNotificationPreferences,
 } from '@/hooks/useNotificationPreferences'
 import { cn } from '@/lib/cn'
+import { extractErrorDetail } from '@/lib/errors'
+import { pushApi } from '@/lib/notifications'
 import {
   KIND_GROUP,
   NOTIFICATION_GROUP_LABEL,
@@ -23,6 +26,7 @@ export function NotificationsSettingsTab() {
   const prefsQuery = useNotificationPreferences()
   const setPrefs = useSetNotificationPreferences()
   const { permission, subscribed, subscribe, unsubscribe } = usePush()
+  const [testing, setTesting] = useState(false)
 
   if (prefsQuery.isLoading) {
     return (
@@ -120,26 +124,54 @@ export function NotificationsSettingsTab() {
           </div>
         )}
         {permission === 'granted' && subscribed && (
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-glass-border bg-surface p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-glass-border bg-surface p-3">
             <p className="text-sm text-text">
               Push-уведомления включены на этом устройстве.
             </p>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={async () => {
-                try {
-                  await unsubscribe()
-                  toast.success('Отписались от push на этом устройстве')
-                } catch (err) {
-                  toast.error('Не удалось отписаться', {
-                    description: (err as Error).message,
-                  })
-                }
-              }}
-            >
-              Отписаться
-            </Button>
+            <div className="flex items-center gap-2">
+              {/* Единственный способ убедиться в доставке, не читая журнал
+                  сервера. Пуш ломался молча — проверять его должно быть можно
+                  изнутри продукта. */}
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={testing}
+                onClick={async () => {
+                  setTesting(true)
+                  try {
+                    const result = await pushApi.test()
+                    if (result.ok) toast.success(result.detail)
+                    else toast.message('Уведомление не отправлено', {
+                      description: result.detail,
+                    })
+                  } catch (err) {
+                    toast.error('Проверка не удалась', {
+                      description: extractErrorDetail(err),
+                    })
+                  } finally {
+                    setTesting(false)
+                  }
+                }}
+              >
+                {testing ? 'Отправляем…' : 'Проверить'}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={async () => {
+                  try {
+                    await unsubscribe()
+                    toast.success('Отписались от push на этом устройстве')
+                  } catch (err) {
+                    toast.error('Не удалось отписаться', {
+                      description: (err as Error).message,
+                    })
+                  }
+                }}
+              >
+                Отписаться
+              </Button>
+            </div>
           </div>
         )}
         {permission === 'granted' && !subscribed && (
