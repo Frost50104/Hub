@@ -51,6 +51,25 @@ class Project(Base):
             unique=True,
             postgresql_where=text("personal_owner_id IS NOT NULL"),
         ),
+        # Блоб и его тип живут и умирают вместе.
+        CheckConstraint(
+            "(badge_storage_key IS NULL) = (badge_mime IS NULL)",
+            name="ck_projects_badge_image_pair",
+        ),
+        # Эмодзи ИЛИ картинка. Оба NULL легально — это буквы.
+        CheckConstraint(
+            "NOT (badge_emoji IS NOT NULL AND badge_storage_key IS NOT NULL)",
+            name="ck_projects_badge_exclusive",
+        ),
+        # Этот mime уходит прямо в Content-Type пользовательских байт, которые
+        # отдаются INLINE в <img>. Whitelist на уровне БД значит, что даже баг
+        # в ручке не сможет вернуть text/html. Цена — gif/avif позже потребуют
+        # миграции; принято сознательно.
+        CheckConstraint(
+            "badge_mime IS NULL OR badge_mime IN "
+            "('image/png', 'image/jpeg', 'image/webp')",
+            name="ck_projects_badge_mime",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -63,6 +82,17 @@ class Project(Base):
         Integer, nullable=False, server_default=text("1")
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Бейдж проекта: эмодзи ЛИБО картинка, иначе две буквы ключа. Инварианты
+    # держат CHECK'и в __table_args__, а не только код.
+    #
+    # `badge_storage_key` — путь ОТНОСИТЕЛЬНО attachments_root, как у
+    # task_attachments.storage_key и media_files.storage_key. Имя файла несёт
+    # свежий uuid на КАЖДУЮ заливку: подпись URL считается от ключа, поэтому
+    # новая картинка = новый адрес, и прежние байты не остаются под тем же
+    # URL в кэше браузера.
+    badge_emoji: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    badge_storage_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    badge_mime: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Папка — ОБЩАЯ для тенанта раскладка (не персональная). SET NULL:
     # удаление папки не удаляет проект, он переезжает в «Без папки».
     folder_id: Mapped[UUID | None] = mapped_column(
