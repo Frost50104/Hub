@@ -23,6 +23,9 @@ const MyTasksPage = lazy(() =>
 const ProjectListPage = lazy(() =>
   import('@/pages/ProjectListPage').then((m) => ({ default: m.ProjectListPage })),
 )
+const ArchivedProjectsPage = lazy(() =>
+  import('@/pages/ArchivedProjectsPage').then((m) => ({ default: m.ArchivedProjectsPage })),
+)
 const ProjectPage = lazy(() =>
   import('@/pages/ProjectPage').then((m) => ({ default: m.ProjectPage })),
 )
@@ -75,6 +78,9 @@ const CourseBuilderPage = lazy(() =>
 const LearnRatingPage = lazy(() =>
   import('@/pages/learn/LearnRatingPage').then((m) => ({ default: m.LearnRatingPage })),
 )
+const LearnFavoritesPage = lazy(() =>
+  import('@/pages/learn/LearnFavoritesPage').then((m) => ({ default: m.LearnFavoritesPage })),
+)
 const LearnAdminPage = lazy(() =>
   import('@/pages/learn/LearnAdminPage').then((m) => ({ default: m.LearnAdminPage })),
 )
@@ -106,8 +112,10 @@ const NotificationsSettingsTab = lazy(() =>
 
 
 export function App() {
+  // fallback ФУНКЦИЕЙ, а не элементом: только так Sentry передаёт саму ошибку —
+  // без неё экран сбоя ничего не объясняет, а Sentry в Hub ещё не подключён.
   return (
-    <Sentry.ErrorBoundary fallback={<ErrorFallback />}>
+    <Sentry.ErrorBoundary fallback={({ error }) => <ErrorFallback error={error} />}>
       {/* Внешний Suspense — для роутов вне Shell (/p/:token). */}
       <Suspense fallback={<SkeletonRows rows={6} className="p-6" />}>
       <Routes>
@@ -120,6 +128,9 @@ export function App() {
           <Route path="/my" element={<MyTasksPage />} />
           <Route path="/inbox" element={<InboxPage />} />
           <Route path="/projects" element={<ProjectListPage />} />
+        {/* Статический сегмент объявлен ДО «:id»: v6 и так ранжирует по
+            специфичности, но порядок здесь читается как гарантия. */}
+        <Route path="/projects/archived" element={<ArchivedProjectsPage />} />
           <Route path="/projects/:id" element={<ProjectPage />} />
           <Route path="/search" element={<SearchPage />} />
           {/* Профиль слит с настройками (редизайн 2026-08): старый путь живёт
@@ -137,6 +148,7 @@ export function App() {
           <Route path="/learn/products" element={<LearnProductsPage />} />
           <Route path="/learn/products/:productId" element={<LearnProductPage />} />
           <Route path="/learn/rating" element={<LearnRatingPage />} />
+          <Route path="/learn/favorites" element={<LearnFavoritesPage />} />
           {/* Ассистент общий для двух пространств. Старый learn-путь —
               редирект, а не 404: PWA живёт вчерашним бандлом. */}
           <Route path="/assistant" element={<AssistantPage />} />

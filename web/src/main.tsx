@@ -9,10 +9,16 @@ import { Toaster } from './components/ui/Toaster'
 import { UpdateBanner } from './components/UpdateBanner'
 import { setBackendEnv } from './lib/appEnv'
 import { queryClient } from './lib/queryClient'
+import { installPreloadRecovery } from './lib/preloadRecovery'
 import { initSentry } from './lib/sentry'
 import { setDisplayTz } from './lib/taskDates'
 import { initTheme } from './lib/theme'
 import './styles/globals.css'
+
+// До первого рендера: провал ленивой загрузки чанка (деплой удалил старые
+// хэши, а PWA ещё на вчерашнем бандле) лечится перезагрузкой, а не экраном
+// «Что-то пошло не так».
+installPreloadRecovery()
 
 const root = document.getElementById('root')
 if (!root) throw new Error('#root element missing in index.html')
