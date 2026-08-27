@@ -34,6 +34,7 @@ import {
   type SurveyListData,
   type UnlinkedLogin,
 } from '@/lib/learn'
+import { toggleFavoriteKey } from '@/lib/favorites'
 
 // ─── Оргструктура ────────────────────────────────────────────────────────────
 
@@ -227,6 +228,57 @@ export function useFavorites(): UseQueryResult<FavoriteItem[]> {
     queryKey: ['learn-favorites'],
     queryFn: learnApi.favorites,
     staleTime: 60_000,
+  })
+}
+
+/**
+ * Ключи «тип:id» для звёздочек в списках.
+ *
+ * Отдельно от `useFavorites`: тот отдаёт 50 последних записей, склеенных с
+ * индексом публикаций, и подсветка по нему у активного сотрудника гасла бы
+ * через раз.
+ */
+export function useFavoriteIds(enabled = true): UseQueryResult<Set<string>> {
+  return useQuery({
+    queryKey: ['learn-favorite-ids'],
+    queryFn: () => learnApi.favoriteIds().then((keys) => new Set(keys)),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+/**
+ * Переключатель звезды: оптимистично правит набор ключей и синхронизирует оба
+ * представления избранного.
+ *
+ * Инвалидируются ОБА ключа: список избранного и набор ключей живут в кэше
+ * порознь, и без этого экран «Избранное» показывал бы снятую звезду до F5.
+ */
+export function useToggleFavorite() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ objectType, objectId }: { objectType: string; objectId: string }) =>
+      learnApi.toggleFavorite(objectType, objectId),
+    onMutate: async ({ objectType, objectId }) => {
+      await qc.cancelQueries({ queryKey: ['learn-favorite-ids'] })
+      const previous = qc.getQueryData<Set<string>>(['learn-favorite-ids'])
+      if (previous) {
+        qc.setQueryData(
+          ['learn-favorite-ids'],
+          toggleFavoriteKey(previous, objectType, objectId),
+        )
+      }
+      return { previous }
+    },
+    onError: (_e, _vars, ctx) => {
+      // Возврат к прежнему набору: иначе звезда осталась бы «нажатой» после
+      // отказа сервера — например у сотрудника без учебного профиля (404).
+      if (ctx?.previous) qc.setQueryData(['learn-favorite-ids'], ctx.previous)
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['learn-favorite-ids'] })
+      void qc.invalidateQueries({ queryKey: ['learn-favorites'] })
+    },
   })
 }
 

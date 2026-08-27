@@ -18,11 +18,13 @@ import {
   Users,
   X,
 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
+import { FavoriteStar } from '@/components/learn/FavoriteStar'
 import { ImageLightbox } from '@/components/learn/lesson/ImageLightbox'
 import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
@@ -48,6 +50,7 @@ import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
 import { nbsp, plural } from '@/lib/typography'
 import { hasTextPreview, inlineViewerKind, materialPrimaryAction } from '@/lib/inlineViewer'
+import { canPublishMaterial, canSaveMaterial } from '@/lib/materialForm'
 import { describeSectionContents, sectionContents } from '@/lib/sectionDelete'
 import {
   type MaterialText,
@@ -231,7 +234,7 @@ export function LearnLibraryPage() {
   return (
     <div className="mx-auto max-w-[680px] lg:flex lg:max-w-[948px] lg:items-start lg:gap-12 lg:px-8">
     <div className="min-w-0 flex-1 lg:max-w-[640px]">
-      <header className="flex flex-wrap items-end justify-between gap-3 px-5 pt-11 lg:px-0">
+      <header className="flex flex-wrap items-end justify-between gap-3 px-5 pt-4 lg:px-0 lg:pt-11">
         <div className="min-w-0">
           {/* Счётчик над заголовком нужен только при поиске («12 из 179»):
               без фильтра то же число стоит в плашке «Всего документов», и
@@ -392,39 +395,51 @@ export function LearnLibraryPage() {
 
           <div className="flex flex-col gap-2">
             {materials.map((m) => (
-              <button
+              // Рамка и ховер переехали на обёртку: звезда — кнопка, а кнопку
+              // в кнопку вкладывать нельзя. Внутренняя кнопка осталась зоной
+              // «открыть карточку» и занимает всю ширину до звезды.
+              <div
                 key={m.id}
-                type="button"
-                onClick={() => setOpened(m.id)}
-                className="flex min-h-[56px] items-center gap-3 rounded-[14px] border border-hair px-3 py-2.5 text-left transition-colors hover:border-amber/40"
+                className="flex min-h-[56px] items-center gap-1 rounded-[14px] border border-hair pr-2 transition-colors hover:border-amber/40"
               >
-                <ExtTile material={m} />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[15px] font-semibold leading-[1.35] text-text lg:text-[16px]">
-                    {m.title}
+                <button
+                  type="button"
+                  onClick={() => setOpened(m.id)}
+                  className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left"
+                >
+                  <ExtTile material={m} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[15px] font-semibold leading-[1.35] text-text lg:text-[16px]">
+                      {m.title}
+                    </span>
+                    <MetaLine
+                      className="mt-0.5 text-[13px] text-text2 lg:text-sm"
+                      items={materialMeta(
+                        m,
+                        sectionFilter
+                          ? null
+                          : m.section_id
+                            ? (sectionTitle.get(m.section_id) ?? null)
+                            : 'Без раздела',
+                      )}
+                    />
                   </span>
-                  <MetaLine
-                    className="mt-0.5 text-[13px] text-text2 lg:text-sm"
-                    items={materialMeta(
-                      m,
-                      sectionFilter
-                        ? null
-                        : m.section_id
-                          ? (sectionTitle.get(m.section_id) ?? null)
-                          : 'Без раздела',
-                    )}
-                  />
-                </span>
-                {canManage && m.status !== 'published' && (
-                  <Badge variant="secondary">{CONTENT_STATUS_LABEL[m.status]}</Badge>
-                )}
-                {m.requires_acknowledgement && m.acked_by_me && (
-                  <Check className="h-4 w-4 shrink-0 text-green" />
-                )}
-                {m.kind === 'link' && (
-                  <ExternalLink className="h-4 w-4 shrink-0 text-text2" />
-                )}
-              </button>
+                  {canManage && m.status !== 'published' && (
+                    <Badge variant="secondary">{CONTENT_STATUS_LABEL[m.status]}</Badge>
+                  )}
+                  {m.requires_acknowledgement && m.acked_by_me && (
+                    <Check className="h-4 w-4 shrink-0 text-green" />
+                  )}
+                  {m.kind === 'link' && (
+                    <ExternalLink className="h-4 w-4 shrink-0 text-text2" />
+                  )}
+                </button>
+                <FavoriteStar
+                  objectType="library_material"
+                  objectId={m.id}
+                  title={m.title}
+                />
+              </div>
             ))}
           </div>
         </section>
@@ -439,7 +454,12 @@ export function LearnLibraryPage() {
         />
       )}
       {createOpen && data && (
-        <MaterialFormDialog data={data} material={null} onClose={() => setCreateOpen(false)} />
+        <MaterialFormDialog
+          data={data}
+          material={null}
+          onCreated={setOpened}
+          onClose={() => setCreateOpen(false)}
+        />
       )}
       {sectionsOpen && data && (
         <SectionsDialog
@@ -861,10 +881,19 @@ function MaterialDialog({
 function MaterialFormDialog({
   data,
   material,
+  onCreated,
   onClose,
 }: {
   data: LibraryData
   material: LibraryMaterial | null
+  /**
+   * Созданный материал — вызывающему, чтобы открыть его карточку.
+   *
+   * Зовётся ПОСЛЕ загрузки файла и после того, как список перечитан: карточка
+   * ищет материал в уже загруженной выдаче (`data.materials.find`), и открытая
+   * раньше времени показала бы пустой экран с залипшим `?m=` в адресе.
+   */
+  onCreated?: (id: string) => void
   onClose: () => void
 }) {
   const isNew = material === null
@@ -883,7 +912,9 @@ function MaterialFormDialog({
   )
   const [file, setFile] = useState<File | null>(null)
 
-  const save = useLibraryMutation(async () => {
+  const isPublisher = ['admin', 'publisher'].includes(data.content_role)
+
+  const save = useLibraryMutation(async (publish: boolean) => {
     const body: MaterialUpsert = {
       title: title.trim(),
       description: description.trim() || null,
@@ -901,16 +932,57 @@ function MaterialFormDialog({
         kind,
       })
       if (kind === 'file' && file) {
-        await learnApi.uploadVersion(created.id, file)
+        try {
+          await learnApi.uploadVersion(created.id, file)
+        } catch {
+          // Материал уже создан — рушить весь путь из-за файла нельзя: человек
+          // потеряет заполненную форму и заведёт дубль. Файл догружается из
+          // карточки кнопкой «Загрузить файл».
+          toast.error('Материал создан, но файл не загрузился — приложите его в карточке')
+        }
+      }
+      if (publish) {
+        try {
+          return await learnApi.setMaterialStatus(created.id, 'published')
+        } catch {
+          // Материал СОЗДАН — падать здесь нельзя: форма осталась бы открытой,
+          // и повторное нажатие завело бы дубль. Публикацию человек повторит из
+          // карточки, где видно и статус, и причину.
+          toast.error('Материал создан, но опубликовать не удалось — сделайте это в карточке')
+        }
       }
       return created
     }
     return learnApi.updateMaterial(material.id, body)
   })
 
-  const valid =
-    title.trim().length > 0 &&
-    (kind === 'link' ? /^https?:\/\/\S+$/.test(url.trim()) : true)
+  const formState = { title, kind, url, hasFile: file !== null }
+  const valid = canSaveMaterial(formState)
+  // Правило зеркалит серверное условие публикации — см. `lib/materialForm.ts`.
+  const canPublishNow = canPublishMaterial(formState)
+
+  const qc = useQueryClient()
+  const submit = async (publish: boolean) => {
+    const saved = await save.mutateAsync(publish).catch(() => null)
+    if (!saved) return
+    if (!isNew) {
+      toast.success('Сохранено')
+      onClose()
+      return
+    }
+    toast.success(
+      publish && saved.status === 'published'
+        ? 'Материал опубликован'
+        : 'Материал создан (черновик)',
+    )
+    // Ждём перечитывания списка ПЕРЕД открытием карточки: она берёт материал
+    // из загруженной выдачи, а не запрашивает по id. Ключ один на оба запроса
+    // библиотеки (`['learn-library', manage]`) — префикс накрывает и probe, и
+    // manage.
+    await qc.invalidateQueries({ queryKey: ['learn-library'] })
+    onClose()
+    onCreated?.(saved.id)
+  }
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
@@ -919,10 +991,7 @@ function MaterialFormDialog({
           onSubmit={(e) => {
             e.preventDefault()
             if (!valid) return
-            void save.mutateAsync(undefined as never).then(() => {
-              toast.success(isNew ? 'Материал создан (черновик)' : 'Сохранено')
-              onClose()
-            })
+            void submit(false)
           }}
         >
           <DialogHeader>
@@ -1069,6 +1138,25 @@ function MaterialFormDialog({
             <Button type="button" variant="secondary" onClick={onClose} disabled={save.isPending}>
               Отмена
             </Button>
+            {isNew && isPublisher && (
+              // Публикация правом publisher и ограничена — тем же признаком,
+              // что и кнопка в карточке. Автору её не рисуем: сервер ответит
+              // 403 уже после создания, и материал остался бы черновиком без
+              // объяснения.
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!canPublishNow || save.isPending}
+                title={
+                  valid && !canPublishNow
+                    ? 'Сначала приложите файл — без него материал не публикуется'
+                    : undefined
+                }
+                onClick={() => void submit(true)}
+              >
+                Сохранить и опубликовать
+              </Button>
+            )}
             <Button type="submit" disabled={!valid || save.isPending}>
               {save.isPending ? 'Сохраняем…' : 'Сохранить'}
             </Button>
@@ -1123,6 +1211,65 @@ function MaterialAudienceDialog({
             onClick={() =>
               void save.mutateAsync(undefined as never).then(() => {
                 toast.success('Аудитория обновлена')
+                onClose()
+              })
+            }
+          >
+            Сохранить
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function SectionAudienceDialog({
+  section,
+  onClose,
+}: {
+  section: LibrarySection
+  onClose: () => void
+}) {
+  const audience = useAudienceDraft(section.audience_id)
+  const { value, setValue } = audience
+  const save = useLibraryMutation(() => learnApi.setSectionAudience(section.id, value))
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Кому виден раздел «{section.title}»</DialogTitle>
+        </DialogHeader>
+        <p className="text-[13px] leading-[1.5] text-text2">
+          Раздел скроется целиком — вместе со всеми материалами внутри, даже
+          открытыми всем. Вложенные разделы правилу не подчиняются: им аудиторию
+          задают отдельно.
+        </p>
+        {audience.loading ? (
+          <SkeletonRows rows={3} />
+        ) : (
+          <>
+            {audience.failed && (
+              <p className="text-sm text-red">
+                Не удалось загрузить текущие правила — сохранение перезапишет их.
+              </p>
+            )}
+            <AudiencePicker
+              value={value}
+              onChange={setValue}
+              extraLabels={audience.extraLabels}
+            />
+          </>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={save.isPending}>
+            Отмена
+          </Button>
+          <Button
+            type="button"
+            disabled={save.isPending || !audience.ready}
+            onClick={() =>
+              void save.mutateAsync(undefined as never).then(() => {
+                toast.success('Аудитория раздела обновлена')
                 onClose()
               })
             }
@@ -1243,6 +1390,7 @@ function SectionsDialog({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [deleting, setDeleting] = useState<LibrarySection | null>(null)
+  const [audienceFor, setAudienceFor] = useState<LibrarySection | null>(null)
   const create = useLibraryMutation((title: string) => learnApi.createSection({ title }))
   const rename = useLibraryMutation((args: { id: string; title: string }) =>
     learnApi.renameSection(args.id, args.title),
@@ -1313,6 +1461,21 @@ function SectionsDialog({
               ) : (
                 <span className="min-w-0 flex-1 truncate text-sm text-text">{s.title}</span>
               )}
+              {s.audience_id && (
+                // Признак «раздел закрыт» обязан быть виден в списке: иначе
+                // ограничение доступа существует только внутри диалога, и о нём
+                // забывают ровно до жалобы «а почему я этого не вижу».
+                <Users className="h-3.5 w-3.5 shrink-0 text-amber" aria-label="Ограничен аудиторией" />
+              )}
+              <button
+                type="button"
+                title={`Кому виден раздел «${s.title}»`}
+                aria-label={`Кому виден раздел «${s.title}»`}
+                className="rounded p-1.5 text-text3 hover:bg-glass hover:text-text"
+                onClick={() => setAudienceFor(s)}
+              >
+                <Users className="h-3.5 w-3.5" />
+              </button>
               <button
                 type="button"
                 title="Переименовать"
@@ -1342,6 +1505,12 @@ function SectionsDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      {audienceFor && (
+        <SectionAudienceDialog
+          section={audienceFor}
+          onClose={() => setAudienceFor(null)}
+        />
+      )}
       {deleting && (
         <ResponsiveDialog
           open

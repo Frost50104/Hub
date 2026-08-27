@@ -446,6 +446,8 @@ export interface FavoriteItem {
   title: string
   url_path: string
   created_at: string | null
+  /** false — объект снят с публикации: строка есть, ссылки нет. */
+  available: boolean
 }
 
 // ─── Курсы (Ф3a) ─────────────────────────────────────────────────────────────
@@ -1043,6 +1045,10 @@ export interface AssessmentCampaign {
   my_state: QuizConsumer | null
   audience_size: number
   completed_count: number
+  /** ВСЕ попытки по тесту кампании, без пересечения с аудиторией: именно
+   *  столько результатов уничтожит удаление. `completed_count` для этого не
+   *  годится — он считает только тех, кто в аудитории сейчас. */
+  attempt_count: number
 }
 
 export interface AssessmentReportRow {
@@ -1208,6 +1214,13 @@ export const learnApi = {
     api.post<LibrarySection>('/learn/library/sections', body).then((r) => r.data),
   renameSection: (id: string, title: string): Promise<LibrarySection> =>
     api.patch<LibrarySection>(`/learn/library/sections/${id}`, { title }).then((r) => r.data),
+  setSectionAudience: (
+    id: string,
+    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+  ): Promise<LibrarySection> =>
+    api
+      .put<LibrarySection>(`/learn/library/sections/${id}/audience`, body)
+      .then((r) => r.data),
   // force — перенести материалы/подразделы в «Без раздела» и удалить.
   deleteSection: (id: string, force = false): Promise<void> =>
     api
@@ -1360,6 +1373,9 @@ export const learnApi = {
       .then((r) => r.data),
   favorites: (): Promise<FavoriteItem[]> =>
     api.get<FavoriteItem[]>('/learn/favorites').then((r) => r.data),
+  // Только ключи «тип:id»: без лимита и без индекса публикаций — см. ручку.
+  favoriteIds: (): Promise<string[]> =>
+    api.get<{ keys: string[] }>('/learn/favorites/ids').then((r) => r.data.keys),
   recent: (): Promise<FavoriteItem[]> =>
     api.get<FavoriteItem[]>('/learn/recent').then((r) => r.data),
 

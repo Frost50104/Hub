@@ -1,7 +1,14 @@
 """Избранное + недавно просмотренное (Ф2, ТЗ §11).
 
-Заголовки/ссылки объектов берутся из search_documents (published) — избранный
-или недавно открытый объект, который сняли с публикации, из списков исчезает.
+Заголовки и ссылки объектов берутся из `search_documents`, куда попадает только
+ОПУБЛИКОВАННОЕ. Отсюда два следствия, и оба важны для экрана избранного:
+
+- объект, снятый с публикации, названия не имеет — но из списка НЕ исчезает
+  (LEFT JOIN + строка «недоступно сейчас»). Молча пропавшая звезда выглядит как
+  «избранное не сохраняется», и это ровно та жалоба, с которой всё началось;
+- подсветка звёзд по этому списку врала бы дважды — из-за лимита и из-за
+  индекса. Для неё есть отдельная ручка `/learn/favorites/ids`: только пары
+  «тип:id», без join и без лимита.
 """
 
 from __future__ import annotations
@@ -23,6 +30,15 @@ from app.services.org_scope import get_profile
 
 router = APIRouter(tags=["learn-favorites"])
 
+# Заголовка у недоступного объекта нет — в индексе его попросту не осталось.
+# Тип назвать всё же можно: «Документ (недоступен)» честнее, чем пустая строка.
+FALLBACK_TITLE = {
+    "library_material": "Документ",
+    "news_post": "Новость",
+    "course": "Курс",
+    "product": "Товар",
+}
+
 
 class FavoriteToggleBody(BaseModel):
     object_type: str = Field(max_length=32)
@@ -35,6 +51,9 @@ class FavoriteItem(BaseModel):
     title: str
     url_path: str
     created_at: datetime | None = None
+    # None у ссылки = объекта нет в индексе: черновик, архив или снятая
+    # публикация. Клиент рисует такую строку неактивной, а не прячет.
+    available: bool = True
 
 
 @router.post("/learn/favorites/toggle")
@@ -79,6 +98,39 @@ async def toggle_favorite(
     return {"is_favorite": True}
 
 
+class FavoriteIds(BaseModel):
+    """Ключи «тип:id» — ровно то, что нужно звёздочкам в списках."""
+
+    keys: list[str]
+
+
+@router.get("/learn/favorites/ids", response_model=FavoriteIds)
+async def list_favorite_ids(
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> FavoriteIds:
+    """Плоский список ключей — для подсветки звёзд в библиотеке, курсах и
+    ассортименте.
+
+    Отдельно от `/learn/favorites` НЕ ради экономии: тот список ограничен 50
+    записями и join'ится с индексом публикаций, то есть у активного сотрудника
+    часть звёзд просто не загорелась бы. Здесь нет ни лимита, ни join'а — сама
+    отметка не зависит от того, опубликован ли объект сейчас.
+
+    Без учебного профиля отдаём пусто, а не 404: звезду в этом случае прячет
+    клиент, и падать на чтении незачем.
+    """
+    profile = await get_profile(db, principal)
+    if profile is None:
+        return FavoriteIds(keys=[])
+    rows = await db.execute(
+        select(Favorite.object_type, Favorite.object_id).where(
+            Favorite.profile_id == profile.id
+        )
+    )
+    return FavoriteIds(keys=[f"{object_type}:{object_id}" for object_type, object_id in rows])
+
+
 @router.get("/learn/favorites", response_model=list[FavoriteItem])
 async def list_favorites(
     principal: Principal = Depends(require_auth()),
@@ -89,7 +141,10 @@ async def list_favorites(
         return []
     rows = await db.execute(
         select(Favorite, SearchDocument.title, SearchDocument.url_path)
-        .join(
+        # LEFT, а не INNER: снятый с публикации объект обязан остаться в списке
+        # пометкой «недоступно сейчас». INNER выбрасывал его молча, и человек
+        # видел, как избранное «само рассасывается».
+        .outerjoin(
             SearchDocument,
             (SearchDocument.object_type == Favorite.object_type)
             & (SearchDocument.object_id == Favorite.object_id),
@@ -102,9 +157,10 @@ async def list_favorites(
         FavoriteItem(
             object_type=fav.object_type,
             object_id=fav.object_id,
-            title=title,
-            url_path=url_path,
+            title=title or FALLBACK_TITLE.get(fav.object_type, "Объект"),
+            url_path=url_path or "",
             created_at=fav.created_at,
+            available=url_path is not None,
         )
         for fav, title, url_path in rows
     ]

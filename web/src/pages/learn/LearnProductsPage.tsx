@@ -17,6 +17,7 @@ import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-r
 import { toast } from 'sonner'
 
 import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
+import { FavoriteStar } from '@/components/learn/FavoriteStar'
 import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -102,7 +103,7 @@ export function LearnProductsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[920px] px-5 pb-16 pt-11 lg:px-8">
+    <div className="mx-auto max-w-[920px] px-5 pb-16 pt-4 lg:px-8 lg:pt-11">
       <header className="flex flex-col gap-3.5 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between">
         <div className="min-w-0">
           <p className="mb-1 min-h-[1em] text-[12px] leading-[1.35] text-text2 lg:hidden">{counter}</p>
@@ -159,31 +160,45 @@ export function LearnProductsPage() {
         {items.length > 0 && (
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 lg:gap-3.5">
             {items.map((card) => (
-              <button
+              // Обёртка держит рамку и фон, кнопка — только зону открытия:
+              // звезда это кнопка, а вложенная кнопка невалидна.
+              <div
                 key={card.id}
-                type="button"
-                onClick={() => open(card)}
-                className="flex flex-col overflow-hidden rounded-[14px] border border-hair bg-tint text-left transition-colors hover:border-amber/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                className="relative flex flex-col overflow-hidden rounded-[14px] border border-hair bg-tint transition-colors hover:border-amber/50"
               >
-                {card.photo_urls[0] ? (
-                  <img
-                    src={card.photo_urls[0]}
-                    alt={card.title}
-                    loading="lazy"
-                    className="h-[104px] w-full object-cover lg:h-[132px]"
-                  />
-                ) : (
-                  <PhotoPlaceholder className="h-[104px] w-full lg:h-[132px]" iconClass="h-[26px] w-[26px] lg:h-[30px] lg:w-[30px]" />
-                )}
-                <span className="flex flex-col gap-1.5 px-3 pb-[13px] pt-[11px] lg:px-[13px] lg:pb-3.5 lg:pt-3">
-                  <span className="text-[16px] font-semibold leading-[1.3] text-text lg:text-[17px]">{card.title}</span>
-                  {card.status !== 'published' && (
-                    <Badge variant="outline" className="self-start">
-                      {CONTENT_STATUS_LABEL[card.status]}
-                    </Badge>
+                <button
+                  type="button"
+                  onClick={() => open(card)}
+                  className="flex flex-1 flex-col text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                >
+                  {card.photo_urls[0] ? (
+                    <img
+                      src={card.photo_urls[0]}
+                      alt={card.title}
+                      loading="lazy"
+                      className="h-[104px] w-full object-cover lg:h-[132px]"
+                    />
+                  ) : (
+                    <PhotoPlaceholder className="h-[104px] w-full lg:h-[132px]" iconClass="h-[26px] w-[26px] lg:h-[30px] lg:w-[30px]" />
                   )}
-                </span>
-              </button>
+                  <span className="flex flex-col gap-1.5 px-3 pb-[13px] pt-[11px] lg:px-[13px] lg:pb-3.5 lg:pt-3">
+                    <span className="text-[16px] font-semibold leading-[1.3] text-text lg:text-[17px]">{card.title}</span>
+                    {card.status !== 'published' && (
+                      <Badge variant="outline" className="self-start">
+                        {CONTENT_STATUS_LABEL[card.status]}
+                      </Badge>
+                    )}
+                  </span>
+                </button>
+                {/* Подложка обязательна: звезда лежит поверх фото товара, и на
+                    светлом снимке амбер по амберу не читался бы. */}
+                <FavoriteStar
+                  objectType="product"
+                  objectId={card.id}
+                  title={card.title}
+                  className="absolute right-1.5 top-1.5 h-8 w-8 bg-bg/70 backdrop-blur-sm"
+                />
+              </div>
             ))}
           </div>
         )}
@@ -308,7 +323,7 @@ export function LearnProductPage() {
   ) : null
 
   return (
-    <div className="mx-auto max-w-[920px] px-5 pb-16 pt-11 lg:px-8">
+    <div className="mx-auto max-w-[920px] px-5 pb-16 pt-4 lg:px-8 lg:pt-11">
       <button
         type="button"
         onClick={back}

@@ -27,6 +27,7 @@ import { useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { coursesSectionTitle } from '@/components/layout/learnNav'
+import { FavoriteStar } from '@/components/learn/FavoriteStar'
 import { CourseCover, courseTypeBadgeClass } from '@/components/learn/CourseCover'
 import { QueryError } from '@/components/QueryError'
 import { RailRow, RailSection, RightRail } from '@/components/ui/RightRail'
@@ -223,6 +224,9 @@ function CourseCard({
           <Check className="h-3.5 w-3.5" strokeWidth={3} />
         </span>
       )}
+      {/* Звезда внутри ссылки — как и кнопка правки ниже: клик гасится
+          `preventDefault` + `stopPropagation`, иначе он уводил бы на курс. */}
+      <FavoriteStar objectType="course" objectId={course.id} title={course.title} />
       {manage && (
         <span className="flex shrink-0 items-center gap-1.5">
           <button
@@ -296,7 +300,7 @@ export function LearnCoursesPage() {
   return (
     <div className="mx-auto max-w-[680px] lg:flex lg:max-w-[948px] lg:items-start lg:gap-12 lg:px-8">
     <div className="min-w-0 flex-1 lg:max-w-[640px]">
-      <header className="flex flex-wrap items-end justify-between gap-3 px-5 pt-14 lg:px-0">
+      <header className="flex flex-wrap items-end justify-between gap-3 px-5 pt-4 lg:px-0 lg:pt-14">
         <h1 className="font-display text-[28px] font-bold leading-[1.18] tracking-[0.01em] text-text lg:text-[34px] lg:leading-[1.15]">
           {coursesSectionTitle(probe.data?.content_role)}
         </h1>

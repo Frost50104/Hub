@@ -16,7 +16,9 @@ from app.api.assessments import (
     ImportBody,
     activate_campaign,
     campaign_report,
+    close_campaign,
     create_campaign,
+    delete_campaign,
     import_questions,
     list_campaigns,
     update_campaign,
@@ -30,7 +32,7 @@ from app.api.quizzes import (
 )
 from app.models.audience import Audience, AudienceMember
 from app.models.notification import Notification
-from app.schemas.quiz import AnswerBody, QuizUpsert, ReviewBody
+from app.schemas.quiz import AnswerBody, QuestionDraft, QuizUpsert, ReviewBody
 from tests.integration.test_courses import _mk_course, _mk_member
 from tests.integration.test_quizzes import (
     _mk_publisher,
@@ -179,6 +181,88 @@ async def test_import_questions_from_lesson_quiz(
     assert [q.position for q in result.questions] == [0, 1, 2]
 
 
+async def test_saving_the_imported_set_keeps_everything(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """ОС 26.08: «вопросы импортируются, но не появляются».
+
+    Ручка кампании — REPLACE: она сносит все вопросы квиза и вставляет то, что
+    прислал клиент. Значит редактор ОБЯЗАН пересеять локальный набор ответом
+    импорта: сохранение старым набором физически удаляет импортированное.
+    Тест фиксирует обе стороны — и то, что ответ импорта самодостаточен, и то,
+    чем оборачивается сохранение мимо него.
+    """
+    hr, _ = await _mk_admin(db, tenant_id)
+    _course, lessons = await _mk_course(db, tenant_id, lesson_count=1)
+    lesson_quiz = await _publish_quiz(
+        db, hr, lessons[0].id, [_single_draft(correct=0), _single_draft(correct=1)]
+    )
+    campaign = await _mk_campaign(db, hr, title="Сохранение после импорта")
+
+    imported = await import_questions(
+        campaign.id, ImportBody(quiz_id=lesson_quiz.id), hr, db
+    )
+    assert len(imported.questions) == 3
+
+    def _upsert(questions):
+        return QuizUpsert(
+            title="Сохранение после импорта",
+            status="draft",
+            pass_score_pct=80,
+            attempts_limit=1,
+            shuffle_questions=False,
+            shuffle_options=False,
+            questions=questions,
+        )
+
+    # Так делает исправленный редактор: набор взят из ответа импорта.
+    saved = await upsert_campaign_quiz(
+        campaign.id,
+        _upsert(
+            [
+                QuestionDraft(
+                    qtype=q.qtype,
+                    prompt=q.prompt,
+                    media_id=q.media_id,
+                    options=q.options,
+                    answer=q.answer,
+                    points=q.points,
+                )
+                for q in imported.questions
+            ]
+        ),
+        hr,
+        db,
+    )
+    assert len(saved.questions) == 3
+
+    # А так было до правки: локальный набор отстал на импорт — и импорт исчез.
+    lost = await upsert_campaign_quiz(
+        campaign.id, _upsert([_single_draft(correct=1)]), hr, db
+    )
+    assert len(lost.questions) == 1
+
+
+async def test_publisher_cannot_import_questions(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Кнопка импорта спрятана не из вкусовщины: ручка — admin-only.
+
+    Publisher добирался до неё, выбирал урок и получал 403 в конце пути.
+    """
+    admin, _ = await _mk_admin(db, tenant_id)
+    publisher, _ = await _mk_publisher(db, tenant_id)
+    _course, lessons = await _mk_course(db, tenant_id, lesson_count=1)
+    lesson_quiz = await _publish_quiz(db, admin, lessons[0].id, [_single_draft()])
+    campaign = await _mk_campaign(db, admin, title="Импорт publisher")
+
+    with pytest.raises(HTTPException) as exc:
+        await import_questions(
+            campaign.id, ImportBody(quiz_id=lesson_quiz.id), publisher, db
+        )
+    assert exc.value.status_code == 403
+
+
 async def test_publisher_cannot_manage_campaigns(
     db: AsyncSession, tenant_id: uuid.UUID
 ):
@@ -301,3 +385,97 @@ async def test_review_notification_points_at_assessments_not_null_course(
     assert rows, "уведомление о проверке не создано"
     assert all(n.url == "/learn/assessments" for n in rows), [n.url for n in rows]
     assert all("None" not in (n.url or "") for n in rows)
+
+
+# ─── Удаление кампании (27.08) ───────────────────────────────────────────────
+#
+# До этого сервер отдавал 409 всему, кроме черновика. Владелец решил открыть
+# удаление ЗАВЕРШЁННЫХ: они копятся в списке, а убрать их было нечем. Цена —
+# каскад уносит тест, вопросы и все попытки, то есть саму запись о том, кто
+# аттестован. Поэтому ниже проверяются обе границы: что завершённую удалить
+# можно, а запущенную по-прежнему нельзя.
+
+
+async def test_closed_campaign_can_be_deleted_with_its_results(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    from app.models.quiz import Quiz, QuizAttempt
+
+    hr, _ = await _mk_admin(db, tenant_id, email=f"hr-{uuid.uuid4().hex[:6]}@t.ru")
+    campaign = await _mk_campaign(db, hr, title="Закрытая")
+    await activate_campaign(campaign.id, hr, db)
+    await close_campaign(campaign.id, hr, db)
+    quiz_id = (
+        await db.execute(select(Quiz.id).where(Quiz.campaign_id == campaign.id))
+    ).scalar_one()
+
+    await delete_campaign(campaign.id, hr, db)
+
+    assert (
+        await db.execute(select(Quiz.id).where(Quiz.id == quiz_id))
+    ).scalar_one_or_none() is None
+    assert (
+        await db.execute(select(QuizAttempt.id).where(QuizAttempt.quiz_id == quiz_id))
+    ).scalars().all() == []
+
+
+async def test_active_campaign_still_cannot_be_deleted(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Граница, которая не должна съехать: у людей она сейчас на экране."""
+    hr, _ = await _mk_admin(db, tenant_id, email=f"hr-{uuid.uuid4().hex[:6]}@t.ru")
+    campaign = await _mk_campaign(db, hr, title="Идёт")
+    await activate_campaign(campaign.id, hr, db)
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_campaign(campaign.id, hr, db)
+    assert exc.value.status_code == 409
+    assert "закройте" in exc.value.detail
+
+
+async def test_draft_campaign_still_deletable(db: AsyncSession, tenant_id: uuid.UUID):
+    hr, _ = await _mk_admin(db, tenant_id, email=f"hr-{uuid.uuid4().hex[:6]}@t.ru")
+    campaign = await _mk_campaign(db, hr, title="Черновик")
+
+    await delete_campaign(campaign.id, hr, db)
+
+    assert [c for c in await list_campaigns(hr, db) if c.id == campaign.id] == []
+
+
+async def test_delete_writes_audit_with_lost_attempt_count(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Объекта не станет — масштаб потери обязан остаться в журнале."""
+    from app.models.audit import AuditLog
+
+    hr, _ = await _mk_admin(db, tenant_id, email=f"hr-{uuid.uuid4().hex[:6]}@t.ru")
+    campaign = await _mk_campaign(db, hr, title="Под удаление")
+    await activate_campaign(campaign.id, hr, db)
+    await close_campaign(campaign.id, hr, db)
+
+    await delete_campaign(campaign.id, hr, db)
+
+    row = (
+        await db.execute(
+            select(AuditLog)
+            .where(
+                AuditLog.object_type == "assessment_campaign",
+                AuditLog.object_id == campaign.id,
+                AuditLog.action == "delete",
+            )
+        )
+    ).scalar_one()
+    assert row.object_label == "Под удаление"
+    assert (row.diff or {}).get("status") == "closed"
+    assert "attempts" in (row.diff or {})
+
+
+async def test_list_reports_attempt_count_to_manager(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Число, которое покажут в предупреждении, должно приходить в списке."""
+    hr, _ = await _mk_admin(db, tenant_id, email=f"hr-{uuid.uuid4().hex[:6]}@t.ru")
+    campaign = await _mk_campaign(db, hr, title="Со счётчиком")
+
+    view = next(c for c in await list_campaigns(hr, db) if c.id == campaign.id)
+    assert view.attempt_count == 0

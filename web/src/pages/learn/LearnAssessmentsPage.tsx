@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, BadgeCheck, Import, Pencil, Plus, Trash2, Users, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 
@@ -28,9 +28,22 @@ import {
   type AssessmentCampaign,
   type AssessmentReportRow,
   type QuizAttempt,
+  type QuizManage,
   type QuizQuestionDraft,
 } from '@/lib/learn'
 import { nbsp, plural } from '@/lib/typography'
+
+import {
+  describeCampaignDeletion,
+  resolveAssessmentView,
+  type AssessmentView,
+} from '@/lib/assessments'
+import {
+  DISCARD_QUIZ_CONFIRM,
+  quizDraftDirty,
+  quizSnapshot,
+  type QuizDraftSnapshot,
+} from '@/lib/quizDraft'
 
 import { QuestionDialog } from './QuizBuilder'
 
@@ -76,7 +89,9 @@ const ACTION_BTN =
   'h-12 rounded-xl px-5 text-[15px] lg:h-9 lg:rounded-[10px] lg:px-3.5 lg:text-[13px]'
 const GHOST_BTN = cn(ACTION_BTN, 'bg-transparent')
 
-type View = 'my' | 'report' | 'manage'
+// Псевдоним, а не второй список: разъедься они — вкладка и её дефолт
+// начали бы понимать разные наборы.
+type View = AssessmentView
 
 // ─── Карточка сотрудника ─────────────────────────────────────────────────────
 
@@ -179,6 +194,8 @@ function FullscreenRunner({
       aria-modal="true"
       aria-label={campaign.title}
       className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-bg"
+      // Вырез статус-бара — свой: этот слой живёт вне мобильного <main>, которому отступ раздаёт Shell.
+      style={{ paddingTop: 'var(--safe-top, 0px)' }}
     >
       <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-hair bg-bg-alt px-3 py-2 lg:px-6">
         <button
@@ -376,22 +393,28 @@ function ManagerCampaignCard({ campaign }: { campaign: AssessmentCampaign }) {
           <Users className="h-4 w-4" /> Аудитория
         </Button>
         {campaign.status === 'draft' && (
-          <>
-            <Button
-              className={ACTION_BTN}
-              disabled={activate.isPending}
-              onClick={() =>
-                void activate
-                  .mutateAsync(undefined as never)
-                  .then(() => toast.success('Аттестация запущена — аудитория уведомлена'))
-              }
-            >
-              Запустить
-            </Button>
-            <Button variant="secondary" className={cn(GHOST_BTN, 'text-red')} onClick={() => setDeleteOpen(true)}>
-              <Trash2 className="h-4 w-4" /> Удалить
-            </Button>
-          </>
+          <Button
+            className={ACTION_BTN}
+            disabled={activate.isPending}
+            onClick={() =>
+              void activate
+                .mutateAsync(undefined as never)
+                .then(() => toast.success('Аттестация запущена — аудитория уведомлена'))
+            }
+          >
+            Запустить
+          </Button>
+        )}
+        {/* Удаление — у черновика и у завершённой. Запущенную сервер не отдаёт
+            (409): у людей она сейчас на экране, сначала «Закрыть кампанию». */}
+        {campaign.status !== 'active' && (
+          <Button
+            variant="secondary"
+            className={cn(GHOST_BTN, 'text-red')}
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash2 className="h-4 w-4" /> Удалить
+          </Button>
         )}
         {active && (
           <Button
@@ -414,12 +437,16 @@ function ManagerCampaignCard({ campaign }: { campaign: AssessmentCampaign }) {
 
 function DeleteCampaignDialog({ campaign, onClose }: { campaign: AssessmentCampaign; onClose: () => void }) {
   const remove = useCampaignMutation(() => learnApi.deleteAssessment(campaign.id))
+  // Цена удаления считается по данным кампании, а не пишется общим «вы
+  // уверены?»: у завершённой она уносит попытки сотрудников, и об этом надо
+  // сказать числом.
+  const loss = describeCampaignDeletion(campaign)
   return (
     <ResponsiveDialog
       open
       onOpenChange={(v) => !v && onClose()}
       title={`Удалить «${campaign.title}»?`}
-      description="Черновик кампании удаляется вместе с вопросами. Запущенные кампании не удаляются — их закрывают."
+      description="Восстановить кампанию будет нельзя. Запущенную сначала закрывают."
       desktopWidth={440}
       footer={
         <>
@@ -431,12 +458,22 @@ function DeleteCampaignDialog({ campaign, onClose }: { campaign: AssessmentCampa
             disabled={remove.isPending}
             onClick={() => void remove.mutateAsync(undefined as never).then(onClose)}
           >
-            Удалить
+            {loss.losesResults ? 'Удалить с результатами' : 'Удалить'}
           </Button>
         </>
       }
     >
-      <span className="sr-only">Подтверждение удаления</span>
+      <p
+        className={cn(
+          'm-0 rounded-xl border border-hair p-3 text-sm',
+          // Карточка нейтральная даже когда уходят результаты: красный в
+          // системе — просрочка и ошибка, а удаление это не ошибка. Опасность
+          // несёт кнопка и само число.
+          'bg-tint text-text',
+        )}
+      >
+        {loss.summary}
+      </p>
     </ResponsiveDialog>
   )
 }
@@ -451,23 +488,57 @@ function CampaignQuizDialog({ campaign, onClose }: { campaign: AssessmentCampaig
   const [attemptsLimit, setAttemptsLimit] = useState<string>('1')
   const [editIndex, setEditIndex] = useState<number | 'new' | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [seeded, setSeeded] = useState(false)
+  const qc = useQueryClient()
+  // Импорт вопросов ручка отдаёт только администратору
+  // (`require_content_role(..., "admin")`), поэтому publisher, нажав кнопку,
+  // получал 403 после выбора урока — то есть в конце пути, а не в начале.
+  const canImport = useMe().data?.hub_role === 'admin'
+  // Снимок того, с чего человек начал. Сравниваем именно с ним, а не с
+  // `quiz.data`: если коллега сохранит свой набор, пока диалог открыт, это не
+  // повод объявлять работу этого человека изменённой.
+  const seededRef = useRef<QuizDraftSnapshot | null>(null)
+
+  // Засеваем РОВНО ОДИН РАЗ, по образцу AudiencePicker.
+  //
+  // Инцидент 26.08: сотрудница набирала вопросы аттестации, переключалась в
+  // другое окно за текстом — и на возврате всё исчезало «в секунду». Причина
+  // была здесь: `refetchOnWindowFocus: true` при `staleTime` 30 с даёт рефетч
+  // на каждый возврат в окно, ответ приходит НОВЫМ объектом, эффект срабатывал
+  // на смену ссылки и затирал локальный черновик серверным списком — а он
+  // пустой, пока не нажата «Сохранить». Ни одного запроса на запись при этом
+  // не было: вопросы жили только во вкладке.
+  //
+  // Пересев по изменившимся данным здесь не нужен вовсе: диалог открывают,
+  // правят и закрывают, а сохранение — PUT, заменяющий набор целиком.
+  //
+  // Пересев вынесен функцией: её зовёт и первичный сев, и импорт вопросов.
+  // Разъехаться им нельзя — импорт, не обновивший `seededRef`, поднимает
+  // ложное «выйти без сохранения?».
+  const applyQuiz = useCallback((data: QuizManage) => {
+    const snapshot = quizSnapshot(data)
+    setPassScore(snapshot.passScore)
+    setAttemptsLimit(snapshot.attemptsLimit)
+    setQuestions(snapshot.questions)
+    seededRef.current = snapshot
+  }, [])
 
   useEffect(() => {
-    if (quiz.data) {
-      setPassScore(quiz.data.pass_score_pct)
-      setAttemptsLimit(quiz.data.attempts_limit === null ? '' : String(quiz.data.attempts_limit))
-      setQuestions(
-        quiz.data.questions.map((q) => ({
-          qtype: q.qtype,
-          prompt: q.prompt,
-          media_id: q.media_id,
-          options: q.options,
-          answer: q.answer,
-          points: q.points,
-        })),
-      )
-    }
-  }, [quiz.data])
+    if (seeded || !quiz.data) return
+    applyQuiz(quiz.data)
+    setSeeded(true)
+  }, [seeded, quiz.data, applyQuiz])
+
+  // Перехват на ОДНОМ месте: `onOpenChange` у ResponsiveDialog срабатывает и на
+  // крестик, и на Escape, и на клик мимо — а «Отмена» зовёт тот же путь.
+  const closeGuarded = () => {
+    const dirty = quizDraftDirty(
+      { passScore, attemptsLimit, questions },
+      seededRef.current,
+    )
+    if (dirty && !window.confirm(DISCARD_QUIZ_CONFIRM)) return
+    onClose()
+  }
 
   const persist = () =>
     learnApi.upsertAssessmentQuiz(campaign.id, {
@@ -487,13 +558,13 @@ function CampaignQuizDialog({ campaign, onClose }: { campaign: AssessmentCampaig
   return (
     <ResponsiveDialog
       open
-      onOpenChange={(v) => !v && onClose()}
+      onOpenChange={(v) => !v && closeGuarded()}
       title={`Вопросы: ${campaign.title}`}
       description="Порог и лимит попыток действуют на всю кампанию; вопросы можно добавить вручную или импортом из теста урока."
       desktopWidth={640}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={closeGuarded}>
             Отмена
           </Button>
           <Button
@@ -570,7 +641,9 @@ function CampaignQuizDialog({ campaign, onClose }: { campaign: AssessmentCampaig
         ))}
         {questions.length === 0 && !quiz.isLoading && (
           <p className="py-2 text-center text-[14px] text-text2">
-            Добавьте вопросы или импортируйте из тестов уроков.
+            {canImport
+              ? 'Добавьте вопросы или импортируйте из тестов уроков.'
+              : 'Добавьте вопросы аттестации.'}
           </p>
         )}
       </div>
@@ -578,9 +651,15 @@ function CampaignQuizDialog({ campaign, onClose }: { campaign: AssessmentCampaig
         <Button variant="secondary" className="bg-transparent" onClick={() => setEditIndex('new')}>
           <Plus className="h-4 w-4" /> Вопрос
         </Button>
-        <Button variant="secondary" className="bg-transparent" onClick={() => setImportOpen(true)}>
-          <Import className="h-4 w-4" /> Импорт из теста урока
-        </Button>
+        {canImport && (
+          <Button
+            variant="secondary"
+            className="bg-transparent"
+            onClick={() => setImportOpen(true)}
+          >
+            <Import className="h-4 w-4" /> Импорт из теста урока
+          </Button>
+        )}
       </div>
 
       {editIndex !== null && (
@@ -600,9 +679,17 @@ function CampaignQuizDialog({ campaign, onClose }: { campaign: AssessmentCampaig
           campaign={campaign}
           beforeImport={persist}
           onClose={() => setImportOpen(false)}
-          onImported={() => {
+          onImported={(fresh) => {
             setImportOpen(false)
-            void quiz.refetch()
+            // Берём набор ИЗ ОТВЕТА импорта, а не из рефетча: раньше здесь был
+            // `quiz.refetch()`, но пересев стоит под сторожем `seeded`, и
+            // импортированные вопросы на экран не попадали. Дальше «Сохранить»
+            // слал PUT со старым набором, а ручка кампании — replace: строки
+            // импортированных вопросов физически удалялись.
+            applyQuiz(fresh)
+            // Кэш обновляем ЗДЕСЬ же: без этого возврат в окно поднял бы
+            // рефетч, а `staleTime` 30 с успел бы отдать устаревший ответ.
+            qc.setQueryData(['learn-assessment-quiz', campaign.id], fresh)
           }}
         />
       )}
@@ -617,11 +704,11 @@ function ImportQuestionsDialog({
   onImported,
 }: {
   campaign: AssessmentCampaign
-  // Сохраняет несохранённые локальные вопросы: после импорта редактор
-  // перечитывает квиз с сервера, и несохранённое иначе потеряется.
+  // Сохраняет несохранённые локальные вопросы: импорт добавляет вопросы НА
+  // СЕРВЕРЕ и возвращает набор целиком, поэтому несохранённое иначе потеряется.
   beforeImport: () => Promise<unknown>
   onClose: () => void
-  onImported: () => void
+  onImported: (fresh: QuizManage) => void
 }) {
   const courses = useQuery({ queryKey: ['learn-courses', true], queryFn: () => learnApi.courses(true) })
   const [busy, setBusy] = useState(false)
@@ -635,9 +722,11 @@ function ImportQuestionsDialog({
         toast.error(`У урока «${title}» нет теста`)
         return
       }
-      await learnApi.importAssessmentQuestions(campaign.id, quiz.id)
-      toast.success('Вопросы импортированы')
-      onImported()
+      const fresh = await learnApi.importAssessmentQuestions(campaign.id, quiz.id)
+      toast.success(
+        `Импортировано ${plural(quiz.questions.length, 'вопрос', 'вопроса', 'вопросов')}`,
+      )
+      onImported(fresh)
     } catch (e) {
       toast.error('Импорт не удался', { description: extractErrorDetail(e) })
     } finally {
@@ -834,7 +923,9 @@ export function LearnAssessmentsPage() {
   const isDesktop = useIsDesktop()
   const me = useMe()
   const data = useAssessments()
-  const [view, setView] = useState<View>('my')
+  // null = «человек ещё не выбирал»: вкладку по умолчанию считает
+  // `resolveAssessmentView` по роли, а не эффект после приезда `me`.
+  const [view, setView] = useState<View | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [running, setRunning] = useState<{ campaign: AssessmentCampaign; attempt: QuizAttempt } | null>(
     null,
@@ -857,7 +948,11 @@ export function LearnAssessmentsPage() {
     if (isAdmin) out.push({ value: 'manage', label: 'Кампании' })
     return out
   }, [canReport, isAdmin])
-  const effectiveView: View = options.some((o) => o.value === view) ? view : 'my'
+  const effectiveView = resolveAssessmentView(
+    view,
+    options.map((o) => o.value),
+    isAdmin,
+  )
 
   const start = useMutation({
     mutationFn: (campaign: AssessmentCampaign) =>
@@ -868,7 +963,7 @@ export function LearnAssessmentsPage() {
   })
 
   return (
-    <div className="mx-auto max-w-[860px] px-5 pb-16 pt-11 lg:px-8">
+    <div className="mx-auto max-w-[860px] px-5 pb-16 pt-4 lg:px-8 lg:pt-11">
       <header className="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between lg:gap-3.5">
         <h1 className="font-display text-[28px] font-bold leading-[1.18] tracking-[0.01em] text-text lg:text-[34px] lg:leading-[1.15]">
           Аттестации

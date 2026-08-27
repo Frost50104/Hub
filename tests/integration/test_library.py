@@ -236,3 +236,70 @@ async def test_ack_deadline_counts_from_access_grant(
     # Без срока ознакомления дедлайна нет вовсе.
     material.ack_deadline_days = None
     assert ack_deadline_for(material, granted) is None
+
+
+async def test_section_audience_closes_its_materials(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """ОС 25.08: аудиторию раздела наконец можно задать.
+
+    Колонка и фильтр по ней жили в коде с Ф2, ручки не было — «раздел только
+    для руководителей» приходилось собирать по одному материалу. Проверяем всю
+    цепочку: ручка → материализация состава → выдача `/learn/library`.
+    """
+    from fastapi import HTTPException
+
+    from app.api.library import get_library, set_section_audience
+    from app.models.library import LibrarySection
+    from app.schemas.library import AudienceBody
+    from app.schemas.org import AudienceRuleBody
+    from tests.integration.test_courses import _mk_member
+
+    publisher, publisher_profile = await _mk_member(db, tenant_id, email="pub-sec@t.ru")
+    publisher_profile.content_role = "publisher"
+    inside_principal, insider = await _mk_member(db, tenant_id, email="in@t.ru")
+    outside_principal, _outsider = await _mk_member(db, tenant_id, email="out@t.ru")
+    await db.flush()
+
+    section = LibrarySection(tenant_id=tenant_id, title="Только для своих")
+    db.add(section)
+    await db.flush()
+    material = await _mk_material(
+        db, tenant_id, title="Закрытый регламент", status="published", section_id=section.id
+    )
+    await db.commit()
+
+    # Publisher обязателен: раздел — это доступ, а не оформление.
+    with pytest.raises(HTTPException) as exc:
+        await set_section_audience(
+            section.id, AudienceBody(is_all=False, rules=[]), outside_principal, db
+        )
+    assert exc.value.status_code == 403
+
+    await set_section_audience(
+        section.id,
+        AudienceBody(
+            is_all=False,
+            rules=[AudienceRuleBody(mode="include", profile_ids=[insider.id])],
+        ),
+        publisher,
+        db,
+    )
+    await db.refresh(section)
+    assert section.audience_id is not None
+
+    inside = await get_library(False, inside_principal, db)
+    assert section.id in [s.id for s in inside.sections]
+    assert material.id in [m.id for m in inside.materials]
+
+    outside = await get_library(False, outside_principal, db)
+    assert section.id not in [s.id for s in outside.sections]
+    # Материал опубликован и сам по себе открыт всем — прячет его именно раздел.
+    assert material.id not in [m.id for m in outside.materials]
+
+    # Возврат к «Всем» открывает обратно, без ручной чистки материалов.
+    await set_section_audience(section.id, AudienceBody(is_all=True), publisher, db)
+    await db.refresh(section)
+    assert section.audience_id is None
+    reopened = await get_library(False, outside_principal, db)
+    assert material.id in [m.id for m in reopened.materials]

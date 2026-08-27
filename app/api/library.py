@@ -448,6 +448,59 @@ async def update_section(
     return SectionResponse.model_validate(section)
 
 
+@router.put(
+    "/learn/library/sections/{section_id}/audience", response_model=SectionResponse
+)
+async def set_section_audience(
+    section_id: UUID,
+    body: AudienceBody,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> SectionResponse:
+    """Кому виден раздел — и, вместе с ним, всё, что в нём лежит.
+
+    Колонка `audience_id` и фильтр по ней существовали с Ф2, а задать её было
+    нечем: раздел «Только для руководителей» приходилось собирать, проставляя
+    аудиторию каждому материалу по отдельности (ОС 25.08).
+
+    Ручка ОТДЕЛЬНАЯ, а не поле в `SectionUpdate`: у аудитории своя семантика
+    «Всем» (`is_all` против `audience_id = NULL`) и свой пересчёт состава под
+    advisory-локом. Второй путь записи разъехался бы с первым в первый же день.
+
+    Внимание: правило распространяется на ПРЯМЫХ детей раздела —
+    `_material_visible_to` смотрит `material.section_id`, но по `parent_id`
+    вверх не поднимается. Закрытый родитель не закрывает вложенный раздел.
+    """
+    await require_content_role(db, principal, "publisher")
+    section = await db.get(LibrarySection, section_id)
+    if section is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Раздел не найден")
+    try:
+        audience_id, _diff = await set_object_audience(
+            db,
+            tenant_id=principal.tenant_id,
+            current_audience_id=section.audience_id,
+            is_all=body.is_all,
+            rules=[r.to_spec() for r in body.rules],
+            object_hint=f"library_section:{section.id}",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    section.audience_id = audience_id
+    audit.record(
+        db,
+        tenant_id=principal.tenant_id,
+        actor_id=principal.employee_id,
+        action="access_change",
+        object_type="library_section",
+        object_id=section.id,
+        object_label=section.title,
+    )
+    await db.commit()
+    await db.refresh(section)
+    return SectionResponse.model_validate(section)
+
+
 @router.delete("/learn/library/sections/{section_id}", status_code=204)
 async def delete_section(
     section_id: UUID,

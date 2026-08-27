@@ -13,7 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from signaris_auth import Principal
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.quizzes import _manage_response, consumer_quiz_state
@@ -62,6 +62,11 @@ class CampaignView(BaseModel):
     # Менеджеру:
     audience_size: int = 0
     completed_count: int = 0
+    # ВСЕ попытки по тесту кампании, без пересечения с аудиторией. Именно
+    # столько результатов уничтожит удаление, и врать тут нельзя:
+    # `completed_count` считает только тех, кто в аудитории СЕЙЧАС, — состав
+    # мог смениться, и он занижает потерю.
+    attempt_count: int = 0
 
 
 class ImportBody(BaseModel):
@@ -171,7 +176,7 @@ async def list_campaigns(
         quiz = await _campaign_quiz(db, campaign.id)
         question_count = 0
         my_state = None
-        audience_size = completed_count = 0
+        audience_size = completed_count = attempt_count = 0
         if quiz is not None:
             question_count = (
                 await db.execute(
@@ -204,6 +209,13 @@ async def list_campaigns(
                     )
                 }
                 completed_count = len(finished & set(members))
+                attempt_count = (
+                    await db.execute(
+                        select(func.count())
+                        .select_from(QuizAttempt)
+                        .where(QuizAttempt.quiz_id == quiz.id)
+                    )
+                ).scalar_one()
         out.append(
             CampaignView(
                 id=campaign.id,
@@ -219,6 +231,7 @@ async def list_campaigns(
                 my_state=my_state,
                 audience_size=audience_size,
                 completed_count=completed_count,
+                attempt_count=attempt_count,
             )
         )
     return out
@@ -527,10 +540,38 @@ async def delete_campaign(
 ) -> None:
     await require_content_role(db, principal, "admin")
     campaign = await _campaign_or_404(db, campaign_id)
-    if campaign.status != "draft":
+    # Запущенную не отдаём: у людей она сейчас на экране, и половина может быть
+    # в середине попытки. Сначала «Закрыть кампанию», потом удаление.
+    if campaign.status == "active":
         raise HTTPException(
-            status_code=409, detail="Активную/закрытую кампанию нельзя удалить"
+            status_code=409,
+            detail="Запущенную кампанию нельзя удалить — сначала закройте её",
         )
+    # Завершённую удалять МОЖНО (решение владельца 27.08), но это уносит
+    # каскадом тест, вопросы и ВСЕ попытки — то есть саму запись о том, кто
+    # аттестован. Поэтому число попыток идёт в журнал: объекта не станет, а
+    # масштаб потери останется видимым.
+    quiz = await _campaign_quiz(db, campaign.id)
+    attempts = 0
+    if quiz is not None:
+        attempts = (
+            await db.execute(
+                select(func.count())
+                .select_from(QuizAttempt)
+                .where(QuizAttempt.quiz_id == quiz.id)
+            )
+        ).scalar_one()
+    audit.record(
+        db,
+        tenant_id=principal.tenant_id,
+        actor_id=principal.employee_id,
+        action="delete",
+        object_type="assessment_campaign",
+        object_id=campaign.id,
+        object_label=campaign.title,
+        diff={"status": campaign.status, "attempts": attempts},
+    )
+    await db.flush()
     await db.delete(campaign)  # квиз и попытки каскадом
     await db.commit()
 

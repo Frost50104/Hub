@@ -1,5 +1,6 @@
 import { BookOpen, ShieldCheck, TrendingUp } from 'lucide-react'
 
+import { CoverTile } from '@/components/learn/CoverTile'
 import { cn } from '@/lib/cn'
 import { type CourseType } from '@/lib/learn'
 
@@ -7,25 +8,13 @@ import { type CourseType } from '@/lib/learn'
  * Обложка курса без единого ассета: фото курсов нет и не будет.
  *
  * Тон и иконка — от типа курса, паттерн — от индекса (шесть градиентов по
- * кругу), поэтому 18 курсов различимы на глаз. Паттерн выводится из
- * currentColor через color-mix и работает в обеих темах одним кодом; если
- * браузер не знает color-mix, невалидным становится только background-image —
- * заливка и иконка остаются на месте.
+ * кругу), поэтому 18 курсов различимы на глаз. Сам рецепт плашки живёт в
+ * `CoverTile`: тот же узор рисует «Новинки» на витрине, и разъезжаться им
+ * незачем.
  *
  * Индекс берётся у КУРСА, а не у позиции в отфильтрованном списке: иначе
  * обложка менялась бы при переключении фильтра.
  */
-
-const PATTERNS = [
-  'repeating-linear-gradient(45deg, PP 0 2px, transparent 2px 9px)',
-  'radial-gradient(PP 1.2px, transparent 1.5px)',
-  'repeating-linear-gradient(135deg, PP 0 1px, transparent 1px 6px)',
-  'repeating-radial-gradient(circle at 25% 115%, PP 0 1px, transparent 1px 10px)',
-  'repeating-linear-gradient(0deg, PP 0 1px, transparent 1px 8px), repeating-linear-gradient(90deg, PP 0 1px, transparent 1px 8px)',
-  'linear-gradient(135deg, PP 0 46%, transparent 46%)',
-]
-
-const PATTERN_INK = 'color-mix(in srgb, currentColor 18%, transparent)'
 
 const ICON: Record<CourseType, typeof BookOpen> = {
   mandatory: ShieldCheck,
@@ -79,19 +68,12 @@ export function CourseCover({
   muted?: boolean
   className?: string
 }) {
-  const Icon = ICON[courseType]
-  const pattern = PATTERNS[index % PATTERNS.length]!.replaceAll('PP', PATTERN_INK)
   return (
-    <span
-      aria-hidden
-      className={cn(
-        'flex h-[60px] w-[60px] shrink-0 items-center justify-center rounded-xl lg:h-[72px] lg:w-[72px]',
-        muted ? MUTED_TONE : TONE[courseType],
-        className,
-      )}
-      style={{ backgroundImage: pattern, backgroundSize: '9px 9px' }}
-    >
-      <Icon className="h-6 w-6" strokeWidth={1.9} />
-    </span>
+    <CoverTile
+      icon={ICON[courseType]}
+      index={index}
+      tone={muted ? MUTED_TONE : TONE[courseType]}
+      className={cn('h-[60px] w-[60px] lg:h-[72px] lg:w-[72px]', className)}
+    />
   )
 }
