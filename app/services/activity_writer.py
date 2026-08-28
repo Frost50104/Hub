@@ -6,8 +6,10 @@ in the same transaction — partial states are impossible.
 
 Kinds (extended as features land):
 - 3a tasks: `created`, `updated`, `status_changed`, `assigned`, `unassigned`,
-  `archived`, `unarchived`, `deleted`, `due_changed`, `priority_changed`,
-  `moved` (section change).
+  `archived`, `unarchived`, `deleted`, `due_changed`, `priority_changed`.
+- 28.08: `moved` — переезд задачи в ДРУГОЙ ПРОЕКТ (`services/task_move.py`).
+  Секций, для которых этот kind задумывался в 3a, нет с 0048, и писателя у
+  него до сих пор не было — старых строк с иным payload не существует.
 - 3b canban: `reordered` (position-only updates without status change).
 - 3c comments/watchers: `commented`, `comment_edited`, `comment_deleted`,
   `watcher_added`, `watcher_removed`.

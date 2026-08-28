@@ -54,6 +54,23 @@ describe('renderActivity', () => {
     expect(renderActivity(act('commented'))).toBeNull()
   })
 
+  it('переезд называет прежний проект и прежний номер', () => {
+    expect(
+      renderActivity(
+        act('moved', {
+          from_project: 'Подбор',
+          to_project: 'Развитие Hub',
+          from_key: 'PLP-118',
+          to_key: 'RH-12',
+        }),
+      ),
+    ).toBe('Пётр перенёс задачу из «Подбор» — прежний номер PLP-118')
+  })
+
+  it('переезд без payload не выдумывает проект', () => {
+    expect(renderActivity(act('moved', {}))).toBe('Пётр перенёс задачу в другой проект')
+  })
+
   it('неизвестный вид не роняет ленту', () => {
     expect(renderActivity(act('teleported'))).toBe('Пётр: teleported')
   })

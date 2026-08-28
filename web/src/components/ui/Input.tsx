@@ -29,6 +29,10 @@ const FIELD_CLASS =
  */
 export const TEXTAREA_CLASS = `min-h-[80px] rounded-lg px-3 py-2 text-sm ${FIELD_CLASS}`
 
+/** Выпадающий список формы — тот же вид и тот же фокус, что у поля ввода.
+ *  Собранный руками селект брал только кольцо и получал двойной контур. */
+export const SELECT_CLASS = `h-10 rounded-lg px-3 text-sm ${FIELD_CLASS}`
+
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
   ({ className, ...props }, ref) => (
     <input

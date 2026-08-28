@@ -79,6 +79,18 @@ export function renderActivity(a: ActivityLike): string | null {
         ? `${actor} снял исполнителя`
         : `${actor} назначил исполнителя`
     }
+    case 'moved': {
+      // Единственный след прежнего номера: задача переехала в другой проект и
+      // перенумеровалась (`uq_tasks_project_seq`), так что ссылки «PLP-118» в
+      // переписке больше на неё не указывают. Имя проекта — снапшот на момент
+      // события, как и везде в ленте.
+      const from = p['from_project'] ? String(p['from_project']) : null
+      const key = p['from_key'] ? String(p['from_key']) : null
+      if (!from) return `${actor} перенёс задачу в другой проект`
+      return key
+        ? `${actor} перенёс задачу из «${from}» — прежний номер ${key}`
+        : `${actor} перенёс задачу из «${from}»`
+    }
     case 'archived':
       return `${actor} архивировал`
     case 'unarchived':

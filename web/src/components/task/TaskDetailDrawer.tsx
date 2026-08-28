@@ -2,9 +2,11 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import {
   Archive,
   Calendar,
+  ChevronRight,
   Trash2,
   CornerLeftUp,
   Flag,
+  FolderOpen,
   Link as LinkIcon,
   MoreHorizontal,
   Tag,
@@ -12,6 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { Markdown } from '@/components/Markdown'
@@ -19,6 +22,7 @@ import { PeoplePickerMulti } from '@/components/PeoplePickerMulti'
 import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
 import { DrawerSection } from '@/components/task/DrawerSection'
+import { MoveTaskDialog } from '@/components/task/MoveTaskDialog'
 import { SubtaskList } from '@/components/task/SubtaskList'
 import { TaskDoneControl } from '@/components/task/TaskDoneControl'
 import { TaskAttachments } from '@/components/task/TaskAttachments'
@@ -63,6 +67,8 @@ import { plural } from '@/lib/typography'
 
 interface TaskDetailDrawerProps {
   taskId: string | null
+  /** Проект СТРАНИЦЫ. Внутри — только фолбэк на время загрузки задачи: всё
+   *  остальное считается от `task.project_id` (см. `taskProjectId`). */
   projectId: string
   onClose: () => void
   /** Переключить drawer на другую задачу (родитель/подзадача). */
@@ -123,6 +129,12 @@ function stageValue(e: React.ChangeEvent<HTMLSelectElement>): string | null {
   return e.target.value || null
 }
 
+/** Строка «Проект» на десктопе: силуэт селекта, но открывает диалог переноса —
+ *  у переезда есть цена (новый номер, отвал меток), и тихим выбором он быть
+ *  не может. */
+const PROJECT_BUTTON =
+  'inline-flex h-9 max-w-[320px] items-center gap-1.5 rounded-[9px] border border-glass-border bg-surface px-3 font-body text-[14px] text-text hover:border-amber focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60'
+
 const STAGE_SELECT =
   'h-9 max-w-[320px] rounded-[9px] border border-glass-border bg-surface px-3 font-body text-[14px] text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 disabled:cursor-default'
 
@@ -153,10 +165,16 @@ export function TaskDetailDrawer({
   const contentRef = useRef<HTMLDivElement>(null)
   const taskQuery = useTask(taskId ?? undefined)
   const { data: task, isLoading } = taskQuery
-  const project = useProject(projectId)
+  // Проект ЗАДАЧИ, а не проект страницы. Пока задача не загрузилась, они
+  // совпадают; после переезда — расходятся, и карточка на проп-значении
+  // показывала бы колонки и кастом-поля чужого проекта, а ключ в шапке
+  // собирала бы из ключа старого проекта и уже нового номера («PLP-12» —
+  // номера, которого нет нигде).
+  const taskProjectId = task?.project_id ?? projectId
+  const project = useProject(taskProjectId)
   // Этапы проекта: статус в карточке — раскрывающийся список с их именами
   // (имена пользовательские, этапов сколько угодно — ряд чипов не годится).
-  const stages = useStages(projectId)
+  const stages = useStages(taskProjectId)
   // Права считает сервер: viewer → read-only, hub:admin вне членства → правит.
   const readOnly = !project.data?.can_edit
   // Исполнитель закрывает свою задачу и двигает её по доске даже будучи
@@ -167,16 +185,16 @@ export function TaskDetailDrawer({
   // Наблюдателю мало сказать «нельзя» — надо назвать, кого просить.
   // `GET /projects/{id}/members` открыт любой роли в проекте (включая
   // viewer), поэтому имя владельца доступно и ему.
-  const members = useProjectMembers(readOnly ? projectId : undefined)
+  const members = useProjectMembers(readOnly ? taskProjectId : undefined)
   const owner = members.data?.find((m) => m.role === 'owner')
-  const update = useUpdateTask(projectId)
-  const toggleAssignee = useToggleAssignee(projectId)
-  const toggleDone = useToggleDone(projectId)
-  const archive = useArchiveTask(projectId)
-  const remove = useDeleteTask(projectId)
+  const update = useUpdateTask(taskProjectId)
+  const toggleAssignee = useToggleAssignee(taskProjectId)
+  const toggleDone = useToggleDone(taskProjectId)
+  const archive = useArchiveTask(taskProjectId)
+  const remove = useDeleteTask(taskProjectId)
   // Подзадачи считаем из того же кэша, что и `SubtaskList` — отдельный запрос
   // ради одной цифры в диалоге не нужен.
-  const projectTasks = useTasks(projectId)
+  const projectTasks = useTasks(taskProjectId)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [dueAt, setDueAt] = useState('')
@@ -184,6 +202,8 @@ export function TaskDetailDrawer({
   const [editingDesc, setEditingDesc] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [moveOpen, setMoveOpen] = useState(false)
+  const navigate = useNavigate()
 
   useEffect(() => {
     if (task) {
@@ -345,23 +365,23 @@ export function TaskDetailDrawer({
               </span>
             </div>
 
-            {/* Хлебные крошки: проект / родительская задача. */}
-            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[13px] text-text2">
-              {project.data && <span className="truncate">{project.data.name}</span>}
-              {task?.parent_task_id && onOpenTask && (
-                <>
-                  <span aria-hidden>/</span>
-                  <button
-                    type="button"
-                    onClick={() => onOpenTask(task.parent_task_id!)}
-                    className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-text"
-                  >
-                    <CornerLeftUp className="h-3.5 w-3.5" />
-                    К родительской
-                  </button>
-                </>
-              )}
-            </p>
+            {/* Ссылка на родительскую задачу. Имя проекта отсюда убрано
+                (28.08): оно появилось строкой «Проект» в свойствах, и один и тот
+                же текст дважды в одной карточке читается как два разных факта.
+                Проект по-прежнему опознаётся в шапке — по префиксу ключа
+                («RH-5»), который тут и остаётся. */}
+            {task?.parent_task_id && onOpenTask && (
+              <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[13px] text-text2">
+                <button
+                  type="button"
+                  onClick={() => onOpenTask(task.parent_task_id!)}
+                  className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-text"
+                >
+                  <CornerLeftUp className="h-3.5 w-3.5" />
+                  К родительской
+                </button>
+              </p>
+            )}
 
             {task && (
               // Состояние задачи — кружок слева от названия, тот же контрол,
@@ -462,6 +482,20 @@ export function TaskDetailDrawer({
               // «свойство → значение», контрол справа, строка 48px. Ряды чипов
               // на телефоне превращались в стену из шести разнородных блоков.
               <PropertyRows>
+                {/* Первой: на «Моих задачах» и в поиске карточка иначе не
+                    говорит, из какого задача проекта. */}
+                <PropertyRow
+                  label="Проект"
+                  onClick={readOnly ? undefined : () => setMoveOpen(true)}
+                >
+                  <span className="truncate">{project.data?.name ?? '—'}</span>
+                  {!readOnly && (
+                    <ChevronRight
+                      className="ml-1 h-4 w-4 shrink-0 text-text2"
+                      strokeWidth={1.9}
+                    />
+                  )}
+                </PropertyRow>
                 <PropertyRow label="Колонка">
                   {stages.data && stages.data.length > 0 ? (
                     <select
@@ -529,7 +563,7 @@ export function TaskDetailDrawer({
                 {/* Кастом-поля — теми же строками 48px, что Этап/Приоритет/Срок
                     (макет «Задача · мобильный»), а не стопкой «подпись + инпут»
                     (QA-0821 #14). */}
-                <TaskCustomFields variant="mobile" taskId={task.id} projectId={projectId} />
+                <TaskCustomFields variant="mobile" taskId={task.id} projectId={taskProjectId} />
               </PropertyRows>
             )}
 
@@ -538,6 +572,28 @@ export function TaskDetailDrawer({
                 <dl className="m-0 grid grid-cols-1 items-start gap-x-3.5 gap-y-3 lg:grid-cols-[112px_1fr] lg:items-center lg:gap-y-2.5">
                   {desktop && (
                     <>
+                      <Dt icon={FolderOpen}>Проект</Dt>
+                      <dd className="m-0 min-w-0">
+                        {readOnly ? (
+                          <span className="text-[14px] text-text">
+                            {project.data?.name ?? '—'}
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setMoveOpen(true)}
+                            title="Перенести в другой проект"
+                            className={PROJECT_BUTTON}
+                          >
+                            <span className="truncate">{project.data?.name ?? '—'}</span>
+                            <ChevronRight
+                              className="h-4 w-4 shrink-0 text-text2"
+                              strokeWidth={1.9}
+                            />
+                          </button>
+                        )}
+                      </dd>
+
                       <Dt icon={Flag}>Колонка</Dt>
                       <dd className="m-0">
                         {/* Имена колонок пользовательские и их сколько угодно —
@@ -655,7 +711,7 @@ export function TaskDetailDrawer({
                     <TaskLabels
                       bare
                       taskId={task.id}
-                      projectId={projectId}
+                      projectId={taskProjectId}
                       canEdit={!readOnly}
                       onManageLabels={project.data?.can_manage ? onManageLabels : undefined}
                     />
@@ -665,7 +721,7 @@ export function TaskDetailDrawer({
                     <TaskCustomFields
                       variant="rows"
                       taskId={task.id}
-                      projectId={projectId}
+                      projectId={taskProjectId}
                     />
                   )}
                 </dl>
@@ -719,7 +775,7 @@ export function TaskDetailDrawer({
                 {!task.parent_task_id && (
                   <SubtaskList
                     taskId={task.id}
-                    projectId={projectId}
+                    projectId={taskProjectId}
                     canEdit={!readOnly}
                     onOpenTask={onOpenTask}
                   />
@@ -727,7 +783,7 @@ export function TaskDetailDrawer({
 
                 <TaskDependencies
                   taskId={task.id}
-                  projectId={projectId}
+                  projectId={taskProjectId}
                   canEdit={!readOnly}
                 />
 
@@ -740,71 +796,49 @@ export function TaskDetailDrawer({
             )}
           </div>
 
-          {/* Мобильный футер: «Комментарий…» ставит курсор в композер треда,
-              «Готово» закрывает задачу (или возвращает). Sticky, не fixed:
-              fixed под клавиатурой iOS уезжает вместе с visual viewport. */}
-          {task && !desktop && (
+          {/* Мобильный футер — ОДНО действие: закрыть задачу (или вернуть).
+              Поле «Комментарий…» отсюда убрано (28.08): оно только скроллило к
+              композеру, который и так стоит в теле карточки. Sticky, не fixed:
+              fixed под клавиатурой iOS уезжает вместе с visual viewport.
+              Показывать нечего — футера нет вовсе: полоса с отступом под
+              safe-area и пустотой внутри читается как сломанная вёрстка. */}
+          {task && !desktop && canStatus && (
             <footer
               className="sticky bottom-0 z-10 flex shrink-0 items-center gap-2 border-t border-hair bg-bg-alt px-4 pt-2.5"
               style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 10px)' }}
             >
-              {readOnly ? (
-                <>
-                  <span className="min-w-0 flex-1 text-[14px] text-text2">
-                    Комментировать может участник проекта.
-                  </span>
-                  <WatchControl taskId={task.id} />
-                  {/* Единственный способ закрыть задачу с телефона: без этой
-                      ветки исполнитель-наблюдатель видел бы карточку своей
-                      задачи вообще без действия. */}
-                  {canStatus && (
-                    <button
-                      type="button"
-                      onClick={() => toggleDone(task)}
-                      className={cn(
-                        'flex h-12 shrink-0 items-center justify-center rounded-xl px-5 text-[15px] font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
-                        task.done
-                          ? 'border border-glass-border text-text'
-                          : 'bg-amber text-on-amber',
-                      )}
-                    >
-                      {task.done ? 'Вернуть' : 'Готово'}
-                    </button>
-                  )}
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const el = document.querySelector<HTMLTextAreaElement>(
-                        '#task-thread-composer textarea',
-                      )
-                      el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-                      el?.focus()
-                    }}
-                    className="flex h-12 min-w-0 flex-1 items-center rounded-xl border border-glass-border bg-tint px-4 text-left text-[15px] text-text2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
-                  >
-                    Комментарий…
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => toggleDone(task)}
-                    className={cn(
-                      'flex h-12 shrink-0 items-center justify-center rounded-xl px-5 text-[15px] font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
-                      task.done
-                        ? 'border border-glass-border text-text'
-                        : 'bg-amber text-on-amber',
-                    )}
-                  >
-                    {task.done ? 'Вернуть' : 'Готово'}
-                  </button>
-                </>
-              )}
+              <button
+                type="button"
+                onClick={() => toggleDone(task)}
+                className={cn(
+                  'flex h-12 w-full items-center justify-center rounded-xl px-5 text-[15px] font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
+                  task.done
+                    ? 'border border-glass-border text-text'
+                    : 'bg-amber text-on-amber',
+                )}
+              >
+                {task.done ? 'Вернуть' : 'Готово'}
+              </button>
             </footer>
           )}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
+      {task && (
+        <MoveTaskDialog
+          open={moveOpen}
+          onOpenChange={setMoveOpen}
+          taskId={task.id}
+          projectId={taskProjectId}
+          currentStageName={
+            stages.data?.find((s) => s.id === task.stage_id)?.name ?? null
+          }
+          // Уводим на новое место. Без этого проп `projectId` страницы остаётся
+          // старым, а с ним — колонки, кастом-поля и метки чужого проекта.
+          onMoved={(report) =>
+            navigate(`/projects/${report.project_id}?task=${task.id}`)
+          }
+        />
+      )}
       {task && (
         <ShareDialog
           open={shareOpen}

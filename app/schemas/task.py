@@ -96,6 +96,50 @@ class TaskUpdate(BaseModel):
     # priority/position) по-прежнему игнорируют null.
 
 
+class TaskMoveRequest(BaseModel):
+    """Тело `POST /tasks/{id}/move`.
+
+    Отдельная схема, а не поле в `TaskUpdate`: на том `extra="forbid"`, и
+    вчерашний PWA-бандл получил бы 422 вместо no-op; плюс `update_task`
+    расширяет права до viewer'а для `ASSIGNEE_EDITABLE_FIELDS`, а переносу
+    там не место.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: UUID
+    # Колонка в ЦЕЛЕВОМ проекте. `None` — «без статуса» (0046): задача есть в
+    # списке и поиске, но не на доске. Колонки подзадач сервер подбирает по
+    # имени сам.
+    stage_id: UUID | None = None
+
+
+class TaskMoveReport(BaseModel):
+    """Что случится (`move-preview`) или что случилось (`move`).
+
+    Один силуэт на оба ответа: предпросмотр и перенос считаются одним кодом
+    (`services/task_move.py`), и разные формы ответа развели бы тексты в
+    диалоге и в тосте.
+    """
+
+    project_id: UUID
+    project_name: str
+    # Новый «KEY-42». `None` у предпросмотра: номер выдаёт только сам перенос
+    # (`allocate_task_seq`), а показывать несуществующий номер нельзя.
+    new_key: str | None = None
+    subtasks: int
+    labels_kept: int
+    labels_total: int
+    values_kept: int
+    values_total: int
+    watchers_dropped: int
+    dependencies_dropped: int
+    shares_revoked: int
+    # У цели активна публичная ссылка scope=project — задача станет видна по
+    # ней анонимам (api/public.py::_build_project_view берёт ВСЕ задачи).
+    target_public: bool
+
+
 class TaskAssigneeAdd(BaseModel):
     """Тело POST /tasks/{id}/assignees — добавить одного исполнителя."""
 

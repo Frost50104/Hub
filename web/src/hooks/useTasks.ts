@@ -73,6 +73,51 @@ export type UpdateVars = TaskUpdateBody & {
   __optimistic?: Partial<Task>
 }
 
+/**
+ * Корни кэша трекера, которые задевает переезд задачи.
+ *
+ * Перечислять ключи по одному тут нельзя: переезд меняет ДВА проекта разом и
+ * трогает десять корней — списки и карточку (`tasks`), ленту, комментарии и
+ * наблюдателей (`task`), счётчики проектов, колонки, метки, кастом-поля,
+ * зависимости, «Мои задачи», статистику «Главной» и хронологию. Забытый корень
+ * оставит экран со старыми данными, и выглядеть это будет как «перенос не
+ * сработал», хотя сервер отработал.
+ */
+const MOVE_TOUCHES = [
+  'tasks',
+  'task',
+  'projects',
+  'stages',
+  'labels',
+  'custom-fields',
+  'dependencies',
+  'me-tasks',
+  'me-stats',
+  'timeline',
+]
+
+/** Перенос задачи в другой проект. Оптимистики нет сознательно: переезд меняет
+ *  номер, колонку, метки и значения полей — угадать результат нечем, а
+ *  соврать на секунду тут дороже, чем подождать ответ. */
+export function useMoveTask() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...body }: MoveVars) => tasksApi.move(id, body),
+    meta: { errorMessage: 'Не удалось перенести задачу' },
+    onSuccess: () => {
+      qc.invalidateQueries({
+        predicate: (q) => MOVE_TOUCHES.includes(String(q.queryKey[0])),
+      })
+    },
+  })
+}
+
+interface MoveVars {
+  id: string
+  project_id: string
+  stage_id: string | null
+}
+
 export function useUpdateTask(projectId: string) {
   const qc = useQueryClient()
   return useMutation({

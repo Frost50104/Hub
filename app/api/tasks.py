@@ -18,12 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.attachment import TaskAttachment
 from app.models.notification import Notification
+from app.models.project import Project
 from app.models.shadow import ShadowUser
 from app.models.stage import ProjectStage
 from app.models.task import Task, TaskLabelAssignment, TaskWatcher
 from app.schemas.task import (
     TaskAssigneeAdd,
     TaskCreate,
+    TaskMoveReport,
+    TaskMoveRequest,
     TaskPriority,
     TaskResponse,
     TaskUpdate,
@@ -52,6 +55,7 @@ from app.services.task_assignees import (
     set_task_assignees,
 )
 from app.services.task_counts import load_row_counts
+from app.services.task_move import MovePlan, apply_move, plan_move
 from app.services.tasks import (
     allocate_task_seq,
     apply_done_filter,
@@ -432,6 +436,119 @@ async def update_task(
     await db.commit()
     await db.refresh(task)
     return await _serialize_one(db, task)
+
+
+# ─── Перенос в другой проект ────────────────────────────────────────────────
+#
+# Не поле в PATCH: у переезда своя цена (перенумерация, отвал меток и значений
+# полей, отзыв публичной ссылки), и человек обязан увидеть её ДО нажатия.
+# Отсюда две ручки на один расчёт — `services/task_move.py::plan_move`.
+
+
+def _move_report(plan: MovePlan, task: Task) -> TaskMoveReport:
+    return TaskMoveReport(
+        project_id=plan.target.id,
+        project_name=plan.target.name,
+        new_key=plan.new_keys.get(task.id),
+        subtasks=plan.subtasks,
+        labels_kept=len(plan.labels_keep),
+        labels_total=plan.labels_total,
+        values_kept=len(plan.values_keep),
+        values_total=plan.values_total,
+        watchers_dropped=len(plan.watchers_drop),
+        dependencies_dropped=plan.dependencies_drop,
+        shares_revoked=plan.shares_revoke,
+        target_public=plan.target_public,
+    )
+
+
+async def _move_context(
+    db: AsyncSession,
+    *,
+    task_id: UUID,
+    project_id: UUID,
+    principal: Principal,
+    lock: bool,
+) -> tuple[Task, Project, Project]:
+    """Задача, её проект и цель — с ролью редактора в ОБОИХ.
+
+    Прав в источнике мало: без проверки цели задачу можно было бы затолкать в
+    проект, которого не видишь.
+
+    `lock=True` (запись) берёт строку задачи `FOR UPDATE`: два одновременных
+    переноса в разные проекты иначе выдали бы два номера, задача осталась бы
+    в проекте последнего, а первому ушёл бы отчёт про проект, где её нет.
+    """
+    task = await db.get(Task, task_id, with_for_update=lock)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
+    source, _ = await require_task_access(db, task, principal, allow=EDIT_ROLES)
+    target, _ = await require_project_role(db, project_id, principal, allow=EDIT_ROLES)
+    return task, source, target
+
+
+@router.get("/tasks/{task_id}/move-preview", response_model=TaskMoveReport)
+async def preview_task_move(
+    task_id: UUID,
+    project_id: UUID = Query(...),
+    stage_id: UUID | None = Query(default=None),
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> TaskMoveReport:
+    """Что случится при переносе. НИЧЕГО не пишет — в том числе не выдаёт номер.
+
+    Свой bucket: диалог дёргает предпросмотр на каждую смену цели, и в общем
+    `task:write` (120/мин) перебор проектов упёрся бы в 429 на СЛЕДУЮЩЕЙ
+    правке задачи.
+    """
+    await enforce_rate_limit(
+        bucket="task:move-preview",
+        employee_id=str(principal.employee_id),
+        limit=60,
+        window_sec=60,
+    )
+    task, source, target = await _move_context(
+        db, task_id=task_id, project_id=project_id, principal=principal, lock=False
+    )
+    plan = await plan_move(
+        db,
+        task=task,
+        source=source,
+        target=target,
+        principal=principal,
+        stage_id=stage_id,
+    )
+    return _move_report(plan, task)
+
+
+@router.post("/tasks/{task_id}/move", response_model=TaskMoveReport)
+async def move_task(
+    task_id: UUID,
+    body: TaskMoveRequest,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> TaskMoveReport:
+    """Перенести задачу (и её подзадачи) в другой проект."""
+    await enforce_rate_limit(
+        bucket="task:write",
+        employee_id=str(principal.employee_id),
+        limit=120,
+        window_sec=60,
+    )
+    task, source, target = await _move_context(
+        db, task_id=task_id, project_id=body.project_id, principal=principal, lock=True
+    )
+    plan = await plan_move(
+        db,
+        task=task,
+        source=source,
+        target=target,
+        principal=principal,
+        stage_id=body.stage_id,
+    )
+    await apply_move(db, plan=plan, principal=principal)
+    await db.commit()
+    return _move_report(plan, task)
 
 
 # ─── Assignees (инкрементальный путь) ───────────────────────────────────────

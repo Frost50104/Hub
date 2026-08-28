@@ -53,8 +53,11 @@ class Task(Base):
             "priority IN ('low', 'medium', 'high', 'urgent')",
             name="ck_tasks_priority",
         ),
-        # project_id иммутабелен (переноса задач между проектами нет) —
-        # иначе перевыдавать seq через _allocate_task_seq нового проекта.
+        # Номер уникален ВНУТРИ проекта. С 28.08 задачу можно перенести
+        # (`services/task_move.py`), и это ограничение — причина, по которой
+        # переезд ОБЯЗАН перевыдать `seq` через `allocate_task_seq` целевого
+        # проекта: ссылки «PLP-118» в переписке после переноса не сходятся, и
+        # цену диалог называет человеку до нажатия.
         UniqueConstraint("project_id", "seq", name="uq_tasks_project_seq"),
     )
 

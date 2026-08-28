@@ -131,6 +131,28 @@ export interface TaskUpdateBody {
   position?: string | number
 }
 
+/** Ответ `move-preview` и `move` — один силуэт на «что будет» и «что стало».
+ *  Считает их один и тот же код на сервере (`services/task_move.py`), поэтому
+ *  и тип один: разные формы развели бы текст диалога с текстом тоста. */
+export interface TaskMoveReport {
+  project_id: string
+  project_name: string
+  /** «KEY-42» в новом проекте. `null` у предпросмотра: номер выдаёт только сам
+   *  перенос, а показывать несуществующий номер нельзя. */
+  new_key: string | null
+  subtasks: number
+  labels_kept: number
+  labels_total: number
+  values_kept: number
+  values_total: number
+  watchers_dropped: number
+  dependencies_dropped: number
+  shares_revoked: number
+  /** У цели активна публичная ссылка на проект — задача станет видна по ней
+   *  анонимам, хотя публиковать её отдельно никто не просил. */
+  target_public: boolean
+}
+
 export interface CalendarRange {
   /** Inclusive YYYY-MM-DD. */
   from: string
@@ -160,6 +182,23 @@ export const tasksApi = {
     api.post<Task>(`/projects/${projectId}/tasks`, body).then((r) => r.data),
   update: (id: string, body: TaskUpdateBody): Promise<Task> =>
     api.patch<Task>(`/tasks/${id}`, body).then((r) => r.data),
+  /** Что случится при переносе. `stage_id` уходит только непустым: у null
+   *  axios сериализует `stage_id=`, а FastAPI ждёт UUID и отвечает 422. */
+  movePreview: (
+    id: string,
+    projectId: string,
+    stageId: string | null,
+  ): Promise<TaskMoveReport> =>
+    api
+      .get<TaskMoveReport>(`/tasks/${id}/move-preview`, {
+        params: { project_id: projectId, stage_id: stageId ?? undefined },
+      })
+      .then((r) => r.data),
+  move: (
+    id: string,
+    body: { project_id: string; stage_id: string | null },
+  ): Promise<TaskMoveReport> =>
+    api.post<TaskMoveReport>(`/tasks/${id}/move`, body).then((r) => r.data),
   archive: (id: string): Promise<Task> =>
     api.post<Task>(`/tasks/${id}/archive`).then((r) => r.data),
   unarchive: (id: string): Promise<Task> =>

@@ -32,12 +32,12 @@
 - `sections` (project_id, name, position)
 
 ### Задачи
-- `tasks` (project_id, section_id, parent_task_id, title, description markdown, done BOOLEAN + completed_at под CHECK, priority: `low` | `medium` | `high` | `urgent`, start_at, due_at, position NUMERIC, search_vector tsvector).
+- `tasks` (project_id, parent_task_id, title, description markdown, done BOOLEAN + completed_at под CHECK, priority: `low` | `medium` | `high` | `urgent`, start_at, due_at, position NUMERIC, search_vector tsvector).
   - Подзадачи только 1 уровень — CHECK `parent_task_id IS NULL OR (SELECT parent_task_id FROM tasks t2 WHERE t2.id = parent_task_id) IS NULL`; UI — секция в карточке (SubtaskList), в топ-уровне List/Board не показываются
 - Инструкции по работе в Hub — не сущность БД: две готовые HTML-страницы в `guides/` (репо) отдаются `GET /api/guides/{kind}?e&s` по подписи (`services/guides.py`, тот же `issue_token`, что у медиа) через internal-локацию nginx. Кому какая — `guides_for_role` (hub-admin: обе, остальные: сотрудницкая), ссылки приходят готовыми в `GET /api/me`. Первая задача сотрудника («Изучите инструкцию») заводится в момент создания личного проекта — `services/onboarding.py`, вызов в `ensure_personal_project`
 - `POST /api/feedback` — обратная связь из настроек: текст + необязательный файл → задача в проекте по ключу `SIGNARIS_HUB_FEEDBACK_PROJECT_KEY` (первая колонка, метка «Обратная связь», исполнитель — владелец проекта, пуш ему). Открыта любому сотруднику: rate-limit 5/час, автор НЕ становится наблюдателем (`create_task_record(watch_creator=False)`), проверки файла — общий `services/attachments.py::store_upload`. Детали и причины — `app/services/feedback.py`.
 - `project_stages` (project_id, name, position; 0040, свободные с 0044) — колонки доски: ТОЛЬКО имя и позиция, системного смысла нет. `tasks.stage_id` НЕОБЯЗАТЕЛЕН (0046): `NULL` = «без статуса» — задача есть в списке, календаре, поиске и `/me/tasks` (там `outerjoin`), но не на доске; новая задача без явного `stage_id` уходит в первую колонку. FK без `SET NULL`: удаление колонки с задачами требует выбора — `move_to` (перенести) или `detach` (оставить без колонки), без обоих 409. Колонок у проекта может не быть вовсе (26.08): новый проект рождается пустым, и удалить можно любую колонку, включая последнюю; состояние задачи — независимая ось `tasks.done`, пишет её только `app/services/stages.py::set_done`. API `app/api/stages.py`
-- `tasks.seq` (0032–0033) — номера «KEY-42» внутри проекта, выдача только `allocate_task_seq` под row-lock проекта, `project_id` иммутабелен
+- `tasks.seq` (0032–0033) — номера «KEY-42» внутри проекта, выдача только `allocate_task_seq` под row-lock проекта; `project_id` меняется ровно одним путём — переносом (ниже)
 - `task_assignees` (task_id, employee_id, position, assigned_by; PK составной, RLS с 0034) — **единственное место, где живут исполнители**; колонка-зеркало `tasks.assignee_id` удалена ревизией 0036. Пишет только `app/services/task_assignees.py`; в списках — EXISTS/батч, не JOIN
 - `task_watchers` — auto-добавление: assignee + creator + mentioned
 - `task_comments` (markdown, `mentioned_ids UUID[]`)
@@ -49,6 +49,38 @@
 - `public_share_tokens` (scope task|project, БЕЗ RLS — cross-tenant lookup по токену, миграция 0009) — view-only `/p/{token}`
 - `project_members.is_favorite` (миграция 0012) — личное избранное, секция в Sidebar
 - `project_folders` (name, position) + `projects.folder_id` (0035) — общие для тенанта папки, ровно один уровень; удаление папки не удаляет проекты (ON DELETE SET NULL); API `app/api/project_folders.py` на префиксе `/project-folders`
+
+### Перенос задачи между проектами (28.08)
+
+`POST /tasks/{id}/move` + `GET /tasks/{id}/move-preview`, обе — `app/api/tasks.py`, работа — `app/services/task_move.py`.
+
+**Почему отдельная ручка, а не поле в PATCH.** На `TaskUpdate` стоит `extra="forbid"` (0045) — вчерашний PWA-бандл получил бы 422 вместо no-op; `update_task` расширяет права до viewer'а для `ASSIGNEE_EDITABLE_FIELDS`, и переносу там не место; ответ PATCH по инварианту не несёт `can_complete`, а переезд обязан вернуть новый ключ.
+
+**Почему план и исполнение — две функции.** `plan_move` считает, `apply_move` раскладывает посчитанное. Предпросмотр в диалоге и сама запись идут по ОДНОМУ коду: вторая реализация правил «что переедет» разошлась бы с первой на первой же правке. `dry_run` «сделать и откатить» (как у импорта CSV) не подошёл: `allocate_task_seq` инкрементит `projects.next_task_seq` до отката, и диалог, где человек перебирает пять целей, оставил бы дыру в каждой. `plan_move` не пишет ничего, `new_key` у предпросмотра — `null`.
+
+**Что делает переезд.**
+
+| | правило и причина |
+|---|---|
+| номер | новый, через `allocate_task_seq` цели — `uq_tasks_project_seq` иначе падает. Старый ключ уходит в ленту (`kind="moved"`, payload `from_key`/`to_key`/`from_project`/`to_project`) — это единственный его след, ссылки «PLP-118» в переписке больше не сходятся |
+| семья | подзадачи едут за родителем, нумеруются по возрастанию старого `seq`. Одна подзадача — 409: `parent_task_id` — FK на `tasks.id` без проектного ограничения, БД разрыв стерпит, а `SubtaskList` ищет детей в списке нового проекта и покажет ноль |
+| позиция | `next_position(db, target, stage_id=…)` каждой переехавшей. Позиция — `max+1` внутри (проект, колонка), и число из чужой шкалы поставило бы задачу в середину списка |
+| колонка | у корня — из запроса (`None` = «без статуса», 0046), у подзадач — по совпадению ИМЕНИ, через `.get()` а не индекс. Оставить `stage_id` как есть нельзя: FK на `project_stages` проектом не ограничен и намеренно без `SET NULL` — строка сохранится, а на доске цели задача не появится никогда |
+| метки | по точному совпадению имени; новых меток в цели не заводим — перенос задачи не должен править справочник чужого проекта |
+| кастом-поля | по паре (имя, ТИП): по одному имени число уехало бы в текстовое поле. `select`/`multi_select` пересобираются по ЛЕЙБЛУ опции (id у одноимённых полей свои), финальный фильтр — `custom_field_validator.validate` |
+| исполнители | `ensure_project_member(viewer)` в цели — иначе человек узнает о переносе по 403 из пуша |
+| наблюдатели | не ставшие участниками — отписываются, их `notifications` по задаче удаляются. Членство им давать НЕЛЬЗЯ: viewer видит весь целевой проект, и подписка на одну задачу открыла бы закрытый проект. Исключение — САМ переносящий: права редактора в цели у него только что проверены, и без оговорки админ отписывался от собственной задачи (найдено на staging 28.08) |
+| зависимости | связи со вторым концом в старом проекте удаляются: `api/dependencies.py` отвечает 400 на кросс-проектные, и переезд не должен оставлять на данных то, чего ручка не создаёт |
+| уведомления | `url` переписывается на новый проект (`services/notify.py` кладёт туда `project_id` на момент отправки) |
+| публичная ссылка | `scope=task` переехавших ОТЗЫВАЕТСЯ. `api/public.py::_build_task_view` проект не смотрит вовсе, поэтому переезд в личное сделал бы личное публичным в обход `assert_not_personal`. `public_share_tokens` — одна из четырёх таблиц БЕЗ RLS, `tenant_id` в условии обязателен |
+
+**Права и запреты.** Редактор в ОБОИХ проектах (`require_task_access` + `require_project_role`), задача берётся `FOR UPDATE` (два одновременных переноса иначе выдали бы два номера и один отчёт-обманку). **Личный проект с любой стороны обязан быть своим** — иначе 409, в том числе hub-admin'у: его пропускает и `require_project_role` (админ-байпас), и `personal_task_scope` (для админа возвращает `None`). Цель архивная — 409, тот же проект — 400. Предпросмотр — свой bucket `task:move-preview` (60/мин): в общем `task:write` перебор целей в диалоге упирался бы в 429 на следующей правке задачи.
+
+**Отчёт `TaskMoveReport`** несёт счётчики (`labels_kept`/`labels_total`, `values_*`, `watchers_dropped`, `dependencies_dropped`, `shares_revoked`, `subtasks`) и флаг `target_public` — у цели активна ссылка `scope=project`, а `_build_project_view` отдаёт анонимам ВСЕ задачи проекта, то есть приехавшая станет публичной без «явного акта над ней».
+
+**Ассистенту инструмента переноса не дано** — по той же причине, что и `delete_task`: нужны права в двух проектах, и результат необратимо меняет номер.
+
+**Фронт.** Строка «Проект» первой в свойствах карточки (обе раскладки), `components/task/MoveTaskDialog.tsx` на `ResponsiveDialog`, чистые `lib/taskMove.ts` (`moveTargets` — цели, `describeTaskMove` — текст по отчёту сервера). Карточка считает проект от `task.project_id`, а НЕ от пропа страницы, и после переноса уводит на `/projects/{новый}?task=`. Мутация `useMoveTask` инвалидирует десять корней кэша предикатом: переезд меняет два проекта, и перечисление ключей по одному гарантированно что-нибудь забудет. Массовая разноска по меткам осталась за одноразовой джобой `app/jobs/split_project_by_labels.py`.
 
 ### Представления проекта
 Список / Доска (по этапам `project_stages`) / Календарь (`app/api/calendar.py`) / Хронология (`app/api/timeline.py`, `include_undated` — строки без полосы) / Дашборд (`app/api/stats.py`: статусы, этапы, приоритеты, тренд, загрузка с `overdue_count`; графики CSS — `Donut`/`MiniBarChart`/`MeterRow`, recharts снят) / Участники. Импорт задач из CSV — `POST /projects/{id}/tasks/import?dry_run=` (`app/api/tasks_import.py`) через общий путь создания `app/services/tasks.py::create_task_record`. Фильтры (assignee/done/priority/label/due) + сортировка списка — состояние в URL searchParams; Board всегда в position-порядке. Полнотекстовый поиск: `app/api/search.py` + DSL `app/services/search_dsl.py` (0008: pg_trgm, tsvector). Мутации задач оптимистичные (rollback из снапшота, `useUpdateTask`), complete/archive — с undo-тостом.
