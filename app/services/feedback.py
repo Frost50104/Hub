@@ -84,16 +84,30 @@ async def find_feedback_project(db: AsyncSession, tenant_id: UUID) -> Project:
     По КЛЮЧУ из настроек, а не по id: ключ переживает переименование проекта и
     читается в конфиге. Тенант в условии явно — ключ уникален лишь внутри
     тенанта, и полагаться на одну только RLS в поиске «куда писать» не стоит.
+
+    Архивный проект = проекта нет: см. комментарий у ветки ниже.
     """
     key = get_settings().feedback_project_key
-    project = (
+    row = (
         await db.execute(
-            select(Project).where(Project.tenant_id == tenant_id, Project.key == key)
+            select(Project, Project.archived_at.is_not(None).label("archived")).where(
+                Project.tenant_id == tenant_id, Project.key == key
+            )
         )
-    ).scalar_one_or_none()
+    ).first()
+    # Архивный проект приравниваем к отсутствующему: задачи туда не заводятся
+    # (`services/projects.py::assert_project_accepts_tasks`), и без этой ветки
+    # сотрудник, пишущий в поддержку, получил бы 409 «Проект в архиве» — про
+    # проект, которого он не выбирал и не видел.
+    project = row[0] if row is not None and not row.archived else None
     if project is None:
         # 503, а не 500: отправитель ни при чём, а владельцу нужен внятный след.
-        log.error("feedback.project_missing", key=key, tenant_id=str(tenant_id))
+        log.error(
+            "feedback.project_unavailable",
+            key=key,
+            tenant_id=str(tenant_id),
+            reason="archived" if row is not None else "missing",
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Обратная связь пока не настроена — напишите владельцу продукта напрямую",

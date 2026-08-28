@@ -12,9 +12,36 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project, ProjectMember
+
+# Один текст на все отказы «проект в архиве»: создание задачи
+# (`services/tasks.py::create_task_record`) и перенос в архивный проект
+# (`services/task_move.py::assert_movable`). Разные формулировки одного правила
+# читаются как разные правила.
+ARCHIVED_PROJECT_DETAIL = "Проект в архиве — сначала восстановите его"
+
+
+def assert_project_accepts_tasks(project: Project) -> None:
+    """409, если в проект больше не заводят задачи.
+
+    Гейт стоит ТОЛЬКО на создании. Правку существующей задачи в архивном
+    проекте не трогаем сознательно: она ничего не теряет — задача уже есть и
+    открывается по ссылке, — а запрет сломал бы массовые правки ассистента
+    посреди плана. Колонки, метки и кастом-поля в архиве тоже по-прежнему
+    создаются: пустая колонка ничего не теряет (см. docs/tech-debt/open.md).
+
+    Заводить задачи было можно всегда, и прятал это только клиент; живой путь
+    мимо клиента — ассистент, который резолвит проект по имени. Созданная так
+    задача выпадает из поиска (`api/search.py` фильтрует архивные проекты) и из
+    списков, то есть с точки зрения человека работа исчезает.
+    """
+    if project.archived_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=ARCHIVED_PROJECT_DETAIL
+        )
 
 
 async def create_project_record(

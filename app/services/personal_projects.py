@@ -82,21 +82,6 @@ def not_my_personal(employee_id: UUID) -> ColumnElement[bool]:
 # ─── Чтение и создание ──────────────────────────────────────────────────────
 
 
-async def personal_owner_of(db: AsyncSession, project_id: UUID) -> UUID | None:
-    """Владелец личного пространства или None у обычного проекта.
-
-    Не просто «личный ли» — по владельцу решаются ДВА правила создания задачи
-    (`tasks.create_task_record`): статуса нет ни у кого в личном, а исполнителем
-    задача получает владельца, только если он же её и создаёт. Вызывается там,
-    где проект существует и доступ проверен, поэтому «строки нет» = «не личный».
-    """
-    return (
-        await db.execute(
-            select(Project.personal_owner_id).where(Project.id == project_id)
-        )
-    ).scalar_one_or_none()
-
-
 async def get_personal_project_id(db: AsyncSession, employee_id: UUID) -> UUID | None:
     """Один индексный SELECT по `uq_projects_personal_owner`."""
     return (

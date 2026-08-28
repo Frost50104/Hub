@@ -21,7 +21,7 @@ from app.models.stage import ProjectStage
 from app.models.task import Task
 from app.schemas.task import LEGACY_STATUS_DETAIL, TaskCreate, resolve_assignee_ids
 from app.services.activity_writer import record_activity
-from app.services.personal_projects import personal_owner_of
+from app.services.projects import assert_project_accepts_tasks
 from app.services.stages import default_stage_for, next_position
 from app.services.task_assignees import (
     apply_assignee_side_effects,
@@ -92,8 +92,20 @@ async def create_task_record(
     оставлять лок и первых двух записанными); `flush()` — до activity и
     исполнителей (FK на tasks.id).
     """
-    # Один запрос на два правила личного пространства ниже: колонка и исполнитель.
-    personal_owner = await personal_owner_of(db, project_id)
+    # Проект нужен целиком: из него и гейт архива, и два правила личного
+    # пространства ниже (колонка и исполнитель). `db.get` по первичному ключу —
+    # это попадание в identity map сессии на ВСЕХ живых путях: ручка и импорт
+    # CSV уже загрузили проект в `require_project_role` → `fetch_project_or_404`,
+    # обратная связь — в `find_feedback_project`. То есть запрос не уходит вовсе,
+    # тогда как прежний `personal_owner_of` слал отдельный SELECT на КАЖДУЮ
+    # строку импорта.
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Проект не найден"
+        )
+    assert_project_accepts_tasks(project)
+    personal_owner = project.personal_owner_id
 
     resolved = resolve_assignee_ids(body)
     if resolved is None and personal_owner == principal.employee_id:

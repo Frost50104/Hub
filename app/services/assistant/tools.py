@@ -365,6 +365,14 @@ async def t_list_projects(ctx: ToolContext, a: BaseModel) -> dict[str, Any]:
     stmt = (
         visible_projects_stmt(ctx)
         .where(not_personal())
+        # Архивные — тоже нет: каталог, из которого выбирает модель, обязан
+        # совпадать с тем, что человек видит в сайдбаре и на /projects. Иначе
+        # ассистент предлагает завести задачу там, откуда она сразу выпадет из
+        # поиска и списков. Фильтр стоит ЗДЕСЬ, а не в `visible_projects_stmt`:
+        # ту же выборку используют `resolve_task`, `t_search_tasks` и
+        # `t_my_tasks`, а веб архивные проекты на чтение не закрывает
+        # (`/me/tasks` их отдаёт, прямая ссылка открывается).
+        .where(Project.archived_at.is_(None))
         .order_by(func.lower(Project.name))
         .limit(200)
     )
@@ -490,6 +498,20 @@ async def t_create_task(ctx: ToolContext, a: CreateTaskArgs) -> dict[str, Any]:
         return denied(
             f"в проекте «{project.name}» у вас роль наблюдателя — создавать задачи там нельзя",
             await project_managers(ctx, project.id),
+        )
+    # Отказ ЗДЕСЬ, на построении плана, а не на исполнении: `_exec_create_task`
+    # зовёт ручку, и без этой ветки человек увидел бы карточку плана, нажал
+    # «Выполнить» и получил ошибку. `who_can` намеренно пуст — владелец прав не
+    # выдаёт, проект надо восстановить.
+    if project.archived_at is not None:
+        # Причина названа ПОЛНОСТЬЮ, вместе со способом вернуть проект в работу:
+        # `who_can` тут пуст (владелец прав не выдаёт), а пустой слот «кого
+        # просить» модель заполняет догадкой — на staging она сочинила
+        # «уточните у администратора платформы».
+        return denied(
+            f"проект «{project.name}» в архиве — задачи туда не заводятся. "
+            "Вернуть его в работу может владелец проекта: вкладка «О проекте» → "
+            "«Настройки проекта» → «Разархивировать»"
         )
     people = await _resolve_assignees(ctx, a.assignees)
     due = parse_due(a.due_at)
