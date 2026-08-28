@@ -99,6 +99,10 @@ def get_engine() -> AsyncEngine:
             pool_size=10,
             max_overflow=20,
             echo=False,
+            # Текст ошибки SQLAlchemy рендерит параметры запроса, а среди них
+            # бывают ПДн — ФИО из фида auth, email, тела задач. Цена: в ошибках
+            # БД не видно значений (INTEGRATION.md §14).
+            hide_parameters=True,
         )
     return _engine
 
