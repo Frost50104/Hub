@@ -53,6 +53,59 @@ async def _save_cursor(seq: int) -> None:
         await session.commit()
 
 
+async def _apply_rename(event: DeletionEvent) -> None:
+    """`employee_updated`: имя из auth → HR-карточка сотрудника.
+
+    Копий имени в Hub две. `shadow_users.full_name` (её читает весь трекер)
+    обновляет сама библиотека сразу после `on_event`; здесь — вторая копия,
+    `employee_profiles.full_name`, которую видно на learn-экранах, в
+    оргструктуре и в сертификатах. Без этой ветки случай закрывается наполовину.
+
+    Только UPDATE существующей карточки: фид не должен становиться каналом
+    создания записей о людях, которые в Hub не приходили. Карточки нет (человек
+    не заходил и HR его не заводил) — выходим молча, при первом входе имя
+    подтянет `_sync_linked_profile`.
+
+    Ветка идемпотентна (совпало имя — выходим): курсор двигается ПОСЛЕ
+    `on_event`, поэтому упавшее событие переиграется на следующем тике. По той
+    же причине ошибку БД не глушим — молчаливая потеря переименования хуже
+    повтора; так же устроена соседняя ветка с `archive_profile`.
+    """
+    new_name = (event.full_name or "").strip()
+    if not new_name or event.employee_id is None or event.tenant_id is None:
+        return
+
+    from sqlalchemy import select
+
+    from app.models.employee_profile import EmployeeProfile
+    from app.services import audit
+
+    async with tenant_scoped_session(event.tenant_id) as domain_session:
+        profile = (
+            await domain_session.execute(
+                select(EmployeeProfile).where(
+                    EmployeeProfile.employee_id == event.employee_id
+                )
+            )
+        ).scalar_one_or_none()
+        if profile is None or profile.full_name == new_name:
+            return
+        audit.record(
+            domain_session,
+            tenant_id=profile.tenant_id,
+            actor_id=None,  # инициатор — auth, а не человек в Hub
+            action="update",
+            object_type="employee_profile",
+            object_id=profile.id,
+            object_label=new_name,
+            diff={"full_name": {"old": profile.full_name, "new": new_name}},
+        )
+        profile.full_name = new_name
+        await domain_session.commit()
+    # Имя в лог не пишем: ПДн (требование INTEGRATION.md §14).
+    log.info("deletion_sync.profile_renamed", seq=event.seq)
+
+
 async def _on_event(session: AsyncSession, event: DeletionEvent) -> None:
     # Task-домен: no-op (историю задач/комментов сохраняем, read-path фильтрует
     # shadow_users.deleted_at). Learn-домен (Ф0): удаление/перевод сотрудника в
@@ -66,6 +119,9 @@ async def _on_event(session: AsyncSession, event: DeletionEvent) -> None:
         employee_id=str(event.employee_id) if event.employee_id else None,
         tenant_id=str(event.tenant_id) if event.tenant_id else None,
     )
+    if event.event_type == "employee_updated":
+        await _apply_rename(event)
+        return
     if event.event_type not in ("employee_deleted", "employee_transferred"):
         return
     if event.employee_id is None:

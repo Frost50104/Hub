@@ -17,7 +17,10 @@ dependencies = [
     "httpx>=0.27",
     "python-multipart>=0.0.9",
     "pywebpush>=2.0.0",
-    "signaris-auth-client[fastapi,sqlalchemy]>=0.5.0,<0.6",
+    # 0.8.0 — событие `employee_updated` в продуктовом фиде: воркер сам обновляет
+    # shadow_users.full_name, до этого имя в зеркале менялось только запросами
+    # самого человека (см. app/services/deletion_sync.py).
+    "signaris-auth-client[fastapi,sqlalchemy]>=0.8.0,<0.9",
     # Ф6 AI: pgvector-тип для SQLAlchemy + извлечение текста файлов.
     "pgvector>=0.2.5",
     "pypdf>=4.0",
