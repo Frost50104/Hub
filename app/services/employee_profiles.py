@@ -148,6 +148,27 @@ async def _sync_linked_profile(
     now: datetime,
 ) -> None:
     values: dict = {"last_activity_at": now}
+
+    # Имя принадлежит auth: профиль его ЗЕРКАЛИТ, а не хранит своё (ОС 28.08 —
+    # HR переименовал человека на экране «Сотрудники», а в пикере участников
+    # осталось старое: трекер читает shadow_users, learn — профиль, и хозяева у
+    # них были разные). Пустое имя из токена НЕ затирает существующее: в
+    # профиле это единственный опознавательный признак в списках, а JWT
+    # приходит извне.
+    new_name = (principal.full_name or "").strip()
+    if new_name and new_name != profile.full_name:
+        audit.record(
+            db,
+            tenant_id=profile.tenant_id,
+            actor_id=principal.employee_id,
+            action="update",
+            object_type="employee_profile",
+            object_id=profile.id,
+            object_label=new_name,
+            diff={"full_name": {"old": profile.full_name, "new": new_name}},
+        )
+        values["full_name"] = new_name
+
     new_email = normalize_email(principal.email)
     if normalize_email(profile.email) != new_email:
         # Смена email в auth. Pre-check вместо ловли IntegrityError — ошибка

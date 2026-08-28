@@ -190,14 +190,27 @@ function EmployeeCardDialog({
   const [tuStores, setTuStores] = useState<Set<string> | null>(
     profile && profile.org_role === 'tu' ? new Set(profile.tu_store_ids) : null,
   )
+  // Имя и email принадлежат auth и приезжают оттуда при каждом входе человека.
+  // Признак «уже заходил» — last_activity_at, а не наличие аккаунта: карточку
+  // можно привязать вручную (/link, /restore), и до первого входа её ещё
+  // осмысленно править (ОС 28.08).
+  const authOwnsIdentity = !isNew && profile.last_activity_at !== null
 
   const managers = useEmployees({ status: 'active' })
 
   const save = useEmployeeMutation(async () => {
-    const payload = { ...form, email: form.email.trim(), full_name: form.full_name.trim() }
+    const { email, full_name, ...rest } = form
+    const identity = { email: email.trim(), full_name: full_name.trim() }
+    // Поля, которыми владеет auth, из тела ИСКЛЮЧАЮТСЯ, а не шлются как есть:
+    // сервер отклоняет отличающееся значение, а форма отправляет объект
+    // целиком — иначе сохранение должности или роли ловило бы 422 на ровном
+    // месте. При создании карточки владельца ещё нет, там поля обязательны.
     const saved = isNew
-      ? await learnApi.createEmployee(payload)
-      : await learnApi.updateEmployee(profile.id, payload)
+      ? await learnApi.createEmployee({ ...rest, ...identity })
+      : await learnApi.updateEmployee(
+          profile.id,
+          authOwnsIdentity ? rest : { ...rest, ...identity },
+        )
     if (form.org_role === 'tu' && tuStores !== null) {
       await learnApi.replaceTuStores(saved.id, [...tuStores])
     }
@@ -210,7 +223,9 @@ function EmployeeCardDialog({
     setForm((f) => ({ ...f, [key]: value }))
 
   const submit = async () => {
-    if (!form.email.trim() || !form.full_name.trim()) return
+    // У карточки, которой владеет auth, эти поля недоступны и не отправляются —
+    // требовать их заполненности незачем.
+    if (!authOwnsIdentity && (!form.email.trim() || !form.full_name.trim())) return
     await save.mutateAsync(undefined as never)
     toast.success(isNew ? 'Карточка создана' : 'Сохранено')
     onClose()
@@ -251,6 +266,7 @@ function EmployeeCardDialog({
                 <Input
                   id="emp-name"
                   value={form.full_name}
+                  disabled={authOwnsIdentity}
                   onChange={(e) => set('full_name', e.target.value)}
                   autoFocus={isNew}
                 />
@@ -261,6 +277,7 @@ function EmployeeCardDialog({
                   id="emp-email"
                   type="email"
                   value={form.email}
+                  disabled={authOwnsIdentity}
                   onChange={(e) => set('email', e.target.value)}
                 />
               </div>

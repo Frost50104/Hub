@@ -267,6 +267,27 @@ async def update_employee(
     fields = body.model_dump(exclude_unset=True)
     if "email" in fields:
         fields["email"] = normalize_email(fields["email"])
+    # Имя и email принадлежат auth: `_sync_linked_profile` перезапишет их при
+    # следующем входе человека, поэтому правка здесь была бы принята, показана
+    # применённой и молча пропала (ОС 28.08).
+    #
+    # Критерий — `last_activity_at`, а НЕ наличие `employee_id`: ручки /link и
+    # /restore привязывают аккаунт без входа, и по employee_id карточка
+    # замерзала бы с HR-именем, которое уже некому исправить.
+    #
+    # Отклоняется ОТЛИЧАЮЩЕЕСЯ значение, а не само присутствие поля: форма
+    # редактора шлёт объект целиком, и на «присутствии» сломалось бы сохранение
+    # должности, магазина и роли — у нового бандла и особенно у вчерашнего.
+    if profile.last_activity_at is not None:
+        for name, label in (("full_name", "Имя"), ("email", "Email")):
+            if name in fields and fields[name] != getattr(profile, name):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"{label} сотрудника меняется в его профиле в auth — "
+                        "оттуда Hub берёт его при следующем входе"
+                    ),
+                )
     diff: dict = {}
     org_changed = False
     for name, value in fields.items():
