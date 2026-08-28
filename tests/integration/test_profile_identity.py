@@ -164,3 +164,28 @@ async def test_card_without_login_is_still_editable(
     )
     assert updated.full_name == "Исправленное Имя"
 
+
+async def test_first_login_of_a_pre_created_card_takes_the_auth_name(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Привязка карточки по email обязана сразу взять имя из auth.
+
+    Ветка привязки ставила `employee_id` и `last_activity_at`, но имя не
+    трогала — HR-написание оставалось до ВТОРОГО входа, а починить его уже
+    нечем: гейт PATCH к этому моменту закрыт именно `last_activity_at`.
+    Найдено на проде 28.08 (rfedorov1@: карточка «Фёдоров Руслан», в auth
+    «Руслан Фёдоров»).
+    """
+    admin = await _admin(db, tenant_id, "idn6")
+    created = await create_employee(
+        EmployeeCreate(email="newcomer@t.ru", full_name="Фёдоров Руслан"), admin, db
+    )
+    await db.commit()
+
+    person = make_principal(
+        tenant_id, email="newcomer@t.ru", full_name="Руслан Фёдоров", tenant_slug="idn6"
+    )
+    profile = await _login(db, person)
+
+    assert profile.id == created.id, "карточка должна быть найдена по email, не создана заново"
+    assert profile.full_name == "Руслан Фёдоров"

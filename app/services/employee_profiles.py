@@ -91,6 +91,12 @@ async def ensure_profile_for_principal(db: AsyncSession, principal: Principal) -
             if result.rowcount:
                 log.info("profile.linked", profile_id=str(active.id))
                 await db.refresh(active)
+                # Имя и email зеркалим СРАЗУ при привязке, а не со второго
+                # входа. Иначе HR-написание застревает в карточке, а починить
+                # его уже нечем: `last_activity_at` только что выставлен, и
+                # PATCH этих полей отвечает 422 (ОС 28.08, случай rfedorov1@).
+                await _sync_linked_profile(db, active, principal, now)
+                await db.refresh(active)
                 diffs = await recalc_profile(db, active)
                 await notify_new_audience_members(db, diffs)
                 return MatchResult(outcome="linked", profile=active)
