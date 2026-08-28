@@ -35,6 +35,17 @@ export const BottomSheet = forwardRef<HTMLDivElement, BottomSheetProps>(
           <DialogPrimitive.Content
             ref={ref}
             tabIndex={-1}
+            // Описания у шторки может не быть — тогда снимаем атрибут целиком:
+            // Radix ставит `aria-describedby` на id, которого нет в документе,
+            // и пишет предупреждение в консоль (в проде тоже — guard'а по
+            // NODE_ENV в `DescriptionWarning` нет).
+            //
+            // Спред, а не `aria-describedby={undefined}` в лоб: ключ со
+            // значением `undefined` в JSX ВСЁ РАВНО попадает в объект пропсов и
+            // перебивает атрибут Radix (у него `...contentProps` идут после
+            // собственных aria-атрибутов) — то есть отвязал бы настоящее
+            // описание, когда `subtitle` есть.
+            {...(subtitle ? {} : { 'aria-describedby': undefined })}
             // Авто-фокус — на саму шторку, а не на первый контрол: иначе
             // первый селект/кнопка открывались с фокус-рингом (тот же класс
             // находки, что у «Закрыть» карточки задачи — QA-0821 #14).
@@ -65,13 +76,21 @@ export const BottomSheet = forwardRef<HTMLDivElement, BottomSheetProps>(
                     </DialogPrimitive.Title>
                   )}
                   {subtitle && (
-                    <p className="mt-0.5 text-xs text-text3">{subtitle}</p>
+                    // Именно `Description`, а не свой <p>: Radix связывает её
+                    // с диалогом по id. Тег тот же — примитив рендерит <p>.
+                    <DialogPrimitive.Description className="mt-0.5 text-xs text-text3">
+                      {subtitle}
+                    </DialogPrimitive.Description>
                   )}
                 </div>
                 <div className="justify-self-end">{trailing}</div>
               </header>
             )}
-            {!title && !subtitle && !trailing && (
+            {/* Заголовок обязателен всегда, а не только у шторки без шапки:
+                с одним `trailing` (или одним `subtitle`) header рендерился, а
+                Title — нет, и Radix ругался уже на него. Живых таких вызовов
+                нет, но условие всё равно было неверным. */}
+            {!title && (
               <DialogPrimitive.Title className="sr-only">
                 Меню действий
               </DialogPrimitive.Title>

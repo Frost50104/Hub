@@ -36,6 +36,10 @@ export function ImageLightbox({
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/90" />
         <DialogPrimitive.Content
           className="fixed inset-0 z-50 flex flex-col items-center justify-center outline-none"
+          // Описание тут — само изображение (у него есть alt). Без явного
+          // снятия Radix ставит `aria-describedby` на несуществующий id и
+          // пишет предупреждение в консоль, в том числе в прод-сборке.
+          aria-describedby={undefined}
           onClick={() => onOpenChange(false)}
           onKeyDown={(e) => {
             if (e.key === 'ArrowRight' && index < images.length - 1) onIndexChange(index + 1)

@@ -265,6 +265,12 @@ export function TaskDetailDrawer({
         <DialogPrimitive.Content
           ref={contentRef}
           tabIndex={-1}
+          // Описания у карточки нет по замыслу: её содержание — сама карточка.
+          // Без явного снятия Radix ставит `aria-describedby` на id, которого в
+          // документе нет, и пишет предупреждение в консоль — в том числе в
+          // прод-сборке (guard'а по NODE_ENV в `DescriptionWarning` нет), а
+          // консоль у нас единственный канал диагностики с телефона.
+          aria-describedby={undefined}
           // Немодальный Radix закрывает слой и по клику, и по ФОКУСУ снаружи —
           // оба гасим: закрытие — крестик, Escape, пустой ?task=.
           onInteractOutside={desktop ? (e) => e.preventDefault() : undefined}
