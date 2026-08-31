@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { AudiencePicker } from '@/components/learn/AudiencePicker'
+import { EmployeeListNote } from '@/components/learn/EmployeeListNote'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { FilterChip } from '@/components/ui/FilterChip'
@@ -621,10 +622,15 @@ function GroupMembersDialog({
               {o.label}
             </label>
           ))}
-          {options.length === 0 && (
+          {/* Гейт на !isLoading обязателен: условия «идёт загрузка» и «опций
+              ноль» независимы, и во время добора экран показывал скелетон И
+              «Нет доступных участников.» одновременно — читалось как «в группу
+              некого добавить». */}
+          {options.length === 0 && !(kind === 'user-groups' && employees.isLoading) && (
             <p className="p-2 text-sm text-text3">Нет доступных участников.</p>
           )}
         </div>
+        {kind === 'user-groups' && <EmployeeListNote data={employees.data} />}
         <DialogFooter>
           <Button type="button" variant="secondary" onClick={onClose} disabled={save.isPending}>
             Отмена

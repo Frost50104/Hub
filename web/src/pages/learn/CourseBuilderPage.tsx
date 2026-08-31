@@ -31,6 +31,7 @@ import { toast } from 'sonner'
 
 import { coursesSectionTitle } from '@/components/layout/learnNav'
 import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
+import { EmployeeListNote } from '@/components/learn/EmployeeListNote'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
@@ -814,6 +815,7 @@ function AssignDialog({ course, onClose }: { course: CourseDetail; onClose: () =
               <p className="px-2 py-3 text-center text-sm text-text3">Никого не нашли.</p>
             )}
           </div>
+          <EmployeeListNote data={employees.data} />
           <div>
             <Label htmlFor="assign-due">Срок (необязательно)</Label>
             <Input

@@ -34,6 +34,7 @@ import {
   type SurveyListData,
   type UnlinkedLogin,
 } from '@/lib/learn'
+import { collectEmployees } from '@/lib/employeeList'
 import { toggleFavoriteKey } from '@/lib/favorites'
 
 // ─── Оргструктура ────────────────────────────────────────────────────────────
@@ -73,10 +74,30 @@ export interface EmployeeFilters {
   offset?: number
 }
 
+/**
+ * ВЕСЬ набор сотрудников, а не первая страница.
+ *
+ * Здесь стояло `limit: 100`, и это прятало людей сразу на шести экранах: на
+ * проде активных было 149, список показывал 100, а пикеры руководителя, целей
+ * привязки и состава групп молча обрезались там же (ОС владельца 31.08).
+ * Поднять лимит до 500 было бы не починкой, а переносом обрыва на 501-го.
+ *
+ * Полный набор дёшев: `EmployeeResponse` плоская, `_to_responses` батчевый —
+ * страница в 500 строк стоит серверу два запроса. Не «оптимизировать» обратно
+ * потолком.
+ *
+ * `limit`/`offset` идут ПОСЛЕ спреда намеренно: ровно перекрытие в обратном
+ * порядке и делало переданный вызывающим лимит невидимым.
+ */
 export function useEmployees(filters: EmployeeFilters): UseQueryResult<EmployeeList> {
   return useQuery({
     queryKey: ['learn-employees', filters],
-    queryFn: () => learnApi.employees({ ...filters, limit: 100 }),
+    queryFn: () =>
+      collectEmployees((limit, offset) =>
+        learnApi.employees({ ...filters, limit, offset }),
+      ),
+    // Держит прошлый результат, пока летит новый запрос: без него поиск мигает
+    // пустотой на каждую букву.
     placeholderData: (prev) => prev,
   })
 }

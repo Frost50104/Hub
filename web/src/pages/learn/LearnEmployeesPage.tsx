@@ -2,6 +2,9 @@ import { Archive, ArchiveRestore, Link2, Plus, Search, Upload, UserX } from 'luc
 import { useState } from 'react'
 import { toast } from 'sonner'
 
+import { employeeListCaption } from '@/lib/employeeList'
+
+import { EmployeeListNote } from '@/components/learn/EmployeeListNote'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
@@ -104,7 +107,12 @@ export function LearnEmployeesPage() {
         {employees.isError && <QueryError onRetry={() => void employees.refetch()} />}
         {employees.data && (
           <>
-            <p className="text-xs text-text3">Всего: {employees.data.total}</p>
+            {/* Раньше здесь стояло «Всего: N» над обрезанным до сотни списком —
+                экран противоречил сам себе. Правило одно на все четыре места,
+                где сотрудников выбирают: `lib/employeeList.ts`. */}
+            <p className="text-xs text-text3">
+              {employeeListCaption(employees.data.items.length, employees.data.total)}
+            </p>
             <ul className="divide-y divide-glass-border rounded-xl border border-glass-border bg-glass">
               {employees.data.items.length === 0 && (
                 <li className="p-4 text-sm text-text3">
@@ -400,6 +408,7 @@ function EmployeeCardDialog({
                       </option>
                     ))}
                 </Select>
+                <EmployeeListNote data={managers.data} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="emp-content">Права на контент</Label>
@@ -584,6 +593,10 @@ function UnlinkedDialog({ onClose }: { onClose: () => void }) {
     learnApi.linkEmployee(args.profileId, args.employeeId),
   )
 
+  // Цели привязки фильтруются на КЛИЕНТЕ по загруженным профилям: пока хук
+  // отдавал первую сотню, карточки из хвоста алфавита выбрать было нельзя
+  // вовсе — админ решал, что карточки нет, и заводил дубль (на проде таких
+  // непривязанных карточек за границей было 35).
   const unboundProfiles = (employees.data?.items ?? []).filter((p) => p.employee_id === null)
 
   return (
@@ -636,6 +649,7 @@ function UnlinkedDialog({ onClose }: { onClose: () => void }) {
                   >
                     Привязать
                   </Button>
+                  <EmployeeListNote data={employees.data} />
                 </div>
               ) : (
                 <Button

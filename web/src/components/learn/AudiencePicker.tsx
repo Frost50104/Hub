@@ -12,6 +12,7 @@ import {
   useEmployees,
   useOrgSnapshot,
 } from '@/hooks/useLearn'
+import { employeeTruncationNote } from '@/lib/employeeList'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { emptyPickReason, emptyPickText } from '@/lib/audienceHints'
 import { cn } from '@/lib/cn'
@@ -118,8 +119,10 @@ export function AudiencePicker({
     key === 'profile_ids' || !dimCounts.data
       ? null
       : (dimCounts.data.counts[key]?.[id] ?? 0)
-  // Поиск в измерении «Сотрудник»: без него дропдаун молча показывал бы
-  // только первую сотню активных (limit 100 в useEmployees).
+  // Поиск в измерении «Сотрудник»: серверный `q` сужает выборку до одного
+  // запроса на больших организациях. Раньше он был ЕДИНСТВЕННЫМ способом
+  // добраться до людей за сотой строкой — `useEmployees` отдавал первую
+  // страницу; с 31.08 хук добирает весь набор, и поиск снова просто удобство.
   const [employeeQ, setEmployeeQ] = useState('')
   const debouncedQ = useDebouncedValue(employeeQ, 300)
   const employees = useEmployees({ status: 'active', q: debouncedQ || undefined })
@@ -220,6 +223,14 @@ export function AudiencePicker({
               countFor={countFor}
               employeeQ={employeeQ}
               onEmployeeQ={setEmployeeQ}
+              employeesNote={
+                employees.data
+                  ? employeeTruncationNote(
+                      employees.data.items.length,
+                      employees.data.total,
+                    )
+                  : null
+              }
               onChange={(r) => updateRule(i, r)}
               onRemove={() => removeRule(i)}
             />
@@ -291,6 +302,7 @@ function RuleRow({
   countFor,
   employeeQ,
   onEmployeeQ,
+  employeesNote,
   onChange,
   onRemove,
 }: {
@@ -301,6 +313,8 @@ function RuleRow({
   countFor: (key: DimensionKey, id: string) => number | null
   employeeQ: string
   onEmployeeQ: (q: string) => void
+  /** «Показаны N из M», если добор упёрся в предел; иначе null. */
+  employeesNote: string | null
   onChange: (r: AudienceRuleDraft) => void
   onRemove: () => void
 }) {
@@ -403,6 +417,9 @@ function RuleRow({
             placeholder="Поиск сотрудника…"
             className="w-44"
           />
+        )}
+        {dimKey === 'profile_ids' && employeesNote && (
+          <p className="basis-full text-xs text-text3">{employeesNote}</p>
         )}
         <Select
           className="min-w-[160px] flex-1"

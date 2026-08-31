@@ -151,7 +151,14 @@ async def list_employees(
     rows = (
         (
             await db.execute(
-                stmt.order_by(EmployeeProfile.full_name).limit(limit).offset(offset)
+                # Тай-брейкер по `id` обязателен: клиент читает список
+                # СТРАНИЦАМИ (`useEmployees` добирает набор до `total`), а на
+                # неустойчивом порядке полные тёзки дают повторы и пропуски на
+                # стыке страниц. Видимый порядок он не меняет — только разводит
+                # одинаковые `full_name`.
+                stmt.order_by(EmployeeProfile.full_name, EmployeeProfile.id)
+                .limit(limit)
+                .offset(offset)
             )
         )
         .scalars()
