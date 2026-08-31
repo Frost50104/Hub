@@ -146,6 +146,13 @@ if [[ -d "$REPO_ROOT/ops/systemd" ]]; then
   systemctl enable signaris-hub-due-soon.timer signaris-hub-overdue.timer
   # 3.6.8: backup + healthcheck timers.
   systemctl enable --now signaris-hub-backup.timer signaris-hub-backup-cleanup.timer
+  # 31.08: архив ключей и .env — без него восстановленный сервер молча
+  # подписывает пуши новым VAPID-ключом (см. scripts/backup-secrets.sh).
+  systemctl enable --now signaris-hub-backup-secrets.timer
+  # backup-files.timer тут не было: на проде его включили руками, и заново
+  # поднятый по этому скрипту хост остался бы без снапшотов вложений — то есть
+  # ровно без того, ради чего bootstrap и запускают.
+  systemctl enable --now signaris-hub-backup-files.timer
   systemctl enable --now signaris-hub-healthcheck.timer
 fi
 

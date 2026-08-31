@@ -69,7 +69,11 @@
      /opt/signaris-hub/backups/pre-migrate/db-signaris_hub_db-<ts>.dump
    systemctl start signaris-hub
    ```
-   Суточные дампы — в `/opt/signaris-hub/backups/daily/` (plain SQL.gz: `zcat ... | sudo -u postgres psql -d <db>`).
+   Суточные дампы — в `/opt/signaris-hub/backups/daily/`. Это **`pg_dump -Fc`, поверх которого ещё раз `gzip -9`**, а НЕ plain SQL: `psql` его не примет, а `pg_restore` без `gunzip` отвечает «input file does not appear to be a valid archive» (здесь до 31.08 стояло неверное `zcat … | psql`). Правильно так:
+   ```bash
+   gunzip -c /opt/signaris-hub/backups/daily/db-signaris_hub_db-<date>.sql.gz |
+     sudo -u postgres pg_restore --clean --if-exists -d signaris_hub_db
+   ```
 
 После любого отката: `curl https://hub.signaris.ru/api/env` + smoke по основным страницам; фронт может требовать hard-refresh из-за PWA-кэша (баннер обновления).
 
@@ -109,7 +113,8 @@ Staging-копии юнитов генерируются `ops/systemd/make-stagi
 
 **Cron timers (общие для prod+staging, 3.6.8):**
 - `signaris-hub-backup.timer` — 00:00 UTC daily, один run для обеих БД, `User=postgres`. Файлы в `/opt/signaris-hub/backups/daily/db-<db>-<date>.sql.gz`, Sunday hardlink → `weekly/`. Optional S3 offsite через `/etc/default/signaris-hub-backup` (BACKUP_S3_BUCKET + AWS creds).
-- `signaris-hub-backup-cleanup.timer` — 00:30 UTC daily, retention 14d daily + 42d weekly.
+- `signaris-hub-backup-cleanup.timer` — 00:30 UTC daily, **`User=root`**. Дампы чистятся по mtime (14d daily + 42d weekly), снапшоты вложений и архивы ключей — **по ИМЕНИ каталога, 14 штук**: `rsync -a` переносит на снапшот mtime исходного каталога, и `-mtime` находил там ВСЕ снапшоты разом, включая свежий (31.08). Цель симлинка `latest` не удаляется никогда — иначе `backup-files.sh` молча уходит в полный rsync без `--link-dest`.
+- `signaris-hub-backup-secrets.timer` — 00:20 UTC daily, root. Зашифрованный (gpg AES256) архив того, чего нет в git: оба `.env`, `vapid_private.pem`, `/etc/default/signaris-hub-*`. Пароль — `BACKUP_SECRETS_PASSPHRASE` в `/etc/default/signaris-hub-backup` и **обязательным дублем в CLAUDE.md → СЕКРЕТЫ**.
 - `signaris-hub[-staging]-course-due-soon.timer` — daily 06:15 UTC, напоминание о дедлайне назначенного курса (`app/jobs/course_due_soon.py`); включён на обоих env.
 - `signaris-hub[-staging]-automations.timer` — hourly :20, исполнение automation_jobs чанком 200 (`app/jobs/automations_run.py`); включён на обоих env.
 - `signaris-hub[-staging]-inactivity.timer` — daily 07:00 UTC, правило неактивности warn→grace→авто-архив (`app/jobs/inactivity.py`); включён на обоих env.
@@ -127,6 +132,33 @@ Staging-копии юнитов генерируются `ops/systemd/make-stagi
 ## Память VPS: STT и сборка фронта
 
 STT-юнит — пара `MemoryHigh=800M` + `MemoryMax=1100M` (одиночный `MemoryMax` ловит OOM на странице кэша весов) + выгрузка модели по 5 мин простоя; **одна STT-машина на хост** — включён ПРОД, staging-юнит disable-нут; staging-юниты собирать `ops/systemd/make-staging-unit.py`. `vite build` на VPS больше не запускается — `deploy.sh` собирает фронт локально и заливает `web/dist` (сборка на сервере росла до ~970 МБ RSS и падала по OOM).
+
+## Репетиция восстановления
+
+Бэкап, из которого ни разу не разворачивались, — гипотеза. `scripts/restore-check.sh`
+проверяет её целиком: разворачивает дамп во ВРЕМЕННУЮ базу `restore_check_<ts>`,
+сверяет и сносит её (`trap` на выходе, имя собирается только из литерала и метки
+времени — снаружи в `DROP DATABASE` не попадает ничего).
+
+```bash
+ssh root@94.241.168.8
+/opt/signaris-hub/scripts/restore-check.sh \
+  /opt/signaris-hub/backups/daily/db-signaris_hub_db-$(date +%F).sql.gz
+```
+
+Что проверяется и почему именно это:
+
+- `pg_restore` без единой ошибки;
+- **`alembic_version` совпадает с живой базой** — дамп «полный, но от старой
+  схемы» иначе выглядит совершенно здоровым;
+- `projects`, `tasks`, `employee_profiles`, `task_comments` непусты, счётчики
+  печатаются рядом с живыми (живые больше на дневной прирост — это норма);
+- **есть RLS-политики** — они восстанавливаются отдельно от таблиц, и дамп без
+  них работает ровно до первого кросс-tenant запроса.
+
+Первый прогон — 31.08.2026: 0 ошибок, alembic 0049 = 0049, 82 политики,
+16 802 задачи против 16 813 живых. На таймер сознательно не повешено: пусть
+остаётся осознанным действием, а не фоном, который никто не видел вживую.
 
 ## Healthcheck-алерты
 

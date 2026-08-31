@@ -3,8 +3,13 @@ Description=Signaris Hub — retention sweep (daily 14d, weekly 42d)
 
 [Service]
 Type=oneshot
-User=postgres
-Group=postgres
+# ROOT, а не postgres (31.08): чистить приходится за двумя владельцами — дампы
+# postgres:postgres, снапшоты вложений signaris:signaris под root:root
+# каталогом. С postgres удаление снапшотов отвечало «Permission denied», а
+# скрипт этот отказ проглатывал и печатал «cleanup ok» — ретенция файловых
+# бэкапов не работала два месяца. Гард на путь и запрет трогать цель `latest`
+# живут в самом скрипте.
+User=root
 ExecStart=/opt/signaris-hub/scripts/backup-cleanup.sh
 StandardOutput=journal
 StandardError=journal
