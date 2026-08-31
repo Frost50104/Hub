@@ -20,10 +20,11 @@ import {
   useMarkAllRead,
   useMarkRead,
   useNotifications,
+  useUnreadCount,
 } from '@/hooks/useNotifications'
 import { cn } from '@/lib/cn'
+import { inboxCounter, inboxEmpty } from '@/lib/inboxView'
 import { type Notification } from '@/lib/notifications'
-import { plural } from '@/lib/typography'
 import { useResolvedSpace } from '@/lib/workspace'
 
 const KIND_ICON: Record<string, typeof Bell> = {
@@ -59,14 +60,25 @@ export function InboxPage() {
 function useInbox() {
   // Чип — выбор одного из двух окон выборки (unread_only на сервере), а не
   // декоративная вкладка: клик по уже активному ничего не меняет.
-  const [unreadOnly, setUnreadOnly] = useState(false)
+  //
+  // Открываемся на «Непрочитанных» (31.08, решение владельца): «Входящие» — это
+  // список дел, а не архив, и у активного пользователя прочитанное измеряется
+  // сотнями. Состояние локальное и живёт до ухода со страницы: это ДЕФОЛТ, а не
+  // сохранённая настройка — вернувшись, человек снова видит то, что не разобрал.
+  const [unreadOnly, setUnreadOnly] = useState(true)
   const notifications = useNotifications(unreadOnly)
   const markAll = useMarkAllRead()
   const markOne = useMarkRead()
   // useMemo на данных запроса, а не на `data ?? []`: литерал даёт новую
   // ссылку каждый рендер, и группировка пересчитывалась бы вхолостую.
   const items = useMemo(() => notifications.data ?? [], [notifications.data])
-  const unread = items.filter((n) => !n.is_read).length
+  // Число непрочитанных — из того же источника, что бейдж в сайдбаре, а НЕ из
+  // длины списка: ручка отдаёт максимум 50 строк, и у человека со 160
+  // непрочитанными подпись говорила «50 непрочитанных». Ключ запроса общий с
+  // бейджем, так что лишнего похода в сеть нет, а `useMarkRead`/`useMarkAllRead`
+  // инвалидируют весь префикс `['notifications']` — число обновляется само.
+  const unreadCount = useUnreadCount()
+  const unread = unreadCount.data?.count ?? items.filter((n) => !n.is_read).length
   const groups = useMemo(() => bucketByAge(items), [items])
   return {
     notifications,
@@ -101,6 +113,40 @@ function FilterChip({
     >
       {children}
     </button>
+  )
+}
+
+/**
+ * Полоса «Все / Непрочитанные» + счётчик.
+ *
+ * Одна на обе раскладки. На телефоне чипов раньше не было (так был нарисован
+ * макет), и пока список по умолчанию показывал ВСЁ, это ничего не стоило.
+ * С дефолтом «Непрочитанные» их отсутствие означало бы, что прочитанное с
+ * телефона недостижимо вовсе, — поэтому чипы переехали в общий компонент.
+ */
+function InboxFilters({
+  unreadOnly,
+  onChange,
+  unread,
+  className,
+}: {
+  unreadOnly: boolean
+  onChange: (v: boolean) => void
+  unread: number
+  className?: string
+}) {
+  return (
+    <div className={cn('flex items-center gap-2', className)}>
+      <FilterChip active={!unreadOnly} onClick={() => onChange(false)}>
+        Все
+      </FilterChip>
+      <FilterChip active={unreadOnly} onClick={() => onChange(true)}>
+        Непрочитанные
+      </FilterChip>
+      {/* Ветвление и причина, по которой дроби «N из M» здесь нет, —
+          в `lib/inboxView.ts`, там же тест. */}
+      <span className="ml-auto text-[13px] text-text2">{inboxCounter(unread)}</span>
+    </div>
   )
 }
 
@@ -163,14 +209,19 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-function EmptyInbox() {
+/**
+ * `unreadOnly` обязателен: с новым дефолтом «пусто» чаще всего значит «всё
+ * разобрано», а не «уведомлений не было». Текст «Здесь пока тихо» человеку с
+ * двумя сотнями прочитанных читался бы как потеря истории.
+ */
+function EmptyInbox({ unreadOnly }: { unreadOnly: boolean }) {
+  const Glyph = unreadOnly ? CheckCircle2 : Bell
+  const { title, body } = inboxEmpty(unreadOnly)
   return (
     <div className="mx-4 mt-6 flex flex-col items-center gap-2 rounded-2xl border border-glass-border bg-tint p-10 text-center">
-      <Bell className="h-10 w-10 text-text2" />
-      <p className="font-display text-[18px] font-bold text-text">Здесь пока тихо</p>
-      <p className="max-w-xs text-[15px] text-text2">
-        Назначения, упоминания, комментарии и дедлайны попадут сюда.
-      </p>
+      <Glyph className="h-10 w-10 text-text2" />
+      <p className="font-display text-[18px] font-bold text-text">{title}</p>
+      <p className="max-w-xs text-[15px] text-text2">{body}</p>
     </div>
   )
 }
@@ -238,20 +289,7 @@ function DesktopInbox() {
         )}
       </header>
 
-      <div className="flex items-center gap-2">
-        <FilterChip active={!unreadOnly} onClick={() => setUnreadOnly(false)}>
-          Все
-        </FilterChip>
-        <FilterChip active={unreadOnly} onClick={() => setUnreadOnly(true)}>
-          Непрочитанные
-        </FilterChip>
-        {/* Счётчик не повторяет заголовок пустого состояния — только число. */}
-        <span className="ml-auto text-[13px] text-text2">
-          {unread > 0
-            ? `${unread} непрочитанных из ${items.length}`
-            : plural(items.length, 'уведомление', 'уведомления', 'уведомлений')}
-        </span>
-      </div>
+      <InboxFilters unreadOnly={unreadOnly} onChange={setUnreadOnly} unread={unread} />
 
       {notifications.isLoading && <SkeletonRows rows={5} />}
       {notifications.isError && (
@@ -261,7 +299,9 @@ function DesktopInbox() {
           title="Не удалось загрузить уведомления"
         />
       )}
-      {notifications.data && items.length === 0 && <EmptyInbox />}
+      {notifications.data && items.length === 0 && (
+        <EmptyInbox unreadOnly={unreadOnly} />
+      )}
 
       {items.length > 0 && (
         <div className="overflow-hidden rounded-[14px] border border-glass-border bg-tint">
@@ -291,7 +331,8 @@ function DesktopInbox() {
 // ─── Мобильный ──────────────────────────────────────────────────────────────
 
 function MobileInbox() {
-  const { notifications, markAll, markOne, items, unread, groups } = useInbox()
+  const { notifications, markAll, markOne, items, unread, groups, unreadOnly, setUnreadOnly } =
+    useInbox()
   const space = useResolvedSpace()
 
   return (
@@ -312,8 +353,16 @@ function MobileInbox() {
         }
       />
 
-      {/* Чипов «Все/Непрочитанные» на телефоне нет (макет): окно выборки —
-          десктопный контрол, на телефоне достаточно «Прочитать всё» и счётчика. */}
+      {/* Чипы появились и здесь (31.08). Прежде их не было по макету, и это
+          было безобидно, пока список открывался на «Все»; с дефолтом
+          «Непрочитанные» без них прочитанное с телефона было бы недостижимо. */}
+      <InboxFilters
+        unreadOnly={unreadOnly}
+        onChange={setUnreadOnly}
+        unread={unread}
+        className="px-4 pb-2 pt-1"
+      />
+
       {notifications.isLoading && <SkeletonRows rows={5} className="p-4" />}
       {notifications.isError && (
         <QueryError
@@ -323,7 +372,9 @@ function MobileInbox() {
           className="m-4"
         />
       )}
-      {notifications.data && items.length === 0 && <EmptyInbox />}
+      {notifications.data && items.length === 0 && (
+        <EmptyInbox unreadOnly={unreadOnly} />
+      )}
 
       {groups.map(
         (g) =>
