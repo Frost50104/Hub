@@ -34,6 +34,23 @@ def test_my_counters_compiles():
     assert "JOIN task_assignees" not in sql
 
 
+def test_archive_filter_touches_only_the_two_now_counters():
+    """Половинчатость — не забывчивость, а решение (см. докстринг `_mine`).
+
+    `open_now`/`overdue_now` — состояние на сейчас, они стоят на одном экране
+    со списком, из которого архивные проекты ушли. `completed_*` — история:
+    фильтр там стирал бы столбики графика за месяцы, когда работа была сделана.
+    Поэтому предикат живёт ВНУТРИ двух `.filter()`, а не в общем `where`.
+    """
+    sql = _sql(my_counters_stmt(EMPLOYEE, NOW))
+    assert "JOIN projects" in sql, "джойн нужен: без него предикат не собрать"
+    assert sql.count("projects.archived_at IS NULL") == 2
+    # Общий WHERE его НЕ несёт — иначе накрыло бы и `completed_*`. Режем по
+    # "\nWHERE ", а не по "WHERE": первое вхождение слова — внутри FILTER.
+    where = sql.split("\nWHERE ", 1)[1]
+    assert "projects.archived_at" not in where
+
+
 def test_my_created_compiles():
     sql = _sql(my_created_stmt(EMPLOYEE, NOW))
     assert sql.count("FILTER") == 2

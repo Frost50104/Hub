@@ -13,6 +13,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
+from sqlalchemy import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project, ProjectMember
@@ -22,6 +23,30 @@ from app.models.project import Project, ProjectMember
 # (`services/task_move.py::assert_movable`). Разные формулировки одного правила
 # читаются как разные правила.
 ARCHIVED_PROJECT_DETAIL = "Проект в архиве — сначала восстановите его"
+
+
+# ─── Предикаты видимости ────────────────────────────────────────────────────
+
+
+def project_not_archived() -> ColumnElement[bool]:
+    """«Проект не в архиве» — для КРОСС-ПРОЕКТНЫХ выборок задач.
+
+    Архив значит «запарковано»: задачи архивного проекта уходят из личных
+    списков (`/me/tasks`, «В работе» и «Просрочено» в `/me/stats`, инструменты
+    ассистента) и перестают порождать ДЕДЛАЙННЫЕ пуши (`jobs/due_soon.py`,
+    `jobs/overdue.py`). Событийные пуши — назначение, упоминание, комментарий,
+    смена колонки — остаются: за ними стоит человек, который действует прямо
+    сейчас, и ссылка ведёт на карточку, которая открывается.
+
+    Префикс `project_` в имени обязателен: своя `archived_at` есть и у `Task`,
+    а в `api/me_tasks.py` предикат стоит строкой рядом с `Task.archived_at` —
+    голое `not_archived()` там читалось бы как условие на задачу.
+
+    Выборки ПО ЯВНОМУ проекту предикат НЕ применяют — человек назвал проект
+    сам: страница проекта (`api/tasks.py::list_tasks`), календарь, таймлайн,
+    `t_project_stats` и `t_search_tasks` с заданным `project`.
+    """
+    return Project.archived_at.is_(None)
 
 
 def assert_project_accepts_tasks(project: Project) -> None:

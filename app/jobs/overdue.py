@@ -18,14 +18,38 @@ from sqlalchemy import select
 from app import log as log_config
 from app.db import tenant_scoped_session
 from app.jobs._common import already_notified
+from app.models.project import Project
 from app.models.task import Task
 from app.services.notify import notify_overdue
+from app.services.projects import project_not_archived
 from app.services.task_assignees import collect_recipients
 from app.services.taskdates import start_of_today_utc
 
 log = structlog.get_logger("jobs.overdue")
 
 ANTI_DUP_WINDOW = timedelta(hours=23)
+
+
+def scan_stmt(now: datetime):
+    """Просроченные задачи, по которым сегодня шлём напоминание.
+
+    Вынесено из `main()` ради теста — как `collect_recipients` (докстринг
+    `tests/integration/test_job_recipients.py`). Про `project_not_archived()`
+    см. `jobs/due_soon.py::scan_stmt`.
+    """
+    return (
+        select(Task)
+        .join(Project, Project.id == Task.project_id)
+        .where(
+            Task.due_at.is_not(None),
+            # День срока раньше сегодняшнего (display tz), не `< now`:
+            # полуденный срок сегодня — ещё не просрочка.
+            Task.due_at < start_of_today_utc(now),
+            Task.done.is_(False),
+            Task.archived_at.is_(None),
+            project_not_archived(),
+        )
+    )
 
 
 async def main() -> int:
@@ -35,18 +59,7 @@ async def main() -> int:
 
     sent_total = 0
     async with tenant_scoped_session(None, bypass_rls=True) as session:
-        tasks = (
-            await session.execute(
-                select(Task).where(
-                    Task.due_at.is_not(None),
-                    # День срока раньше сегодняшнего (display tz), не `< now`:
-                    # полуденный срок сегодня — ещё не просрочка.
-                    Task.due_at < start_of_today_utc(now),
-                    Task.done.is_(False),
-                    Task.archived_at.is_(None),
-                )
-            )
-        ).scalars().all()
+        tasks = (await session.execute(scan_stmt(now))).scalars().all()
         log.info("overdue.scanned", task_count=len(tasks))
 
         # Один батч на всю выборку вместо запроса за watcher'ами на задачу.

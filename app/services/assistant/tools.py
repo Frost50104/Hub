@@ -38,6 +38,7 @@ from app.services.assistant.context import (
     visible_projects_stmt,
 )
 from app.services.personal_projects import not_personal
+from app.services.projects import project_not_archived
 from app.services.task_assignees import (
     assignee_exists,
     has_no_assignees,
@@ -249,14 +250,23 @@ async def serialize_task(ctx: ToolContext, task: Task, project_key: str) -> dict
 
 
 async def t_search_tasks(ctx: ToolContext, a: SearchTasksArgs) -> dict[str, Any]:
-    projects = visible_projects_stmt(ctx).subquery()
+    # Проект резолвим ДО сборки выборки: именно он решает, применять ли фильтр
+    # архива. Кросс-проектный поиск повторяет веб (`api/search.py:241`) и
+    # архивные проекты не показывает; НАЗВАННЫЙ проект показывает — иначе на
+    # «покажи задачи в PKNG» ассистент ответил бы «задач нет», а это враньё:
+    # страница проекта их показывает, и правка там разрешена.
+    named = await resolve_project(ctx, a.project) if a.project else None
+    base = visible_projects_stmt(ctx)
+    if named is None:
+        base = base.where(project_not_archived())
+    projects = base.subquery()
     stmt = (
         select(Task, projects.c.key)
         .join(projects, projects.c.id == Task.project_id)
         .where(Task.archived_at.is_(None))
     )
-    if a.project:
-        stmt = stmt.where(Task.project_id == (await resolve_project(ctx, a.project)).id)
+    if named is not None:
+        stmt = stmt.where(Task.project_id == named.id)
     if a.query:
         stmt = stmt.where(Task.title.ilike(f"%{a.query}%"))
     if a.done is not None:
@@ -337,7 +347,9 @@ async def t_project_summary(ctx: ToolContext, a: ProjectRefArgs) -> dict[str, An
 
 
 async def t_my_tasks(ctx: ToolContext, a: MyTasksArgs) -> dict[str, Any]:
-    projects = visible_projects_stmt(ctx).subquery()
+    # Зеркало `/me/tasks`: архивный проект запаркован, его задачи из личных
+    # списков ушли — ассистент обязан отвечать то же, что экран.
+    projects = visible_projects_stmt(ctx).where(project_not_archived()).subquery()
     stmt = (
         select(Task, projects.c.key)
         .join(projects, projects.c.id == Task.project_id)
@@ -369,10 +381,10 @@ async def t_list_projects(ctx: ToolContext, a: BaseModel) -> dict[str, Any]:
         # совпадать с тем, что человек видит в сайдбаре и на /projects. Иначе
         # ассистент предлагает завести задачу там, откуда она сразу выпадет из
         # поиска и списков. Фильтр стоит ЗДЕСЬ, а не в `visible_projects_stmt`:
-        # ту же выборку используют `resolve_task`, `t_search_tasks` и
-        # `t_my_tasks`, а веб архивные проекты на чтение не закрывает
-        # (`/me/tasks` их отдаёт, прямая ссылка открывается).
-        .where(Project.archived_at.is_(None))
+        # ту же выборку используют `resolve_task` и `resolve_project`, а поиск
+        # проекта ПО ИМЕНИ обязан находить и архивный — прямая ссылка на него
+        # открывается, и правка задач там разрешена.
+        .where(project_not_archived())
         .order_by(func.lower(Project.name))
         .limit(200)
     )

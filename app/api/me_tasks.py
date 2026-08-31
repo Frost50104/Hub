@@ -1,7 +1,12 @@
-"""GET /api/me/tasks — current user's assigned tasks across all projects.
+"""GET /api/me/tasks — задачи, назначенные на меня, по всем проектам.
 
-Used on the Home dashboard widget and the standalone /my page. Filters:
-`status` (todo|in_progress|in_review|done), `due_window` (overdue|today|upcoming|all).
+Кормит панель «Главной» и страницу `/my`. Фильтры: `done`, `due_window`
+(overdue|today|upcoming|all), `include_archived`, `include_personal`.
+
+Архивный проект сюда не попадает (31.08): архив значит «запарковано» — задачи
+уходят из личных списков и перестают порождать дедлайнные пуши. Правило одно на
+`/me/stats`, `jobs/due_soon.py`, `jobs/overdue.py` и инструменты ассистента,
+предикат — `services/projects.py::project_not_archived`.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from app.models.stage import ProjectStage
 from app.models.task import Task
 from app.schemas.task import TaskResponse
 from app.services.personal_projects import not_my_personal
+from app.services.projects import project_not_archived
 from app.services.task_assignees import (
     assignee_exists,
     load_assignees,
@@ -43,6 +49,9 @@ async def list_my_tasks(
     # LEGACY (0044): см. `_reject_legacy_status` в api/tasks.py.
     status_: str | None = Query(default=None, alias="status"),
     due_window: DueWindow | None = Query(default=None),
+    # «Архивное вообще»: и архивные ЗАДАЧИ, и задачи архивных ПРОЕКТОВ. Флаг
+    # один, потому что смысл один — «покажи убранное»; клиент его не шлёт
+    # (вход в архив — пункт сайдбара «Архив», а не фильтр этого списка).
     include_archived: bool = Query(default=False),
     # Задачи СВОЕГО личного проекта у окон отбираем: на /my для них отдельная
     # секция «ЛИЧНОЕ», и одна задача не должна стоять на экране дважды. Задачи
@@ -66,7 +75,12 @@ async def list_my_tasks(
         .order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
     )
     if not include_archived:
-        stmt = stmt.where(Task.archived_at.is_(None))
+        # Два РАЗНЫХ архива в одной строке: задачи и её проекта. Проект — через
+        # предикат `project_not_archived()`, потому что правило кросс-проектное
+        # и живёт ещё в `/me/stats`, двух cron-джобах и инструментах ассистента;
+        # джойн на `projects` здесь уже есть (выше, ради `Project.key`), так что
+        # условие бесплатное.
+        stmt = stmt.where(Task.archived_at.is_(None), project_not_archived())
     if not include_personal:
         stmt = stmt.where(not_my_personal(principal.employee_id))
     stmt = apply_done_filter(stmt, done)

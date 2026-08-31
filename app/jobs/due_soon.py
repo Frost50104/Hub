@@ -18,8 +18,10 @@ from sqlalchemy import select
 from app import log as log_config
 from app.db import tenant_scoped_session
 from app.jobs._common import already_notified
+from app.models.project import Project
 from app.models.task import Task
 from app.services.notify import notify_due_soon
+from app.services.projects import project_not_archived
 from app.services.task_assignees import collect_recipients
 
 log = structlog.get_logger("jobs.due_soon")
@@ -31,6 +33,34 @@ ANTI_DUP_WINDOW = timedelta(hours=23)
 LOOKAHEAD_WINDOW = timedelta(hours=24)
 
 
+def scan_stmt(now: datetime):
+    """Задачи, по которым сейчас шлём «срок завтра».
+
+    Вынесено из `main()` ради теста: сам джоб тестами не покрыт — ровно та
+    причина, по которой из него уже вынесен `collect_recipients` (докстринг
+    `tests/integration/test_job_recipients.py`).
+
+    `project_not_archived()` здесь не косметика: архивный проект запаркован,
+    его задачи ушли из «Моих задач», и напоминание звонило бы человеку по
+    работе, которую он сам убрал с глаз. Событийные пуши (назначение,
+    упоминание, комментарий) архив не гасит — за ними стоит живое действие.
+
+    JOIN INNER безопасен: `tasks.project_id` NOT NULL.
+    """
+    return (
+        select(Task)
+        .join(Project, Project.id == Task.project_id)
+        .where(
+            Task.due_at.is_not(None),
+            Task.due_at >= now,
+            Task.due_at < now + LOOKAHEAD_WINDOW,
+            Task.done.is_(False),
+            Task.archived_at.is_(None),
+            project_not_archived(),
+        )
+    )
+
+
 async def main() -> int:
     log_config.configure()
     now = datetime.now(UTC)
@@ -39,17 +69,7 @@ async def main() -> int:
 
     sent_total = 0
     async with tenant_scoped_session(None, bypass_rls=True) as session:
-        tasks = (
-            await session.execute(
-                select(Task).where(
-                    Task.due_at.is_not(None),
-                    Task.due_at >= now,
-                    Task.due_at < upper,
-                    Task.done.is_(False),
-                    Task.archived_at.is_(None),
-                )
-            )
-        ).scalars().all()
+        tasks = (await session.execute(scan_stmt(now))).scalars().all()
         log.info("due_soon.scanned", task_count=len(tasks))
 
         # Один батч на всю выборку вместо запроса за watcher'ами на задачу.

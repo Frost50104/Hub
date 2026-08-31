@@ -45,12 +45,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.deps import get_db, require_auth, require_auth_any
 from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
+from app.models.project import Project
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskAssignee
 from app.services.personal_projects import (
     assert_full_project_access,
 )
 from app.services.project_access import require_project_role
+from app.services.projects import project_not_archived
 from app.services.task_assignees import assignee_exists, has_no_assignees
 from app.services.taskdates import (
     display_today,
@@ -497,10 +499,14 @@ def _mine(employee_id: UUID):
       бы мою работу в ЧУЖОМ личном пространстве: коллега вправе поручить мне
       задачу у себя, и я вправе её закрыть (`test_guest_closes_assigned_task`).
       `/me/tasks` такие задачи показывает — блок обязан их считать.
-    * `Project.archived_at` тоже не трогаем. Во-первых, `/me/tasks` его не
-      фильтрует, а блок — сводка того же экрана. Во-вторых, фильтр переписывал
-      бы прошлое: архивация проекта задним числом стирала бы столбики из
-      графика за месяцы, когда работа была сделана.
+    * `Project.archived_at` здесь не фильтруем — и это ПОЛОВИНА правила
+      (31.08). Фильтр переписывал бы прошлое: архивация проекта задним числом
+      стирала бы столбики из графика за месяцы, когда работа была сделана.
+      Поэтому `completed_*`, `created_*` и ряд `daily` считают архивные проекты
+      наравне со всеми. Вторая половина — в `my_counters_stmt`: `open_now` и
+      `overdue_now` это состояние НА СЕЙЧАС, они стоят на одном экране со
+      списком, из которого архивные ушли, и там предикат применяется точечно,
+      внутри двух агрегатов.
 
     Членство в проекте не проверяем — ровно как `/me/tasks`. (Инвариант
     «исполнитель всегда участник» на самом деле дырявый: удаление участника
@@ -529,7 +535,14 @@ def _in_window(column, start: datetime, end: datetime, label: str):
 
 
 def my_counters_stmt(employee_id: UUID, now: datetime):
-    """Четыре числа по МОИМ задачам одним запросом."""
+    """Четыре числа по МОИМ задачам одним запросом.
+
+    Архив проекта делит эти четыре числа пополам, см. докстринг `_mine`:
+    `completed_*` — история и считаются как есть, `open_now`/`overdue_now` —
+    состояние на сейчас и архивные проекты не учитывают. Предикат поэтому стоит
+    ВНУТРИ двух `.filter()`, а не в общем `where`; джойн на `projects` для этого
+    и добавлен (INNER безопасен: `tasks.project_id` NOT NULL).
+    """
     end = start_of_tomorrow_utc(now)
     return (
         select(
@@ -545,14 +558,21 @@ def my_counters_stmt(employee_id: UUID, now: datetime):
                 end,
                 "completed_30",
             ),
-            func.count().filter(Task.done.is_(False)).label("open_now"),
+            func.count()
+            .filter(and_(Task.done.is_(False), project_not_archived()))
+            .label("open_now"),
             func.count()
             .filter(
-                and_(Task.done.is_(False), Task.due_at < start_of_today_utc(now))
+                and_(
+                    Task.done.is_(False),
+                    Task.due_at < start_of_today_utc(now),
+                    project_not_archived(),
+                )
             )
             .label("overdue_now"),
         )
         .select_from(Task)
+        .join(Project, Project.id == Task.project_id)
         .where(_mine(employee_id))
     )
 

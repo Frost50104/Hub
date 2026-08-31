@@ -142,9 +142,11 @@ async def test_assistant_hides_archived_from_the_catalogue_but_still_reads_it(
 ):
     """Фильтр — точечно в `t_list_projects`, а не в `visible_projects_stmt`.
 
-    Веб архивные проекты на чтение не закрывает: `/me/tasks` их отдаёт, прямая
-    ссылка открывается. Фильтр в общей выборке отобрал бы у ассистента и
-    `resolve_task`, и поиск — он стал бы строже интерфейса.
+    Общая выборка кормит `resolve_task` и `resolve_project`, а они обязаны
+    находить архивный проект по ключу и по имени: прямая ссылка на него
+    открывается, правка задач разрешена, и «покажи задачи в PKNG» должно
+    отвечать правду. Что из ЛИЧНЫХ списков архивные ушли — отдельное правило и
+    отдельный файл (`test_archived_projects_hidden.py`).
     """
     owner, alive, dead = await _archived(db, tenant_id, "ar5")
     await unarchive_project(dead.id, owner, db)

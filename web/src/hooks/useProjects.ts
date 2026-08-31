@@ -69,6 +69,15 @@ export function useUpdateProject(id: string) {
   })
 }
 
+/**
+ * Архивация и возврат из архива.
+ *
+ * `me-tasks` и `me-stats` — не для порядка: с 31.08 архив прячет задачи проекта
+ * из «Моих задач», а «В работе» и «Просрочено» на «Главной» перестают их
+ * считать. Без инвалидации владелец, заархивировав проект и перейдя на «Мои
+ * задачи», увидел бы их на месте до протухания кэша — и решил бы, что архив
+ * сломан. Разархивация — та же история наоборот.
+ */
 export function useArchiveProject(id: string) {
   const qc = useQueryClient()
   return useMutation({
@@ -78,6 +87,8 @@ export function useArchiveProject(id: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.detail(id) })
       qc.invalidateQueries({ queryKey: projectKeys.all })
+      qc.invalidateQueries({ queryKey: ['me-tasks'] })
+      qc.invalidateQueries({ queryKey: ['me-stats'] })
     },
   })
 }
