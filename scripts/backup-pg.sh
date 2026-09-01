@@ -33,11 +33,26 @@ if [[ "$(date +%u)" == "7" ]]; then
   ln -f "$DAILY_FILE" "$WEEKLY_DIR/db-$DB-$STAMP.sql.gz"
 fi
 
-# Optional offsite — if BACKUP_S3_BUCKET set and aws CLI present, copy.
-# Не блокируем daily-job если aws не отвечает.
-if [[ -n "${BACKUP_S3_BUCKET:-}" ]] && command -v aws >/dev/null 2>&1; then
-  aws s3 cp "$DAILY_FILE" "s3://$BACKUP_S3_BUCKET/$DB/" --quiet || \
-    echo "(offsite s3 copy failed — backup is still on disk)" >&2
+# Offsite (01.09): rclone-назначение целиком в BACKUP_S3_REMOTE, например
+# `twc:signaris-hub-backups`. Креды — в /root/.config/rclone/rclone.conf (600).
+#
+# `aws` заменён на `rclone`: awscli в Ubuntu 24.04 отсутствует как пакет, а
+# вендорный установщик тянет ~250 МБ ради одной команды.
+#
+# STAGING НЕ ВЕЗЁМ: он воспроизводим, его дамп — вторая копия тех же
+# персональных данных, а снапшот вложений там 3,7 ГБ против 1,5 ГБ у прода и
+# стал бы основным объёмом в бакете.
+#
+# `copy`, а не `sync`: назначение должно только пополняться. Синхронизация
+# отражала бы локальную ротацию в бакет, и любая беда с локальным каталогом
+# (пустой том, ошибка в ретенции) стёрла бы offsite-копию — ровно то, ради
+# чего она existует. Побочный эффект приятный: в бакете история длиннее
+# локальных 14 дней, а стоит она 6 МБ в сутки.
+#
+# Ошибка S3 не роняет ночную джобу: дамп уже лежит на диске.
+if [[ -n "${BACKUP_S3_REMOTE:-}" && "$DB" != *staging* ]] && command -v rclone >/dev/null 2>&1; then
+  rclone copy "$DAILY_FILE" "$BACKUP_S3_REMOTE/db/" --quiet || \
+    echo "(offsite copy failed — backup is still on disk)" >&2
 fi
 
 # Show size for logs.

@@ -74,4 +74,12 @@ mv -f "$OUT.tmp" "$OUT"
 chown root:root "$OUT"
 chmod 600 "$OUT"
 
+# Offsite — тем же правилом, что дампы: только пополняем. Архив крошечный
+# (единицы килобайт), поэтому в бакете он копится без ротации: это и есть
+# история ключей, а вернуть VAPID суточной давности иногда нужнее свежего.
+if [[ -n "${BACKUP_S3_REMOTE:-}" ]] && command -v rclone >/dev/null 2>&1; then
+  rclone copy "$OUT" "$BACKUP_S3_REMOTE/secrets/" --quiet || \
+    echo "(offsite secrets copy failed — архив остался на диске)" >&2
+fi
+
 echo "secrets backup ok: $OUT ($(du -h "$OUT" | cut -f1), файлов: ${#ITEMS[@]})"

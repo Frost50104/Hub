@@ -32,8 +32,25 @@ for SRC in /opt/signaris-hub/attachments /opt/signaris-hub-staging/attachments; 
   echo "files backup ok: $DEST ($(du -sh "$DEST" | cut -f1))"
 done
 
-# Optional offsite — как у pg-бэкапа, не блокируем job при недоступном S3.
-if [[ -n "${BACKUP_S3_BUCKET:-}" ]] && command -v aws >/dev/null 2>&1; then
-  aws s3 sync "$BACKUP_ROOT" "s3://$BACKUP_S3_BUCKET/files/" --quiet || \
-    echo "(offsite files sync failed — snapshots are still on disk)" >&2
+# Offsite (01.09) — только ПОСЛЕДНИЙ снапшот ПРОДА.
+#
+# Раньше здесь стояло `aws s3 sync "$BACKUP_ROOT"` по всему дереву снапшотов, и
+# включать это было нельзя: hardlink'и в S3 не переживают, поэтому 14 копий по
+# 1,5 ГБ уехали бы как ~21 ГБ вместо 1,5. Дедупликация живёт только на локальной
+# ФС; в бакете нужен ровно один актуальный слепок.
+#
+# `latest` — симлинк, поэтому путь разрешаем сами: rclone по символическим
+# ссылкам не ходит.
+#
+# `copy`, а не `sync`: см. объяснение в backup-pg.sh. Вложения почти не
+# удаляются, так что осиротевшие объекты копятся медленно, а риск стереть
+# offsite-копию вслед за локальной бедой снят полностью.
+if [[ -n "${BACKUP_S3_REMOTE:-}" ]] && command -v rclone >/dev/null 2>&1; then
+  PROD_LATEST="$(readlink -f "$BACKUP_ROOT/signaris-hub/latest" || true)"
+  if [[ -d "$PROD_LATEST" ]]; then
+    rclone copy "$PROD_LATEST" "$BACKUP_S3_REMOTE/attachments/" --quiet || \
+      echo "(offsite files copy failed — snapshots are still on disk)" >&2
+  else
+    echo "(offsite skipped: $BACKUP_ROOT/signaris-hub/latest не разрешается)" >&2
+  fi
 fi
