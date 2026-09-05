@@ -459,8 +459,15 @@ async def fetch_report(
     date_from: date,
     date_to: date,
     check_columns: bool = True,
+    extra_filters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Собрать отчёт: текущий период + предыдущий равной длины для дельты."""
+    """Собрать отчёт: текущий период + предыдущий равной длины для дельты.
+
+    `extra_filters` — runtime-скоуп (франчайзи → свои Department.Id, 3б).
+    Обязан домерживаться в КАЖДЫЙ запрос вида, включая предыдущий период и
+    добор выручки writeoff: иначе дельта «к прошлому периоду» сравнивала бы
+    точку с целой сетью.
+    """
     if kind not in SPECS:
         raise IikoError(f"Нет отчёта «{kind}»")
     spec = SPECS[kind]
@@ -479,9 +486,10 @@ async def fetch_report(
         f for f in spec.optional_aggregate if not available or f in available
     ]
 
-    # Фильтра по точкам нет: сущности Hub и iiko сознательно не связаны, отчёт
-    # всегда по сети, и названия точек берутся такими, как их ведёт iiko.
-    filters = dict(spec.extra_filters)
+    # Названия точек берутся такими, как их ведёт iiko; runtime-скоуп (если
+    # есть) ключуется на Department.Id из реестра объектов — моста по имени
+    # по-прежнему нет (0039).
+    filters = {**spec.extra_filters, **(extra_filters or {})}
 
     rows = await client.olap(
         report_type=spec.report_type,
@@ -514,6 +522,7 @@ async def fetch_report(
                 group_by=[F_DEPARTMENT],
                 aggregate=[F_AMOUNT],
                 date_field=F_DATE_FILTER,
+                extra_filters=extra_filters,
             )
             revenue = sum(_num(r, F_AMOUNT) for r in sales) or None
         except IikoError:

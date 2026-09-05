@@ -57,8 +57,14 @@ def _client() -> IikoClient:
     )
 
 
-def _cache_key(tenant_id: UUID, kind: str, date_from: date, date_to: date) -> str:
-    return f"iiko:report:{tenant_id}:{kind}:{date_from}:{date_to}"
+def _cache_key(
+    tenant_id: UUID, kind: str, date_from: date, date_to: date, scope_key: str = ""
+) -> str:
+    # Скоуп ОБЯЗАН быть в ключе: без него франчайзи получил бы закэшированный
+    # полный отчёт сети (и наоборот). Пустой scope_key оставляет прежние
+    # ключи — кэш полного отчёта не инвалидируется зря.
+    base = f"iiko:report:{tenant_id}:{kind}:{date_from}:{date_to}"
+    return f"{base}:scope:{scope_key}" if scope_key else base
 
 
 async def get_report(
@@ -67,9 +73,11 @@ async def get_report(
     kind: str,
     date_from: date,
     date_to: date,
+    extra_filters: dict[str, Any] | None = None,
+    scope_key: str = "",
 ) -> dict[str, Any]:
     redis = get_redis()
-    key = _cache_key(tenant_id, kind, date_from, date_to)
+    key = _cache_key(tenant_id, kind, date_from, date_to, scope_key)
     cached = await redis.get(key)
     if cached:
         payload = json.loads(cached)
@@ -105,6 +113,7 @@ async def get_report(
                 kind,
                 date_from=date_from,
                 date_to=date_to,
+                extra_filters=extra_filters,
             )
         await redis.set(
             key, json.dumps(payload, ensure_ascii=False), ex=get_settings().iiko_cache_ttl_sec

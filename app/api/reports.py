@@ -1,27 +1,30 @@
-"""Отчёты iiko (волна 2 ассистента).
+"""Отчёты iiko (волна 2 ассистента; скоуп франчайзи — 05.09, выкат 3б).
 
 Живут под `/api/ai/`, потому что именно эта локация nginx держит
 `proxy_read_timeout 120s`: OLAP за месяц — самый долгий запрос продукта.
 
-Кто что видит (решение владельца 2026-08-20):
+Кто что видит (решение владельца 2026-08-20, дополнено 05.09):
 
-- **вся сеть** — hub-admin, publisher+, офис, ТУ и владельцы франчайзи;
-- **403** — линейный сотрудник на точке. Выручка и списания сети не входят в
-  его работу.
+- **вся сеть** — hub-admin, publisher+, офис и ТУ;
+- **владелец франчайзи — ТОЛЬКО СВОИ точки** (выкат 3б): фильтр по
+  `Department.Id` из реестра объектов (`stores.site_id` → `shadow_sites.refs`
+  system=iiko). Связи размечены человеком и подтверждены владельцем по
+  таблице выручки 05.09 — блокирующее требование auth выполнено. Моста по
+  ИМЕНИ по-прежнему нет (0039): скоуп ключуется на GUID. Допущенный как
+  publisher/admin франчайзи остаётся с полной сетью — основание допуска
+  решает (`_require_report_access` возвращает его явно);
+- **403** — линейный сотрудник на точке.
 
-**Сущности точек НЕ связываются.** Отчёт показывает названия точек так, как их
-ведёт iiko, и никакого моста к `stores` не строит: сопоставление по имени —
-это перевод, который однажды ошибётся и покажет управляющему чужую выручку,
-а имя из iiko человек и так узнаёт. Прямое следствие, принятое владельцем:
-сузить отчёт до «своих» точек нечем, поэтому владелец франчайзи видит и чужие.
-
-Офис, ТУ и франчайзи приходится разрешать здесь явно: `resolve_scope` заведён
-под аналитику по СОТРУДНИКАМ и отдаёт им скоуп по своим людям, а тут вопрос
-только «пускать или нет».
+Следствия скоупа: кэш-ключ отчёта ВКЛЮЧАЕТ скоуп (иначе франчайзи получил бы
+закэшированный отчёт сети); ноль привязанных точек — явный отказ, а не пустой
+фильтр (пустой IncludeValues = вся сеть); `writeoff` франчайзи недоступен —
+TRANSACTIONS-тип не отдаёт `Department.Id` (проверено columns() 05.09), и
+фильтровать его нечем.
 """
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
@@ -29,15 +32,18 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from signaris_auth import Principal
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import enforce_rate_limit, get_db, require_auth
+from app.models.org import Store
+from app.models.shadow import ShadowSite
 from app.services import lifecycle
 from app.services.content_access import resolve_content_role
 from app.services.iiko import service as iiko_service
 from app.services.iiko.client import IikoError, IikoNotConfigured
 from app.services.iiko.reports import REPORT_ORDER, SPECS
-from app.services.org_scope import get_profile
+from app.services.org_scope import get_profile, resolve_scope
 from app.services.project_access import is_hub_admin
 
 router = APIRouter(tags=["iiko-reports"])
@@ -53,18 +59,23 @@ MAX_PERIOD_DAYS = 92
 REPORT_ORG_ROLES = frozenset({"office", "tu", "franchisee_owner"})
 
 
-async def _require_report_access(db: AsyncSession, principal: Principal) -> None:
-    """Пустить или отказать. Скоупа по точкам нет — отчёт всегда по сети."""
+async def _require_report_access(db: AsyncSession, principal: Principal) -> str:
+    """Пустить или отказать; вернуть ОСНОВАНИЕ допуска — от него зависит скоуп.
+
+    `"full"` — вся сеть (publisher/hub-admin/офис/ТУ), `"franchisee"` — только
+    свои точки. Порядок веток важен: франчайзи с content_role=publisher
+    допущен КАК publisher и видит сеть — скоуп не меняет это молча
+    (правило показано владельцу вместе с таблицей выручки 05.09)."""
     role = await resolve_content_role(db, principal)
     if lifecycle.can(role, "publisher") or is_hub_admin(principal):
-        return
+        return "full"
     profile = await get_profile(db, principal)
     if (
         profile is not None
         and profile.status == "active"
         and profile.org_role in REPORT_ORG_ROLES
     ):
-        return
+        return "franchisee" if profile.org_role == "franchisee_owner" else "full"
     raise HTTPException(
         status_code=403,
         detail=(
@@ -72,6 +83,35 @@ async def _require_report_access(db: AsyncSession, principal: Principal) -> None
             "владельцам франчайзи"
         ),
     )
+
+
+async def _franchisee_department_ids(db: AsyncSession, principal: Principal) -> list[str]:
+    """iiko-подразделения точек франчайзи: свои магазины → site_id → refs.
+
+    `resolve_scope` отдаёт живые магазины по `Store.franchisee_id`; дальше —
+    зеркало реестра. Дубли магазинов дают один и тот же Department.Id —
+    set() схлопывает."""
+    scope = await resolve_scope(db, principal)
+    if scope.kind != "stores" or not scope.store_ids:
+        return []
+    site_ids = [
+        sid
+        for (sid,) in await db.execute(
+            select(Store.site_id).where(
+                Store.id.in_(scope.store_ids), Store.site_id.is_not(None)
+            )
+        )
+    ]
+    if not site_ids:
+        return []
+    dept_ids: set[str] = set()
+    for (refs,) in await db.execute(
+        select(ShadowSite.refs).where(ShadowSite.site_id.in_(site_ids))
+    ):
+        for ref in refs or []:
+            if ref.get("system") == "iiko" and ref.get("external_id"):
+                dept_ids.add(str(ref["external_id"]))
+    return sorted(dept_ids)
 
 
 def _period(date_from: date | None, date_to: date | None) -> tuple[date, date]:
@@ -118,7 +158,33 @@ async def _build(
     await enforce_rate_limit(
         bucket="ai:iiko", employee_id=str(principal.employee_id), limit=10, window_sec=60
     )
-    await _require_report_access(db, principal)
+    basis = await _require_report_access(db, principal)
+    extra_filters: dict[str, Any] | None = None
+    scope_key = ""
+    if basis == "franchisee":
+        if kind == "writeoff":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Отчёт по списаниям пока не умеет разбивку по точкам "
+                    "(iiko не отдаёт id подразделения в этом типе отчёта) — "
+                    "он доступен офису"
+                ),
+            )
+        dept_ids = await _franchisee_department_ids(db, principal)
+        if not dept_ids:
+            # Пустой IncludeValues означал бы ВСЮ сеть — отказ обязан быть явным.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Точки вашего франчайзи ещё не привязаны к реестру "
+                    "объектов — напишите администратору"
+                ),
+            )
+        extra_filters = {
+            "Department.Id": {"filterType": "IncludeValues", "values": dept_ids}
+        }
+        scope_key = hashlib.sha256(",".join(dept_ids).encode()).hexdigest()[:16]
     start, end = _period(date_from, date_to)
     try:
         payload = await iiko_service.get_report(
@@ -126,6 +192,8 @@ async def _build(
             kind=kind,
             date_from=start,
             date_to=end,
+            extra_filters=extra_filters,
+            scope_key=scope_key,
         )
     except IikoNotConfigured as e:
         raise HTTPException(status_code=503, detail=str(e)) from None
