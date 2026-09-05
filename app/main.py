@@ -231,6 +231,7 @@ def create_app() -> FastAPI:
     from app.api import search as search_api
     from app.api import share as share_api
     from app.api import shifts as shifts_api
+    from app.api import sites as sites_api
     from app.api import stages as stages_api
     from app.api import stats as stats_api
     from app.api import surveys as surveys_api
@@ -289,6 +290,7 @@ def create_app() -> FastAPI:
     # Отчёты iiko — под /api/ai/, где nginx держит proxy_read_timeout 120s.
     app.include_router(reports_api.router, prefix="/api")
     app.include_router(shifts_api.router, prefix="/api")
+    app.include_router(sites_api.router, prefix="/api")
     app.include_router(assessments_api.router, prefix="/api")
 
     return app

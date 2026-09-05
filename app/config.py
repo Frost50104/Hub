@@ -70,6 +70,15 @@ class Settings(BaseSettings):
     staff_service_key: str | None = Field(default=None)
     staff_sync_enabled: bool = Field(default=True)
     staff_sync_interval_sec: float = Field(default=900.0)
+    # Sites-sync (0053): зеркало реестра объектов auth. Планировщика НЕТ
+    # сознательно (данные меняются ~4 раза в год) — только ручной триггер;
+    # флаг гейтит живой прогон ручки (при false она форсит dry-run). Ключ —
+    # тот же staff_service_key (auth добавил метке hub право на объекты).
+    sites_sync_enabled: bool = Field(default=True)
+    # Свежесть снимка зеркала — ФИКСИРОВАННЫЕ сутки (не 2×интервал: интервала
+    # не существует). Протухший снимок откатывает карточки к локальным полям
+    # с меткой «данные реестра устарели».
+    sites_snapshot_fresh_days: int = Field(default=14)
 
     # Sid-sync (Phase 2 SLO) — фоновый воркер опрашивает фид ревокации SSO-сессий
     # (GET /api/products/revoked-sids, X-Service-Key) и держит локальный

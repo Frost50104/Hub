@@ -142,6 +142,11 @@ class Store(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), nullable=False
     )
+    # Ссылка на объект реестра auth (0053, shadow_sites.site_id) — БЕЗ FK
+    # (межбазовая). Пишется ТОЛЬКО разовым бэкфиллом из файла связей (не API:
+    # StoreUpdate её не знает, extra="forbid" отвечает 422; не синком —
+    # синхронизация зеркала stores не трогает ни в одной ветке).
+    site_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
 
 
 class StoreGroup(Base):
