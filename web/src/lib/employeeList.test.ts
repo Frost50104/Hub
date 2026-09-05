@@ -46,6 +46,21 @@ describe('collectEmployees', () => {
     expect(res.total).toBe(10_000)
   })
 
+  it('сохраняет поля ответа сверх items/total', async () => {
+    // EmployeeList несёт staff_synced_at и invitations: пересборка
+    // `{ items, total }` руками теряла их — плашка «ожидает auth»
+    // висела вечно при живом синке (прод, 04.09).
+    const fetchPage = vi.fn(async () => ({
+      items: people(3),
+      total: 3,
+      staff_synced_at: '2026-09-04T18:29:52Z',
+      invitations: [{ id: 'inv-1' }],
+    }))
+    const res = await collectEmployees(fetchPage)
+    expect(res.staff_synced_at).toBe('2026-09-04T18:29:52Z')
+    expect(res.invitations).toHaveLength(1)
+  })
+
   it('дедуплицирует пересечение страниц', async () => {
     // Между запросами кого-то завели, границы сдвинулись, и первый со второй
     // страницы уже был на первой.

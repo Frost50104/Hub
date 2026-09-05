@@ -29,20 +29,25 @@ export interface EmployeePage<T> {
  * Дедупликация по `id`: между запросами набор может измениться и границы
  * страниц сдвинутся. `Map` сохраняет порядок первого появления, то есть
  * порядок сервера.
+ *
+ * Склейка обязана СОХРАНЯТЬ поля ответа сверх items/total (спред последней
+ * страницы): `EmployeeList` несёт ещё `staff_synced_at` и `invitations`, и
+ * пересборка `{ items, total }` руками молча теряла их — плашка «ожидает
+ * auth» висела вечно при живом синке (найдено на проде 04.09).
  */
-export async function collectEmployees<T extends { id: string }>(
-  fetchPage: (limit: number, offset: number) => Promise<EmployeePage<T>>,
-): Promise<EmployeePage<T>> {
+export async function collectEmployees<T extends { id: string }, P extends EmployeePage<T>>(
+  fetchPage: (limit: number, offset: number) => Promise<P>,
+): Promise<P> {
   const byId = new Map<string, T>()
-  let total = 0
+  let last: P | undefined
   for (let page = 0; page < EMPLOYEE_MAX_PAGES; page++) {
     const res = await fetchPage(EMPLOYEE_PAGE_SIZE, page * EMPLOYEE_PAGE_SIZE)
-    total = res.total
+    last = res
     for (const item of res.items) byId.set(item.id, item)
     if (res.items.length < EMPLOYEE_PAGE_SIZE) break
-    if (byId.size >= total) break
+    if (byId.size >= res.total) break
   }
-  return { items: [...byId.values()], total }
+  return { ...(last as P), items: [...byId.values()] }
 }
 
 /** Показали не всех — сработал предел добора. */
