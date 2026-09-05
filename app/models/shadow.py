@@ -9,9 +9,11 @@ filter `WHERE deleted_at IS NULL` at read time.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, String, text
+from sqlalchemy import DateTime, String, Text, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -82,3 +84,38 @@ class AuthInvitation(Base):
     synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), nullable=False
     )
+
+
+class ShadowSite(Base):
+    """Зеркало объекта (торговой точки) из реестра auth (0053, sites-sync).
+
+    Полный replace-снапшот `GET /api/products/sites` — применяется ТОЛЬКО
+    после сверки `len(items) == total` (пустой валидный ответ иначе стёр бы
+    зеркало). Архивные объекты приходят с `archived_at` и ЖИВУТ строками:
+    удаления объектов в реестре не существует вовсе, пропасть из снимка
+    строка может только вместе с реестром. `refs` — [{system, external_id}];
+    несколько ссылок system="hub" на один объект — основной сценарий (наши
+    дубли магазинов до слияния). Карточку читает выкат 3; `stores.site_id`
+    синхронизация НЕ трогает никогда.
+    """
+
+    __tablename__ = "shadow_sites"
+
+    site_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), index=True, nullable=False
+    )
+    code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    legal_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    inn: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    refs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
