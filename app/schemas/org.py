@@ -110,6 +110,9 @@ class StoreResponse(BaseModel):
     address: str | None
     franchisee_id: UUID | None
     archived_at: datetime | None
+    # Ссылка на объект реестра auth (0053). В StoreUpdate её НЕТ намеренно:
+    # пишется только разовым бэкфиллом, extra="forbid" отвечает 422.
+    site_id: UUID | None = None
 
 
 class DepartmentResponse(BaseModel):

@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
-import { useEmployees, useOrgMutation, useOrgSnapshot } from '@/hooks/useLearn'
+import { useEmployees, useOrgMutation, useOrgSnapshot, useSites } from '@/hooks/useLearn'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/cn'
 import {
@@ -30,7 +30,9 @@ import {
   type OrgRef,
   type OrgSnapshot,
   type OrgStore,
+  type SiteMirror,
 } from '@/lib/learn'
+import { duplicateGroups, siteDisplay, type SiteLinkState } from '@/lib/siteLink'
 
 import { useAdminEmbedded } from './adminEmbed'
 
@@ -181,6 +183,15 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
   const [code, setCode] = useState('')
   const [franchiseeId, setFranchiseeId] = useState('')
   const [editing, setEditing] = useState<OrgStore | null>(null)
+  // Зеркало реестра объектов (0053): адрес у магазинов появляется впервые —
+  // stores.address пуст у всех, адрес исторически живёт в name.
+  const sites = useSites()
+  const siteById = useMemo(
+    () => new Map((sites.data?.items ?? []).map((x) => [x.site_id, x])),
+    [sites.data],
+  )
+  const snapshotFresh = sites.data?.snapshot_fresh ?? false
+  const dupes = useMemo(() => duplicateGroups(org.stores), [org.stores])
 
   const create = useOrgMutation(
     (body: { name: string; code?: string; franchisee_id?: string | null }) =>
@@ -247,6 +258,25 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
           <Plus className="h-4 w-4" /> Добавить
         </Button>
       </form>
+      {dupes.length > 0 && (
+        <div className="rounded-xl border border-amber/40 bg-amber/5 p-3">
+          <p className="text-sm font-semibold text-amber">
+            Магазины с общим объектом реестра — сливать нельзя
+          </p>
+          <p className="mt-0.5 text-xs text-text3">
+            Каждая пара указывает на одну физическую точку. Слияние или архивация
+            дубля теряет данные (правила аудиторий, смены, закрепления) — это
+            отдельная задача, не действие в этом списке.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {dupes.map((g) => (
+              <li key={g.site_id} className="text-xs text-text2">
+                {g.stores.map((x) => x.name).join('  ·  ')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <ul className="divide-y divide-glass-border rounded-xl border border-glass-border bg-glass">
         {org.stores.length === 0 && (
           <li className="p-4 text-sm text-text3">Пока пусто — добавьте первый магазин.</li>
@@ -261,13 +291,16 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
                 </span>
               )}
             </span>
-            <span className={cn('flex-1 text-sm', s.archived_at ? 'text-text3 line-through' : 'text-text')}>
-              {s.name}
-              {franchiseeName(s.franchisee_id) && (
-                <span className="ml-2 text-xs text-text3">
-                  · {franchiseeName(s.franchisee_id)}
-                </span>
-              )}
+            <span className="min-w-0 flex-1">
+              <span className={cn('block truncate text-sm', s.archived_at ? 'text-text3 line-through' : 'text-text')}>
+                {s.name}
+                {franchiseeName(s.franchisee_id) && (
+                  <span className="ml-2 text-xs text-text3">
+                    · {franchiseeName(s.franchisee_id)}
+                  </span>
+                )}
+              </span>
+              <SiteLine state={siteDisplay(s, siteById.get(s.site_id ?? ''), snapshotFresh)} />
             </span>
             <IconAction
               title="Изменить"
@@ -301,6 +334,7 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
           {editing && (
             <StoreEditForm
               store={editing}
+              siteState={siteDisplay(editing, siteById.get(editing.site_id ?? ''), snapshotFresh)}
               franchisees={org.franchisees}
               pending={update.isPending}
               onSave={async (body) => {
@@ -316,14 +350,31 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
   )
 }
 
+/** Строка под именем магазина: адрес из реестра, метки архива и протухания.
+ *  Состояний три, не два — «stale» обязан быть виден (lib/siteLink.ts). */
+function SiteLine({ state }: { state: SiteLinkState }) {
+  if (state.kind === 'none') return null
+  if (state.kind === 'stale') {
+    return <span className="block text-xs text-amber">данные реестра устарели</span>
+  }
+  return (
+    <span className="block truncate text-xs text-text3">
+      {state.site.address ?? state.site.name}
+      {state.site.archived_at && <span className="text-amber"> · объект в архиве</span>}
+    </span>
+  )
+}
+
 function StoreEditForm({
   store,
+  siteState,
   franchisees,
   pending,
   onSave,
   onCancel,
 }: {
   store: OrgStore
+  siteState: SiteLinkState
   franchisees: OrgRef[]
   pending: boolean
   onSave: (body: {
@@ -375,6 +426,19 @@ function StoreEditForm({
             ))}
           </Select>
         </div>
+        {siteState.kind !== 'none' && (
+          <div className="space-y-1.5">
+            <Label>Реестр объектов</Label>
+            {siteState.kind === 'live' ? (
+              <SiteCard site={siteState.site} />
+            ) : (
+              <p className="text-xs text-amber">
+                Данные реестра устарели — показаны локальные поля. Обновление
+                зеркала вернёт адрес и реквизиты.
+              </p>
+            )}
+          </div>
+        )}
       </div>
       <DialogFooter>
         <Button type="button" variant="secondary" onClick={onCancel} disabled={pending}>
@@ -385,6 +449,28 @@ function StoreEditForm({
         </Button>
       </DialogFooter>
     </form>
+  )
+}
+
+/** Read-only карточка объекта: реестр — источник адреса и реквизитов, править
+ *  их в Hub нельзя (и незачем — колонка archived_at магазина остаётся нашей). */
+function SiteCard({ site }: { site: SiteMirror }) {
+  return (
+    <div className="space-y-0.5 rounded-lg border border-glass-border bg-surface px-3 py-2 text-xs text-text2">
+      {site.archived_at && (
+        <p className="font-semibold text-amber">
+          Объект в архиве реестра — магазин при этом живёт своей жизнью
+        </p>
+      )}
+      <p>{[site.code, site.name].filter(Boolean).join(' · ')}</p>
+      {site.address && <p>{site.address}</p>}
+      {(site.legal_name ?? site.inn) && (
+        <p>{[site.legal_name, site.inn ? `ИНН ${site.inn}` : null].filter(Boolean).join(' · ')}</p>
+      )}
+      {(site.email ?? site.phone) && (
+        <p>{[site.email, site.phone].filter(Boolean).join(' · ')}</p>
+      )}
+    </div>
   )
 }
 
