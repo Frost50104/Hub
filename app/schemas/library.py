@@ -19,6 +19,10 @@ def _strip_title(v: str) -> str:
 
 class AudienceBody(BaseModel):
     is_all: bool = True
+    # «Скрыто ото всех» (0051): оверлей — правила сохраняются, членство
+    # вычищается. Дефолт False = совместимость со вчерашними PWA-бандлами
+    # (их сохранение молча снимает скрытие — осознанная цена).
+    is_none: bool = False
     rules: list[AudienceRuleBody] = Field(default_factory=list, max_length=50)
 
 
@@ -86,6 +90,9 @@ class MaterialUpdate(BaseModel):
 
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=10_000)
+    # Смена типа «Файл ↔ Ссылка» (02.09): семантику (url, current_version_no,
+    # эффективная ack-версия) пересчитывает update_material, не setattr.
+    kind: str | None = Field(default=None, pattern="^(file|link)$")
     url: str | None = Field(default=None, pattern=URL_PATTERN, max_length=2000)
     section_id: UUID | None = None
     requires_acknowledgement: bool | None = None
@@ -151,6 +158,11 @@ class MaterialResponse(BaseModel):
     updated_at: datetime
     # Персональные флаги текущего пользователя (заполняются в API):
     current_version: VersionResponse | None = None
+    # Подписанный адрес скачивания ТЕКУЩЕЙ версии (без Bearer, фикс iOS 02.09):
+    # standalone-PWA не скриптует окно после window.open('') — кнопке нужен
+    # ГОТОВЫЙ https-адрес, чтобы открыть его прямо в жесте клика. issue_token
+    # с часовой сеткой держит URL побайтово стабильным между рефетчами.
+    download_url: str | None = None
     opened_by_me: bool = False
     acked_by_me: bool = False
     ack_pending: bool = False  # обязателен и мной ещё не подтверждён

@@ -27,6 +27,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.db import tenant_scoped_session
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.audience import AudienceMember
 from app.models.employee_profile import EmployeeProfile
@@ -62,6 +63,7 @@ from app.services.audience_resolver import (
     visible_filter,
 )
 from app.services.content_access import require_content_role, resolve_content_role
+from app.services.learn_media import issue_token, verify_token
 from app.services.learn_notify import notify_ack_required
 from app.services.library_storage import (
     LIBRARY_MIME,
@@ -368,6 +370,16 @@ async def get_library(
             v = versions.get((m.id, m.current_version_no))
             if v is not None:
                 resp.current_version = VersionResponse.model_validate(v)
+            # Готовый подписанный адрес — кнопка «Скачать файл» открывает его
+            # window.open'ом прямо в жесте (iOS standalone не скриптует окна).
+            exp, sig = issue_token(
+                _material_file_key(m.id, m.current_version_no),
+                get_settings().media_url_ttl_sec,
+            )
+            resp.download_url = (
+                f"/api/learn/library/materials/{m.id}/file"
+                f"?v={m.current_version_no}&e={exp}&s={sig}"
+            )
         resp.opened_by_me = m.id in opened
         my_acks = acks.get(m.id, set())
         if m.re_ack_on_new_version:
@@ -481,6 +493,7 @@ async def set_section_audience(
             tenant_id=principal.tenant_id,
             current_audience_id=section.audience_id,
             is_all=body.is_all,
+            is_none=body.is_none,
             rules=[r.to_spec() for r in body.rules],
             object_hint=f"library_section:{section.id}",
         )
@@ -623,6 +636,52 @@ async def update_material(
     material = await _get_material_or_404(db, material_id)
     _require_manage(material, principal, role)
     fields = body.model_dump(exclude_unset=True)
+
+    # Тип и URL применяются НЕ слепым setattr, а через эффективное состояние:
+    # иначе PATCH {"url": null} на ссылке персистил бы материал без адреса
+    # (гейт публикации ловит только file), а смена типа не пересчитывала бы
+    # current_version_no — от него считается эффективная ack-версия (file → N,
+    # link → 0), т.е. у re_ack-материалов смена типа честно требует повторного
+    # ознакомления.
+    new_kind = fields.pop("kind", None) or material.kind
+    # exclude_unset: ключ "url" есть, только если его прислали.
+    new_url = fields.pop("url", material.url)
+    kind_changed = new_kind != material.kind
+    if new_kind == "link":
+        if not new_url:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Для ссылки укажите URL",
+            )
+        new_version_no = None
+    else:
+        # У file URL не бывает (как в create_material).
+        new_url = None
+        if kind_changed:
+            # Версия — последняя загруженная, если материал уже жил файлом.
+            # upload_version нумерует от MAX(version_no) из БД, так что цикл
+            # file→link→file безопасен для уникальности.
+            last_version = (
+                await db.execute(
+                    select(func.max(MaterialVersion.version_no)).where(
+                        MaterialVersion.material_id == material.id
+                    )
+                )
+            ).scalar_one_or_none()
+            if material.status == "published" and last_version is None:
+                # Иначе жил бы опубликованный материал с download-404: гейт
+                # change_status ловит только переход В published.
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Сначала загрузите файл",
+                )
+            new_version_no = last_version
+        else:
+            new_version_no = material.current_version_no
+    fields["kind"] = new_kind
+    fields["url"] = new_url
+    fields["current_version_no"] = new_version_no
+
     diff = audit.field_diff(
         material, {**{k: getattr(material, k) for k in fields}, **fields}, list(fields)
     )
@@ -912,6 +971,7 @@ async def set_material_audience(
             tenant_id=principal.tenant_id,
             current_audience_id=material.audience_id,
             is_all=body.is_all,
+            is_none=body.is_none,
             rules=[r.to_spec() for r in body.rules],
             object_hint=f"{_OBJECT_TYPE}:{material.id}",
         )
@@ -1005,6 +1065,106 @@ async def download_material(
         )
         await db.commit()
     return FileResponse(path, media_type=row.mime, filename=row.file_name)
+
+
+# Короткий TTL: ссылка живёт ровно на «нажал и скачал». Ключ подписи включает
+# номер версии — новая заливка аннулирует старые адреса.
+_DOWNLOAD_LINK_TTL_SEC = 600
+
+
+def _material_file_key(material_id: UUID, version_no: int) -> str:
+    return f"material-file:{material_id}:{version_no}"
+
+
+@router.get("/learn/library/materials/{material_id}/download-link")
+async def material_download_link(
+    material_id: UUID,
+    version: int | None = Query(default=None),
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Подписанный адрес для скачивания БЕЗ Bearer (фикс iOS, 02.09).
+
+    Прежний путь «blob через axios + window.open» на iOS standalone PWA
+    упирался в белый экран: оверлей window.open остаётся на about:blank и на
+    blob-URL не переходит. На обычный https он переходит честно — поэтому
+    клиент открывает окно в жесте клика и ведёт его на короткоживущий
+    подписанный адрес (паттерн `/api/media`). Доступ и учёт открытия
+    (ack-гейт) — ЗДЕСЬ: неавторизованная отдача файла личность не знает.
+    """
+    role = await resolve_content_role(db, principal)
+    material = await _get_material_or_404(db, material_id)
+    profile = await get_profile(db, principal)
+    if not await _material_visible_to(
+        db, material, principal, role, profile.id if profile else None
+    ):
+        raise HTTPException(status_code=404, detail="Материал не найден")
+    version_no = version or material.current_version_no
+    if version_no is None:
+        raise HTTPException(status_code=404, detail="У материала нет файла")
+    row_exists = (
+        await db.execute(
+            select(MaterialVersion.id).where(
+                MaterialVersion.material_id == material_id,
+                MaterialVersion.version_no == version_no,
+            )
+        )
+    ).scalar_one_or_none()
+    if row_exists is None:
+        raise HTTPException(status_code=404, detail="Версия не найдена")
+    if profile is not None:
+        await _track_open(
+            db, tenant_id=material.tenant_id, profile_id=profile.id, material_id=material.id
+        )
+        await db.commit()
+    exp, sig = issue_token(_material_file_key(material_id, version_no), _DOWNLOAD_LINK_TTL_SEC)
+    return {
+        "url": (
+            f"/api/learn/library/materials/{material_id}/file"
+            f"?v={version_no}&e={exp}&s={sig}"
+        )
+    }
+
+
+@router.get("/learn/library/materials/{material_id}/file")
+async def serve_material_file(
+    material_id: UUID,
+    v: int = Query(...),
+    e: int = Query(...),
+    s: str = Query(..., max_length=64),
+) -> FileResponse:
+    """Отдача файла по подписи — без JWT (работает и в iOS PWA standalone).
+
+    Доступ проверен при выдаче ссылки (`download-link`), подпись привязана к
+    материалу И версии. Сессия — bypass, как у `/api/media`: тенант ещё
+    неизвестен, а строка версии нужна для пути и имени файла.
+    """
+    if not verify_token(_material_file_key(material_id, v), e, s):
+        raise HTTPException(status_code=403, detail="Ссылка недействительна или истекла")
+    async with tenant_scoped_session(None, bypass_rls=True) as session:
+        row = (
+            await session.execute(
+                select(MaterialVersion).where(
+                    MaterialVersion.material_id == material_id,
+                    MaterialVersion.version_no == v,
+                )
+            )
+        ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Версия не найдена")
+    path = absolute_path(row.storage_key)
+    if not path.is_file():
+        raise HTTPException(status_code=410, detail="Файл отсутствует в хранилище")
+    # inline, не attachment (итерация 3 фикса iOS, 02.09): оверлей
+    # standalone-PWA attachment ни отрисовать, ни скачать не умеет — белый
+    # экран. Inline iOS показывает QuickLook-превью с «Поделиться»; XSS-класса
+    # нет — LIBRARY_MIME без text/html и svg, загрузка сниффится.
+    return FileResponse(
+        path,
+        media_type=row.mime,
+        filename=row.file_name,
+        content_disposition_type="inline",
+    )
 
 
 _TEXT_PREVIEW_LIMIT = 60_000

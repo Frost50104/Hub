@@ -238,6 +238,252 @@ async def test_ack_deadline_counts_from_access_grant(
     assert ack_deadline_for(material, granted) is None
 
 
+async def test_signed_download_link_for_ios(
+    db: AsyncSession, tenant_id: uuid.UUID, tmp_path, monkeypatch
+):
+    """Фикс iOS (02.09): «Скачать файл» ведёт окно на подписанный https-адрес.
+
+    Оверлей window.open в standalone-PWA не переходит на blob-URL — белый
+    about:blank. Ссылку выдаёт авторизованная ручка (она же фиксирует
+    открытие для ack-гейта), отдача — по HMAC без Bearer; подпись привязана
+    к материалу И версии."""
+    from urllib.parse import parse_qs, urlparse
+
+    from fastapi import HTTPException
+
+    from app.api.library import material_download_link, serve_material_file
+    from app.config import get_settings
+    from app.models.library import MaterialVersion, ViewHistory
+    from tests.integration.test_courses import _mk_member
+
+    monkeypatch.setattr(get_settings(), "attachments_root", tmp_path)
+    member, profile = await _mk_member(
+        db, tenant_id, email=f"dl-{uuid.uuid4().hex[:6]}@t.ru"
+    )
+    material = await _mk_material(
+        db, tenant_id, title="Бланк заказа", status="published", current_version_no=1
+    )
+    storage_key = f"{tenant_id}/learn/blank.xlsx"
+    db.add(
+        MaterialVersion(
+            material_id=material.id,
+            tenant_id=tenant_id,
+            version_no=1,
+            storage_key=storage_key,
+            file_name="blank.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            size_bytes=4,
+        )
+    )
+    await db.flush()
+    dest = tmp_path / storage_key
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(b"PK\x03\x04")
+    await db.commit()
+
+    link = await material_download_link(material.id, None, member, db)
+    parsed = urlparse(link["url"])
+    q = parse_qs(parsed.query)
+    assert parsed.path == f"/api/learn/library/materials/{material.id}/file"
+
+    # Выдача ссылки = открытие: ack-гейт «сначала откройте» удовлетворён.
+    opened = (
+        await db.execute(
+            select(ViewHistory).where(
+                ViewHistory.profile_id == profile.id,
+                ViewHistory.object_id == material.id,
+            )
+        )
+    ).scalar_one_or_none()
+    assert opened is not None
+
+    resp = await serve_material_file(
+        material.id, v=int(q["v"][0]), e=int(q["e"][0]), s=q["s"][0]
+    )
+    assert str(resp.path) == str(dest)
+    # inline, не attachment: attachment iOS-оверлей рендерит белым экраном.
+    disposition = resp.headers.get("content-disposition", "")
+    assert disposition.startswith("inline")
+    assert "blank.xlsx" in disposition
+
+    # Битая подпись — 403 до похода на диск.
+    with pytest.raises(HTTPException) as exc:
+        await serve_material_file(material.id, v=1, e=int(q["e"][0]), s="0" * 32)
+    assert exc.value.status_code == 403
+
+    # Выдача библиотеки несёт ГОТОВЫЙ подписанный адрес: iOS standalone
+    # не скриптует окно после window.open('') — кнопке нужен href заранее.
+    from app.api.library import get_library
+
+    library = await get_library(False, member, db)
+    mine = next(m for m in library.materials if m.id == material.id)
+    assert mine.download_url is not None
+    lp = urlparse(mine.download_url)
+    lq = parse_qs(lp.query)
+    served = await serve_material_file(
+        material.id, v=int(lq["v"][0]), e=int(lq["e"][0]), s=lq["s"][0]
+    )
+    assert str(served.path) == str(dest)
+
+
+# ─── Материал-ссылка и смена типа «Файл ↔ Ссылка» (02.09) ────────────────────
+
+
+async def test_link_material_lifecycle_and_url_guard(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Link-путь целиком: публикация без файла, ознакомление v0, запреты.
+
+    До 02.09 у link-пути не было ни одного бэкенд-теста; PATCH {"url": null}
+    молча персистил ссылку без адреса (слепой setattr) — теперь 422."""
+    import io
+
+    from fastapi import HTTPException, UploadFile
+
+    from app.api.library import (
+        acknowledge,
+        change_status,
+        create_material,
+        track_open,
+        update_material,
+        upload_version,
+    )
+    from app.schemas.library import AckBody, MaterialCreate, MaterialUpdate, StatusBody
+    from tests.integration.test_courses import _mk_member
+
+    publisher, pub_profile = await _mk_member(
+        db, tenant_id, email=f"pub-{uuid.uuid4().hex[:6]}@t.ru"
+    )
+    pub_profile.content_role = "publisher"
+    member, _member_profile = await _mk_member(
+        db, tenant_id, email=f"m-{uuid.uuid4().hex[:6]}@t.ru"
+    )
+    await db.flush()
+
+    created = await create_material(
+        MaterialCreate(
+            title="Облачная папка",
+            kind="link",
+            url="https://disk.example/x",
+            requires_acknowledgement=True,
+        ),
+        publisher,
+        db,
+    )
+    # Публикация ссылки не требует файла (гейт «Сначала загрузите файл» — про file).
+    await change_status(created.id, StatusBody(status="published"), publisher, db)
+
+    # Ознакомление: клик «Открыть ссылку» = /open, отметка — с version_no=0.
+    await track_open(created.id, member, db)
+    acked = await acknowledge(created.id, AckBody(version_no=0), member, db)
+    assert acked.acked_by_me is True
+
+    # Версий у ссылки нет.
+    with pytest.raises(HTTPException) as exc:
+        await upload_version(
+            created.id,
+            UploadFile(file=io.BytesIO(b"x"), filename="a.pdf"),
+            publisher,
+            db,
+        )
+    assert exc.value.status_code == 422
+
+    # Дыра закрыта: ссылку нельзя оставить без адреса.
+    with pytest.raises(HTTPException) as exc:
+        await update_material(created.id, MaterialUpdate(url=None), publisher, db)
+    assert exc.value.status_code == 422
+    assert "URL" in exc.value.detail
+
+
+async def test_material_kind_switch_file_link_file(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Смена типа: file→link снимает версию (ack-версия становится 0 —
+    у re_ack-материалов повторное ознакомление), link→file восстанавливает
+    последнюю загруженную версию."""
+    from app.api.library import update_material
+    from app.models.library import MaterialVersion
+    from app.schemas.library import MaterialUpdate
+    from tests.integration.test_courses import _mk_member
+
+    publisher, pub_profile = await _mk_member(
+        db, tenant_id, email=f"pub-{uuid.uuid4().hex[:6]}@t.ru"
+    )
+    pub_profile.content_role = "publisher"
+    await db.flush()
+
+    material = await _mk_material(
+        db,
+        tenant_id,
+        title="Сменный тип",
+        status="published",
+        current_version_no=1,
+        re_ack_on_new_version=True,
+    )
+    db.add(
+        MaterialVersion(
+            material_id=material.id,
+            tenant_id=tenant_id,
+            version_no=1,
+            storage_key="lib/x",
+            file_name="a.pdf",
+            mime="application/pdf",
+            size_bytes=10,
+        )
+    )
+    await db.flush()
+
+    resp = await update_material(
+        material.id,
+        MaterialUpdate(kind="link", url="https://disk.example/doc"),
+        publisher,
+        db,
+    )
+    assert resp.kind == "link" and resp.url == "https://disk.example/doc"
+    await db.refresh(material)
+    assert material.current_version_no is None
+    assert _effective_ack_version(material) == 0
+
+    resp = await update_material(material.id, MaterialUpdate(kind="file"), publisher, db)
+    assert resp.kind == "file" and resp.url is None
+    await db.refresh(material)
+    assert material.current_version_no == 1
+
+
+async def test_published_link_to_file_requires_version(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """У ОПУБЛИКОВАННОГО материала смена link→file без загруженных версий — 422
+    (иначе жил бы опубликованный материал с download-404); черновику можно —
+    файл догружается из карточки."""
+    from fastapi import HTTPException
+
+    from app.api.library import update_material
+    from app.schemas.library import MaterialUpdate
+    from tests.integration.test_courses import _mk_member
+
+    publisher, pub_profile = await _mk_member(
+        db, tenant_id, email=f"pub-{uuid.uuid4().hex[:6]}@t.ru"
+    )
+    pub_profile.content_role = "publisher"
+    await db.flush()
+
+    published = await _mk_material(
+        db, tenant_id, title="Живая ссылка", kind="link",
+        url="https://disk.example/a", status="published",
+    )
+    with pytest.raises(HTTPException) as exc:
+        await update_material(published.id, MaterialUpdate(kind="file"), publisher, db)
+    assert exc.value.status_code == 422
+    assert "загрузите файл" in exc.value.detail
+
+    draft = await _mk_material(
+        db, tenant_id, title="Черновик-ссылка", kind="link", url="https://disk.example/b"
+    )
+    resp = await update_material(draft.id, MaterialUpdate(kind="file"), publisher, db)
+    assert resp.kind == "file" and resp.url is None and resp.current_version_no is None
+
+
 async def test_section_audience_closes_its_materials(
     db: AsyncSession, tenant_id: uuid.UUID
 ):
