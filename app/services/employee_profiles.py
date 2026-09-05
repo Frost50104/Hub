@@ -68,6 +68,32 @@ async def _find_by_email(
     ).scalar_one_or_none()
 
 
+async def find_latest_archived_by_email(
+    db: AsyncSession, email: str
+) -> EmployeeProfile | None:
+    """Самая свежая АРХИВНАЯ карточка с этим адресом.
+
+    Отдельно от `_find_by_email` и с `.first()` вместо `scalar_one_or_none()`
+    намеренно. У активных стоит partial-unique индекс, и вторая строка там —
+    повод упасть; у архивных индекса нет, а с 01.09 повторный найм создаёт
+    НОВУЮ карточку вместо восстановления старой. Значит цепочка «наняли —
+    уволили — наняли — уволили» даёт две архивные записи на один адрес, и
+    `scalar_one_or_none()` бросил бы `MultipleResultsFound` прямо в `/api/me`:
+    человек не смог бы войти в Hub вообще.
+    """
+    return (
+        await db.execute(
+            select(EmployeeProfile)
+            .where(
+                func.lower(EmployeeProfile.email) == normalize_email(email),
+                EmployeeProfile.status == "archived",
+            )
+            .order_by(EmployeeProfile.archived_at.desc().nulls_last())
+            .limit(1)
+        )
+    ).scalars().first()
+
+
 async def ensure_profile_for_principal(db: AsyncSession, principal: Principal) -> MatchResult:
     """Идемпотентный матчинг/создание профиля. Коммитит вызывающий."""
     now = datetime.now(UTC)
@@ -111,11 +137,14 @@ async def ensure_profile_for_principal(db: AsyncSession, principal: Principal) -
         )
         return MatchResult(outcome="needs_restore", profile=None)
 
-    archived = await _find_by_email(db, email, status="archived")
-    if archived is not None:
-        # Повторный найм: история на архивной карточке, дубль не создаём.
-        log.info("profile.needs_restore", profile_id=str(archived.id), email=email)
-        return MatchResult(outcome="needs_restore", profile=archived)
+    # Архивную карточку с этим адресом СОЗНАТЕЛЬНО не подхватываем (01.09).
+    # Раньше здесь возвращался `needs_restore`, и админ видел одну кнопку
+    # «восстановить» — то есть «отдать новому человеку историю старого». А
+    # корпоративный ящик уволенного отдают следующему сотруднику, и он получал
+    # чужие сертификаты и сданные курсы. Теперь заводим ЧИСТУЮ карточку;
+    # вернувшийся сотрудник по умолчанию проходит обучение заново, а свести две
+    # карточки вручную admin по-прежнему может через `/restore`.
+    twin = await find_latest_archived_by_email(db, email)
 
     stmt = (
         pg_insert(EmployeeProfile)
@@ -144,7 +173,154 @@ async def ensure_profile_for_principal(db: AsyncSession, principal: Principal) -
     diffs = await recalc_profile(db, profile)
     await notify_new_audience_members(db, diffs)
     log.info("profile.autocreated", profile_id=str(inserted_id), email=email)
+    if twin is not None:
+        # Обычно это новый человек на освободившемся ящике — всё правильно. Но
+        # тем же путём проходит ОШИБОЧНАЯ архивация: человека убрали по недосмотру,
+        # он вошёл и получил дубль, а история осталась в архиве. Снятая ветка
+        # `needs_restore` была единственным сигналом об этом, поэтому оставляем
+        # след — и в аудите, и полем `archived_twin` на карточке.
+        audit.record(
+            db,
+            tenant_id=profile.tenant_id,
+            actor_id=principal.employee_id,
+            action="create",
+            object_type="employee_profile",
+            object_id=profile.id,
+            object_label=profile.full_name,
+            diff={"archived_twin": {"old": None, "new": str(twin.id)}},
+        )
+        log.info(
+            "profile.autocreated_with_archived_twin",
+            profile_id=str(inserted_id),
+            twin_id=str(twin.id),
+        )
     return MatchResult(outcome="created", profile=profile)
+
+
+StaffRowOutcome = Literal[
+    "already_linked", "linked", "created", "email_conflict", "archived_skip", "no_card"
+]
+
+
+async def ensure_profile_for_staff_row(
+    db: AsyncSession,
+    *,
+    tenant_id: UUID,
+    employee_id: UUID,
+    email: str,
+    full_name: str,
+    link_only: bool = False,
+) -> StaffRowOutcome:
+    """Матчинг/создание карточки из PULL-строки штата (staff-sync, 0052).
+
+    `link_only=True` — режим сервисных учёток (решение владельца 04.09):
+    существующую карточку ПРИВЯЗЫВАЕМ (непривязанная карточка кафе показывала
+    «без учётки» при живой учётке в auth), но НЕ создаём (`no_card`) — гейт
+    требования 1 остаётся на создании, ветка привязки уведомлений не шлёт.
+
+    Тот же порядок, что у `ensure_profile_for_principal` (employee_id →
+    lower(email) среди active → создание), с тремя намеренными отличиями:
+    - `last_activity_at` НЕ ставится: человек не входил, бейдж «не входил»
+      и заморозка идентичности обязаны работать как для не входивших;
+    - `_sync_linked_profile` не зовётся: он ставит last_activity_at, а имя
+      привязанной HR-карточки до первого входа остаётся редактируемым
+      (та же семантика, что у ручки /link);
+    - архивная карточка с тем же email БЛОКИРУЕТ создание (`archived_skip`,
+      требование 3 auth): `archive_profile(manual)` обнуляет employee_id, и
+      без этой проверки pull пересоздавал бы карточку через 15 минут после
+      каждой ручной архивации — с новой рассылкой обязательных курсов.
+      Настоящий новый человек на освободившемся ящике карточку всё равно
+      получит — при первом ВХОДЕ (`ensure_profile_for_principal` архивных
+      сознательно не смотрит и заводит чистую с подсказкой archived_twin).
+      Автоархив (`auto_inactivity`) сюда не доходит: он сохраняет
+      employee_id, и `_find_by_employee_id` возвращает already_linked.
+
+    Гонки с живым входом закрыты теми же механизмами, что и там: UPDATE с
+    guard `employee_id IS NULL` и partial-UNIQUE (tenant_id, lower(email))
+    WHERE status='active'.
+    """
+    existing = await _find_by_employee_id(db, employee_id)
+    if existing is not None:
+        return "already_linked"
+
+    norm = normalize_email(email)
+    active = await _find_by_email(db, norm, status="active")
+    if active is not None:
+        if active.employee_id is None:
+            result = await db.execute(
+                update(EmployeeProfile)
+                .where(EmployeeProfile.id == active.id, EmployeeProfile.employee_id.is_(None))
+                .values(employee_id=employee_id)
+            )
+            if result.rowcount:
+                log.info("staff_sync.profile_linked", profile_id=str(active.id))
+                return "linked"
+            return "already_linked"
+        # Активная карточка с этим email привязана к другому auth-аккаунту —
+        # рассинхрон данных, руками через /link или /restore. Не трогаем.
+        log.warning("staff_sync.email_conflict", email=norm, profile_id=str(active.id))
+        return "email_conflict"
+
+    if link_only:
+        return "no_card"
+
+    twin = await find_latest_archived_by_email(db, norm)
+    if twin is not None:
+        log.info("staff_sync.archived_skip", twin_id=str(twin.id))
+        return "archived_skip"
+
+    stmt = (
+        pg_insert(EmployeeProfile)
+        .values(
+            tenant_id=tenant_id,
+            employee_id=employee_id,
+            email=norm,
+            full_name=full_name or norm,
+        )
+        .on_conflict_do_nothing(
+            index_elements=["tenant_id", func.lower(EmployeeProfile.email)],
+            index_where=EmployeeProfile.status == "active",
+        )
+        .returning(EmployeeProfile.id)
+    )
+    inserted_id = (await db.execute(stmt)).scalar_one_or_none()
+    if inserted_id is None:
+        return "already_linked"  # гонка: параллельный вход успел первым
+    profile = (
+        await db.execute(select(EmployeeProfile).where(EmployeeProfile.id == inserted_id))
+    ).scalar_one()
+    # Членство сразу: is_all/exclude-only аудитории должны включить новичка
+    # (и уведомить об обязательных материалах — как при ручном заведении).
+    diffs = await recalc_profile(db, profile)
+    await notify_new_audience_members(db, diffs)
+    log.info("staff_sync.profile_created", profile_id=str(inserted_id), email=norm)
+    return "created"
+
+
+async def classify_staff_row(
+    db: AsyncSession,
+    *,
+    employee_id: UUID,
+    email: str,
+    link_only: bool = False,
+) -> StaffRowOutcome:
+    """Read-only предсказание исхода `ensure_profile_for_staff_row` — dry-run.
+
+    Отдельная функция, а не «прогон + rollback»: у живого пути есть побочка
+    вне транзакции (`notify_new_audience_members` шлёт реальные пуши), и
+    откат БД её не отменил бы. Порядок веток обязан совпадать с живым путём.
+    """
+    if await _find_by_employee_id(db, employee_id) is not None:
+        return "already_linked"
+    norm = normalize_email(email)
+    active = await _find_by_email(db, norm, status="active")
+    if active is not None:
+        return "linked" if active.employee_id is None else "email_conflict"
+    if link_only:
+        return "no_card"
+    if await find_latest_archived_by_email(db, norm) is not None:
+        return "archived_skip"
+    return "created"
 
 
 async def _sync_linked_profile(
@@ -204,6 +380,23 @@ async def _sync_linked_profile(
     )
 
 
+# Причины, по которым карточка ОСВОБОЖДАЕТ вход: архивировал человек (`manual`)
+# или учётку удалили в auth (`auth_deleted`).
+#
+# Спрашивать админа «уволен или временно?» мы пробовали и отказались: выбор
+# можно ответить неверно КАЖДЫЙ раз, а неверный ответ бесшумно возвращает
+# исходный баг — ящик остаётся занятым, и следующий сотрудник наследует чужую
+# карточку. Непрерывность при этом ничего не теряет: архивная карточка
+# блокирует обучение независимо от привязки, восстанавливать её админу
+# приходится в любом случае, а восстановленная БЕЗ привязки заново связывается
+# по email на следующем входе (ветка «активная без привязки» ниже).
+#
+# `auto_inactivity` — единственное исключение, и оно не про выбор: джоба
+# архивирует человека, который никуда не уходил, просто полгода не заходил.
+# Отвязка выкинула бы действующего сотрудника в «Непривязанные входы».
+UNBINDING_REASONS = ("manual", "auth_deleted")
+
+
 async def archive_profile(
     db: AsyncSession,
     profile: EmployeeProfile,
@@ -217,6 +410,12 @@ async def archive_profile(
     profile.status = "archived"
     profile.archived_at = datetime.now(UTC)
     profile.archive_reason = reason
+    if reason in UNBINDING_REASONS:
+        # Освобождаем вход и корпоративный ящик: следующий сотрудник на том же
+        # адресе не найдётся ни по `employee_id`, ни по email и получит чистую
+        # карточку. История остаётся здесь, на архивной (ОС владельца 01.09 —
+        # «новый получает остаток от уволенного»).
+        profile.employee_id = None
     await db.flush()
     # Каскад: членства аудиторий (recalc_profile для archived удаляет все).
     await recalc_profile(db, profile)

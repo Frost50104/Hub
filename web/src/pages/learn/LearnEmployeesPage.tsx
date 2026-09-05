@@ -1,7 +1,25 @@
-import { Archive, ArchiveRestore, Link2, Plus, Search, Upload, UserX } from 'lucide-react'
+import {
+  Archive,
+  ArchiveRestore,
+  ExternalLink,
+  Link2,
+  Plus,
+  RefreshCw,
+  Search,
+  Upload,
+  UserX,
+} from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
+import {
+  AUTH_STATE_LABEL,
+  authStateTone,
+  HUB_ROLE_LABEL,
+  showAuthStateBadge,
+  staffSyncToast,
+  type AuthState,
+} from '@/lib/authState'
 import { employeeListCaption } from '@/lib/employeeList'
 
 import { EmployeeListNote } from '@/components/learn/EmployeeListNote'
@@ -24,6 +42,7 @@ import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import {
   useEmployeeMutation,
+  useEmployee,
   useEmployees,
   useOrgSnapshot,
   useUnlinkedLogins,
@@ -57,6 +76,23 @@ export function LearnEmployeesPage() {
     status: statusFilter,
     q: debouncedSearch.trim() || undefined,
   })
+  // Фильтр по статусу учётки — клиентский: набор и так добирается целиком.
+  const [authFilter, setAuthFilter] = useState<'all' | 'no_account' | 'not_logged_in'>('all')
+  const [syncing, setSyncing] = useState(false)
+  const runSync = async () => {
+    setSyncing(true)
+    try {
+      const report = await learnApi.syncStaff()
+      const t = staffSyncToast(report)
+      if (t.kind === 'success') toast.success(t.text)
+      else toast.message(t.text)
+      await employees.refetch()
+    } catch {
+      toast.error('Не удалось синхронизировать с auth')
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const positionName = (id: string | null) =>
     org.data?.positions.find((p) => p.id === id)?.name
@@ -71,6 +107,14 @@ export function LearnEmployeesPage() {
             <h1 className="font-display text-2xl font-bold text-text">Сотрудники</h1>
           )}
           <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              disabled={syncing}
+              onClick={() => void runSync()}
+              title="Подтянуть учётки и hub-роли из auth"
+            >
+              <RefreshCw className={cn('h-4 w-4', syncing && 'animate-spin')} /> Обновить из auth
+            </Button>
             <Button variant="secondary" onClick={() => setUnlinkedOpen(true)}>
               <Link2 className="h-4 w-4" /> Непривязанные входы
             </Button>
@@ -80,6 +124,14 @@ export function LearnEmployeesPage() {
             <Button onClick={() => setCardOpen('new')}>
               <Plus className="h-4 w-4" /> Сотрудник
             </Button>
+            <a
+              href="https://auth.signaris.ru/admin/employees"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 self-center text-sm text-amber hover:underline"
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> Учётки в auth
+            </a>
           </div>
         </div>
 
@@ -107,6 +159,67 @@ export function LearnEmployeesPage() {
         {employees.isError && <QueryError onRetry={() => void employees.refetch()} />}
         {employees.data && (
           <>
+            {/* Правда о связке с auth (staff-sync, 0052). */}
+            {employees.data.staff_synced_at ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs text-text3">
+                  Штат из auth: синхронизировано {formatSyncTime(employees.data.staff_synced_at)}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setAuthFilter('all')}
+                  className={cn(
+                    'rounded-full border px-2.5 py-0.5 text-xs',
+                    authFilter === 'all' ? 'border-amber text-text' : 'border-glass-border text-text3',
+                  )}
+                >
+                  Все
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuthFilter('no_account')}
+                  className={cn(
+                    'rounded-full border px-2.5 py-0.5 text-xs',
+                    authFilter === 'no_account' ? 'border-amber text-text' : 'border-glass-border text-text3',
+                  )}
+                >
+                  Без учётки
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuthFilter('not_logged_in')}
+                  className={cn(
+                    'rounded-full border px-2.5 py-0.5 text-xs',
+                    authFilter === 'not_logged_in' ? 'border-amber text-text' : 'border-glass-border text-text3',
+                  )}
+                >
+                  Не входили
+                </button>
+              </div>
+            ) : (
+              <p className="rounded-lg border border-amber/30 bg-amber/5 px-3 py-2 text-xs text-text2">
+                Ожидает обновления auth-сервиса: список пока пополняется только по
+                входам сотрудников. Кнопка «Обновить из auth» заработает после выката.
+              </p>
+            )}
+            {(employees.data.invitations?.length ?? 0) > 0 && (
+              <div className="rounded-xl border border-glass-border bg-glass">
+                <p className="border-b border-glass-border px-4 py-2 text-xs font-bold uppercase tracking-wide text-text2">
+                  Приглашены в auth, ещё не приняли ({employees.data.invitations!.length})
+                </p>
+                {employees.data.invitations!.map((inv) => (
+                  <div key={inv.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
+                    <span className="min-w-0 truncate text-text">
+                      {inv.full_name || inv.email}
+                      <span className="ml-2 text-xs text-text3">{inv.email}</span>
+                    </span>
+                    <span className="shrink-0 text-xs text-text3">
+                      {HUB_ROLE_LABEL[inv.role] ?? inv.role}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             {/* Раньше здесь стояло «Всего: N» над обрезанным до сотни списком —
                 экран противоречил сам себе. Правило одно на все четыре места,
                 где сотрудников выбирают: `lib/employeeList.ts`. */}
@@ -119,7 +232,15 @@ export function LearnEmployeesPage() {
                   Никого не нашли. Добавьте сотрудника или загрузите CSV.
                 </li>
               )}
-              {employees.data.items.map((e) => (
+              {employees.data.items
+                .filter(
+                  (e) =>
+                    authFilter === 'all' ||
+                    e.auth_state === authFilter ||
+                    // До первого синка «без учётки» приходит осторожным not_linked.
+                    (authFilter === 'no_account' && e.auth_state === 'not_linked'),
+                )
+                .map((e) => (
                 <li key={e.id}>
                   <button
                     className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
@@ -135,10 +256,29 @@ export function LearnEmployeesPage() {
                           .join(' · ')}
                       </p>
                     </div>
+                    {e.hub_role && (
+                      <Badge variant="outline" className="text-text2">
+                        {HUB_ROLE_LABEL[e.hub_role] ?? e.hub_role}
+                      </Badge>
+                    )}
                     {e.org_role !== 'employee' && (
                       <Badge variant="outline">{ORG_ROLE_LABEL[e.org_role]}</Badge>
                     )}
-                    {e.employee_id === null && e.status === 'active' && (
+                    {/* Честный статус учётки — одна серверная функция вместо
+                        двух рассинхронённых признаков (staff-sync, 0052).
+                        Фолбэк для протухшего кэша без auth_state — старое
+                        правило по employee_id. */}
+                    {e.status === 'active' && showAuthStateBadge(e.auth_state as AuthState | null) && (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          authStateTone(e.auth_state as AuthState) === 'red' ? 'text-red' : 'text-amber',
+                        )}
+                      >
+                        {AUTH_STATE_LABEL[e.auth_state as AuthState]}
+                      </Badge>
+                    )}
+                    {e.status === 'active' && e.auth_state == null && e.employee_id === null && (
                       <Badge variant="outline" className="text-amber">
                         ещё не входил
                       </Badge>
@@ -168,6 +308,18 @@ export function LearnEmployeesPage() {
       {unlinkedOpen && <UnlinkedDialog onClose={() => setUnlinkedOpen(false)} />}
     </div>
   )
+}
+
+function formatSyncTime(iso: string): string {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000))
+  if (mins < 1) return 'только что'
+  if (mins < 60) return `${mins} мин назад`
+  return new Date(iso).toLocaleString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 // ─── Карточка сотрудника ─────────────────────────────────────────────────────
@@ -224,6 +376,9 @@ function EmployeeCardDialog({
     }
     return saved
   })
+  // Списочная ручка `archived_twin` не заполняет — тянем одиночную.
+  const full = useEmployee(isNew ? null : profile.id)
+  const twin = full.data?.archived_twin ?? null
   const archive = useEmployeeMutation(() => learnApi.archiveEmployee(profile!.id))
   const restore = useEmployeeMutation(() => learnApi.restoreEmployee(profile!.id))
 
@@ -279,6 +434,18 @@ function EmployeeCardDialog({
                   autoFocus={isNew}
                 />
               </div>
+              {twin && (
+                // Обычно это новый человек на освободившемся ящике — всё
+                // правильно. Но тем же путём проходит ОШИБОЧНАЯ архивация, и
+                // без этой строки дубль появлялся бы молча: снятая ветка
+                // `needs_restore` была единственным сигналом.
+                <p className="text-xs text-text3 sm:col-span-2">
+                  В архиве есть карточка с этим адресом: {twin.full_name}
+                  {twin.archived_at
+                    ? `, ${new Date(twin.archived_at).toLocaleDateString('ru-RU')}`
+                    : ''}
+                </p>
+              )}
               <div className="space-y-1.5">
                 <Label htmlFor="emp-email">Email (как в SSO)</Label>
                 <Input
@@ -466,7 +633,13 @@ function EmployeeCardDialog({
                 disabled={archive.isPending}
                 onClick={() =>
                   void archive.mutateAsync(undefined as never).then(() => {
-                    toast.success('Карточка в архиве. История обучения сохранена.')
+                    // Тост называет главное последствие: ящик освободился.
+                    // Спрашивать «уволен или временно» мы пробовали и
+                    // отказались — выбор можно ответить неверно, а неверный
+                    // ответ бесшумно возвращал исходный баг.
+                    toast.success(
+                      'Карточка в архиве, вход освобождён. История обучения сохранена.',
+                    )
                     onClose()
                   })
                 }
@@ -502,6 +675,7 @@ function EmployeeCardDialog({
           </DialogFooter>
         </form>
       </DialogContent>
+
     </Dialog>
   )
 }

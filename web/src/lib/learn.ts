@@ -94,13 +94,51 @@ export interface EmployeeProfile {
   archive_reason: string | null
   last_activity_at: string | null
   created_at: string
+  /**
+   * Архивная карточка с тем же email. Приходит ТОЛЬКО из одиночной ручки
+   * (`learnApi.employee`), в списке всегда `null`: подсказка редкая, а запрос
+   * на строку — нет.
+   */
+  archived_twin?: { id: string; full_name: string; archived_at: string | null } | null
   /** Закреплённые магазины (только для org_role=tu). */
   tu_store_ids: string[]
+  /** Кеш из auth (staff-sync, 0052): hub-роль и честный статус учётки. */
+  hub_role?: string | null
+  auth_state?: string | null
+}
+
+/** Непринятое приглашение с ролью hub — «добавлен, но ещё не входил». */
+export interface AuthInvitation {
+  id: string
+  email: string
+  full_name: string | null
+  role: string
+  expires_at: string | null
 }
 
 export interface EmployeeList {
   items: EmployeeProfile[]
   total: number
+  /** Когда штат синкался из auth; null = auth ещё не выкатил ручку. */
+  staff_synced_at?: string | null
+  /** Только для hub-admin; остальным приходит пустым. */
+  invitations?: AuthInvitation[]
+}
+
+export interface StaffSyncReport {
+  available: boolean
+  // true = подсчёт без записи: сервер форсит его, пока staff-sync выключен
+  dry_run: boolean
+  shadows: number
+  profiles_created: number
+  profiles_linked: number
+  email_conflicts: number
+  archived_skips: number
+  service_accounts: number
+  inactive_skipped: number
+  roles_cleared: number
+  archived: number
+  invitations: number
 }
 
 export interface EmployeeUpsert {
@@ -164,6 +202,14 @@ export function emptyRule(mode: 'include' | 'exclude'): AudienceRuleDraft {
   }
 }
 
+/** Тело PUT .../audience и dry-run: три состояния — «всем» (is_all без
+ *  правил), «никому» (is_none — оверлей, правила сохраняются), «по правилам». */
+export interface AudiencePayload {
+  is_all: boolean
+  is_none: boolean
+  rules: AudienceRuleDraft[]
+}
+
 export interface AudienceDryRun {
   count: number
   sample: { id: string; full_name: string }[]
@@ -179,6 +225,8 @@ export interface AudienceDimensionCounts {
 /** Ответ GET /learn/audiences/{id} — предзаполнение пикера аудитории. */
 export interface AudienceRules {
   is_all: boolean
+  /** «Скрыто ото всех» (0051) — сеется в черновик вместе с правилами. */
+  is_none: boolean
   rules: AudienceRuleDraft[]
   /** Имена по profile_ids правил (включая архивных) — для чипов. */
   profile_labels: Record<string, string>
@@ -273,6 +321,10 @@ export interface LibraryMaterial {
   next_review_at: string | null
   updated_at: string
   current_version: MaterialVersion | null
+  /** Готовый подписанный адрес скачивания (без Bearer) — открывается
+   *  window.open'ом прямо в жесте клика: iOS standalone-PWA не скриптует
+   *  окно после window.open(''), белый about:blank (ОС 02.09). */
+  download_url: string | null
   opened_by_me: boolean
   acked_by_me: boolean
   ack_pending: boolean
@@ -289,6 +341,9 @@ export interface LibraryData {
 export interface MaterialUpsert {
   title?: string
   description?: string | null
+  /** Тип можно менять и при редактировании (02.09) — сервер пересчитает
+   *  url/current_version_no и эффективную ack-версию. */
+  kind?: 'file' | 'link'
   url?: string | null
   section_id?: string | null
   requires_acknowledgement?: boolean
@@ -1044,6 +1099,8 @@ export interface AssessmentCampaign {
   created_at: string
   my_state: QuizConsumer | null
   audience_size: number
+  /** Аудитория «скрыто ото всех» — бейдж на карточке объясняет «0 из 0». */
+  audience_hidden: boolean
   completed_count: number
   /** ВСЕ попытки по тесту кампании, без пересечения с аудиторией: именно
    *  столько результатов уничтожит удаление. `completed_count` для этого не
@@ -1057,12 +1114,41 @@ export interface AssessmentReportRow {
   status: 'not_started' | 'in_progress' | 'pending_review' | 'passed' | 'failed'
   score_pct: number | null
   finished_at: string | null
+  /** Лучшая завершённая попытка (её балл и показан) — хендл разбора ответов. */
+  attempt_id: string | null
+}
+
+/** «Сложные вопросы»: доля ошибок по вопросу среди всех сдававших. */
+export interface AssessmentQuestionStat {
+  prompt: string
+  qtype: QuizQuestionType
+  attempts: number
+  wrong: number
+  fail_rate_pct: number
 }
 
 export interface AssessmentReport {
   campaign_id: string
   title: string
   rows: AssessmentReportRow[]
+  /** Только hub-admin; null — сервер не считал. */
+  question_stats: AssessmentQuestionStat[] | null
+}
+
+/** Разбор попытки из отчёта (admin-only): ответы человека + правильные. */
+export interface AssessmentAttemptDetail {
+  attempt_id: string
+  profile_id: string
+  employee_name: string
+  attempt_no: number
+  finished_at: string | null
+  score_pct: number | null
+  passed: boolean | null
+  needs_review: boolean
+  questions: QuizSnapshotQuestion[]
+  answers: Record<string, unknown>
+  results: Record<string, boolean | null>
+  correct_answers: Record<string, Record<string, unknown>>
 }
 
 export type MediaKind = 'image' | 'video' | 'pdf'
@@ -1153,12 +1239,18 @@ export const learnApi = {
     api.get<EmployeeProfile>(`/learn/employees/${id}`).then((r) => r.data),
   createEmployee: (body: EmployeeUpsert & { email: string; full_name: string }): Promise<EmployeeProfile> =>
     api.post<EmployeeProfile>('/learn/employees', body).then((r) => r.data),
+  /** Ручной прогон staff-sync — кнопка «Обновить из auth» (admin). */
+  syncStaff: (): Promise<StaffSyncReport> =>
+    api.post<StaffSyncReport>('/learn/employees/sync').then((r) => r.data),
   updateEmployee: (id: string, body: EmployeeUpsert & { status_text?: string | null }): Promise<EmployeeProfile> =>
     api.patch<EmployeeProfile>(`/learn/employees/${id}`, body).then((r) => r.data),
   replaceTuStores: (id: string, storeIds: string[]): Promise<EmployeeProfile> =>
     api
       .put<EmployeeProfile>(`/learn/employees/${id}/tu-stores`, { store_ids: storeIds })
       .then((r) => r.data),
+  // Архивация ОСВОБОЖДАЕТ вход и корпоративный ящик: следующий сотрудник на том
+  // же адресе получит чистую карточку. Причину не выбираем — у человека вариант
+  // один, и спрашивать значило бы дать возможность ответить неверно.
   archiveEmployee: (id: string): Promise<EmployeeProfile> =>
     api
       .post<EmployeeProfile>(`/learn/employees/${id}/archive`, { reason: 'manual' })
@@ -1185,10 +1277,7 @@ export const learnApi = {
       .then((r) => r.data)
   },
 
-  audienceDryRun: (body: {
-    is_all: boolean
-    rules: AudienceRuleDraft[]
-  }): Promise<AudienceDryRun> =>
+  audienceDryRun: (body: AudiencePayload): Promise<AudienceDryRun> =>
     api.post<AudienceDryRun>('/learn/audiences/dry-run', body).then((r) => r.data),
   audienceDimensionCounts: (): Promise<AudienceDimensionCounts> =>
     api
@@ -1216,7 +1305,7 @@ export const learnApi = {
     api.patch<LibrarySection>(`/learn/library/sections/${id}`, { title }).then((r) => r.data),
   setSectionAudience: (
     id: string,
-    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+    body: AudiencePayload,
   ): Promise<LibrarySection> =>
     api
       .put<LibrarySection>(`/learn/library/sections/${id}/audience`, body)
@@ -1254,7 +1343,7 @@ export const learnApi = {
       .then((r) => r.data),
   setMaterialAudience: (
     id: string,
-    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+    body: AudiencePayload,
   ): Promise<LibraryMaterial> =>
     api
       .put<LibraryMaterial>(`/learn/library/materials/${id}/audience`, body)
@@ -1300,7 +1389,7 @@ export const learnApi = {
     api.post<NewsPost>(`/learn/news/${id}/status`, { status }).then((r) => r.data),
   setNewsAudience: (
     id: string,
-    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+    body: AudiencePayload,
   ): Promise<NewsPost> =>
     api.put<NewsPost>(`/learn/news/${id}/audience`, body).then((r) => r.data),
   toggleReaction: (id: string, emoji: string): Promise<void> =>
@@ -1348,7 +1437,7 @@ export const learnApi = {
     api.post<Survey>(`/learn/surveys/${id}/status`, { status }).then((r) => r.data),
   setSurveyAudience: (
     id: string,
-    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+    body: AudiencePayload,
   ): Promise<Survey> =>
     api.put<Survey>(`/learn/surveys/${id}/audience`, body).then((r) => r.data),
   submitSurvey: (
@@ -1413,7 +1502,7 @@ export const learnApi = {
     api.post<Course>(`/learn/courses/${id}/status`, { status }).then((r) => r.data),
   setCourseAudience: (
     id: string,
-    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+    body: AudiencePayload,
   ): Promise<Course> =>
     api.put<Course>(`/learn/courses/${id}/audience`, body).then((r) => r.data),
   assignCourse: (
@@ -1563,7 +1652,7 @@ export const learnApi = {
     api.post<ProductCard>(`/learn/products/${id}/status`, { status }).then((r) => r.data),
   setProductAudience: (
     id: string,
-    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+    body: AudiencePayload,
   ): Promise<ProductCard> =>
     api.put<ProductCard>(`/learn/products/${id}/audience`, body).then((r) => r.data),
   openProduct: (id: string): Promise<void> =>
@@ -1694,7 +1783,7 @@ export const learnApi = {
     api.patch<AssessmentCampaign>(`/learn/assessments/${id}`, body).then((r) => r.data),
   setAssessmentAudience: (
     id: string,
-    body: { is_all: boolean; rules: AudienceRuleDraft[] },
+    body: AudiencePayload,
   ): Promise<void> =>
     api.put(`/learn/assessments/${id}/audience`, body).then(() => undefined),
   assessmentQuiz: (id: string): Promise<QuizManage> =>
@@ -1716,6 +1805,15 @@ export const learnApi = {
     api.delete(`/learn/assessments/${id}`).then(() => undefined),
   assessmentReport: (id: string): Promise<AssessmentReport> =>
     api.get<AssessmentReport>(`/learn/assessments/${id}/report`).then((r) => r.data),
+  assessmentAttempt: (
+    campaignId: string,
+    attemptId: string,
+  ): Promise<AssessmentAttemptDetail> =>
+    api
+      .get<AssessmentAttemptDetail>(
+        `/learn/assessments/${campaignId}/attempts/${attemptId}`,
+      )
+      .then((r) => r.data),
 
   uploadMedia: (file: File): Promise<MediaUploadResult> => {
     const form = new FormData()
@@ -1754,16 +1852,21 @@ export const learnApi = {
 
   /**
    * Открыть файл материала в новой вкладке. Тег <a href> не несёт Bearer —
-   * качаем blob через axios и открываем object-URL. Окно создаём ДО fetch
-   * (в жесте клика), иначе попап-блокер.
+   * берём у сервера короткоживущий ПОДПИСАННЫЙ адрес и ведём окно на него.
+   * Окно создаём ДО fetch (в жесте клика), иначе попап-блокер.
+   *
+   * Именно подписанный https, а НЕ blob: iOS standalone PWA открывает
+   * window.open оверлеем about:blank, который на blob-URL не переходит —
+   * «Скачать файл» упирался в белый экран (ОС 02.09). Учёт открытия
+   * (ack-гейт) сервер делает при выдаче ссылки.
    */
   openMaterialFile: async (material: LibraryMaterial): Promise<void> => {
     const win = window.open('', '_blank')
     try {
-      const resp = await api.get(`/learn/library/materials/${material.id}/download`, {
-        responseType: 'blob',
-      })
-      const url = URL.createObjectURL(resp.data as Blob)
+      const resp = await api.get<{ url: string }>(
+        `/learn/library/materials/${material.id}/download-link`,
+      )
+      const url = resp.data.url
       if (win) {
         win.location.href = url
       } else {
@@ -1774,7 +1877,6 @@ export const learnApi = {
         a.click()
         a.remove()
       }
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (e) {
       win?.close()
       throw e

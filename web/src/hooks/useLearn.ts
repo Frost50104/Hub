@@ -10,8 +10,8 @@ import {
   learnApi,
   type AudienceDimensionCounts,
   type AudienceDryRun,
+  type AudiencePayload,
   type AudienceRules,
-  type AudienceRuleDraft,
   type AuditList,
   type CertificateInfo,
   type CourseDetail,
@@ -102,6 +102,18 @@ export function useEmployees(filters: EmployeeFilters): UseQueryResult<EmployeeL
   })
 }
 
+/**
+ * Одна карточка сотрудника. Нужна ради `archived_twin` — списочная ручка это
+ * поле не заполняет.
+ */
+export function useEmployee(id: string | null): UseQueryResult<EmployeeProfile> {
+  return useQuery({
+    queryKey: ['learn-employees', 'one', id],
+    queryFn: () => learnApi.employee(id!),
+    enabled: id !== null,
+  })
+}
+
 export function useEmployeeMutation<TArgs>(
   fn: (args: TArgs) => Promise<EmployeeProfile | void>,
 ) {
@@ -126,7 +138,7 @@ export function useUnlinkedLogins(enabled: boolean): UseQueryResult<UnlinkedLogi
 // ─── Audience dry-run ────────────────────────────────────────────────────────
 
 export function useAudienceDryRun(
-  body: { is_all: boolean; rules: AudienceRuleDraft[] } | null,
+  body: AudiencePayload | null,
 ): UseQueryResult<AudienceDryRun> {
   return useQuery({
     queryKey: ['learn-audience-dry-run', body],
@@ -164,6 +176,11 @@ export function useAudienceRules(
     queryKey: ['learn-audience-rules', audienceId],
     queryFn: () => learnApi.audienceRules(audienceId!),
     enabled: audienceId !== null,
+    // Сохранение диалогов кэш не инвалидирует, а `useAudienceDraft` сеет
+    // черновик ПЕРВЫМ пришедшим значением: кэш закрытого диалога при повторном
+    // открытии подсовывал бы доредакционные правила (и «Сохранить» молча
+    // снимал бы «Скрыто ото всех»). Ноль — закрыли диалог, забыли кэш.
+    gcTime: 0,
     meta: { suppressGlobalError: true },
   })
 }

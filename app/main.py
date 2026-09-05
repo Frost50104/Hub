@@ -119,6 +119,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             reason="SIGNARIS_HUB_SIGNARIS_SERVICE_KEY missing or disabled",
         )
 
+    # Staff-sync (0052): pull штата из auth — тени + кеш hub-ролей + карточки.
+    # Ключ СВОЙ (staff_service_key, метка hub) — не общий сервисный. На staging
+    # воркер выключен флагом (общий VAPID: залп пушей ушёл бы на реальные
+    # устройства); 401/403 от auth = доступа пока нет, воркер тихо ждёт.
+    staff_task: asyncio.Task | None = None
+    if settings.staff_service_key and settings.staff_sync_enabled:
+        from app.services.staff_sync import start_worker as start_staff_worker
+
+        staff_task = asyncio.create_task(supervise("staff-sync", start_staff_worker))
+        log.info("staff_sync.task_created")
+    else:
+        log.info(
+            "staff_sync.disabled",
+            reason="SIGNARIS_HUB_STAFF_SERVICE_KEY missing or staff_sync disabled",
+        )
+
     # Sid-sync worker (Phase 2 SLO) — опрашивает фид ревокаций SSO-сессий,
     # держит локальный blacklist, чтобы require_auth отказывал в access-токенах
     # с ревокнутым sid мгновенно (≤ poll-интервал), не дожидаясь access-TTL.
@@ -137,7 +153,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        for task in (deletion_task, sid_sync_task):
+        for task in (deletion_task, staff_task, sid_sync_task):
             if task is not None:
                 task.cancel()
                 try:

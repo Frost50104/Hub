@@ -52,6 +52,21 @@ class EmployeeUpdate(BaseModel):
     status_text: str | None = Field(default=None, max_length=160)
 
 
+class ArchivedTwin(BaseModel):
+    """Однофамилец по адресу: карточка в архиве с тем же email.
+
+    Нужна как замена снятому `needs_restore`. Обычно это новый человек на
+    освободившемся корпоративном ящике — всё правильно. Но тем же путём
+    проходит ОШИБОЧНАЯ архивация, и без подсказки дубль появлялся бы молча.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    full_name: str
+    archived_at: datetime | None
+
+
 class EmployeeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -76,11 +91,34 @@ class EmployeeResponse(BaseModel):
     created_at: datetime
     # Закреплённые магазины (только для org_role=tu; заполняется в API).
     tu_store_ids: list[UUID] = []
+    # Архивная карточка с тем же email. Заполняет ТОЛЬКО `get_employee` — в
+    # списке это был бы лишний запрос на каждую строку ради редкой подсказки.
+    archived_twin: ArchivedTwin | None = None
+    # Кеш из auth (staff-sync, 0052; заполняется в API из shadow_users):
+    # hub-роль (admin|member|viewer) и честный статус учётки.
+    hub_role: str | None = None
+    auth_state: str | None = None  # no_account|not_linked|not_logged_in|active|blocked|deleted
+
+
+class InvitationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    email: str
+    full_name: str | None
+    role: str
+    expires_at: datetime | None
 
 
 class EmployeeListResponse(BaseModel):
     items: list[EmployeeResponse]
     total: int
+    # Когда штат последний раз синкался из auth; None = синка ещё не было
+    # (auth не выкатил ручку) — фронт показывает плашку «ожидает».
+    staff_synced_at: datetime | None = None
+    # Непринятые приглашения с ролью hub — «добавлен, но ещё не входил».
+    # Отдаются только hub-admin'у (скоуп all); остальным — пустой список.
+    invitations: list[InvitationResponse] = []
 
 
 class TuStoresReplace(BaseModel):
@@ -88,6 +126,10 @@ class TuStoresReplace(BaseModel):
 
 
 class ArchiveBody(BaseModel):
+    # `auth_deleted` через API не принимаем: его ставит только deletion-sync.
+    # Дефолт `manual` — то, что шлёт и новый клиент, и старые PWA-бандлы без
+    # тела; он же освобождает вход, так что застрявший бандл автоматически
+    # получает новое поведение.
     reason: str = Field(default="manual", pattern="^(manual|auto_inactivity)$")
 
 

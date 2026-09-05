@@ -47,3 +47,38 @@ class ShadowUser(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Кеш штата из auth (0052, staff-sync): роль продукта и статус учётки.
+    # client-lib'овский upsert эти колонки НЕ трогает (проверено: его SQL
+    # обновляет ровно tenant_id/email/full_name/last_seen_at) — пишет только
+    # pull-синк. NULL в auth_active = синка ещё не было.
+    hub_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    auth_active: Mapped[bool | None] = mapped_column(nullable=True)
+    staff_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class AuthInvitation(Base):
+    """Зеркало непринятого приглашения с ролью hub (0052, staff-sync).
+
+    У приглашённого нет employee_id — в shadow_users ему места нет, а именно
+    он отвечает админу на «добавлен, но ещё не входил». Снапшот: каждая
+    синхронизация заменяет состав тенанта целиком (принятые/отозванные
+    исчезают сами).
+    """
+
+    __tablename__ = "auth_invitations"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), index=True, nullable=False
+    )
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date
+from datetime import UTC, date, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -25,17 +25,20 @@ from signaris_auth import Principal
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.deps import get_db, require_auth
 from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
 from app.models.org import Department, Franchisee, Position, Store
-from app.models.shadow import ShadowUser
+from app.models.shadow import AuthInvitation, ShadowUser
 from app.schemas.employee import (
     ArchiveBody,
+    ArchivedTwin,
     EmployeeCreate,
     EmployeeListResponse,
     EmployeeResponse,
     EmployeeUpdate,
     ImportReport,
+    InvitationResponse,
     LinkBody,
     RestoreBody,
     TuStoresReplace,
@@ -45,6 +48,7 @@ from app.services import audit
 from app.services.audience_resolver import recalc_profile
 from app.services.employee_profiles import (
     archive_profile,
+    find_latest_archived_by_email,
     normalize_email,
     restore_profile,
 )
@@ -87,6 +91,46 @@ async def _to_response(db: AsyncSession, profile: EmployeeProfile) -> EmployeeRe
     return resp
 
 
+def staff_snapshot_fresh(
+    last_synced_at: datetime | None, *, now: datetime, interval_sec: float
+) -> bool:
+    """Снимок auth живой = не старше двух интервалов воркера (совет auth).
+
+    «Был хоть один синк» — залипающий флаг: сломайся ключ, экран неделю
+    уверенно писал бы «без учётки» по устаревшему снимку. Протухший снимок
+    откатывает статусы к осторожному «не привязан(а)»."""
+    if last_synced_at is None:
+        return False
+    return (now - last_synced_at).total_seconds() <= 2 * interval_sec
+
+
+def auth_state_for(
+    *,
+    employee_id: UUID | None,
+    last_activity_at: object,
+    shadow_deleted: bool,
+    auth_active: bool | None,
+    staff_synced: bool,
+) -> str:
+    """Честный статус учётки для карточки — ОДНА функция вместо двух
+    рассинхронённых признаков в JSX (бейдж считался по employee_id, заморозка
+    по last_activity_at — восстановленная карточка показывалась «не входил»
+    с замороженными полями).
+
+    До первого staff-sync утверждать «без учётки» нельзя: непривязанная
+    карточка может принадлежать человеку с живой учёткой, который просто не
+    входил, — до синка отдаём осторожное `not_linked`."""
+    if employee_id is None:
+        return "no_account" if staff_synced else "not_linked"
+    if shadow_deleted:
+        return "deleted"
+    if auth_active is False:
+        return "blocked"
+    if last_activity_at is None:
+        return "not_logged_in"
+    return "active"
+
+
 async def _to_responses(
     db: AsyncSession, profiles: list[EmployeeProfile]
 ) -> list[EmployeeResponse]:
@@ -99,10 +143,40 @@ async def _to_responses(
             )
         ):
             assignments.setdefault(profile_id, []).append(store_id)
+    # Кеш auth одним запросом на страницу (staff-sync, 0052).
+    settings = get_settings()
+    staff_synced = staff_snapshot_fresh(
+        (await db.execute(select(func.max(ShadowUser.staff_synced_at)))).scalar_one_or_none(),
+        now=datetime.now(UTC),
+        interval_sec=settings.staff_sync_interval_sec,
+    )
+    employee_ids = [p.employee_id for p in profiles if p.employee_id is not None]
+    shadows: dict[UUID, tuple[str | None, bool, bool | None]] = {}
+    if employee_ids:
+        for eid, hub_role, deleted_at, auth_active in await db.execute(
+            select(
+                ShadowUser.employee_id,
+                ShadowUser.hub_role,
+                ShadowUser.deleted_at,
+                ShadowUser.auth_active,
+            ).where(ShadowUser.employee_id.in_(employee_ids))
+        ):
+            shadows[eid] = (hub_role, deleted_at is not None, auth_active)
     out = []
     for p in profiles:
         resp = EmployeeResponse.model_validate(p)
         resp.tu_store_ids = assignments.get(p.id, [])
+        hub_role, shadow_deleted, auth_active = shadows.get(
+            p.employee_id, (None, False, None)
+        ) if p.employee_id else (None, False, None)
+        resp.hub_role = hub_role
+        resp.auth_state = auth_state_for(
+            employee_id=p.employee_id,
+            last_activity_at=p.last_activity_at,
+            shadow_deleted=shadow_deleted,
+            auth_active=auth_active,
+            staff_synced=staff_synced,
+        )
         out.append(resp)
     return out
 
@@ -164,9 +238,63 @@ async def list_employees(
         .scalars()
         .all()
     )
+    # Метка последнего синка и приглашения (только admin-скоупу: остальным
+    # список чужих приглашений не нужен и не положен).
+    synced_at = (
+        await db.execute(select(func.max(ShadowUser.staff_synced_at)))
+    ).scalar_one_or_none()
+    invitations: list[AuthInvitation] = []
+    if scope.kind == "all":
+        invitations = list(
+            (
+                await db.execute(
+                    select(AuthInvitation).order_by(AuthInvitation.email)
+                )
+            ).scalars()
+        )
     return EmployeeListResponse(
-        items=await _to_responses(db, list(rows)), total=total
+        items=await _to_responses(db, list(rows)),
+        total=total,
+        staff_synced_at=synced_at,
+        invitations=[InvitationResponse.model_validate(i) for i in invitations],
     )
+
+
+@router.post("/learn/employees/sync")
+async def trigger_staff_sync(
+    dry_run: bool = Query(default=False),
+    principal: Principal = Depends(_ADMIN),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Ручной прогон staff-sync — кнопка «Обновить из auth».
+
+    Возвращает счётчики (сколько карточек создано/привязано, конфликты) —
+    при bootstrap админ видит масштаб, включая залп ознакомительных пушей
+    новичкам. `available=false` = auth не отдаёт штат (нет ручки/доступа).
+
+    Пока `staff_sync_enabled=false`, живой прогон ПРИНУДИТЕЛЬНО становится
+    dry-run: флаг выключают ровно на время выката правок, и кнопка в обход
+    него одним кликом устроила бы bootstrap с неотзываемой рассылкой —
+    порядок включения из HUB_TASK_staff_endpoint_REPLY.md стал бы фикцией.
+    """
+    from app.services.staff_sync import sync_staff
+
+    effective_dry_run = dry_run or not get_settings().staff_sync_enabled
+    report = await sync_staff(dry_run=effective_dry_run)
+    return {
+        "available": report.available,
+        "dry_run": report.dry_run,
+        "shadows": report.shadows_upserted,
+        "profiles_created": report.profiles_created,
+        "profiles_linked": report.profiles_linked,
+        "email_conflicts": report.email_conflicts,
+        "archived_skips": report.archived_skips,
+        "service_accounts": report.service_accounts,
+        "inactive_skipped": report.inactive_skipped,
+        "roles_cleared": report.roles_cleared,
+        "archived": report.archived,
+        "invitations": report.invitations,
+    }
 
 
 @router.get("/learn/employees/unlinked", response_model=list[UnlinkedLoginResponse])
@@ -207,7 +335,15 @@ async def get_employee(
     )
     if not visible:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Карточка не найдена")
-    return await _to_response(db, profile)
+    resp = await _to_response(db, profile)
+    # Подсказка про архивную карточку с тем же адресом — только на АКТИВНОЙ и
+    # только в одиночной ручке: в списке это стоило бы запроса на строку ради
+    # случая, который встречается раз в несколько месяцев.
+    if profile.status == "active":
+        twin = await find_latest_archived_by_email(db, profile.email)
+        if twin is not None:
+            resp.archived_twin = ArchivedTwin.model_validate(twin)
+    return resp
 
 
 @router.post("/learn/employees", response_model=EmployeeResponse, status_code=201)

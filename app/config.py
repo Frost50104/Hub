@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     signaris_service_key: str | None = Field(default=None)
     deletion_sync_enabled: bool = Field(default=True)
     deletion_sync_poll_sec: float = Field(default=60.0)
+    # Staff-sync (0052): pull штата продукта из auth — тени + кеш ролей +
+    # автосоздание учебных карточек. Ключ ОТДЕЛЬНЫЙ (метка hub в auth):
+    # ошибка в общем signaris_service_key молча отняла бы отзыв SSO-сессий
+    # (sid-sync), поэтому смешивать их нельзя. На staging воркер держим
+    # выключенным: VAPID-ключ общий с прод, и bootstrap-залп по staging-копии
+    # подписок ушёл бы на реальные устройства.
+    staff_service_key: str | None = Field(default=None)
+    staff_sync_enabled: bool = Field(default=True)
+    staff_sync_interval_sec: float = Field(default=900.0)
 
     # Sid-sync (Phase 2 SLO) — фоновый воркер опрашивает фид ревокации SSO-сессий
     # (GET /api/products/revoked-sids, X-Service-Key) и держит локальный
