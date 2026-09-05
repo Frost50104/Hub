@@ -202,6 +202,64 @@ async def test_fetch_report_asks_previous_period_for_delta():
     assert periods[1] == ("2026-08-05", "2026-08-12")
 
 
+async def test_extra_filters_reach_every_olap_call_of_the_kind():
+    """Скоуп франчайзи (3б) обязан стоять в КАЖДОМ запросе вида: текущий
+    период, предыдущий (иначе дельта сравнила бы точку с сетью) и добор
+    выручки writeoff."""
+    import json
+
+    bodies: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/auth"):
+            return httpx.Response(200, text="TOK")
+        if req.url.path.endswith("/columns"):
+            return httpx.Response(200, json={"Department": {}, "DishDiscountSumInt": {}})
+        if req.url.path.endswith("/olap"):
+            bodies.append(json.loads(req.content))
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(200, text="ok")
+
+    scope = {"Department.Id": {"filterType": "IncludeValues", "values": ["g1", "g2"]}}
+    async with _client(handler) as c:
+        await fetch_report(
+            c,
+            "revenue",
+            date_from=date(2026, 8, 12),
+            date_to=date(2026, 8, 18),
+            extra_filters=scope,
+        )
+    assert len(bodies) == 2
+    assert all(b["filters"]["Department.Id"]["values"] == ["g1", "g2"] for b in bodies)
+
+    bodies.clear()
+    async with _client(handler) as c:
+        await fetch_report(
+            c,
+            "writeoff",
+            date_from=date(2026, 8, 12),
+            date_to=date(2026, 8, 18),
+            check_columns=False,
+            extra_filters=scope,
+        )
+    assert len(bodies) == 3  # текущий + предыдущий + добор выручки SALES
+    assert all("Department.Id" in b["filters"] for b in bodies)
+
+
+def test_report_cache_key_includes_scope():
+    """Без скоупа в ключе франчайзи получил бы закэшированный отчёт СЕТИ
+    (и наоборот); пустой скоуп оставляет прежние ключи."""
+    import uuid
+
+    from app.services.iiko.service import _cache_key
+
+    t = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    plain = _cache_key(t, "revenue", date(2026, 8, 1), date(2026, 8, 31))
+    scoped = _cache_key(t, "revenue", date(2026, 8, 1), date(2026, 8, 31), "abc123")
+    assert plain != scoped and plain in scoped
+    assert ":scope:" not in plain
+
+
 def test_quantity_never_invents_a_unit():
     """iiko мешает штуки и килограммы в `DishAmountInt`: «Тилапия филе кг»
     продаётся долями. Подпись «шт» была бы неправдой, а округление 0,3 → 0
