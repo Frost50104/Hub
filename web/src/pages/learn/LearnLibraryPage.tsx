@@ -46,6 +46,9 @@ import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { RailRow, RailSection, RightRail } from '@/components/ui/RightRail'
 import { StatTile } from '@/components/ui/StatTile'
 import { useLibrary, useLibraryMutation } from '@/hooks/useLearn'
+import { audienceDraftProblem } from '@/lib/audienceHints'
+import { materialDownloadName } from '@/lib/materialFileName'
+import { isStandalone } from '@/lib/standalone'
 import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
 import { nbsp, plural } from '@/lib/typography'
@@ -560,6 +563,28 @@ function MaterialDialog({
     [inline],
   )
 
+  // Standalone-PWA (домашний экран): встроенный просмотрщик НЕ рендерит
+  // office-файлы вообще — лог прода 02.09: iPhone получил 200 + inline и всё
+  // равно белый экран. Единственный нативный путь — системная шторка
+  // «Поделиться» (Сохранить в Файлы / открыть в Excel): качаем байты с
+  // Bearer (materialFile — он же отмечает открытие) и зовём navigator.share.
+  // → true, если файл отдан шторкой (или человек сам её закрыл).
+  const shareInStandalone = async (): Promise<boolean> => {
+    if (!isStandalone() || typeof navigator.share !== 'function') return false
+    const mime = material.current_version?.mime ?? 'application/octet-stream'
+    const { bytes, objectUrl } = await learnApi.materialFile(material.id)
+    URL.revokeObjectURL(objectUrl)
+    const file = new File([bytes as BlobPart], materialDownloadName(material), { type: mime })
+    if (!navigator.canShare?.({ files: [file] })) return false
+    try {
+      await navigator.share({ files: [file], title: material.title })
+    } catch (e) {
+      // Отмена шторки человеком — не ошибка; всё прочее (истёкшая активация
+      // жеста на большом файле и т.п.) — честный фолбэк на window.open.
+      if (!(e instanceof DOMException && e.name === 'AbortError')) return false
+    }
+    return true
+  }
   const open = useLibraryMutation(async () => {
     if (material.kind === 'link' && material.url) {
       await learnApi.trackOpen(material.id)
@@ -567,13 +592,29 @@ function MaterialDialog({
     } else if (viewerKind) {
       // Тот же download-эндпоинт — он же отмечает открытие для «Ознакомлен».
       setInline(await learnApi.materialFile(material.id))
+    } else if (await shareInStandalone()) {
+      // Файл ушёл системной шторкой.
+    } else if (material.download_url) {
+      // ГОТОВЫЙ https в жесте клика: standalone-PWA не скриптует окно после
+      // window.open('') (белый about:blank, ОС 02.09), а window.open(адрес)
+      // открывается честно. Отметку открытия шлём параллельно, без await —
+      // задержка выбила бы навигацию из пользовательского жеста.
+      void learnApi.trackOpen(material.id)
+      window.open(material.download_url, '_blank', 'noopener')
     } else {
       await learnApi.openMaterialFile(material)
     }
     setOpenedLocally(true)
   })
   const download = useLibraryMutation(async () => {
-    await learnApi.openMaterialFile(material)
+    if (await shareInStandalone()) {
+      // Файл ушёл системной шторкой.
+    } else if (material.download_url) {
+      void learnApi.trackOpen(material.id)
+      window.open(material.download_url, '_blank', 'noopener')
+    } else {
+      await learnApi.openMaterialFile(material)
+    }
     setOpenedLocally(true)
   })
   const ack = useLibraryMutation(() =>
@@ -923,6 +964,9 @@ function MaterialFormDialog({
       re_ack_on_new_version: reAck,
       ack_deadline_days: deadlineDays ? Number(deadlineDays) : null,
       review_period_months: reviewMonths ? Number(reviewMonths) : null,
+      // Тип можно менять и при редактировании (02.09): сервер сам пересчитает
+      // url/current_version_no и эффективную ack-версию.
+      kind,
       url: kind === 'link' ? url.trim() : null,
     }
     if (isNew) {
@@ -1022,8 +1066,11 @@ function MaterialFormDialog({
                 onChange={(e) => setDescription(e.target.value)}
               />
             </div>
-            {isNew && (
-              <div className="flex gap-2">
+            {/* Тумблер доступен и при редактировании: сервер пересчитает
+                версию и ack-семантику. Зеркала 422 «published link→file без
+                версий» здесь сознательно нет — клиент не знает истории версий,
+                редкий случай ловится серверным текстом в тосте. */}
+            <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => setKind('file')}
@@ -1049,6 +1096,11 @@ function MaterialFormDialog({
                   <Link2 className="mx-auto mb-1 h-4 w-4" /> Ссылка
                 </button>
               </div>
+            {!isNew && kind === 'file' && !material.current_version_no && (
+              <p className="text-[13px] text-text3">
+                Файл загружается в карточке материала («Загрузить файл») после
+                сохранения.
+              </p>
             )}
             {kind === 'link' && (
               <div className="space-y-1.5">
@@ -1207,7 +1259,7 @@ function MaterialAudienceDialog({
           </Button>
           <Button
             type="button"
-            disabled={save.isPending || !audience.ready}
+            disabled={save.isPending || !audience.ready || audienceDraftProblem(value) !== null}
             onClick={() =>
               void save.mutateAsync(undefined as never).then(() => {
                 toast.success('Аудитория обновлена')
@@ -1266,7 +1318,7 @@ function SectionAudienceDialog({
           </Button>
           <Button
             type="button"
-            disabled={save.isPending || !audience.ready}
+            disabled={save.isPending || !audience.ready || audienceDraftProblem(value) !== null}
             onClick={() =>
               void save.mutateAsync(undefined as never).then(() => {
                 toast.success('Аудитория раздела обновлена')

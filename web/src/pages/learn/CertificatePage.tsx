@@ -6,6 +6,7 @@ import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { QueryError } from '@/components/QueryError'
+import { isStandalone } from '@/lib/standalone'
 import { Button } from '@/components/ui/Button'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useMe } from '@/hooks/useMe'
@@ -42,13 +43,6 @@ function certMeta(cert: CertificateInfo): string | null {
   if (cert.lessons_count) parts.push(plural(cert.lessons_count, 'урок', 'урока', 'уроков'))
   if (cert.best_score_pct !== null && cert.best_score_pct !== undefined) parts.push(`тест ${cert.best_score_pct}%`)
   return parts.length ? nbsp(parts.join(' · ')) : null
-}
-
-function isStandalone(): boolean {
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (navigator as Navigator & { standalone?: boolean }).standalone === true
-  )
 }
 
 /** Печать: в iOS-PWA `window.print()` ненадёжен — открываем ту же страницу в браузере. */
