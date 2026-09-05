@@ -470,6 +470,80 @@ async def test_delete_writes_audit_with_lost_attempt_count(
     assert "attempts" in (row.diff or {})
 
 
+# ─── Разбор ответов в отчёте (02.09) ─────────────────────────────────────────
+
+
+async def test_report_attempt_detail_for_admin(db: AsyncSession, tenant_id: uuid.UUID):
+    """Admin видит разбор попытки: ответы человека, вердикты и правильные
+    варианты — В ОБХОД show_correct_answers (флаг защищает пересдачи от
+    сотрудника, а не прячет ответы от того, кто их сам ввёл в редакторе).
+    Плюс отчёт несёт attempt_id лучшей попытки и агрегат question_stats."""
+    from app.api.assessments import campaign_attempt_detail
+
+    hr, _ = await _mk_admin(db, tenant_id, email=f"hr-{uuid.uuid4().hex[:6]}@t.ru")
+    member, profile = await _mk_member(
+        db, tenant_id, email=f"m-{uuid.uuid4().hex[:6]}@t.ru"
+    )
+    campaign = await _mk_campaign(db, hr, title="Разбор ответов")
+    await activate_campaign(campaign.id, hr, db)
+
+    attempt = await start_or_resume_attempt(campaign.quiz_id, member, db)
+    qid = attempt.questions[0].id
+    # Отвечаем НЕВЕРНО (правильный — вариант 1).
+    await save_answer(attempt.id, AnswerBody(question_id=qid, value=0), member, db)
+    await submit_attempt(attempt.id, member, db)
+
+    report = await campaign_report(campaign.id, hr, db)
+    row = next(r for r in report.rows if r.profile_id == profile.id)
+    assert row.status == "failed"
+    assert row.attempt_id is not None
+
+    detail = await campaign_attempt_detail(campaign.id, row.attempt_id, hr, db)
+    assert detail.employee_name == profile.full_name
+    assert detail.answers[qid] == 0
+    assert detail.results[qid] is False
+    assert qid in detail.correct_answers  # правильные ответы доехали
+
+    # Агрегат: одна завершённая попытка, одна ошибка — 100%.
+    assert report.question_stats is not None
+    stat = next(s for s in report.question_stats if s.wrong >= 1)
+    assert stat.attempts >= 1 and stat.fail_rate_pct > 0
+
+
+async def test_report_attempt_detail_gates(db: AsyncSession, tenant_id: uuid.UUID):
+    """Разбор — только hub-admin (решение владельца 02.09): publisher — 403,
+    его отчёт — без question_stats; попытка чужой кампании — 404 даже админу."""
+    from app.api.assessments import campaign_attempt_detail
+
+    hr, _ = await _mk_admin(db, tenant_id, email=f"hr-{uuid.uuid4().hex[:6]}@t.ru")
+    publisher, _ = await _mk_publisher(db, tenant_id)
+    member, profile = await _mk_member(
+        db, tenant_id, email=f"m-{uuid.uuid4().hex[:6]}@t.ru"
+    )
+    campaign = await _mk_campaign(db, hr, title="Гейты разбора")
+    await activate_campaign(campaign.id, hr, db)
+    attempt = await start_or_resume_attempt(campaign.quiz_id, member, db)
+    qid = attempt.questions[0].id
+    await save_answer(attempt.id, AnswerBody(question_id=qid, value=1), member, db)
+    await submit_attempt(attempt.id, member, db)
+
+    report = await campaign_report(campaign.id, hr, db)
+    row = next(r for r in report.rows if r.profile_id == profile.id)
+    assert row.attempt_id is not None
+
+    with pytest.raises(HTTPException) as exc:
+        await campaign_attempt_detail(campaign.id, row.attempt_id, publisher, db)
+    assert exc.value.status_code == 403
+
+    pub_report = await campaign_report(campaign.id, publisher, db)
+    assert pub_report.question_stats is None
+
+    other = await _mk_campaign(db, hr, title="Чужая кампания")
+    with pytest.raises(HTTPException) as exc:
+        await campaign_attempt_detail(other.id, row.attempt_id, hr, db)
+    assert exc.value.status_code == 404
+
+
 async def test_list_reports_attempt_count_to_manager(
     db: AsyncSession, tenant_id: uuid.UUID
 ):

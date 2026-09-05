@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, BadgeCheck, Import, Pencil, Plus, Trash2, Users, X } from 'lucide-react'
+import { ArrowLeft, BadgeCheck, EyeOff, Import, Pencil, Plus, Trash2, Users, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
@@ -19,6 +19,8 @@ import { SegmentGroup, type SegmentOption } from '@/components/ui/SegmentGroup'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMe } from '@/hooks/useMe'
+import { describeAnswer, describeCorrect, NO_ANSWER } from '@/lib/attemptAnswers'
+import { audienceDraftProblem } from '@/lib/audienceHints'
 import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
 import {
@@ -256,8 +258,16 @@ function ReportStatusBadge({ status }: { status: AssessmentReportRow['status'] }
   )
 }
 
-function ReportView({ campaigns }: { campaigns: AssessmentCampaign[] }) {
+function ReportView({
+  campaigns,
+  isAdmin,
+}: {
+  campaigns: AssessmentCampaign[]
+  isAdmin: boolean
+}) {
   const [selected, setSelected] = useState<string | null>(campaigns[0]?.id ?? null)
+  // Разбор ответов: только admin (сервер отдаёт ручку тем же гейтом).
+  const [openAttemptId, setOpenAttemptId] = useState<string | null>(null)
   const campaign = campaigns.find((c) => c.id === selected) ?? campaigns[0] ?? null
   const report = useQuery({
     queryKey: ['learn-assessment-report', campaign?.id],
@@ -308,6 +318,40 @@ function ReportView({ campaigns }: { campaigns: AssessmentCampaign[] }) {
       {report.data && rows.length === 0 && (
         <p className="text-[14px] text-text2">В аудитории кампании пока никого нет.</p>
       )}
+      {(report.data?.question_stats?.length ?? 0) > 0 && (
+        <div className="overflow-hidden rounded-[14px] border border-hair bg-tint">
+          <div className="bg-surface px-3.5 py-2.5">
+            <p className="text-[12px] font-bold uppercase tracking-[0.07em] text-text2">
+              Сложные вопросы
+            </p>
+            <p className="mt-0.5 text-[12px] text-text3">
+              По всем завершённым попыткам — где чаще всего ошибались или
+              пропускали ответ.
+            </p>
+          </div>
+          {report.data!.question_stats!.map((s, i) => (
+            <div
+              key={s.prompt}
+              className={cn(
+                'flex items-center justify-between gap-3 px-3.5 py-[9px]',
+                i > 0 && 'border-t border-hair',
+              )}
+            >
+              <span className="min-w-0 text-[14px] leading-[1.4] text-text [text-wrap:pretty]">
+                {s.prompt}
+              </span>
+              <span
+                className={cn(
+                  'shrink-0 font-display text-[14px] font-bold tabular-nums',
+                  s.fail_rate_pct >= 50 ? 'text-red' : 'text-text',
+                )}
+              >
+                {s.wrong} из {s.attempts} · {s.fail_rate_pct}%
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       {rows.length > 0 && (
         <div className="overflow-hidden rounded-[14px] border border-hair bg-tint">
           <div className="hidden grid-cols-[minmax(0,1fr)_130px_72px_116px] items-center gap-3 bg-surface px-3.5 py-2.5 text-[12px] font-bold uppercase tracking-[0.07em] text-text2 lg:grid">
@@ -316,12 +360,25 @@ function ReportView({ campaigns }: { campaigns: AssessmentCampaign[] }) {
             <span>Балл</span>
             <span>Завершено</span>
           </div>
-          {rows.map((row, i) => (
-            <div
+          {rows.map((row, i) => {
+            // Клик — только админу и только по завершённой попытке: остальным
+            // сервер ответил бы 403/404, а кнопку, дающую ошибку, не рисуем.
+            const clickable = isAdmin && row.attempt_id !== null
+            const Row = clickable ? ('button' as const) : ('div' as const)
+            return (
+            <Row
               key={row.profile_id}
+              {...(clickable
+                ? {
+                    type: 'button' as const,
+                    onClick: () => setOpenAttemptId(row.attempt_id),
+                    title: 'Разбор ответов',
+                  }
+                : {})}
               className={cn(
-                'flex items-center gap-2.5 px-3.5 py-[11px] lg:grid lg:grid-cols-[minmax(0,1fr)_130px_72px_116px] lg:gap-3',
+                'flex w-full items-center gap-2.5 px-3.5 py-[11px] text-left lg:grid lg:grid-cols-[minmax(0,1fr)_130px_72px_116px] lg:gap-3',
                 i > 0 ? 'border-t border-hair' : 'lg:border-t lg:border-hair',
+                clickable && 'cursor-pointer transition-colors hover:bg-glass',
               )}
             >
               <span className="min-w-0 flex-1 lg:flex-none">
@@ -341,11 +398,114 @@ function ReportView({ campaigns }: { campaigns: AssessmentCampaign[] }) {
               <span className="hidden text-[14px] text-text2 lg:block">
                 {row.finished_at ? formatDay(row.finished_at) : '—'}
               </span>
-            </div>
-          ))}
+            </Row>
+            )
+          })}
         </div>
       )}
+      {campaign && openAttemptId && (
+        <ReportAttemptDialog
+          campaignId={campaign.id}
+          attemptId={openAttemptId}
+          onClose={() => setOpenAttemptId(null)}
+        />
+      )}
     </div>
+  )
+}
+
+/** Разбор попытки (admin-only): вопросы из СНАПШОТА попытки, ответ человека,
+ *  вердикт и правильный вариант — тексты вариантов берутся из снапшота,
+ *  текущие вопросы кампании после правки/реимпорта тут ни при чём. */
+function ReportAttemptDialog({
+  campaignId,
+  attemptId,
+  onClose,
+}: {
+  campaignId: string
+  attemptId: string
+  onClose: () => void
+}) {
+  const detail = useQuery({
+    queryKey: ['learn-assessment-attempt', attemptId],
+    queryFn: () => learnApi.assessmentAttempt(campaignId, attemptId),
+    meta: { suppressGlobalError: true },
+  })
+  const d = detail.data
+  return (
+    <ResponsiveDialog
+      open
+      onOpenChange={(v) => !v && onClose()}
+      title={d ? `Ответы: ${d.employee_name}` : 'Разбор ответов'}
+      footer={
+        <Button variant="secondary" onClick={onClose}>
+          Закрыть
+        </Button>
+      }
+    >
+      {detail.isLoading && <SkeletonRows rows={5} />}
+      {detail.isError && <QueryError onRetry={() => void detail.refetch()} />}
+      {d && (
+        <div className="flex flex-col gap-3">
+          <p className="text-[14px] text-text2">
+            {d.needs_review
+              ? 'На проверке — открытые вопросы ещё не оценены'
+              : d.score_pct !== null
+                ? `Балл: ${d.score_pct}%`
+                : 'Балл не выставлен'}
+            {d.attempt_no > 1 ? ` · попытка ${d.attempt_no}` : ''}
+            {d.finished_at ? ` · ${formatDay(d.finished_at)}` : ''}
+          </p>
+          {d.questions.map((q, i) => {
+            const verdict = d.results[q.id]
+            const answerText = describeAnswer(q, d.answers[q.id])
+            return (
+              <div key={q.id} className="rounded-[12px] border border-hair bg-tint p-3">
+                <div className="flex items-start justify-between gap-2.5">
+                  <p className="min-w-0 text-[14px] font-semibold leading-[1.4] text-text [text-wrap:pretty]">
+                    {i + 1}. {q.prompt}
+                  </p>
+                  <span
+                    className={cn(
+                      'inline-flex h-[22px] shrink-0 items-center rounded-md px-2 text-[12px] font-semibold',
+                      verdict === true
+                        ? 'bg-green-deep text-bg'
+                        : verdict === false
+                          ? 'bg-red text-bg'
+                          : 'bg-surface text-text',
+                    )}
+                  >
+                    {verdict === true ? 'Верно' : verdict === false ? 'Неверно' : 'На проверке'}
+                  </span>
+                </div>
+                {q.media_url && (
+                  <img
+                    src={q.media_url}
+                    alt=""
+                    className="mt-2 max-h-40 rounded-lg object-contain"
+                  />
+                )}
+                <p
+                  className={cn(
+                    'mt-2 text-[14px] leading-[1.45]',
+                    answerText === NO_ANSWER ? 'text-text3' : 'text-text',
+                  )}
+                >
+                  <span className="text-text3">Ответ: </span>
+                  {answerText}
+                </p>
+                {verdict === false && q.qtype !== 'open' && (
+                  <p className="mt-1 text-[14px] leading-[1.45] text-text2">
+                    <span className="text-text3">Правильно: </span>
+                    {describeCorrect(q, d.correct_answers[q.id])}
+                  </p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </ResponsiveDialog>
   )
 }
 
@@ -371,6 +531,13 @@ function ManagerCampaignCard({ campaign }: { campaign: AssessmentCampaign }) {
         <Badge variant={active ? 'default' : 'secondary'} className={!active ? 'text-text' : undefined}>
           {CAMPAIGN_STATUS_LABEL[campaign.status]}
         </Badge>
+        {/* Аудитория «скрыто ото всех»: без бейджа «прошли 0 из 0» выглядит
+            поломкой, а не осознанным скрытием. */}
+        {campaign.audience_hidden && (
+          <Badge variant="secondary" className="gap-1 text-text">
+            <EyeOff className="h-3 w-3" /> Скрыта
+          </Badge>
+        )}
         {campaign.ends_at && (
           <span className="text-[13px] text-text2 lg:text-[14px]">
             {active ? 'до' : 'закрыта'} {formatDay(campaign.ends_at)}
@@ -809,7 +976,7 @@ function CampaignAudienceDialog({ campaign, onClose }: { campaign: AssessmentCam
             Отмена
           </Button>
           <Button
-            disabled={save.isPending || !audience.ready}
+            disabled={save.isPending || !audience.ready || audienceDraftProblem(value) !== null}
             onClick={() =>
               void save.mutateAsync(undefined as never).then(() => {
                 toast.success('Аудитория обновлена')
@@ -1018,7 +1185,7 @@ export function LearnAssessmentsPage() {
         )}
 
         {data.data && effectiveView === 'report' && (
-          <ReportView campaigns={items.filter((c) => c.status !== 'draft')} />
+          <ReportView campaigns={items.filter((c) => c.status !== 'draft')} isAdmin={isAdmin} />
         )}
 
         {data.data && effectiveView === 'manage' && (

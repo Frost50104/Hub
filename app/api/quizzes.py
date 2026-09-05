@@ -145,20 +145,31 @@ def _snapshot_questions(snapshot: list[dict]) -> list[SnapshotQuestion]:
     return out
 
 
+def attempt_results(attempt: QuizAttempt) -> dict[str, bool | None]:
+    """Пер-вопросные вердикты завершённой попытки, с учётом ревью.
+
+    None = open-вопрос ещё не проверен. После ревью open-вопросы получают
+    вердикт по баллам HR (`review_scores`) — без этого override уже
+    оценённые ответы выглядели бы «не проверено». Переиспользуется отчётом
+    аттестаций (разбор попытки + агрегат «Сложные вопросы»).
+    """
+    scored = score_attempt(attempt.snapshot, attempt.answers)
+    results: dict[str, bool | None] = dict(scored.per_question)
+    if attempt.review_scores:
+        by_id = {q["id"]: float(q.get("points") or 1) for q in attempt.snapshot}
+        for qid, score in attempt.review_scores.items():
+            if qid in by_id:
+                results[qid] = float(score) >= by_id[qid]
+    return results
+
+
 def _attempt_response(
     quiz: Quiz, attempt: QuizAttempt, *, with_results: bool = False
 ) -> AttemptResponse:
     results = None
     correct_answers = None
     if with_results and attempt.finished_at is not None:
-        scored = score_attempt(attempt.snapshot, attempt.answers)
-        results = dict(scored.per_question)
-        if attempt.review_scores:
-            # После ревью open-вопросы получают вердикт по баллам HR.
-            by_id = {q["id"]: float(q.get("points") or 1) for q in attempt.snapshot}
-            for qid, score in attempt.review_scores.items():
-                if qid in by_id:
-                    results[qid] = float(score) >= by_id[qid]
+        results = attempt_results(attempt)
         if quiz.show_correct_answers and not (
             attempt.needs_review and attempt.reviewed_at is None
         ):

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,10 +17,15 @@ from signaris_auth import Principal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.quizzes import _manage_response, consumer_quiz_state
+from app.api.quizzes import (
+    _manage_response,
+    _snapshot_questions,
+    attempt_results,
+    consumer_quiz_state,
+)
 from app.deps import get_db, require_auth
 from app.models.assessment import AssessmentCampaign
-from app.models.audience import AudienceMember
+from app.models.audience import Audience, AudienceMember
 from app.models.employee_profile import EmployeeProfile
 from app.models.quiz import Quiz, QuizAttempt, QuizQuestion
 from app.schemas.library import AudienceBody
@@ -27,6 +33,7 @@ from app.schemas.quiz import (
     QuizConsumerResponse,
     QuizManageResponse,
     QuizUpsert,
+    SnapshotQuestion,
 )
 from app.services import audit, lifecycle
 from app.services.audience_resolver import set_object_audience
@@ -61,6 +68,9 @@ class CampaignView(BaseModel):
     my_state: QuizConsumerResponse | None = None
     # Менеджеру:
     audience_size: int = 0
+    # Аудитория «скрыто ото всех» (0051): без явного бейджа карточка врала бы
+    # «прошли 0 из 0», не объясняя почему.
+    audience_hidden: bool = False
     completed_count: int = 0
     # ВСЕ попытки по тесту кампании, без пересечения с аудиторией. Именно
     # столько результатов уничтожит удаление, и врать тут нельзя:
@@ -79,12 +89,44 @@ class ReportRow(BaseModel):
     status: str  # not_started | in_progress | pending_review | passed | failed
     score_pct: int | None
     finished_at: datetime | None
+    # Лучшая завершённая попытка — та же, чей балл показан в строке; хендл
+    # для админского разбора ответов (клик по строке отчёта).
+    attempt_id: UUID | None = None
+
+
+class QuestionStat(BaseModel):
+    """«Сложные вопросы»: доля ошибок по вопросу среди всех сдававших."""
+
+    prompt: str
+    qtype: str
+    attempts: int
+    wrong: int
+    fail_rate_pct: int
 
 
 class ReportResponse(BaseModel):
     campaign_id: UUID
     title: str
     rows: list[ReportRow]
+    # Только hub-admin (решение владельца 02.09); None = не считалось.
+    question_stats: list[QuestionStat] | None = None
+
+
+class ReportAttemptResponse(BaseModel):
+    """Разбор попытки для админского отчёта: ответы человека + правильные."""
+
+    attempt_id: UUID
+    profile_id: UUID
+    employee_name: str
+    attempt_no: int
+    finished_at: datetime | None
+    score_pct: int | None
+    passed: bool | None
+    needs_review: bool
+    questions: list[SnapshotQuestion]
+    answers: dict[str, Any]
+    results: dict[str, bool | None]
+    correct_answers: dict[str, Any]
 
 
 
@@ -171,6 +213,18 @@ async def list_campaigns(
             if _in_window(c, now)
         ]
 
+    # Скрытые аудитории (0051) — одним запросом на весь список, а не по одной.
+    hidden_audiences: set[UUID] = set()
+    if is_manager:
+        aud_ids = [c.audience_id for c in campaigns if c.audience_id is not None]
+        if aud_ids:
+            hidden_audiences = {
+                r[0]
+                for r in await db.execute(
+                    select(Audience.id).where(Audience.id.in_(aud_ids), Audience.is_none)
+                )
+            }
+
     out = []
     for campaign in campaigns:
         quiz = await _campaign_quiz(db, campaign.id)
@@ -230,6 +284,7 @@ async def list_campaigns(
                 created_at=campaign.created_at,
                 my_state=my_state,
                 audience_size=audience_size,
+                audience_hidden=campaign.audience_id in hidden_audiences,
                 completed_count=completed_count,
                 attempt_count=attempt_count,
             )
@@ -335,6 +390,7 @@ async def set_campaign_audience(
             tenant_id=principal.tenant_id,
             current_audience_id=campaign.audience_id,
             is_all=body.is_all,
+            is_none=body.is_none,
             rules=[r.to_spec() for r in body.rules],
             object_hint=f"assessment:{campaign.id}",
         )
@@ -628,10 +684,12 @@ async def campaign_report(
         finished_at = None
         if any(a.finished_at is None for a in attempts):
             status = "in_progress"
+        attempt_id = None
         if finished:
             best = max(finished, key=lambda a: (a.score_pct or 0))
             score = best.score_pct
             finished_at = best.finished_at
+            attempt_id = best.id
             if any(a.needs_review and a.reviewed_at is None for a in finished):
                 status = "pending_review"
             elif any(a.passed for a in finished):
@@ -645,6 +703,105 @@ async def campaign_report(
                 status=status,
                 score_pct=score,
                 finished_at=finished_at,
+                attempt_id=attempt_id,
             )
         )
-    return ReportResponse(campaign_id=campaign.id, title=campaign.title, rows=report_rows)
+    return ReportResponse(
+        campaign_id=campaign.id,
+        title=campaign.title,
+        rows=report_rows,
+        question_stats=_question_stats(attempts_by_profile)
+        if lifecycle.can(role, "admin")
+        else None,
+    )
+
+
+@router.get(
+    "/learn/assessments/{campaign_id}/attempts/{attempt_id}",
+    response_model=ReportAttemptResponse,
+)
+async def campaign_attempt_detail(
+    campaign_id: UUID,
+    attempt_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> ReportAttemptResponse:
+    """Разбор попытки из отчёта — только hub-admin (решение владельца 02.09).
+
+    `correct_answers` отдаются В ОБХОД `quiz.show_correct_answers`: флаг
+    защищает пересдачи от сотрудника, а не прячет ответы от админа, который
+    сам ввёл их в редакторе вопросов. Publisher'ам ручка не открыта — их
+    доступ к ответам (без правильных) остаётся ревью-ручкой
+    `GET /learn/quiz-attempts/{id}`. Всё берётся из СНАПШОТА попытки
+    (варианты шаффлятся per attempt, answer переиндексирован) — текущие
+    QuizQuestion после правки/реимпорта тут ни при чём.
+    """
+    await require_content_role(db, principal, "admin")
+    await _campaign_or_404(db, campaign_id)
+    quiz = await _campaign_quiz(db, campaign_id)
+    attempt = await db.get(QuizAttempt, attempt_id)
+    if quiz is None or attempt is None or attempt.quiz_id != quiz.id:
+        raise HTTPException(status_code=404, detail="Попытка не найдена")
+    if attempt.finished_at is None:
+        raise HTTPException(status_code=409, detail="Попытка ещё не завершена")
+    profile = await db.get(EmployeeProfile, attempt.profile_id)
+    return ReportAttemptResponse(
+        attempt_id=attempt.id,
+        profile_id=attempt.profile_id,
+        employee_name=profile.full_name if profile else "—",
+        attempt_no=attempt.attempt_no,
+        finished_at=attempt.finished_at,
+        score_pct=attempt.score_pct,
+        passed=attempt.passed,
+        needs_review=attempt.needs_review and attempt.reviewed_at is None,
+        questions=_snapshot_questions(attempt.snapshot),
+        answers=attempt.answers,
+        results=attempt_results(attempt),
+        correct_answers={
+            q["id"]: q.get("answer") for q in attempt.snapshot if q.get("answer")
+        },
+    )
+
+
+def _question_stats(
+    attempts_by_profile: dict[UUID, list[QuizAttempt]],
+) -> list[QuestionStat]:
+    """«Сложные вопросы» по ВСЕМ завершённым попыткам квиза кампании.
+
+    Без пересечения с текущей аудиторией (как `attempt_count`) — смена
+    состава не должна стирать статистику. Бакет — по PROMPT, а не по id
+    вопроса: импорт вопросов кампании — REPLACE с новыми id, и бакет по id
+    расщеплял бы один вопрос на два (тот же приём, что у «Тем провалов» в
+    learn_analytics). Open-вопросы без ревью (вердикт None) не судим;
+    «не ответил» честно считается ошибкой — завершил попытку и пропустил.
+    """
+    buckets: dict[str, list[int]] = {}  # prompt → [wrong, total]
+    qtypes: dict[str, str] = {}
+    for attempts in attempts_by_profile.values():
+        for attempt in attempts:
+            if attempt.finished_at is None:
+                continue
+            results = attempt_results(attempt)
+            for q in attempt.snapshot:
+                verdict = results.get(q["id"])
+                if verdict is None:
+                    continue
+                bucket = buckets.setdefault(q["prompt"], [0, 0])
+                bucket[1] += 1
+                if verdict is False:
+                    bucket[0] += 1
+                qtypes.setdefault(q["prompt"], q["qtype"])
+    return sorted(
+        (
+            QuestionStat(
+                prompt=prompt,
+                qtype=qtypes[prompt],
+                attempts=total,
+                wrong=wrong,
+                fail_rate_pct=round(wrong * 100 / total),
+            )
+            for prompt, (wrong, total) in buckets.items()
+            if wrong > 0
+        ),
+        key=lambda s: (-s.fail_rate_pct, s.prompt),
+    )
