@@ -63,6 +63,9 @@ class Audience(Base):
     tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
     # Явный шорткат «всем активным» — без строк-правил.
     is_all: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # «Никому» (0051): оверлей поверх правил — строки сохраняются, членство
+    # вычищается пересчётом. Снятие флага возвращает прежнюю аудиторию.
+    is_none: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     # Отладочная подсказка, чем владеет audience («course:...», «material:...»).
     object_hint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

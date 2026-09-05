@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  audienceDraftProblem,
+  draftProblemText,
   emptyPickReason,
   emptyPickText,
   type DimensionCounts,
   type PickedCondition,
 } from './audienceHints'
+import type { AudiencePayload, AudienceRuleDraft } from './learn'
 
 const counts: DimensionCounts = {
   position_ids: { seller: 2 },
@@ -88,5 +91,62 @@ describe('emptyPickReason', () => {
     expect(
       emptyPickReason([cond('position_ids', 'admin', 'Должность', 'Админ')], undefined),
     ).toBeNull()
+  })
+})
+
+// ─── audienceDraftProblem: что нельзя сохранять ──────────────────────────────
+
+function rule(mode: 'include' | 'exclude', patch: Partial<AudienceRuleDraft> = {}): AudienceRuleDraft {
+  return {
+    mode,
+    profile_ids: [],
+    position_ids: [],
+    position_group_ids: [],
+    store_ids: [],
+    store_group_ids: [],
+    franchisee_ids: [],
+    franchisee_group_ids: [],
+    department_ids: [],
+    user_group_ids: [],
+    org_roles: [],
+    ...patch,
+  }
+}
+
+function draft(patch: Partial<AudiencePayload> = {}): AudiencePayload {
+  return { is_all: false, is_none: false, rules: [], ...patch }
+}
+
+describe('audienceDraftProblem', () => {
+  it('снятая галка «всем» без правил — не настроено (маскировало «всем»)', () => {
+    expect(audienceDraftProblem(draft())).toBe('unconfigured')
+  })
+
+  it('пустая include-строка — своя проблема, приоритетнее «не настроено»', () => {
+    expect(audienceDraftProblem(draft({ rules: [rule('include')] }))).toBe('empty-include')
+  })
+
+  it('валидные состояния проходят: всем, правила, exclude-only', () => {
+    expect(audienceDraftProblem(draft({ is_all: true }))).toBeNull()
+    expect(
+      audienceDraftProblem(draft({ rules: [rule('include', { org_roles: ['office'] })] })),
+    ).toBeNull()
+    // Exclude-only легально: база «все активные» минус исключённые.
+    expect(
+      audienceDraftProblem(draft({ rules: [rule('exclude', { org_roles: ['employee'] })] })),
+    ).toBeNull()
+  })
+
+  it('«скрыто ото всех» валидно даже без правил — не путать с «не настроено»', () => {
+    expect(audienceDraftProblem(draft({ is_none: true }))).toBeNull()
+    expect(audienceDraftProblem(draft({ is_none: true, is_all: true }))).toBeNull()
+  })
+
+  it('тексты подсказки называют все три выхода', () => {
+    const text = draftProblemText('unconfigured')
+    expect(text).toContain('Видно всем')
+    expect(text).toContain('правило')
+    expect(text).toContain('Скрыть ото всех')
+    expect(draftProblemText('empty-include')).toContain('не выбрано ни одного условия')
   })
 })

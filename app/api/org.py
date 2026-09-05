@@ -661,7 +661,9 @@ async def audience_dry_run(
     try:
         specs = [r.to_spec() for r in body.rules]
         validate_rules(specs)
-        count, sample_ids = await dry_run(db, is_all=body.is_all, rules=specs)
+        count, sample_ids = await dry_run(
+            db, is_all=body.is_all, rules=specs, is_none=body.is_none
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
@@ -698,6 +700,8 @@ async def audience_dimension_counts(
 
 class AudienceRulesResponse(BaseModel):
     is_all: bool
+    # «Скрыто ото всех» (0051) — пикер сеет флаг в черновик вместе с правилами.
+    is_none: bool
     rules: list[AudienceRuleBody]
     # Имена для чипов «Сотрудник»: пикер грузит max 100 активных, правило
     # может ссылаться на кого угодно (включая архивных).
@@ -713,7 +717,7 @@ async def get_audience_rules(
     """Правила аудитории для предзаполнения пикера (ОС 2026-08-10: диалоги
     открывались пустыми — казалось, что группы «не сохраняются»)."""
     await require_content_role(db, principal, "publisher")
-    is_all, rows = await load_audience_rules(db, audience_id)
+    is_all, is_none, rows = await load_audience_rules(db, audience_id)
     rules = [
         AudienceRuleBody(
             mode=r.mode,
@@ -741,7 +745,9 @@ async def get_audience_rules(
                 )
             )
         }
-    return AudienceRulesResponse(is_all=is_all, rules=rules, profile_labels=labels)
+    return AudienceRulesResponse(
+        is_all=is_all, is_none=is_none, rules=rules, profile_labels=labels
+    )
 
 
 @router.post("/learn/audiences/rebuild")

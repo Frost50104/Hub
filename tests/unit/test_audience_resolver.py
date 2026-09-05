@@ -129,6 +129,22 @@ def test_exclude_applies_even_with_is_all():
     assert audience_matches(True, rules, EmployeeAttrs(profile_id=uuid4()))
 
 
+def test_is_none_beats_everything():
+    """«Скрыто ото всех» (0051) бьёт и is_all, и совпавшие include-правила.
+
+    Правила при is_none лежат в БД как черновик — матчить они не должны никого:
+    иначе пересчёт (nightly rebuild, правка карточки) пере-добавил бы членов
+    скрытой аудитории.
+    """
+    pos = uuid4()
+    attrs = EmployeeAttrs(profile_id=uuid4(), position_ids=frozenset({pos}))
+    include = [RuleSpec(mode="include", position_ids=frozenset({pos}))]
+    assert audience_matches(False, include, attrs)  # без флага правило матчит
+    assert not audience_matches(False, include, attrs, is_none=True)
+    assert not audience_matches(True, [], attrs, is_none=True)
+    assert not audience_matches(False, [], attrs, is_none=True)  # exclude-only база «все»
+
+
 # --- validate_rules ----------------------------------------------------------
 
 

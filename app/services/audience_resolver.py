@@ -6,7 +6,8 @@
   (AND непустых измерений; строка без единого измерения НЕ матчит никого —
   fail-closed, создание таких include-строк запрещено валидацией);
 - `audience_matches()` — семантика набора строк (include-OR, exclude
-  вычитается; нет include-строк → база «все активные»).
+  вычитается; нет include-строк → база «все активные»; `is_none` — «скрыто
+  ото всех», 0051: бьёт всё, правила при этом лежат в БД как черновик).
 
 Расширение атрибутов (ТЗ §2.1, критично):
 - ТУ (org_role=tu): store_ids += закреплённые магазины из tu_store_assignments
@@ -133,8 +134,18 @@ def rule_matches(rule: RuleSpec, attrs: EmployeeAttrs) -> bool:
     return True
 
 
-def audience_matches(is_all: bool, rules: list[RuleSpec], attrs: EmployeeAttrs) -> bool:
-    """Набор строк: include-OR (нет include → база «все»), exclude вычитается."""
+def audience_matches(
+    is_all: bool, rules: list[RuleSpec], attrs: EmployeeAttrs, *, is_none: bool = False
+) -> bool:
+    """Набор строк: include-OR (нет include → база «все»), exclude вычитается.
+
+    `is_none` («скрыто ото всех», 0051) бьёт всё: правила при этом сохраняются
+    в БД как черновик, но не матчат никого. Флаг обязан доехать до КАЖДОГО
+    вызова этой функции — пересчёт без него пере-добавил бы членов скрытой
+    аудитории (nightly rebuild, правка карточки сотрудника).
+    """
+    if is_none:
+        return False
     includes = [r for r in rules if r.mode == "include"]
     excludes = [r for r in rules if r.mode == "exclude"]
     base = is_all or not includes or any(rule_matches(r, attrs) for r in includes)
@@ -382,7 +393,9 @@ async def recalc_audience(
         )
     ]
     desired = {
-        pid for pid, attrs in attrs_map.items() if audience_matches(audience.is_all, rules, attrs)
+        pid
+        for pid, attrs in attrs_map.items()
+        if audience_matches(audience.is_all, rules, attrs, is_none=audience.is_none)
     }
     current = {
         row[0]
@@ -443,7 +456,10 @@ async def recalc_profile(db: AsyncSession, profile: EmployeeProfile) -> dict[UUI
 
     for audience in audiences:
         matched = audience_matches(
-            audience.is_all, rules_by_audience.get(audience.id, []), attrs
+            audience.is_all,
+            rules_by_audience.get(audience.id, []),
+            attrs,
+            is_none=audience.is_none,
         )
         has_row = audience.id in current_rows
         if matched and not has_row:
@@ -494,18 +510,33 @@ async def set_object_audience(
     is_all: bool,
     rules: list[RuleSpec],
     object_hint: str,
+    is_none: bool = False,
 ) -> tuple[UUID | None, MembershipDiff | None]:
     """Установить/заменить аудиторию объекта.
 
     «Всем» (is_all без правил) = audience_id NULL — существующая audience
-    удаляется. Иначе — reuse существующей row (правила заменяются) или
-    создание новой + немедленный пересчёт членства.
+    удаляется. «Никому» (is_none, 0051) — audience сохраняется С правилами,
+    но пересчёт вычищает членство в ноль; эта ветка обязана идти ПЕРЕД
+    веткой «всем-удалить», иначе is_none поверх галки «всем» удалял бы
+    аудиторию и открывал объект каждому. Иначе — reuse существующей row
+    (правила заменяются) или создание новой + немедленный пересчёт членства.
 
     → (новый audience_id, diff пересчёта или None).
     """
     validate_rules(rules)
 
-    if is_all and not rules:
+    # «is_all=false без правил» персистило аудиторию, означающую «все» (нет
+    # include-строк → база все активные), — человек снимал галку «всем» и
+    # думал, что закрыл доступ (ОС 01.09: пять таких черновиков-аттестаций).
+    # Fail-closed: состояние без смысла не сохраняется. Клиентское зеркало —
+    # lib/audienceHints.ts::audienceDraftProblem.
+    if not is_all and not is_none and not rules:
+        raise ValueError(
+            "Аудитория не настроена: включите «Видно всем», "
+            "добавьте правило или нажмите «Скрыть ото всех»."
+        )
+
+    if not is_none and is_all and not rules:
         if current_audience_id is not None:
             audience = await db.get(Audience, current_audience_id)
             if audience is not None:
@@ -522,6 +553,9 @@ async def set_object_audience(
         await db.flush()
 
     audience.is_all = is_all
+    # Явный сброс: без него однажды скрытая аудитория оставалась бы скрытой
+    # после любой последующей правки правил (row переиспользуется).
+    audience.is_none = is_none
     await db.execute(delete(AudienceRule).where(AudienceRule.audience_id == audience.id))
     for spec in rules:
         db.add(
@@ -548,32 +582,36 @@ async def set_object_audience(
 
 async def load_audience_rules(
     db: AsyncSession, audience_id: UUID | None
-) -> tuple[bool, list[AudienceRule]]:
-    """→ (is_all, строки правил) для отдачи фронту. NULL → (True, [])."""
+) -> tuple[bool, bool, list[AudienceRule]]:
+    """→ (is_all, is_none, строки правил) для отдачи фронту. NULL → (True, False, [])."""
     if audience_id is None:
-        return True, []
+        return True, False, []
     audience = await db.get(Audience, audience_id)
     if audience is None:
-        return True, []
+        return True, False, []
     rules = (
         (await db.execute(select(AudienceRule).where(AudienceRule.audience_id == audience_id)))
         .scalars()
         .all()
     )
-    return audience.is_all, list(rules)
+    return audience.is_all, audience.is_none, list(rules)
 
 
 # --- Утилиты для API ---------------------------------------------------------
 
 
 async def dry_run(
-    db: AsyncSession, *, is_all: bool, rules: list[RuleSpec]
+    db: AsyncSession, *, is_all: bool, rules: list[RuleSpec], is_none: bool = False
 ) -> tuple[int, list[UUID]]:
     """Счётчик «увидят N» для AudiencePicker (без персиста). → (count, sample)."""
     validate_rules(rules)
     attrs_map = await load_attrs_map(db)
     matched = sorted(
-        (pid for pid, attrs in attrs_map.items() if audience_matches(is_all, rules, attrs)),
+        (
+            pid
+            for pid, attrs in attrs_map.items()
+            if audience_matches(is_all, rules, attrs, is_none=is_none)
+        ),
         key=str,
     )
     return len(matched), matched[:20]

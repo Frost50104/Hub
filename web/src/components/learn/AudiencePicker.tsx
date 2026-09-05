@@ -1,4 +1,4 @@
-import { Minus, Plus, Users, X } from 'lucide-react'
+import { EyeOff, Minus, Plus, Users, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -14,16 +14,24 @@ import {
 } from '@/hooks/useLearn'
 import { employeeTruncationNote } from '@/lib/employeeList'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
-import { emptyPickReason, emptyPickText } from '@/lib/audienceHints'
+import {
+  audienceDraftProblem,
+  draftProblemText,
+  emptyPickReason,
+  emptyPickText,
+  isEmptyRule,
+} from '@/lib/audienceHints'
 import { cn } from '@/lib/cn'
 import { emptyRule, ORG_ROLE_LABEL, type AudienceRuleDraft } from '@/lib/learn'
 
 export interface AudienceValue {
   is_all: boolean
+  /** «Скрыто ото всех» (0051): оверлей — правила сохраняются, не видит никто. */
+  is_none: boolean
   rules: AudienceRuleDraft[]
 }
 
-export const AUDIENCE_ALL: AudienceValue = { is_all: true, rules: [] }
+export const AUDIENCE_ALL: AudienceValue = { is_all: true, is_none: false, rules: [] }
 
 /**
  * Черновик аудитории для диалогов контента: подтягивает СУЩЕСТВУЮЩИЕ правила
@@ -44,13 +52,18 @@ export function useAudienceDraft(audienceId: string | null): {
   const rulesQ = useAudienceRules(audienceId)
   const [value, setValue] = useState<AudienceValue>({
     is_all: audienceId === null,
+    is_none: false,
     rules: [],
   })
   const [seeded, setSeeded] = useState(false)
 
   useEffect(() => {
     if (!seeded && rulesQ.data) {
-      setValue({ is_all: rulesQ.data.is_all, rules: rulesQ.data.rules })
+      setValue({
+        is_all: rulesQ.data.is_all,
+        is_none: rulesQ.data.is_none,
+        rules: rulesQ.data.rules,
+      })
       setSeeded(true)
     }
   }, [seeded, rulesQ.data])
@@ -103,7 +116,11 @@ export function AudiencePicker({
   className?: string
 }) {
   // Uncontrolled-режим для песочницы в админке.
-  const [inner, setInner] = useState<AudienceValue>({ is_all: false, rules: [] })
+  const [inner, setInner] = useState<AudienceValue>({
+    is_all: false,
+    is_none: false,
+    rules: [],
+  })
   const val = value ?? inner
   const setVal = (v: AudienceValue) => {
     setInner(v)
@@ -127,14 +144,16 @@ export function AudiencePicker({
   const debouncedQ = useDebouncedValue(employeeQ, 300)
   const employees = useEmployees({ status: 'active', q: debouncedQ || undefined })
 
-  const hasEmptyInclude = val.rules.some(
-    (r) => r.mode === 'include' && DIMENSIONS.every((d) => r[d.key].length === 0),
-  )
+  // Непригодное к сохранению состояние (гейт «Сохранить» в диалогах — та же
+  // функция) — красная подсказка вместо счётчика.
+  const problem = audienceDraftProblem(val)
   const debounced = useDebouncedValue(val, 400)
   const dryRunBody = useMemo(() => {
-    if (hasEmptyInclude) return null
-    return { is_all: debounced.is_all, rules: debounced.rules }
-  }, [debounced, hasEmptyInclude])
+    // «Скрыто» и непригодные состояния не считаем: ответ либо известен
+    // локально, либо бессмыслен (зеро-рул до сегодня показывал «увидят все»).
+    if (debounced.is_none || audienceDraftProblem(debounced) !== null) return null
+    return { is_all: debounced.is_all, is_none: false, rules: debounced.rules }
+  }, [debounced])
   const dryRun = useAudienceDryRun(dryRunBody)
 
   const optionsFor = (key: DimensionKey): { id: string; label: string }[] => {
@@ -203,54 +222,104 @@ export function AudiencePicker({
       <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
         <input
           type="checkbox"
-          checked={val.is_all && val.rules.length === 0}
+          checked={val.is_all && !val.is_none && val.rules.length === 0}
           onChange={(e) =>
-            setVal(e.target.checked ? { is_all: true, rules: [] } : { is_all: false, rules: [] })
+            setVal(
+              e.target.checked
+                ? { is_all: true, is_none: false, rules: [] }
+                : { is_all: false, is_none: false, rules: [] },
+            )
           }
           className="h-4 w-4 accent-[#FFB200]"
         />
         Видно всем активным сотрудникам
       </label>
 
-      {!(val.is_all && val.rules.length === 0) && (
+      {val.is_none ? (
+        <div className="space-y-2 rounded-lg border border-amber/30 bg-amber/5 p-3">
+          <div className="flex items-start gap-2 text-sm text-text">
+            <EyeOff className="mt-0.5 h-4 w-4 shrink-0 text-amber" />
+            <div>
+              <p>Скрыто ото всех — никто не увидит, пока вы не откроете снова.</p>
+              <p className="mt-1 text-xs text-text2">
+                Правила аудитории сохранены. Уже начатое (открытая попытка,
+                урок во вкладке) доедет до конца, но заново открыть этот
+                контент будет нельзя.
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setVal({ ...val, is_none: false })}
+          >
+            Открыть снова
+          </Button>
+        </div>
+      ) : (
         <>
-          {val.rules.map((rule, i) => (
-            <RuleRow
-              key={i}
-              rule={rule}
-              optionsFor={optionsFor}
-              labelFor={labelFor}
-              countFor={countFor}
-              employeeQ={employeeQ}
-              onEmployeeQ={setEmployeeQ}
-              employeesNote={
-                employees.data
-                  ? employeeTruncationNote(
-                      employees.data.items.length,
-                      employees.data.total,
-                    )
-                  : null
-              }
-              onChange={(r) => updateRule(i, r)}
-              onRemove={() => removeRule(i)}
-            />
-          ))}
+          {!(val.is_all && val.rules.length === 0) &&
+            val.rules.map((rule, i) => (
+              <RuleRow
+                key={i}
+                rule={rule}
+                optionsFor={optionsFor}
+                labelFor={labelFor}
+                countFor={countFor}
+                employeeQ={employeeQ}
+                onEmployeeQ={setEmployeeQ}
+                employeesNote={
+                  employees.data
+                    ? employeeTruncationNote(
+                        employees.data.items.length,
+                        employees.data.total,
+                      )
+                    : null
+                }
+                onChange={(r) => updateRule(i, r)}
+                onRemove={() => removeRule(i)}
+              />
+            ))}
           <div className="flex flex-wrap gap-2">
+            {!(val.is_all && val.rules.length === 0) && (
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    setVal({ ...val, rules: [...val.rules, emptyRule('include')] })
+                  }
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {includes.length === 0 ? 'Кому показывать' : 'ИЛИ показать также'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    setVal({ ...val, rules: [...val.rules, emptyRule('exclude')] })
+                  }
+                >
+                  <Minus className="h-3.5 w-3.5" />
+                  Исключить
+                </Button>
+              </>
+            )}
             <Button
               type="button"
               variant="secondary"
-              onClick={() => setVal({ ...val, rules: [...val.rules, emptyRule('include')] })}
+              onClick={() =>
+                // Пустые строки вычищаются: под плашкой их не видно, а пустая
+                // include-строка дала бы необъяснимый 422 при сохранении.
+                setVal({
+                  ...val,
+                  is_none: true,
+                  rules: val.rules.filter((r) => !isEmptyRule(r)),
+                })
+              }
             >
-              <Plus className="h-3.5 w-3.5" />
-              {includes.length === 0 ? 'Кому показывать' : 'ИЛИ показать также'}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setVal({ ...val, rules: [...val.rules, emptyRule('exclude')] })}
-            >
-              <Minus className="h-3.5 w-3.5" />
-              Исключить
+              <EyeOff className="h-3.5 w-3.5" />
+              Скрыть ото всех
             </Button>
           </div>
         </>
@@ -258,11 +327,13 @@ export function AudiencePicker({
 
       <div className="flex items-center gap-2 rounded-lg border border-glass-border bg-surface px-3 py-2 text-sm">
         <Users className="h-4 w-4 shrink-0 text-amber" />
-        {hasEmptyInclude ? (
-          <span className="text-red">
-            В строке «показать» не выбрано ни одного условия — добавьте условие
-            или удалите строку.
+        {val.is_none ? (
+          <span className="text-text">
+            Увидят: <b>никто</b>{' '}
+            <span className="text-text3">— скрыто ото всех</span>
           </span>
+        ) : problem !== null ? (
+          <span className="text-red">{draftProblemText(problem)}</span>
         ) : dryRun.isFetching ? (
           <span className="text-text3">Считаем…</span>
         ) : dryRun.data ? (

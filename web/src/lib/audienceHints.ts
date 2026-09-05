@@ -8,7 +8,13 @@
  *
  * Чистая функция ради vitest: jsdom в проекте нет, компонент протестировать
  * нечем.
+ *
+ * Здесь же — `audienceDraftProblem`: состояния черновика, которые НЕЛЬЗЯ
+ * сохранять (гейт кнопки «Сохранить» всех диалогов аудитории), зеркало
+ * серверного условия в `set_object_audience`.
  */
+
+import type { AudiencePayload, AudienceRuleDraft } from '@/lib/learn'
 
 /** `{измерение: {значение: сколько сотрудников}}`; значения без людей опущены. */
 export type DimensionCounts = Record<string, Record<string, number>>
@@ -72,6 +78,58 @@ export function emptyPickReason(
     kind: 'intersection',
     dimensionLabels: [...byDimension.values()].map((c) => c[0]!.dimensionLabel),
   }
+}
+
+/** Ключи-измерения строки правила (всё, кроме `mode`). Единственный список:
+ *  от него считается «строка пуста» и здесь, и в пикере. */
+export const RULE_DIMENSION_KEYS = [
+  'profile_ids',
+  'position_ids',
+  'position_group_ids',
+  'store_ids',
+  'store_group_ids',
+  'franchisee_ids',
+  'franchisee_group_ids',
+  'department_ids',
+  'user_group_ids',
+  'org_roles',
+] as const satisfies readonly Exclude<keyof AudienceRuleDraft, 'mode'>[]
+
+/** Строка правила без единого условия. */
+export function isEmptyRule(rule: AudienceRuleDraft): boolean {
+  return RULE_DIMENSION_KEYS.every((key) => rule[key].length === 0)
+}
+
+export type DraftProblem = 'unconfigured' | 'empty-include'
+
+/**
+ * Состояние черновика аудитории, которое нельзя сохранять; `null` — можно.
+ *
+ * - `unconfigured` — галка «всем» снята, правил нет и не «скрыто»: сервер
+ *   завёл бы аудиторию, означающую «все» (нет include-строк → база «все
+ *   активные»), — человек думал, что закрыл доступ (ОС 01.09, пять таких
+ *   черновиков-аттестаций в проде);
+ * - `empty-include` — include-строка без единого условия (случайное «всем»).
+ *
+ * Зеркало серверного гейта в `set_object_audience` (там ValueError → 422):
+ * кнопка «Сохранить», собранная без этой функции, водила бы человека на 422.
+ */
+export function audienceDraftProblem(v: AudiencePayload): DraftProblem | null {
+  if (v.is_none) return null
+  if (v.rules.some((r) => r.mode === 'include' && isEmptyRule(r))) return 'empty-include'
+  if (!v.is_all && v.rules.length === 0) return 'unconfigured'
+  return null
+}
+
+/** Текст красной подсказки в сводке пикера — вместо счётчика «Увидят». */
+export function draftProblemText(problem: DraftProblem): string {
+  if (problem === 'unconfigured') {
+    return (
+      'Аудитория не настроена: включите «Видно всем», добавьте правило ' +
+      'или нажмите «Скрыть ото всех».'
+    )
+  }
+  return 'В строке «показать» не выбрано ни одного условия — добавьте условие или удалите строку.'
 }
 
 /** Текст подсказки под счётчиком «Увидят: 0». Формулировки нейтральны по роду:

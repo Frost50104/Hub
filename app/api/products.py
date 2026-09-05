@@ -453,6 +453,7 @@ async def set_product_audience(
             tenant_id=principal.tenant_id,
             current_audience_id=card.audience_id,
             is_all=body.is_all,
+            is_none=body.is_none,
             rules=[r.to_spec() for r in body.rules],
             object_hint=f"{_OBJECT_TYPE}:{card.id}",
         )

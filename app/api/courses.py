@@ -905,6 +905,7 @@ async def set_course_audience(
             tenant_id=principal.tenant_id,
             current_audience_id=course.audience_id,
             is_all=body.is_all,
+            is_none=body.is_none,
             rules=[r.to_spec() for r in body.rules],
             object_hint=f"{_OBJECT_TYPE}:{course.id}",
         )

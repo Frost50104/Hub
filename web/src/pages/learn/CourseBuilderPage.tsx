@@ -53,6 +53,7 @@ import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useCourse, useCourseMutation, useEmployees } from '@/hooks/useLearn'
 import { useMe } from '@/hooks/useMe'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
+import { audienceDraftProblem } from '@/lib/audienceHints'
 import {
   CONTENT_STATUS_LABEL,
   COURSE_TYPE_LABEL,
@@ -737,7 +738,7 @@ function CourseAudienceDialog({
           </Button>
           <Button
             type="button"
-            disabled={save.isPending || !audience.ready}
+            disabled={save.isPending || !audience.ready || audienceDraftProblem(value) !== null}
             onClick={() =>
               void save.mutateAsync(undefined as never).then(() => {
                 toast.success('Аудитория обновлена')

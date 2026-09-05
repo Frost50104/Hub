@@ -155,16 +155,29 @@ async def test_matching_link_create_and_rehire(db: AsyncSession, tenant_id: uuid
     assert result.outcome == "created"
     assert result.profile is not None and result.profile.email == "new@uppetit.ru"
 
-    # Повторный найм: карточка в архиве, у человека НОВЫЙ employee_id —
-    # дубль не создаётся, требуется restore.
+    # Повторный найм на том же адресе: с 01.09 заводится ЧИСТАЯ карточка, а не
+    # `needs_restore`. Причина в ОС владельца: корпоративный ящик уволенного
+    # отдают следующему сотруднику, и «восстановить» означало отдать ему чужие
+    # сертификаты и сданные курсы. Разбор — `test_profile_rehire.py`.
     await archive_profile(db, card, reason="manual", actor_id=None)
     rehired = make_principal(tenant_id, email="maria.ivanova@uppetit.ru")
     await upsert_shadow_user(db, rehired, table="shadow_users")
     result = await ensure_profile_for_principal(db, rehired)
-    assert result.outcome == "needs_restore"
-    assert result.profile is not None and result.profile.id == card.id
+    assert result.outcome == "created"
+    assert result.profile is not None and result.profile.id != card.id
+    fresh = result.profile
 
-    # Restore с перепривязкой на новый вход.
+    # Свести карточки вручную по-прежнему можно, но теперь это ДВА шага, и
+    # первый обязателен: пока свежая активна, восстановление старой упрётся в
+    # дубль по email. Без этого ассерта путь восстановления выглядел бы
+    # сломанным, хотя он просто стал явным.
+    with pytest.raises(ValueError, match="уже существует"):
+        await restore_profile(db, card, actor_id=None, new_employee_id=rehired.employee_id)
+
+    # Архивация дубля освобождает его вход, поэтому `restore` исходной с тем же
+    # `employee_id` проходит. Действия «объединить карточки» в интерфейсе нет —
+    # это два шага вручную, записано в `docs/tech-debt/open.md`.
+    await archive_profile(db, fresh, reason="manual", actor_id=None)
     await restore_profile(db, card, actor_id=None, new_employee_id=rehired.employee_id)
     assert card.status == "active" and card.employee_id == rehired.employee_id
 
@@ -247,6 +260,7 @@ async def test_get_audience_rules_roundtrip(db: AsyncSession, tenant_id: uuid.UU
 
     resp = await get_audience_rules(audience.id, hr_principal, db)
     assert resp.is_all is False
+    assert resp.is_none is False
     assert len(resp.rules) == 1
     rule = resp.rules[0]
     assert rule.profile_ids == [target.id]
@@ -260,6 +274,112 @@ async def test_get_audience_rules_roundtrip(db: AsyncSession, tenant_id: uuid.UU
     with pytest.raises(HTTPException) as exc:
         await get_audience_rules(audience.id, member_principal, db)
     assert exc.value.status_code == 403
+
+
+async def test_hidden_audience_lifecycle(db: AsyncSession, tenant_id: uuid.UUID):
+    """«Скрыто ото всех» (0051): членство вычищается, правила и granted_at-строки
+    остаются в БД, пересчёт профиля никого не пере-добавляет, снятие флага
+    возвращает прежнюю аудиторию, обычное сохранение сбрасывает флаг."""
+    from app.services.audience_resolver import (
+        RuleSpec,
+        load_audience_rules,
+        set_object_audience,
+    )
+
+    pos = Position(tenant_id=tenant_id, name="Кассир")
+    db.add(pos)
+    await db.flush()
+    cashier = await _mk_profile(db, tenant_id, email="cash@t.ru", position_id=pos.id)
+
+    spec = RuleSpec(mode="include", position_ids=frozenset({pos.id}))
+    audience_id, _diff = await set_object_audience(
+        db,
+        tenant_id=tenant_id,
+        current_audience_id=None,
+        is_all=False,
+        rules=[spec],
+        object_hint="test:hidden",
+    )
+    assert audience_id is not None
+    assert set(await _members(db, audience_id)) == {cashier.id}
+
+    # Скрыть: члены вычищены, правила и сама аудитория — на месте.
+    hidden_id, _diff = await set_object_audience(
+        db,
+        tenant_id=tenant_id,
+        current_audience_id=audience_id,
+        is_all=False,
+        is_none=True,
+        rules=[spec],
+        object_hint="test:hidden",
+    )
+    assert hidden_id == audience_id
+    assert set(await _members(db, audience_id)) == set()
+    is_all, is_none, rows = await load_audience_rules(db, audience_id)
+    assert is_all is False
+    assert is_none is True
+    assert len(rows) == 1  # черновик правил пережил скрытие
+
+    # Пересчёт профиля НЕ воскрешает членство (страховка nightly rebuild).
+    await recalc_profile(db, cashier)
+    assert set(await _members(db, audience_id)) == set()
+
+    # Обычное сохранение тех же правил сбрасывает флаг и возвращает членство.
+    reopened_id, _diff = await set_object_audience(
+        db,
+        tenant_id=tenant_id,
+        current_audience_id=audience_id,
+        is_all=False,
+        rules=[spec],
+        object_hint="test:hidden",
+    )
+    assert reopened_id == audience_id
+    assert set(await _members(db, audience_id)) == {cashier.id}
+    _, is_none, _ = await load_audience_rules(db, audience_id)
+    assert is_none is False
+
+
+async def test_unconfigured_audience_is_rejected(db: AsyncSession, tenant_id: uuid.UUID):
+    """«is_all=false без правил» не сохраняется (ОС 01.09).
+
+    Такое состояние заводило аудиторию, означающую «все» (нет include-строк →
+    база все активные), — человек снимал галку «всем» и думал, что закрыл
+    доступ. Сервер отвечает 422 (ValueError → маппинг в ручках), клиентское
+    зеркало — audienceDraftProblem.
+    """
+    from app.services.audience_resolver import set_object_audience
+
+    with pytest.raises(ValueError, match="Аудитория не настроена"):
+        await set_object_audience(
+            db,
+            tenant_id=tenant_id,
+            current_audience_id=None,
+            is_all=False,
+            rules=[],
+            object_hint="test:unconfigured",
+        )
+
+
+async def test_hidden_beats_the_delete_branch(db: AsyncSession, tenant_id: uuid.UUID):
+    """is_none поверх галки «всем» НЕ удаляет аудиторию.
+
+    Ветка «is_all без правил → audience_id NULL» без учёта is_none открыла бы
+    объект каждому — ровно противоположность нажатой кнопке «Скрыть ото всех».
+    """
+    from app.services.audience_resolver import set_object_audience
+
+    await _mk_profile(db, tenant_id, email="vis@t.ru")
+    audience_id, _diff = await set_object_audience(
+        db,
+        tenant_id=tenant_id,
+        current_audience_id=None,
+        is_all=True,
+        is_none=True,
+        rules=[],
+        object_hint="test:hidden-all",
+    )
+    assert audience_id is not None  # не NULL = не «видно всем»
+    assert set(await _members(db, audience_id)) == set()
 
 
 async def test_dimension_counts_explain_empty_pick(
