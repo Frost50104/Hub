@@ -27,6 +27,7 @@ import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useNews, useNewsMutation } from '@/hooks/useLearn'
 import { useMe } from '@/hooks/useMe'
+import { audienceDraftProblem } from '@/lib/audienceHints'
 import { cn } from '@/lib/cn'
 import {
   CONTENT_STATUS_LABEL,
@@ -602,7 +603,7 @@ function NewsAudienceDialog({ post, onClose }: { post: NewsPost; onClose: () => 
           </Button>
           <Button
             type="button"
-            disabled={save.isPending || !audience.ready}
+            disabled={save.isPending || !audience.ready || audienceDraftProblem(value) !== null}
             onClick={() =>
               void save.mutateAsync(undefined as never).then(() => {
                 toast.success('Аудитория обновлена')

@@ -29,6 +29,7 @@ import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useCourses, useProductMutation, useProducts } from '@/hooks/useLearn'
+import { audienceDraftProblem } from '@/lib/audienceHints'
 import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
 import {
@@ -836,7 +837,7 @@ function ProductAudienceDialog({ card, onClose }: { card: ProductCard; onClose: 
             Отмена
           </Button>
           <Button
-            disabled={save.isPending || !audience.ready}
+            disabled={save.isPending || !audience.ready || audienceDraftProblem(value) !== null}
             onClick={() =>
               void save.mutateAsync(undefined as never).then(() => {
                 toast.success('Аудитория обновлена')

@@ -178,6 +178,7 @@ class AudienceRuleBody(BaseModel):
 
 class AudienceDryRunBody(BaseModel):
     is_all: bool = False
+    is_none: bool = False
     rules: list[AudienceRuleBody] = Field(default_factory=list, max_length=50)
 
 

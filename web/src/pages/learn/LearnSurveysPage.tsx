@@ -27,6 +27,7 @@ import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useSurveyMutation, useSurveys } from '@/hooks/useLearn'
+import { audienceDraftProblem } from '@/lib/audienceHints'
 import { cn } from '@/lib/cn'
 import {
   CONTENT_STATUS_LABEL,
@@ -723,7 +724,7 @@ function SurveyAudienceDialog({ survey, onClose }: { survey: Survey; onClose: ()
           </Button>
           <Button
             type="button"
-            disabled={save.isPending || !audience.ready}
+            disabled={save.isPending || !audience.ready || audienceDraftProblem(value) !== null}
             onClick={() =>
               void save.mutateAsync(undefined as never).then(() => {
                 toast.success('Аудитория обновлена')
