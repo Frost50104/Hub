@@ -75,3 +75,16 @@ describe('renderActivity', () => {
     expect(renderActivity(act('teleported'))).toBe('Пётр: teleported')
   })
 })
+
+describe('renderActivity: наблюдатели (02.09)', () => {
+  it('с payload — редактор подписал другого, без — подписался сам (легаси и /me)', () => {
+    expect(renderActivity(act('watcher_added', { name: 'Ирина' }))).toBe(
+      'Пётр подписал Ирина на задачу',
+    )
+    expect(renderActivity(act('watcher_added'))).toBe('Пётр подписался на задачу')
+    expect(renderActivity(act('watcher_removed', { name: 'Ирина' }))).toBe(
+      'Пётр снял Ирина с наблюдения',
+    )
+    expect(renderActivity(act('watcher_removed'))).toBe('Пётр отписался от задачи')
+  })
+})

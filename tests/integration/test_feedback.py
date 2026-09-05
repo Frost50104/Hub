@@ -118,14 +118,18 @@ async def test_feedback_lands_in_first_column_with_label_and_owner(
     assert list(assignees) == [owner.employee_id]
 
 
-async def test_owner_is_notified_but_sender_is_not_subscribed(
+async def test_owner_is_notified_and_sender_follows_the_task(
     db: AsyncSession, tenant_id: uuid.UUID
 ):
-    """Владелец узнаёт, отправитель — не наблюдатель чужой задачи.
+    """Владелец узнаёт, а отправитель следит за своим сообщением (02.09).
 
-    Подписка автора (`create_task_record` делает её всем) привела бы его по
-    пушу в проект, которого он не видит, то есть в 403.
+    Автор подписан наблюдателем И получил viewer-членство в проекте обратной
+    связи: пуши по задаче идут без проверки видимости, и подписка без доступа
+    вела бы его по ссылке в 404. Следствие «автор видит проект целиком»
+    принято владельцем.
     """
+    from app.models.project import ProjectMember
+
     owner, project, sender = await _seed(db, tenant_id, "snd2")
     await send_feedback(
         _request(), text="Тормозит поиск", files=None, file=None, principal=sender, db=db
@@ -139,8 +143,18 @@ async def test_owner_is_notified_but_sender_is_not_subscribed(
             select(TaskWatcher.employee_id).where(TaskWatcher.task_id == task.id)
         )
     ).scalars().all()
-    assert sender.employee_id not in watchers
+    assert sender.employee_id in watchers  # автор следит за своим фидбеком
     assert owner.employee_id in watchers  # подписан как исполнитель
+
+    member_role = (
+        await db.execute(
+            select(ProjectMember.role).where(
+                ProjectMember.project_id == project.id,
+                ProjectMember.employee_id == sender.employee_id,
+            )
+        )
+    ).scalar_one()
+    assert member_role == "viewer"  # ссылка из пуша открывается
 
     kinds = (
         await db.execute(

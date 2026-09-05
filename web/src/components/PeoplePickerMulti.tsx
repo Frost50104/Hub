@@ -25,12 +25,18 @@ interface PeoplePickerMultiProps {
   onToggle: (person: TaskAssigneeBrief, next: boolean) => void
   /** Снять всех разом. Отдельно от onToggle: цикл по нему слал N параллельных
    *  запросов, которые затирали друг другу оптимистичный кэш (onError любого
-   *  откатывал список целиком) и разъезжались на записи зеркала. */
-  onClearAll: () => void
+   *  откатывал список целиком) и разъезжались на записи зеркала.
+   *  Опционален (02.09): у наблюдателей bulk-clear ручки нет — без коллбэка
+   *  пункт «Очистить всех» не рендерится. */
+  onClearAll?: () => void
   disabled?: boolean
   /** Потолок; зеркалит MAX_ASSIGNEES на бэкенде. */
   max?: number
   placeholder?: string
+  /** Родительный падеж мн. числа для счётчиков («исполнителей»/«наблюдателей»). */
+  nounGenitivePlural?: string
+  /** Префикс aria-label крестика на чипе («Снять исполнителя»). */
+  removeAriaPrefix?: string
   /**
    * `chips` — раскладка карточки задачи: исполнители чипами с крестиком,
    * добавление пунктирной кнопкой. `field` — компактный триггер для строк.
@@ -57,6 +63,8 @@ export function PeoplePickerMulti({
   disabled,
   max = 10,
   placeholder = 'Не назначен',
+  nounGenitivePlural = 'исполнителей',
+  removeAriaPrefix = 'Снять исполнителя',
   variant = 'field',
 }: PeoplePickerMultiProps) {
   const [query, setQuery] = useState('')
@@ -85,7 +93,7 @@ export function PeoplePickerMulti({
       ? placeholder
       : value.length === 1
         ? label(value[0]!)
-        : `${value.length} исполнителей`
+        : `${value.length} ${nounGenitivePlural}`
 
   return (
     <DropdownMenu>
@@ -110,7 +118,7 @@ export function PeoplePickerMulti({
                 <button
                   type="button"
                   onClick={() => onToggle(p, false)}
-                  aria-label={`Снять исполнителя ${label(p)}`}
+                  aria-label={`${removeAriaPrefix} ${label(p)}`}
                   className="-mr-1.5 flex h-5 w-5 items-center justify-center rounded-full text-text2 hover:text-text"
                 >
                   <X className="h-3 w-3" strokeWidth={2.4} />
@@ -129,7 +137,7 @@ export function PeoplePickerMulti({
             </DropdownMenuTrigger>
           )}
           {disabled && value.length === 0 && (
-            <span className="text-[14px] text-text2">Не назначен</span>
+            <span className="text-[14px] text-text2">{placeholder}</span>
           )}
         </span>
       ) : (
@@ -193,10 +201,10 @@ export function PeoplePickerMulti({
         })}
         {atMax && (
           <div className="px-2 py-1.5 text-[13px] text-text2">
-            Максимум {max} исполнителей
+            Максимум {max} {nounGenitivePlural}
           </div>
         )}
-        {value.length > 0 && (
+        {value.length > 0 && onClearAll && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem

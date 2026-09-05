@@ -96,9 +96,14 @@ export function renderActivity(a: ActivityLike): string | null {
     case 'unarchived':
       return `${actor} восстановил из архива`
     case 'watcher_added':
-      return `${actor} подписался на задачу`
+      // С payload — редактор подписал другого (02.09); без — сам (легаси и /me).
+      return p['name']
+        ? `${actor} подписал ${String(p['name'])} на задачу`
+        : `${actor} подписался на задачу`
     case 'watcher_removed':
-      return `${actor} отписался от задачи`
+      return p['name']
+        ? `${actor} снял ${String(p['name'])} с наблюдения`
+        : `${actor} отписался от задачи`
     case 'attached':
       return `${actor} прикрепил файл «${String(p['filename'] ?? '—')}»`
     case 'unattached':

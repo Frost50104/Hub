@@ -11,6 +11,12 @@ from pydantic import BaseModel, ConfigDict
 WatcherReason = Literal["assignee", "creator", "mentioned", "manual"]
 
 
+class WatcherAddBody(BaseModel):
+    """Добавление ДРУГОГО человека наблюдателем (02.09) — редакторская ручка."""
+
+    employee_id: UUID
+
+
 class WatcherResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

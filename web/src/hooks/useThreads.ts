@@ -66,6 +66,40 @@ export function useDeleteComment(taskId: string) {
   })
 }
 
+/** Редакторское добавление/снятие ДРУГОГО наблюдателя (02.09).
+ *  Оптимистично патчит список наблюдателей — пикер в карточке отзывается
+ *  мгновенно; на ошибке снимок возвращается. */
+export function useToggleWatcher(taskId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ person, next }: { person: Watcher; next: boolean }) =>
+      next
+        ? watchersApi.add(taskId, person.employee_id).then(() => undefined)
+        : watchersApi.remove(taskId, person.employee_id),
+    meta: { errorMessage: 'Не удалось изменить наблюдателей' },
+    onMutate: async ({ person, next }) => {
+      await qc.cancelQueries({ queryKey: threadKeys.watchers(taskId) })
+      const prev = qc.getQueryData<Watcher[]>(threadKeys.watchers(taskId))
+      qc.setQueryData<Watcher[]>(threadKeys.watchers(taskId), (list) => {
+        const cur = list ?? []
+        if (next) {
+          if (cur.some((w) => w.employee_id === person.employee_id)) return cur
+          return [...cur, { ...person, added_reason: 'manual', added_at: new Date().toISOString() }]
+        }
+        return cur.filter((w) => w.employee_id !== person.employee_id)
+      })
+      return { prev }
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(threadKeys.watchers(taskId), ctx.prev)
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: threadKeys.watchers(taskId) })
+      void qc.invalidateQueries({ queryKey: threadKeys.activity(taskId) })
+    },
+  })
+}
+
 export function useToggleWatch(taskId: string) {
   const qc = useQueryClient()
   return useMutation({

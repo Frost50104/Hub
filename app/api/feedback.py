@@ -37,10 +37,12 @@ from app.services.feedback import (
     find_feedback_project,
     project_owner_id,
 )
+from app.services.project_access import ensure_project_member
 from app.services.task_assignees import (
     apply_assignee_side_effects,
     set_task_assignees,
 )
+from app.services.task_watchers import ensure_watcher
 from app.services.tasks import create_task_record
 from app.services.timefmt import fmt_dt
 
@@ -129,11 +131,32 @@ async def send_feedback(
                 user_agent=request.headers.get("user-agent"),
             ),
         ),
-        # Автор проект не видит: подписка привела бы его по пушу в 403.
+        # watch_creator=False: побочки create молчат и членства не дают —
+        # подписка и viewer-членство автора идут явными шагами ниже (02.09).
         watch_creator=False,
     )
     await attach_feedback_label(
         db, tenant_id=principal.tenant_id, project_id=project.id, task_id=task.id
+    )
+
+    # Автор следит за своим сообщением (решение владельца 02.09): подписка
+    # даёт пуши по комментариям/статусу, а viewer-членство в проекте обратной
+    # связи открывает карточку по ссылке из пуша — без членства любой
+    # task-эндпоинт отвечал бы 404, и уведомления вели бы в тупик.
+    # Следствие принято владельцем: автор видит проект обратной связи целиком.
+    await ensure_watcher(
+        db,
+        task_id=task.id,
+        tenant_id=principal.tenant_id,
+        employee_id=principal.employee_id,
+        reason="creator",
+    )
+    await ensure_project_member(
+        db,
+        project_id=project.id,
+        tenant_id=principal.tenant_id,
+        employee_id=principal.employee_id,
+        added_by=principal.employee_id,
     )
 
     owner_id = await project_owner_id(db, project.id)

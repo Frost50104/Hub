@@ -1,6 +1,7 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import {
   Archive,
+  Bell,
   Calendar,
   ChevronRight,
   Trash2,
@@ -30,7 +31,6 @@ import { TaskLabels } from '@/components/task/TaskLabels'
 import { TaskCustomFields } from '@/components/task/TaskCustomFields'
 import { TaskDependencies } from '@/components/task/TaskDependencies'
 import { TaskThread } from '@/components/task/TaskThread'
-import { TaskWatchers } from '@/components/task/TaskWatchers'
 import { WatchControl } from '@/components/task/WatchControl'
 import {
   DropdownMenu,
@@ -46,6 +46,7 @@ import { Textarea } from '@/components/ui/Input'
 import { PropertyRow, PropertyRows } from '@/components/ui/PropertyRows'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
+import { useToggleWatcher, useWatchers } from '@/hooks/useThreads'
 import { useProject, useProjectMembers } from '@/hooks/useProjects'
 import { useStages } from '@/hooks/useStages'
 import {
@@ -189,6 +190,10 @@ export function TaskDetailDrawer({
   const owner = members.data?.find((m) => m.role === 'owner')
   const update = useUpdateTask(taskProjectId)
   const toggleAssignee = useToggleAssignee(taskProjectId)
+  // Состав наблюдателей: тот же запрос, что кормит колокольчик в WatchControl —
+  // ключ один, лишнего похода нет.
+  const watchers = useWatchers(taskId ?? undefined)
+  const toggleWatcher = useToggleWatcher(taskId ?? '')
   const toggleDone = useToggleDone(taskProjectId)
   const archive = useArchiveTask(taskProjectId)
   const remove = useDeleteTask(taskProjectId)
@@ -670,6 +675,38 @@ export function TaskDetailDrawer({
                     />
                   </dd>
 
+                  {/* Наблюдатели (02.09): редактор подписывает других; не-участник
+                      получает viewer-членство на сервере. Себя viewer подписывает
+                      колокольчиком в шапке — он и остаётся его инструментом. */}
+                  <Dt icon={Bell}>Наблюдатели</Dt>
+                  <dd className="m-0 min-w-0">
+                    <PeoplePickerMulti
+                      variant="chips"
+                      value={(watchers.data ?? []).map((w) => ({
+                        employee_id: w.employee_id,
+                        email: w.email,
+                        full_name: w.full_name,
+                      }))}
+                      onToggle={(person, next) =>
+                        toggleWatcher.mutate({
+                          person: {
+                            employee_id: person.employee_id,
+                            email: person.email,
+                            full_name: person.full_name,
+                            added_reason: 'manual',
+                            added_at: new Date().toISOString(),
+                          },
+                          next,
+                        })
+                      }
+                      disabled={readOnly}
+                      max={50}
+                      placeholder="Никто не следит"
+                      nounGenitivePlural="наблюдателей"
+                      removeAriaPrefix="Снять наблюдателя"
+                    />
+                  </dd>
+
                   {desktop && (
                     <>
                       <Dt icon={Calendar}>Старт</Dt>
@@ -796,8 +833,6 @@ export function TaskDetailDrawer({
                 <TaskAttachments taskId={task.id} canEdit={!readOnly} />
 
                 <TaskThread taskId={task.id} />
-
-                <TaskWatchers taskId={task.id} />
               </>
             )}
           </div>

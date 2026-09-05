@@ -51,6 +51,14 @@ export const watchersApi = {
     api.post<Watcher>(`/tasks/${taskId}/watchers/me`).then((r) => r.data),
   leave: (taskId: string): Promise<void> =>
     api.delete(`/tasks/${taskId}/watchers/me`).then(() => undefined),
+  // Редакторское управление составом (02.09): добавление не-участника выдаёт
+  // ему viewer-членство на сервере — иначе пуши вели бы в 404.
+  add: (taskId: string, employeeId: string): Promise<Watcher> =>
+    api
+      .post<Watcher>(`/tasks/${taskId}/watchers`, { employee_id: employeeId })
+      .then((r) => r.data),
+  remove: (taskId: string, employeeId: string): Promise<void> =>
+    api.delete(`/tasks/${taskId}/watchers/${employeeId}`).then(() => undefined),
 }
 
 export const activityApi = {
