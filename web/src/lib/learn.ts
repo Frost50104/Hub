@@ -17,6 +17,27 @@ export interface OrgStore {
   address: string | null
   franchisee_id: string | null
   archived_at: string | null
+  // Ссылка на объект реестра auth (0053); через PATCH не пишется.
+  site_id: string | null
+}
+
+/** Строка зеркала реестра объектов (shadow_sites); только чтение, только admin. */
+export interface SiteMirror {
+  site_id: string
+  code: string | null
+  name: string
+  address: string | null
+  legal_name: string | null
+  inn: string | null
+  email: string | null
+  phone: string | null
+  archived_at: string | null
+  synced_at: string
+}
+
+export interface SitesResponse {
+  items: SiteMirror[]
+  snapshot_fresh: boolean
 }
 
 export interface OrgDepartment {
@@ -1167,6 +1188,8 @@ export interface MediaUploadResult {
 export const learnApi = {
   orgSnapshot: (): Promise<OrgSnapshot> =>
     api.get<OrgSnapshot>('/learn/org').then((r) => r.data),
+  sites: (): Promise<SitesResponse> =>
+    api.get<SitesResponse>('/learn/sites').then((r) => r.data),
 
   createRef: (
     kind: 'positions' | 'franchisees',

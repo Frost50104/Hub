@@ -31,6 +31,7 @@ import {
   type QuizManage,
   type RatingData,
   type ReviewQueueItem,
+  type SitesResponse,
   type SurveyListData,
   type UnlinkedLogin,
 } from '@/lib/learn'
@@ -43,6 +44,16 @@ export function useOrgSnapshot(): UseQueryResult<OrgSnapshot> {
   return useQuery({
     queryKey: ['learn-org'],
     queryFn: learnApi.orgSnapshot,
+    staleTime: 60_000,
+  })
+}
+
+/** Зеркало реестра объектов (0053) — зовётся только вкладкой «Оргструктура»
+ *  (ручка под admin: в зеркале ИНН/юрлица/телефоны точек). */
+export function useSites(): UseQueryResult<SitesResponse> {
+  return useQuery({
+    queryKey: ['learn-sites'],
+    queryFn: learnApi.sites,
     staleTime: 60_000,
   })
 }
