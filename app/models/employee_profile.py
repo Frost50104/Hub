@@ -35,6 +35,10 @@ from app.db import Base
 ORG_ROLES = ("employee", "tu", "franchisee_owner", "office")
 CONTENT_ROLES = ("none", "author", "publisher")
 PROFILE_STATUSES = ("active", "archived")
+# `manual` (архивировал человек) и `auth_deleted` (учётку удалили в auth)
+# ОСВОБОЖДАЮТ вход — см. `employee_profiles.UNBINDING_REASONS`. Отдельной
+# причины «уволен» нет намеренно: любая архивация админом означает, что человек
+# ушёл, а спрашивать об этом значило бы дать возможность ответить неверно.
 ARCHIVE_REASONS = ("manual", "auto_inactivity", "auth_deleted")
 
 
