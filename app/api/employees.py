@@ -8,9 +8,11 @@ Permissions:
 CSV-импорт (онбординг UPPETIT, 200+ людей): разделитель `;` или `,`,
 колонки email;full_name;phone;position;store;department;franchisee;org_role;
 manager_email;hired_at (обязательны только email и full_name). Справочники
-матчятся по имени, недостающие создаются (create_missing_refs). Существующие
-active-email пропускаются. suppress_automations зарезервирован (Ф5) — bulk
-не должен триггерить welcome-сценарии ветеранам.
+матчятся по имени; недостающие должности/отделы/франчайзи создаются, а
+МАГАЗИН — нет: неизвестный магазин — построчная ошибка (create_missing_refs,
+дефолт False с 05.09 — опечатка в названии бесшумно плодила магазины-дубли).
+Существующие active-email пропускаются. suppress_automations зарезервирован
+(Ф5) — bulk не должен триггерить welcome-сценарии ветеранам.
 """
 
 from __future__ import annotations
@@ -611,7 +613,11 @@ _IMPORT_COLUMNS = frozenset(
 async def import_employees(
     file: UploadFile = File(...),
     dry_run: bool = Query(default=False),
-    create_missing_refs: bool = Query(default=True),
+    # Дефолт False с 05.09 (задача auth import_no_autocreate): опечатка в
+    # названии магазина бесшумно порождала магазин-дубль без кода и адреса —
+    # неизвестный магазин теперь построчная ошибка. Гейтит ТОЛЬКО Store:
+    # автосоздание должностей/отделов/франчайзи — рабочий сценарий онбординга.
+    create_missing_refs: bool = Query(default=False),
     suppress_automations: bool = Query(default=True),  # noqa: ARG001 — включится в Ф5
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
@@ -658,13 +664,20 @@ async def import_employees(
     pending_managers: list[tuple[EmployeeProfile, str]] = []
     profiles_by_email: dict[str, EmployeeProfile] = {}
 
-    def _resolve_ref(kind: str, name_map: dict, model, raw_name: str):  # noqa: ANN001, ANN202
+    def _resolve_ref(  # noqa: ANN202
+        kind: str,
+        name_map: dict,  # noqa: ANN001
+        model,  # noqa: ANN001
+        raw_name: str,
+        *,
+        allow_create: bool = True,
+    ):
         key = raw_name.strip().lower()
         if not key:
             return None
         if key in name_map:
             return name_map[key]
-        if not create_missing_refs:
+        if not allow_create:
             raise ValueError(f"{kind} «{raw_name.strip()}» не найден")
         row = model(tenant_id=principal.tenant_id, name=raw_name.strip())
         db.add(row)
@@ -700,7 +713,13 @@ async def import_employees(
                 continue
         try:
             position = _resolve_ref("Должность", positions, Position, row.get("position", ""))
-            store = _resolve_ref("Магазин", stores, Store, row.get("store", ""))
+            store = _resolve_ref(
+                "Магазин",
+                stores,
+                Store,
+                row.get("store", ""),
+                allow_create=create_missing_refs,
+            )
             department = _resolve_ref(
                 "Отдел", departments, Department, row.get("department", "")
             )
