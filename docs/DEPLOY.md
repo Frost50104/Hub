@@ -109,6 +109,12 @@ Staging-копии юнитов генерируются `ops/systemd/make-stagi
 
 ## Cron timers и воркеры (полный список)
 
+**In-process воркеры (lifespan `app/main.py`, `worker_supervisor.supervise` — рестарт с backoff + Redis leader-lock; systemd-юнитов у них НЕТ):**
+- **deletion-sync** — фид удалений/переименований auth, poll 60 c; курсор `sync_state(key='deletion_sync')`.
+- **staff-sync** (0052) — pull штата, 15 мин; гейт `STAFF_SERVICE_KEY` + `STAFF_SYNC_ENABLED` (staging выключен навсегда — общий VAPID).
+- **sid-sync** — фид ревокаций SSO-сессий; in-memory store блокирует `--workers > 1`.
+- **sites-sync** (0053) — воркера НЕТ СОЗНАТЕЛЬНО (данные меняются ~4 раза в год): только ручной `POST /api/learn/sites/sync` под advisory-локом.
+
 **Cron timers (due-soon hourly / overdue daily 09:00 MSK):** есть в обоих env — prod (`signaris-hub-{due-soon,overdue}.timer`) и staging (`signaris-hub-staging-{due-soon,overdue}.timer`).
 
 **Cron timers (общие для prod+staging, 3.6.8):**
@@ -252,7 +258,11 @@ INTEGRATED_PRODUCTS: frozenset[str] = frozenset({"net", "sonar", "hub"})
 | `IIKO_BASE_URL` / `IIKO_LOGIN` / `IIKO_PASSWORD` / `IIKO_VERIFY_SSL` / `IIKO_TIMEOUT_SEC` / `IIKO_CACHE_TTL_SEC` | отчёты ассистента поверх iiko OLAP. **Слот лицензии сети общий с продуктом Listen** — стоит отдельная учётка под Hub; без переменных экран отчётов показывает «не подключены» |
 | `STT_ENABLED` / `STT_PROVIDER` / `STT_MODEL` / `STT_LANGUAGE` / `STT_COMPUTE_TYPE` / `STT_CPU_THREADS` / `STT_URL` / `STT_IDLE_UNLOAD_SEC` / `STT_MAX_BYTES` / `STT_TIMEOUT_SEC` / `STT_API_KEY` / `STT_BASE_URL` | голосовой ввод: backend ходит в отдельный юнит `signaris-hub-stt` по `STT_URL`; без `STT_ENABLED` микрофон в UI не рисуется |
 | `SID_SYNC_ENABLED` / `SID_SYNC_POLL_SEC` | воркер ревокаций SSO-сессий (блокирует `--workers > 1`) |
-| `DELETION_SYNC_ENABLED` / `SIGNARIS_SERVICE_KEY` | deletion-sync из auth |
+| `DELETION_SYNC_ENABLED` / `SIGNARIS_SERVICE_KEY` | deletion-sync из auth (тот же общий ключ — у sid-sync) |
+| `STAFF_SERVICE_KEY` | **отдельный** ключ метки hub (штат + реестр объектов): ошибка в общем ключе молча отняла бы отзыв SSO-сессий. Значение — CLAUDE.md → СЕКРЕТЫ |
+| `STAFF_SYNC_ENABLED` / `STAFF_SYNC_INTERVAL_SEC` | pull-воркер штата (0052), 15 мин; **staging=false навсегда** — VAPID общий с прод, bootstrap-залп по staging-копии подписок ушёл бы на реальные устройства |
+| `SITES_SYNC_ENABLED` | зеркало реестра объектов (0053): планировщика НЕТ, флаг гейтит живой прогон ручного `POST /api/learn/sites/sync` (false = форс dry-run) |
+| `SITES_SNAPSHOT_FRESH_DAYS` | свежесть снимка зеркала, фиксированные сутки (14): протухло → карточки магазинов показывают локальные поля с меткой |
 | `ATTACHMENTS_ROOT` / `ATTACHMENT_MAX_BYTES` | корень файлов (вложения задач + learn-медиа), лимит вложений задач |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY_PATH` / `VAPID_SUBJECT` | Web Push |
 | `SENTRY_DSN` | включает Sentry backend (+frontend через /api/env); пока не задан |
