@@ -112,6 +112,19 @@ export function renderActivity(a: ActivityLike): string | null {
       return `${actor} добавил метку «${String(p['name'] ?? '—')}»`
     case 'unlabeled':
       return `${actor} снял метку «${String(p['name'] ?? '—')}»`
+    case 'recurrence_set':
+      return `${actor} включил повтор: ${String(p['rule'] ?? '—')}`
+    case 'recurrence_cleared':
+      return `${actor} выключил повтор`
+    case 'recurrence_spawned':
+      // Копию создаёт система, но по действию человека — он и назван.
+      return `${actor} выполнил задачу — создана следующая${p['seq'] ? ` №${String(p['seq'])}` : ''}`
+    case 'recurrence_created':
+      return `Создана по повтору${p['seq'] ? ` из задачи №${String(p['seq'])}` : ''}`
+    case 'recurrence_stopped':
+      return p['reason'] === 'project_archived'
+        ? 'Повтор остановлен: проект в архиве'
+        : 'Повтор остановлен: задача в архиве'
     case 'commented':
       // Rendered as the comment itself — skip the activity row.
       return null

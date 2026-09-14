@@ -7,6 +7,8 @@ import {
 import { toast } from 'sonner'
 
 import { taskAssignees } from '@/lib/taskAssignees'
+import { humanDate } from '@/lib/taskDates'
+import type { RecurrenceFreq } from '@/lib/taskRecurrence'
 import {
   tasksApi,
   type Task,
@@ -261,12 +263,52 @@ export function useToggleAssignee(projectId: string) {
  * Карточку никуда не двигаем (0044): состояние и колонка — независимые оси,
  * поэтому отмена — это просто обратная галочка, а не возврат в прежний этап.
  */
+/**
+ * Включить или сменить повтор. Только инвалидация, НИКАКОГО setQueryData из
+ * ответа: ответ мутирующей ручки не несёт `can_complete` (см. `_serialize_one`),
+ * и положив его в кэш, мы погасили бы чекбокс у исполнителя-viewer сразу после
+ * включения повтора.
+ */
+export function useSetRecurrence(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, freq, step }: { id: string; freq: RecurrenceFreq; step: number }) =>
+      tasksApi.setRecurrence(id, { freq, step }),
+    meta: { errorMessage: 'Не удалось включить повтор' },
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: ['tasks', projectId] })
+      void qc.invalidateQueries({ queryKey: ['me-tasks'] })
+      void qc.invalidateQueries({ queryKey: taskKeys.detail(vars.id) })
+      void qc.invalidateQueries({ queryKey: ['task', vars.id, 'activity'] })
+    },
+  })
+}
+
+export function useClearRecurrence(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => tasksApi.clearRecurrence(id),
+    meta: { errorMessage: 'Не удалось выключить повтор' },
+    onSuccess: (_data, id) => {
+      void qc.invalidateQueries({ queryKey: ['tasks', projectId] })
+      void qc.invalidateQueries({ queryKey: ['me-tasks'] })
+      void qc.invalidateQueries({ queryKey: taskKeys.detail(id) })
+      void qc.invalidateQueries({ queryKey: ['task', id, 'activity'] })
+    },
+  })
+}
+
 export function useToggleDone(projectId: string) {
   const update = useUpdateTask(projectId)
-  return (task: Pick<Task, 'id' | 'done'>) => {
+  return (task: Pick<Task, 'id' | 'done' | 'recurrence'>) => {
     const next = !task.done
     update.mutate({ id: task.id, done: next })
-    if (next) {
+    if (next && task.recurrence) {
+      // «Отменить» здесь ВРЁТ: обратная галочка не удалит уже созданную копию
+      // и не вернёт правило — оно переехало на неё. Поэтому у повторяющейся
+      // задачи действия нет, зато тост говорит, что дальше.
+      toast.success(`Выполнено. Следующая — ${humanDate(task.recurrence.next_due)}`)
+    } else if (next) {
       toast.success('Задача выполнена', {
         action: {
           label: 'Отменить',

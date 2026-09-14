@@ -601,7 +601,15 @@ def my_created_stmt(employee_id: UUID, now: datetime):
             ),
         )
         .select_from(Task)
-        .where(Task.created_by == employee_id, Task.archived_at.is_(None))
+        .where(
+            Task.created_by == employee_id,
+            Task.archived_at.is_(None),
+            # Копии повторяющихся задач создаёт система от имени автора серии.
+            # «Создано мной» должно означать «завёл руками», иначе ежедневная
+            # задача добавляет автору +365 в год и график перестаёт что-либо
+            # значить.
+            Task.recurrence_parent_id.is_(None),
+        )
     )
 
 

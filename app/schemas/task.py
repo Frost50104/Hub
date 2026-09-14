@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -146,6 +146,36 @@ class TaskAssigneeAdd(BaseModel):
     employee_id: UUID
 
 
+class TaskRecurrenceBody(BaseModel):
+    """Тело PUT /tasks/{id}/recurrence — идемпотентный upsert правила.
+
+    Отдельная схема, а не поле в `TaskUpdate`: на том стоит `extra="forbid"`,
+    и он же расширяет права до исполнителя-viewer для `done`/`stage_id`.
+    Расписание — планирование, ему там не место.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    freq: Literal["day", "weekday", "week", "month"]
+    # `step`, а не `interval`: INTERVAL — зарезервированное слово Postgres.
+    step: int = Field(default=1, ge=1, le=365)
+
+
+class TaskRecurrenceInfo(BaseModel):
+    """Правило + СЧИТАННАЯ СЕРВЕРОМ следующая дата.
+
+    `next_due` приходит с сервера намеренно: второй реализации календарной
+    арифметики на клиенте нет (тот же принцип, что у переноса задачи).
+    """
+
+    freq: Literal["day", "weekday", "week", "month"]
+    step: int
+    anchor: date
+    occurrence: int
+    next_due: date
+    text: str
+
+
 class TaskResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -194,6 +224,11 @@ class TaskResponse(BaseModel):
     comment_count: int | None = None
     attachment_count: int | None = None
     blocker_count: int | None = None
+    # Правило повтора. Заполняют батчем list_tasks, get_task, /me/tasks и обе
+    # ручки повтора (services/task_recurrence.load_rules); остальные — None.
+    recurrence: TaskRecurrenceInfo | None = None
+    # Задача РОДИЛАСЬ по повтору вот этой. Обычная колонка — приезжает везде.
+    recurrence_parent_id: UUID | None = None
     # Может ли ВЫЗЫВАЮЩИЙ закрывать задачу и двигать её по доске: роль owner/editor,
     # hub-admin ИЛИ он среди исполнителей (см. update_task). Заполняют только
     # list_tasks и get_task — там уже посчитана роль в проекте; остальные

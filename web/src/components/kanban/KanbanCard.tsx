@@ -1,6 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { ListTree, Plus } from 'lucide-react'
+import { ListTree, Plus, Repeat } from 'lucide-react'
 import type { CSSProperties } from 'react'
 
 import { PriorityBar } from '@/components/task/PriorityBar'
@@ -10,6 +10,7 @@ import { AvatarStack } from '@/components/ui/AvatarStack'
 import { cn } from '@/lib/cn'
 import { taskAssignees } from '@/lib/taskAssignees'
 import { isOverdue, shortDate } from '@/lib/taskDates'
+import { describeRecurrence } from '@/lib/taskRecurrence'
 import { type Label } from '@/lib/labels'
 import { type SubtaskStats, type Task } from '@/lib/tasks'
 
@@ -126,13 +127,23 @@ export function KanbanCard({
       )}
 
       <div className="flex items-center justify-between gap-2 border-t border-hair pt-[9px]">
-        <span
-          className={cn(
-            'text-[13px] tabular-nums',
-            overdue ? 'font-semibold text-red' : 'text-text2',
+        <span className="flex min-w-0 items-center gap-1.5">
+          {/* Повтор — соседка даты, а не метка: он свойство срока. */}
+          {task.recurrence && (
+            <Repeat
+              className="h-3.5 w-3.5 shrink-0 text-text2"
+              strokeWidth={1.9}
+              aria-label={`Повторяется ${describeRecurrence(task.recurrence)}`}
+            />
           )}
-        >
-          {task.due_at ? shortDate(task.due_at) : 'Без срока'}
+          <span
+            className={cn(
+              'text-[13px] tabular-nums',
+              overdue ? 'font-semibold text-red' : 'text-text2',
+            )}
+          >
+            {task.due_at ? shortDate(task.due_at) : 'Без срока'}
+          </span>
         </span>
         {assignees.length === 0 ? (
           <button

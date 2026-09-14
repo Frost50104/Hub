@@ -1,8 +1,9 @@
-import { Link2, ListTree, MessageSquare, Paperclip } from 'lucide-react'
+import { Link2, ListTree, MessageSquare, Paperclip, Repeat } from 'lucide-react'
 
 import { TaskLabelChip } from '@/components/task/TaskLabelChip'
 import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
+import { describeRecurrence, shortRecurrence } from '@/lib/taskRecurrence'
 import { type SubtaskStats, type Task } from '@/lib/tasks'
 
 /**
@@ -41,7 +42,7 @@ function MetaChip({
  * строки и для списков, которые решают, резервировать ли под неё полосу.
  */
 export function hasTaskContext(
-  task: Pick<Task, 'comment_count' | 'attachment_count' | 'blocker_count'>,
+  task: Pick<Task, 'comment_count' | 'attachment_count' | 'blocker_count' | 'recurrence'>,
   opts: {
     labels?: Label[]
     subtasks?: SubtaskStats
@@ -54,6 +55,7 @@ export function hasTaskContext(
   if (opts.mode === 'fallback') return false
   if (opts.stage) return true
   return (
+    !!task.recurrence ||
     (opts.labels?.length ?? 0) > 0 ||
     (opts.subtasks?.total ?? 0) > 0 ||
     (task.comment_count ?? 0) > 0 ||
@@ -110,9 +112,16 @@ export function TaskContextLine({
   const comments = task.comment_count ?? 0
   const files = task.attachment_count ?? 0
   const blocked = (task.blocker_count ?? 0) > 0
+  const repeats = task.recurrence ?? null
   const bare =
     mode === 'fallback' ||
-    (!stage && shownLabels.length === 0 && !hasSubs && !comments && !files && !blocked)
+    (!stage &&
+      shownLabels.length === 0 &&
+      !hasSubs &&
+      !comments &&
+      !files &&
+      !blocked &&
+      !repeats)
 
   if (bare && !fallback && !reserve) return null
 
@@ -126,6 +135,11 @@ export function TaskContextLine({
     >
       {bare && fallback && (
         <span className="min-w-0 truncate text-[13px] text-text2">{fallback}</span>
+      )}
+      {mode !== 'fallback' && repeats && (
+        <MetaChip icon={Repeat} title={`Повторяется ${describeRecurrence(repeats)}`}>
+          {shortRecurrence(repeats)}
+        </MetaChip>
       )}
       {mode !== 'fallback' && stage && (
         <span

@@ -13,6 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from signaris_auth import Principal
 from sqlalchemy import case, delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import enforce_rate_limit, get_db, require_auth
@@ -21,13 +22,14 @@ from app.models.notification import Notification
 from app.models.project import Project
 from app.models.shadow import ShadowUser
 from app.models.stage import ProjectStage
-from app.models.task import Task, TaskLabelAssignment, TaskWatcher
+from app.models.task import Task, TaskLabelAssignment, TaskRecurrence, TaskWatcher
 from app.schemas.task import (
     TaskAssigneeAdd,
     TaskCreate,
     TaskMoveReport,
     TaskMoveRequest,
     TaskPriority,
+    TaskRecurrenceBody,
     TaskResponse,
     TaskUpdate,
     resolve_assignee_ids,
@@ -42,6 +44,7 @@ from app.services.project_access import (
     is_hub_admin,
     require_project_role,
 )
+from app.services.recurrence_dates import describe
 from app.services.stages import get_stage_in_project, set_done, set_stage
 from app.services.task_assignees import (
     add_assignee,
@@ -56,6 +59,14 @@ from app.services.task_assignees import (
 )
 from app.services.task_counts import load_row_counts
 from app.services.task_move import MovePlan, apply_move, plan_move
+from app.services.task_recurrence import (
+    claim_rule,
+    load_rule,
+    load_rules,
+    recurrence_info,
+    spawn_next,
+)
+from app.services.taskdates import display_today, due_day
 from app.services.tasks import (
     allocate_task_seq,
     apply_done_filter,
@@ -104,6 +115,8 @@ async def _serialize_one(
     by_task = await load_assignees(db, [task.id])
     assignees = by_task.get(task.id, [])
     data = _serialize(task, assignees)
+    rules = await load_rules(db, [task.id])
+    data.recurrence = recurrence_info(rules.get(task.id), today=display_today())
     if rights_for is not None:
         role, principal = rights_for
         data.can_complete = can_complete(role, principal.employee_id, assignees)
@@ -197,10 +210,13 @@ async def list_tasks(
     ids = [t.id for t in tasks]
     by_task = await load_assignees(db, ids)
     counts = await load_row_counts(db, ids)
+    rules = await load_rules(db, ids)
+    today = display_today()
     out: list[TaskResponse] = []
     for t in tasks:
         assignees = by_task.get(t.id, [])
         item = _serialize(t, assignees)
+        item.recurrence = recurrence_info(rules.get(t.id), today=today)
         item.can_complete = can_complete(my_role, principal.employee_id, assignees)
         c = counts.get(t.id)
         if c is not None:
@@ -418,6 +434,12 @@ async def update_task(
                 actor_name=actor_name,
                 recipient_id=emp_id,
             )
+        if task.done:
+            # Следующая копия повторяющейся задачи — в ЭТОЙ же транзакции:
+            # закрытие и копия либо есть оба, либо нет ни одного. Правило
+            # внутри забирается атомарно (`claim_rule`), поэтому снять галочку
+            # и поставить снова второй копии не даст.
+            await spawn_next(db, task=task, actor_id=principal.employee_id)
 
     if body.position is not None:
         # 3a stub — set as-is; rebalance / collision-handling lands with @dnd-kit in 3b.
@@ -577,6 +599,103 @@ async def _actor_name(db: AsyncSession, employee_id: UUID) -> str:
     if rec is None:
         return "Кто-то"
     return rec.full_name or rec.email or "Кто-то"
+
+
+@router.put("/tasks/{task_id}/recurrence", response_model=TaskResponse)
+async def set_task_recurrence(
+    task_id: UUID,
+    body: TaskRecurrenceBody,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> TaskResponse:
+    """Включить или сменить повтор задачи.
+
+    Смена правила ПЕРЕ-ЯКОРИВАЕТ серию (`anchor` = текущий срок, `occurrence`
+    сбрасывается): иначе «поменял день на неделю» дало бы дату из старой сетки.
+    """
+    await enforce_rate_limit(
+        bucket="task:write",
+        employee_id=str(principal.employee_id),
+        limit=120,
+        window_sec=60,
+    )
+    task = await _task_for_edit(db, task_id, principal)
+    if task.parent_task_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Повтор ставится на задачу, а не на подзадачу",
+        )
+    if task.due_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="У задачи нет срока — повтор считается от него",
+        )
+    # Задача уже породила следующую: правило переехало туда, и второй потомок
+    # физически запрещён (partial-UNIQUE). Отвечаем понятно, а не 500 из БД.
+    child = (
+        await db.execute(select(Task.seq).where(Task.recurrence_parent_id == task.id))
+    ).first()
+    if child is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Эта задача уже породила следующую — поставьте повтор на неё",
+        )
+    await db.execute(
+        pg_insert(TaskRecurrence)
+        .values(
+            task_id=task.id,
+            tenant_id=principal.tenant_id,
+            freq=body.freq,
+            step=body.step,
+            anchor=due_day(task.due_at),
+            occurrence=0,
+            created_by=principal.employee_id,
+        )
+        .on_conflict_do_update(
+            index_elements=["task_id"],
+            set_={
+                "freq": body.freq,
+                "step": body.step,
+                "anchor": due_day(task.due_at),
+                "occurrence": 0,
+            },
+        )
+    )
+    await record_activity(
+        db,
+        tenant_id=principal.tenant_id,
+        task_id=task.id,
+        actor_id=principal.employee_id,
+        kind="recurrence_set",
+        payload={"rule": describe(body.freq, body.step)},
+    )
+    await db.commit()
+    await db.refresh(task)
+    return await _serialize_one(db, task)
+
+
+@router.delete("/tasks/{task_id}/recurrence", response_model=TaskResponse)
+async def clear_task_recurrence(
+    task_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> TaskResponse:
+    """Выключить повтор. Идемпотентно: правила не было — не ошибка."""
+    task = await _task_for_edit(db, task_id, principal)
+    existed = await load_rule(db, task.id)
+    if existed is not None:
+        await claim_rule(db, task.id)
+        await record_activity(
+            db,
+            tenant_id=principal.tenant_id,
+            task_id=task.id,
+            actor_id=principal.employee_id,
+            kind="recurrence_cleared",
+            payload={"rule": describe(existed.freq, existed.step)},
+        )
+        await db.commit()
+        await db.refresh(task)
+    return await _serialize_one(db, task)
 
 
 @router.post("/tasks/{task_id}/assignees", response_model=TaskResponse)

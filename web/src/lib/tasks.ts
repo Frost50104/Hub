@@ -1,4 +1,5 @@
 import { api } from './api'
+import type { Recurrence, RecurrenceFreq } from './taskRecurrence'
 
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
 
@@ -59,6 +60,12 @@ export interface Task {
   comment_count?: number | null
   attachment_count?: number | null
   blocker_count?: number | null
+  /** Правило повтора со СЛЕДУЮЩЕЙ датой от сервера. `undefined` — «не знаем»
+   *  (старый бэкенд в окне деплоя или оптимистичный объект), чип не рисуем;
+   *  `null` — «не повторяется». */
+  recurrence?: Recurrence | null
+  /** Задача родилась по повтору вот этой — история серии. */
+  recurrence_parent_id?: string | null
 }
 
 /** «KEY-42» или null, если чего-то не хватает (optimistic-объект, нет key). */
@@ -199,6 +206,10 @@ export const tasksApi = {
     body: { project_id: string; stage_id: string | null },
   ): Promise<TaskMoveReport> =>
     api.post<TaskMoveReport>(`/tasks/${id}/move`, body).then((r) => r.data),
+  setRecurrence: (id: string, body: { freq: RecurrenceFreq; step: number }): Promise<Task> =>
+    api.put<Task>(`/tasks/${id}/recurrence`, body).then((r) => r.data),
+  clearRecurrence: (id: string): Promise<Task> =>
+    api.delete<Task>(`/tasks/${id}/recurrence`).then((r) => r.data),
   archive: (id: string): Promise<Task> =>
     api.post<Task>(`/tasks/${id}/archive`).then((r) => r.data),
   unarchive: (id: string): Promise<Task> =>

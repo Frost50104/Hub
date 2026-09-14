@@ -31,7 +31,9 @@ from app.services.task_assignees import (
     load_assignees,
     serialize_with_assignees,
 )
+from app.services.task_recurrence import load_rules, recurrence_info
 from app.services.taskdates import (
+    display_today,
     overdue_clause,
     start_of_today_utc,
     start_of_tomorrow_utc,
@@ -102,10 +104,14 @@ async def list_my_tasks(
         stmt = stmt.where(Task.due_at >= start_of_today_utc(now), Task.done.is_(False))
 
     rows = (await db.execute(stmt)).all()
-    by_task = await load_assignees(db, [task.id for task, _, _ in rows])
+    ids = [task.id for task, _, _ in rows]
+    by_task = await load_assignees(db, ids)
+    rules = await load_rules(db, ids)
+    today = display_today(now)
     out: list[TaskResponse] = []
     for task, project_key, stage_name in rows:
         data = serialize_with_assignees(task, by_task.get(task.id, []))
+        data.recurrence = recurrence_info(rules.get(task.id), today=today)
         data.project_key = project_key
         data.stage_name = stage_name
         out.append(data)

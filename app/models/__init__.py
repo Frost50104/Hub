@@ -63,6 +63,7 @@ from app.models.task import (
     TaskComment,
     TaskLabel,
     TaskLabelAssignment,
+    TaskRecurrence,
     TaskWatcher,
 )
 from app.models.user_preference import UserPreference
@@ -145,6 +146,7 @@ __all__ = [
     "TaskDependency",
     "TaskLabel",
     "TaskLabelAssignment",
+    "TaskRecurrence",
     "TaskWatcher",
     "TextExtractionJob",
     "TuStoreAssignment",

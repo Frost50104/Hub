@@ -10,6 +10,7 @@ import {
   FolderOpen,
   Link as LinkIcon,
   MoreHorizontal,
+  Repeat,
   Tag,
   Users,
   X,
@@ -55,10 +56,19 @@ import {
   useTask,
   useTasks,
   useToggleAssignee,
+  useClearRecurrence,
+  useSetRecurrence,
   useToggleDone,
   useUpdateTask,
 } from '@/hooks/useTasks'
+import { RecurrenceDialog } from '@/components/task/RecurrenceDialog'
+import { OptionButton } from '@/components/ui/OptionButton'
 import { cn } from '@/lib/cn'
+import {
+  canSetRecurrence,
+  describeRecurrence,
+  recurrenceBlockReason,
+} from '@/lib/taskRecurrence'
 import { taskAssignees } from '@/lib/taskAssignees'
 import { MobileDateCell } from '@/components/ui/MobileDateCell'
 import { dayKey, dueDayToIso, isOverdue, overdueDays } from '@/lib/taskDates'
@@ -81,38 +91,6 @@ interface TaskDetailDrawerProps {
 const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
 
 /** Кнопка-вариант в наборе «Приоритет»: активный — амбер 30% с обводкой. */
-function OptionButton({
-  active,
-  disabled,
-  onClick,
-  children,
-}: {
-  active: boolean
-  disabled: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        'inline-flex min-h-[30px] items-center rounded-lg px-2.5 text-[13px] font-semibold transition-colors',
-        disabled ? 'cursor-default' : 'cursor-pointer',
-        active
-          ? 'bg-amber/30 text-text shadow-[inset_0_0_0_1px_color-mix(in_srgb,rgb(var(--amber))_55%,transparent)]'
-          : disabled
-            ? 'bg-tint text-text2'
-            : 'bg-surface text-text2 hover:text-text',
-      )}
-    >
-      {children}
-    </button>
-  )
-}
-
 /** Подпись свойства в <dl>: иконка + слово, 13/600 на --text2. */
 function Dt({ icon: Icon, children }: { icon?: typeof Flag; children: React.ReactNode }) {
   return (
@@ -208,6 +186,12 @@ export function TaskDetailDrawer({
   const [shareOpen, setShareOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
+  const [repeatOpen, setRepeatOpen] = useState(false)
+  const setRecurrence = useSetRecurrence(taskProjectId)
+  const clearRecurrence = useClearRecurrence(taskProjectId)
+  // Гейты кнопки — зеркало сервера: 422 без срока, 409 на подзадаче.
+  const repeatBlocked = task ? recurrenceBlockReason(task) : null
+  const repeatAllowed = task ? canSetRecurrence(task) : false
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -571,6 +555,17 @@ export function TaskDetailDrawer({
                     )}
                   </MobileDateCell>
                 </PropertyRow>
+                {/* Повтор — ОТДЕЛЬНОЙ строкой, а не внутри ячейки срока: там
+                    невидимый input[type=date] растянут на всю ячейку и перехватил
+                    бы тап (ОС 27.08 про MobileDateCell). */}
+                <PropertyRow
+                  label="Повтор"
+                  onClick={!readOnly && repeatAllowed ? () => setRepeatOpen(true) : undefined}
+                >
+                  <span className={cn('truncate', !task.recurrence && 'text-text2')}>
+                    {task.recurrence ? describeRecurrence(task.recurrence) : '—'}
+                  </span>
+                </PropertyRow>
                 {/* Кастом-поля — теми же строками 48px, что Этап/Приоритет/Срок
                     (макет «Задача · мобильный»), а не стопкой «подпись + инпут»
                     (QA-0821 #14). */}
@@ -745,6 +740,26 @@ export function TaskDetailDrawer({
                             просрочено на {plural(overdueDays(task.due_at), 'день', 'дня', 'дней')}
                           </span>
                         )}
+                        {/* Повтор живёт в строке срока: он и есть свойство
+                            срока. Силуэт — тот же чип 26px, что у даты. */}
+                        {!readOnly && (
+                          <button
+                            type="button"
+                            onClick={() => setRepeatOpen(true)}
+                            disabled={!repeatAllowed}
+                            title={repeatBlocked ?? undefined}
+                            aria-label="Повтор задачи"
+                            className={cn(
+                              DATE_INPUT,
+                              'gap-1',
+                              task.recurrence && 'bg-amber/30 text-text',
+                              !repeatAllowed && 'opacity-60',
+                            )}
+                          >
+                            <Repeat className="h-3.5 w-3.5" strokeWidth={1.9} />
+                            {task.recurrence ? describeRecurrence(task.recurrence) : 'Повтор'}
+                          </button>
+                        )}
                       </dd>
                     </>
                   )}
@@ -864,6 +879,23 @@ export function TaskDetailDrawer({
           )}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
+      {repeatOpen && task && (
+        <RecurrenceDialog
+          current={task.recurrence ?? null}
+          blockedReason={repeatBlocked}
+          saving={setRecurrence.isPending || clearRecurrence.isPending}
+          onSave={(body) =>
+            setRecurrence.mutate(
+              { id: task.id, ...body },
+              { onSuccess: () => setRepeatOpen(false) },
+            )
+          }
+          onClear={() =>
+            clearRecurrence.mutate(task.id, { onSuccess: () => setRepeatOpen(false) })
+          }
+          onClose={() => setRepeatOpen(false)}
+        />
+      )}
       {task && (
         <MoveTaskDialog
           open={moveOpen}

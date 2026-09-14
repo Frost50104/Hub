@@ -16,7 +16,7 @@ across phases:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -24,6 +24,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -107,6 +108,14 @@ class Task(Base):
         DateTime(timezone=True), nullable=True
     )
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Задача РОДИЛАСЬ по повтору вот этой. SET NULL, а НЕ CASCADE (в отличие от
+    # соседнего parent_task_id): удаление старой закрытой копии не должно
+    # уносить всю живую цепочку серии.
+    recurrence_parent_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     position: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     # Человекочитаемый номер в проекте («KEY-42»): выдаётся _allocate_task_seq
     # атомарным инкрементом projects.next_task_seq; дыры при rollback — норма.
@@ -282,3 +291,59 @@ class TaskActivity(Base):
         DateTime(timezone=True), server_default=text("now()"), nullable=False
     )
 
+
+
+RECURRENCE_FREQS = ("day", "weekday", "week", "month")
+
+
+class TaskRecurrence(Base):
+    """Правило повтора ОДНОЙ задачи. Наличие строки = «задача повторяется».
+
+    Строка — ТОКЕН, который тратится ровно один раз: порождение следующей копии
+    начинается с `DELETE ... WHERE task_id = :id RETURNING ...`, и правило
+    ПЕРЕЕЗЖАЕТ на копию. Отсюда идемпотентность без флагов — снять галочку и
+    поставить снова нечего, токена на исходной задаче уже нет.
+
+    `anchor` — день срока в момент установки правила, `occurrence` — сколько
+    шагов сетки от него пройдено. Считать от ПРЕДЫДУЩЕЙ даты нельзя: «каждый
+    месяц» от 31 января поплыл бы 31.01 → 28.02 → 28.03, а от якоря даёт
+    31.01 → 28.02 → 31.03.
+    """
+
+    __tablename__ = "task_recurrences"
+    __table_args__ = (
+        CheckConstraint(
+            "freq IN ('day', 'weekday', 'week', 'month')", name="ck_task_recurrences_freq"
+        ),
+        # «по будням» — готовый пресет; «каждые три будня» продукт не обещает.
+        CheckConstraint(
+            "freq <> 'weekday' OR step = 1", name="ck_task_recurrences_weekday_step"
+        ),
+        CheckConstraint("step BETWEEN 1 AND 365", name="ck_task_recurrences_step"),
+        CheckConstraint("occurrence >= 0", name="ck_task_recurrences_occurrence"),
+    )
+
+    task_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    freq: Mapped[str] = mapped_column(String(8), nullable=False)
+    # Колонка называется `step`, а не `interval`: INTERVAL — тип и зарезервированное
+    # слово Postgres, и любой ручной SQL пришлось бы писать с кавычками.
+    step: Mapped[int] = mapped_column(Integer, server_default=text("1"), nullable=False)
+    anchor: Mapped[date] = mapped_column(Date, nullable=False)
+    occurrence: Mapped[int] = mapped_column(Integer, server_default=text("0"), nullable=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("shadow_users.employee_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        onupdate=text("now()"),
+        nullable=False,
+    )
