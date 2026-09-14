@@ -65,6 +65,7 @@ from app.models.task import (
     TaskLabelAssignment,
     TaskWatcher,
 )
+from app.models.user_preference import UserPreference
 
 __all__ = [
     "Audience",
@@ -150,4 +151,5 @@ __all__ = [
     "ViewHistory",
     "UserGroup",
     "UserGroupMember",
+    "UserPreference",
 ]

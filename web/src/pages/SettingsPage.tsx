@@ -7,7 +7,7 @@ import { useAppUpdate } from '@/hooks/useAppUpdate'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useLearnProfile } from '@/hooks/useLearn'
 import { useMe } from '@/hooks/useMe'
-import { authClient } from '@/lib/auth'
+import { logoutWithDeviceCleanup } from '@/lib/session'
 import { cn } from '@/lib/cn'
 import { HUB_ROLE_BADGE } from '@/lib/learn'
 
@@ -32,7 +32,7 @@ export function SettingsPage() {
   const roleLabel = me.data?.hub_role ? HUB_ROLE_BADGE[me.data.hub_role] : null
   const tenant = me.data?.tenant_slug?.toUpperCase()
   const logout = () => {
-    void authClient.logout()
+    void logoutWithDeviceCleanup()
   }
 
   const tabs = (

@@ -6,6 +6,7 @@ import {
   isOptedIn,
   lastSyncAt,
   markSynced,
+  pushOwner,
   shouldSyncPush,
   urlBase64ToUint8Array,
 } from '@/lib/pushRefresh'
@@ -27,20 +28,26 @@ import {
  * Ошибки глотаются: это фоновая гигиена, а не действие человека. На iOS
  * `serviceWorker.ready` вдобавок может не резолвиться, пока SW не активен —
  * ждать его в UI нельзя.
+ *
+ * Принимает employee_id, а не флаг «готово»: на общем устройстве смена
+ * пользователя обязана перевесить endpoint СРАЗУ, в обход 12-часового троттла
+ * (иначе новый вошедший до полусуток получал бы уведомления предыдущего).
  */
-export function usePushAutoRefresh(enabled: boolean): void {
+export function usePushAutoRefresh(employeeId: string | undefined): void {
   // Гард от повторного запуска в рамках одной загрузки страницы: React
   // перемонтирует Shell при навигации, а StrictMode в dev — сразу дважды.
   const started = useRef(false)
 
   useEffect(() => {
-    if (!enabled || started.current) return
+    if (!employeeId || started.current) return
     if (typeof Notification === 'undefined' || !('serviceWorker' in navigator)) return
     if (
       !shouldSyncPush({
         permission: Notification.permission,
         optedIn: isOptedIn(),
         lastSyncAt: lastSyncAt(),
+        owner: pushOwner(),
+        employeeId,
         now: Date.now(),
       })
     ) {
@@ -75,10 +82,10 @@ export function usePushAutoRefresh(enabled: boolean): void {
           keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
           user_agent: navigator.userAgent.slice(0, 256),
         })
-        markSynced()
+        markSynced(Date.now(), employeeId)
       } catch {
         // Фоновая гигиена: не показываем ошибок и не мешаем работать.
       }
     })()
-  }, [enabled])
+  }, [employeeId])
 }

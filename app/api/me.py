@@ -8,10 +8,11 @@
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from signaris_auth import Principal
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +22,7 @@ from app.services.employee_profiles import ensure_profile_for_principal
 from app.services.guides import GuideLink, guides_for_role
 from app.services.personal_projects import ensure_personal_project
 from app.services.project_access import can_create_project
+from app.services.user_prefs import get_theme, set_theme
 
 router = APIRouter(tags=["me"])
 
@@ -63,6 +65,12 @@ class MeResponse(BaseModel):
     # блокируют попап-фильтры; подпись стабильна в пределах часа, поэтому
     # повторные ответы /me не заставляют браузер перекачивать документ.
     guides: list[GuideLink] = []
+    # Тема оформления — свойство УЧЁТНОЙ ЗАПИСИ, а не браузера (ОС 09.09: на
+    # общем устройстве второй вошедший получал тему первого). None — выбор ещё
+    # не сделан, и фронт вправе засеять его локальным (lib/themeSync.ts);
+    # ОТСУТСТВИЕ поля целиком (старый бэкенд в окне деплоя) он трактует как
+    # «синхронизации нет» и работает по-старому, per-device.
+    theme: Literal["light", "dark"] | None = None
 
 
 @router.get("/me", response_model=MeResponse)
@@ -102,6 +110,9 @@ async def get_me(
     can_create = (
         await can_create_project(db, principal) if hub_role is not None else False
     )
+    # После коммитов выше: селект не должен попадать внутрь транзакции,
+    # которую ensure_* могли откатить до SAVEPOINT.
+    theme = await get_theme(db, principal.employee_id)
     return MeResponse(
         employee_id=principal.employee_id,
         email=principal.email,
@@ -115,6 +126,7 @@ async def get_me(
         can_create_projects=can_create,
         personal_project_id=personal_project_id,
         guides=guides_for_role(hub_role),
+        theme=theme,
     )
 
 
@@ -141,3 +153,39 @@ async def ensure_my_personal_project(
             detail="Не удалось создать личный проект — попробуйте позже",
         )
     return PersonalProjectResponse(personal_project_id=project_id)
+
+
+class MePreferencesUpdate(BaseModel):
+    """Тело всегда полное: набор настроек маленький, PATCH-семантика не нужна.
+
+    `extra="forbid"` — как у остальных схем проекта: pydantic молча игнорирует
+    лишний ключ, и клиент получал бы 200 на запрос, который сервер не выполнил.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    theme: Literal["light", "dark"]
+
+
+class MePreferencesResponse(BaseModel):
+    theme: Literal["light", "dark"] | None
+
+
+@router.put("/me/preferences", response_model=MePreferencesResponse)
+async def put_my_preferences(
+    body: MePreferencesUpdate,
+    principal: Principal = Depends(require_auth_any()),
+    db: AsyncSession = Depends(get_db),
+) -> MePreferencesResponse:
+    """Сохранить настройки интерфейса текущего пользователя.
+
+    `require_auth_any()`, как и у GET /me: principal без hub-роли видит
+    `NoAccessScreen`, но он внутри Shell — видит тему и вправе её менять.
+    """
+    await set_theme(
+        db,
+        employee_id=principal.employee_id,
+        tenant_id=principal.tenant_id,
+        theme=body.theme,
+    )
+    return MePreferencesResponse(theme=body.theme)

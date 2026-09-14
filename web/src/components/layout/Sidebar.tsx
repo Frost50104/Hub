@@ -66,7 +66,7 @@ import {
   useRenameFolder,
   useSetProjectFolder,
 } from '@/hooks/useProjects'
-import { authClient } from '@/lib/auth'
+import { logoutWithDeviceCleanup } from '@/lib/session'
 import { useTheme } from '@/lib/theme'
 import { ProjectKeyChip } from '@/components/project/ProjectKeyChip'
 import { cn } from '@/lib/cn'
@@ -757,7 +757,7 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
           </Link>
           <button
             onClick={() => {
-              void authClient.logout()
+              void logoutWithDeviceCleanup()
             }}
             className="rounded p-1.5 text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
             aria-label="Выйти"

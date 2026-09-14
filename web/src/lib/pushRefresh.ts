@@ -17,6 +17,13 @@
 const OPTED_IN_KEY = 'hub:push-opted-in'
 /** Когда подписку подтверждали в последний раз (мс). */
 const LAST_SYNC_KEY = 'hub:push-last-sync'
+/**
+ * Чей endpoint сейчас на СЕРВЕРЕ (employee_id). Пишется только после успешной
+ * подписки. Нужен на общем устройстве: `POST /push/subscribe` перевешивает
+ * endpoint на текущего пользователя, но до этой перепривязки уведомления
+ * прошлого продолжают приходить, а троттл откладывал бы её на 12 часов.
+ */
+const OWNER_KEY = 'hub:push-owner'
 
 /** Чаще раза в 12 часов дёргать сервер незачем: подписка не портится за час. */
 export const PUSH_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000
@@ -27,6 +34,10 @@ export interface PushRefreshState {
   optedIn: boolean
   /** Когда подтверждали в прошлый раз; null — никогда. */
   lastSyncAt: number | null
+  /** На кого endpoint привязан на сервере; null — не знаем. */
+  owner: string | null
+  /** Кто вошёл сейчас. */
+  employeeId: string
   now: number
 }
 
@@ -38,10 +49,15 @@ export interface PushRefreshState {
  *   жеста человека браузеры игнорируют;
  * - человек выключал уведомления сам — тихо включать их обратно нельзя;
  * - подтверждали недавно — не бьём в сервер на каждой навигации.
+ *
+ * Единственное «да» вне очереди: сменился пользователь (`owner !== employeeId`).
+ * Троттл тут ждать нельзя — до перепривязки endpoint'а уведомления прошлого
+ * пользователя идут на устройство, где уже сидит новый.
  */
 export function shouldSyncPush(state: PushRefreshState): boolean {
   if (state.permission !== 'granted') return false
   if (!state.optedIn) return false
+  if (state.owner !== state.employeeId) return true
   if (state.lastSyncAt !== null && state.now - state.lastSyncAt < PUSH_SYNC_INTERVAL_MS) {
     return false
   }
@@ -71,9 +87,9 @@ export function isOptedIn(): boolean {
 }
 
 /** Человек включил уведомления — с этого момента подписку можно восстанавливать. */
-export function markOptedIn(): void {
+export function markOptedIn(employeeId?: string): void {
   write(OPTED_IN_KEY, '1')
-  markSynced()
+  markSynced(Date.now(), employeeId)
 }
 
 /** Человек выключил уведомления — молча возвращать их нельзя. */
@@ -81,6 +97,7 @@ export function markOptedOut(): void {
   try {
     localStorage.removeItem(OPTED_IN_KEY)
     localStorage.removeItem(LAST_SYNC_KEY)
+    localStorage.removeItem(OWNER_KEY)
   } catch {
     // см. write()
   }
@@ -100,8 +117,13 @@ export function lastSyncAt(): number | null {
   return parseSyncStamp(read(LAST_SYNC_KEY))
 }
 
-export function markSynced(now: number = Date.now()): void {
+export function pushOwner(): string | null {
+  return read(OWNER_KEY)
+}
+
+export function markSynced(now: number = Date.now(), employeeId?: string): void {
   write(LAST_SYNC_KEY, String(now))
+  if (employeeId) write(OWNER_KEY, employeeId)
 }
 
 /**

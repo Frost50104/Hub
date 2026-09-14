@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { useMe } from '@/hooks/useMe'
 import { api } from '@/lib/api'
 import { pushApi } from '@/lib/notifications'
 import { markOptedIn, markOptedOut, urlBase64ToUint8Array } from '@/lib/pushRefresh'
@@ -25,6 +26,9 @@ export interface UsePushResult {
 }
 
 export function usePush(): UsePushResult {
+  // Кому принадлежит подписка: без этого владелец endpoint'а остаётся пустым и
+  // следующий запуск делает лишнюю переподписку.
+  const employeeId = useMe().data?.employee_id
   const [permission, setPermission] = useState<Permission>(() => {
     if (typeof Notification === 'undefined' || !('serviceWorker' in navigator)) {
       return 'unsupported'
@@ -80,10 +84,10 @@ export function usePush(): UsePushResult {
     // Отметка «человек включал уведомления» — по ней тихая переподписка знает,
     // что подписку МОЖНО восстанавливать. Разрешения браузера для этого мало:
     // оно остаётся `granted` и после нашей кнопки «Отключить».
-    markOptedIn()
+    markOptedIn(employeeId)
     setSubscribed(true)
     return true
-  }, [permission])
+  }, [permission, employeeId])
 
   const unsubscribe = useCallback(async () => {
     if (permission === 'unsupported') return

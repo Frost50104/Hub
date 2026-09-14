@@ -7,7 +7,8 @@ import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMe } from '@/hooks/useMe'
 import { usePushAutoRefresh } from '@/hooks/usePushAutoRefresh'
-import { authClient } from '@/lib/auth'
+import { useThemeSync } from '@/hooks/useThemeSetting'
+import { logoutWithDeviceCleanup } from '@/lib/session'
 import {
   consumeBootSpaceRedirect,
   isNeutralPath,
@@ -33,7 +34,7 @@ function NoAccessScreen() {
         Вашему аккаунту не выдана роль в продукте Hub. Обратитесь к
         администратору Signaris, чтобы получить доступ.
       </p>
-      <Button variant="secondary" onClick={() => void authClient.logout()}>
+      <Button variant="secondary" onClick={() => void logoutWithDeviceCleanup()}>
         <LogOut className="h-4 w-4" /> Выйти
       </Button>
     </div>
@@ -73,7 +74,10 @@ export function Shell() {
   // Подтверждение push-подписки — здесь, в корневом лэйауте: `usePush`
   // монтируется только на главной трекера и в настройках, и до него дело
   // доходит не у всех. Запускаем после `/api/me`, иначе запрос уйдёт без токена.
-  usePushAutoRefresh(me.data !== undefined)
+  usePushAutoRefresh(me.data?.employee_id)
+  // Тема принадлежит аккаунту: до ответа /me работает кеш устройства, после —
+  // решает сервер. Хук ОБЯЗАН стоять до раннего return NoAccessScreen.
+  useThemeSync(me.data)
 
   // ЕДИНЫЙ эффект, boot-redirect строго ПЕРЕД remember: раздельные эффекты —
   // баг (remember успел бы перезаписать lastSpace='tasks' на первом маунте

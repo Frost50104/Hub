@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 
 import { api } from '@/lib/api'
 import { clearSentryUser, identifySentryUser } from '@/lib/sentry'
+import type { Theme } from '@/lib/theme'
 
 export interface MeProfile {
   id: string
@@ -37,14 +38,25 @@ export interface Me {
   /** Готовые ПОДПИСАННЫЕ ссылки на инструкции (какие — решает сервер по роли).
    *  Optional по той же причине, что и `personal_project_id`. */
   guides?: { kind: string; title: string; url: string }[]
+  /** Тема оформления АККАУНТА (ОС 09.09). Три состояния, и все три значимы:
+   *  поля нет — старый бэкенд, синхронизации нет; null — выбор не сделан,
+   *  можно засеять локальный; значение — сервер решил (`lib/themeSync.ts`). */
+  theme?: Theme | null
+}
+
+/** Общие опции запроса: их же берёт префетч на экране auth-колбэка, чтобы
+ *  приложение открылось сразу в теме вошедшего, а не в теме устройства.
+ *  `signal` обязателен — без него `cancelQueries` в мутации темы половинчат:
+ *  отменённый запрос доживает и перетирает свежий выбор ответом со старым. */
+export const meQueryOptions = {
+  queryKey: ['me'] as const,
+  queryFn: ({ signal }: { signal?: AbortSignal }) =>
+    api.get<Me>('/me', { signal }).then((r) => r.data),
+  staleTime: 5 * 60_000,
 }
 
 export function useMe(): UseQueryResult<Me> {
-  const query = useQuery({
-    queryKey: ['me'],
-    queryFn: () => api.get<Me>('/me').then((r) => r.data),
-    staleTime: 5 * 60_000,
-  })
+  const query = useQuery(meQueryOptions)
 
   useEffect(() => {
     if (query.data) {

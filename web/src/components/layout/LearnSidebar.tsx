@@ -6,7 +6,7 @@ import { SpaceSwitcher } from './SpaceSwitcher'
 import { Avatar } from '@/components/ui/Avatar'
 import { useMe } from '@/hooks/useMe'
 import { useUnreadCount } from '@/hooks/useNotifications'
-import { authClient } from '@/lib/auth'
+import { logoutWithDeviceCleanup } from '@/lib/session'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/cn'
 import { HubRoleChip } from '@/components/layout/HubRoleChip'
@@ -157,7 +157,7 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
           </Link>
           <button
             onClick={() => {
-              void authClient.logout()
+              void logoutWithDeviceCleanup()
             }}
             className="rounded p-1.5 text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
             aria-label="Выйти"

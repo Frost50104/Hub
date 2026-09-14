@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+import { meQueryOptions } from '@/hooks/useMe'
 import { authClient } from '@/lib/auth'
+import { queryClient } from '@/lib/queryClient'
 
 export function AuthCallback() {
   const nav = useNavigate()
@@ -10,7 +12,16 @@ export function AuthCallback() {
   useEffect(() => {
     authClient
       .handleCallback(window.location.search)
-      .then(({ returnPath }) => nav(returnPath ?? '/', { replace: true }))
+      // /me ДО перехода в приложение: тема принадлежит аккаунту, и без этого
+      // первый экран после входа на чужом устройстве мигал бы прошлой темой.
+      // Ждём максимум секунду и не мешаем входу, если /me молчит или падает.
+      .then(async ({ returnPath }) => {
+        await Promise.race([
+          queryClient.fetchQuery(meQueryOptions).catch(() => undefined),
+          new Promise((r) => setTimeout(r, 1000)),
+        ])
+        nav(returnPath ?? '/', { replace: true })
+      })
       .catch((e: unknown) => setErr(e instanceof Error ? e.message : String(e)))
   }, [nav])
 

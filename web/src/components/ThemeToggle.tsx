@@ -1,5 +1,7 @@
 import { Moon, Sun } from 'lucide-react'
 
+import { useMe } from '@/hooks/useMe'
+import { useSetTheme } from '@/hooks/useThemeSetting'
 import { cn } from '@/lib/cn'
 import { type Theme, useTheme } from '@/lib/theme'
 
@@ -16,6 +18,12 @@ const OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
 export function ThemeToggle({ className, size = 'sm' }: { className?: string; size?: 'sm' | 'lg' }) {
   const theme = useTheme((s) => s.theme)
   const setTheme = useTheme((s) => s.setTheme)
+  const me = useMe()
+  const save = useSetTheme()
+  // Поля `theme` в ответе нет — синхронизации нет (старый бэкенд в окне
+  // деплоя, dev-стенд с фикстурой): тумблер работает локально, как раньше.
+  const synced = me.data?.theme !== undefined
+  const pick = (value: Theme) => (synced ? save.mutate(value) : setTheme(value))
 
   return (
     <div
@@ -34,7 +42,7 @@ export function ThemeToggle({ className, size = 'sm' }: { className?: string; si
             type="button"
             role="radio"
             aria-checked={active}
-            onClick={() => setTheme(value)}
+            onClick={() => pick(value)}
             title={label}
             className={cn(
               'flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60',
