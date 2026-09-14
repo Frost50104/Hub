@@ -6,17 +6,28 @@ import uuid
 from datetime import timedelta
 
 import pytest
+from fastapi import HTTPException
+from signaris_auth import Principal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.learn_home import learn_home, learn_profile
-from app.api.products import list_products, open_product
+from app.api.products import (
+    change_product_status,
+    create_product,
+    delete_product,
+    list_products,
+    open_product,
+)
 from app.models.activity import ActivityEvent
 from app.models.audience import Audience
 from app.models.library import LibraryMaterial
 from app.models.org import Position, Store
 from app.models.product import ProductCard, ProductCardLink
+from app.models.search_document import SearchDocument
 from app.models.survey import Survey
+from app.schemas.library import StatusBody
+from app.schemas.product import ProductUpsert
 from app.services.taskdates import display_today
 from tests.integration.test_courses import _mk_course, _mk_member
 
@@ -28,6 +39,15 @@ def _no_push(monkeypatch):
     from app.services import notify_batch
 
     monkeypatch.setattr(notify_batch, "_schedule_push_batch", lambda **kw: None)
+
+
+async def _doc_count(db: AsyncSession, card_id: uuid.UUID) -> int:
+    rows = await db.execute(
+        select(SearchDocument).where(
+            SearchDocument.object_type == "product", SearchDocument.object_id == card_id
+        )
+    )
+    return len(rows.scalars().all())
 
 
 async def _mk_card(db: AsyncSession, tenant_id: uuid.UUID, **kw) -> ProductCard:
@@ -164,3 +184,103 @@ async def test_learn_profile_tenure(db: AsyncSession, tenant_id: uuid.UUID):
     assert resp.store_name == "П14"
     assert resp.tenure_days == 100
     assert resp.avatar_url and str(member.employee_id) in resp.avatar_url
+
+
+# ─── Жизненный цикл карточки (ОС 09.09: «завести товар за один заход») ───────
+#
+# До этих тестов CRUD и lifecycle продуктов не были покрыты вовсе, а на них
+# теперь стоит клиентский гейт кнопок (`web/src/lib/productForm.ts`) — зеркало
+# серверной матрицы. Зеркало без второй половины разъезжается молча.
+
+
+async def _publisher(
+    db: AsyncSession, tenant_id: uuid.UUID, email: str, role: str = "publisher"
+) -> Principal:
+    principal, profile = await _mk_member(db, tenant_id, email=email)
+    profile.content_role = role
+    await db.flush()
+    return principal
+
+
+async def test_create_is_draft_and_publish_reindexes(db: AsyncSession, tenant_id: uuid.UUID):
+    """Создание даёт черновик вне поиска; публикация заводит документ, архив — снимает."""
+    publisher = await _publisher(db, tenant_id, "pub-create@t.ru")
+
+    created = await create_product(ProductUpsert(title="Раф солёная карамель"), publisher, db)
+    assert created.status == "draft"
+    assert created.published_at is None
+    assert await _doc_count(db, created.id) == 0
+
+    published = await change_product_status(
+        created.id, StatusBody(status="published"), publisher, db
+    )
+    assert published.status == "published"
+    assert published.published_at is not None
+    doc = await db.scalar(
+        select(SearchDocument).where(
+            SearchDocument.object_type == "product", SearchDocument.object_id == created.id
+        )
+    )
+    assert doc is not None
+    # По этому адресу ходят поиск и уведомления — на нём же стоит legacy-редирект
+    # списка (`?p=`), поэтому URL-фильтры ассортимента его ключ не занимают.
+    assert doc.url_path == f"/learn/products?p={created.id}"
+
+    await change_product_status(created.id, StatusBody(status="archived"), publisher, db)
+    assert await _doc_count(db, created.id) == 0
+
+
+async def test_author_cannot_publish(db: AsyncSession, tenant_id: uuid.UUID):
+    """Автор публиковать не может — серверная половина гейта кнопки.
+
+    Матрица разрешает ему только draft→review (`lifecycle._ALLOWED`), поэтому
+    кнопки «Опубликовать» ему не показывают: раньше она была видна всем, кто
+    ведёт контент, и приносила 403 в конце пути.
+    """
+    author = await _publisher(db, tenant_id, "author@t.ru", role="author")
+    created = await create_product(ProductUpsert(title="Эспрессо"), author, db)
+
+    with pytest.raises(HTTPException) as exc:
+        await change_product_status(created.id, StatusBody(status="published"), author, db)
+    assert exc.value.status_code == 403
+
+    card = await db.get(ProductCard, created.id)
+    assert card is not None and card.status == "draft"
+
+
+async def test_published_card_is_archived_not_deleted(db: AsyncSession, tenant_id: uuid.UUID):
+    """Черновик удаляется насовсем, публиковавшаяся карточка — только в архив."""
+    publisher = await _publisher(db, tenant_id, "pub-del@t.ru")
+    draft = await create_product(ProductUpsert(title="Черновик"), publisher, db)
+    await delete_product(draft.id, publisher, db)
+    assert await db.get(ProductCard, draft.id) is None
+
+    live = await create_product(ProductUpsert(title="Живой"), publisher, db)
+    await change_product_status(live.id, StatusBody(status="published"), publisher, db)
+    with pytest.raises(HTTPException) as exc:
+        await delete_product(live.id, publisher, db)
+    assert exc.value.status_code == 409
+
+
+async def test_manage_listing_scopes(db: AsyncSession, tenant_id: uuid.UUID):
+    """Что видно в manage-режиме каждой роли — на этом стоит фильтр статусов."""
+    publisher = await _publisher(db, tenant_id, "pub-scope@t.ru")
+    author = await _publisher(db, tenant_id, "author-scope@t.ru", role="author")
+    plain, _ = await _mk_member(db, tenant_id, email="plain-scope@t.ru")
+
+    own = await create_product(ProductUpsert(title="Черновик автора"), author, db)
+    foreign = await create_product(ProductUpsert(title="Черновик publisher"), publisher, db)
+    live = await create_product(ProductUpsert(title="Опубликованный"), publisher, db)
+    await change_product_status(live.id, StatusBody(status="published"), publisher, db)
+    await change_product_status(foreign.id, StatusBody(status="published"), publisher, db)
+    await change_product_status(foreign.id, StatusBody(status="archived"), publisher, db)
+
+    pub_ids = {i.id for i in (await list_products(True, publisher, db)).items}
+    assert {own.id, foreign.id, live.id} <= pub_ids  # архив и чужие черновики видны
+
+    author_ids = {i.id for i in (await list_products(True, author, db)).items}
+    assert own.id in author_ids and live.id in author_ids
+    assert foreign.id not in author_ids  # чужой архив автору не показываем
+
+    # Роль none: manage=True ничего не открывает, только опубликованное.
+    assert {i.id for i in (await list_products(True, plain, db)).items} == {live.id}

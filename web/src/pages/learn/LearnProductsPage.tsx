@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Archive,
   ArrowLeft,
@@ -6,13 +7,14 @@ import {
   ImagePlus,
   Pencil,
   Plus,
+  Search,
   Send,
   ShoppingBag,
   Trash2,
   Users,
   X,
 } from 'lucide-react'
-import { useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -39,6 +41,23 @@ import {
   type ProductCategory,
   type ProductUpsert,
 } from '@/lib/learn'
+import {
+  clampProductFilters,
+  DEFAULT_PRODUCT_FILTERS,
+  filterProducts,
+  filtersShowing,
+  matchesProductFilters,
+  parseProductFilters,
+  productFiltersToParams,
+  type ProductFilters,
+  type ProductStatusFilter,
+} from '@/lib/productFilters'
+import {
+  canEditProductAudience,
+  canPublishProduct,
+  canSaveProduct,
+  productStatusActions,
+} from '@/lib/productForm'
 import { nbsp, plural } from '@/lib/typography'
 
 /**
@@ -78,29 +97,102 @@ function PhotoPlaceholder({ className, iconClass }: { className: string; iconCla
 
 // ─── Список ──────────────────────────────────────────────────────────────────
 
+const STATUS_CHIPS: { value: ProductStatusFilter; label: string; title: string }[] = [
+  { value: 'active', label: 'Все', title: 'Все, кроме архива' },
+  { value: 'draft', label: 'Черновики', title: 'Черновики и карточки на согласовании' },
+  { value: 'published', label: 'Опубликованные', title: 'Видны сотрудникам' },
+  { value: 'archived', label: 'Архив', title: 'Сняты с публикации' },
+]
+
 export function LearnProductsPage() {
   const navigate = useNavigate()
-  const [params] = useSearchParams()
-  const [category, setCategory] = useState<string | 'all'>('all')
+  const [params, setParams] = useSearchParams()
   const [editorCard, setEditorCard] = useState<ProductCard | 'new' | null>(null)
   const [categoriesOpen, setCategoriesOpen] = useState(false)
+  // Только что сохранённая карточка: к ней скроллим и её обводим.
+  const [focusId, setFocusId] = useState<string | null>(null)
   const { probe, canManage, data } = useProductsData()
 
   const all = useMemo(() => data?.items ?? [], [data])
+  const categories = useMemo(() => data?.categories ?? [], [data])
+  const categoryTitle = useMemo(
+    () => new Map(categories.map((c) => [c.id, c.title])),
+    [categories],
+  )
+  // clamp только ВЫЧИСЛЯЕТ: записать его результат в адрес нельзя — на первом
+  // кадре нет ни categories, ни canManage, и ссылка вида `?c=…&s=archived`
+  // (возврат с карточки, чужая ссылка) была бы затёрта до загрузки данных.
+  const filters = useMemo(
+    () => clampProductFilters(parseProductFilters(params), canManage, categories.map((c) => c.id)),
+    [params, canManage, categories],
+  )
+  const setFilters = useCallback(
+    (next: ProductFilters) => setParams(productFiltersToParams(next, params), { replace: true }),
+    [params, setParams],
+  )
   const items = useMemo(
-    () => (category === 'all' ? all : all.filter((i) => i.category_id === category)),
-    [all, category],
+    () => filterProducts(all, filters, { categoryTitle }),
+    [all, filters, categoryTitle],
+  )
+  // Знаменатель — по текущему статусному срезу: со скрытым архивом «5 из 131»
+  // читалось бы как потеря карточек.
+  const total = useMemo(
+    () =>
+      all.filter((c) =>
+        matchesProductFilters(c, { ...filters, category: 'all', q: '' }, { categoryTitle }),
+      ).length,
+    [all, filters, categoryTitle],
+  )
+  // Поиск нашёл бы это в архиве, но архив скрыт — говорим об этом вслух,
+  // иначе прячущийся архив породит новую версию жалобы «товар не находится».
+  const archivedHits = useMemo(
+    () =>
+      filters.status === 'archived' || !filters.q.trim()
+        ? 0
+        : filterProducts(all, { ...filters, status: 'archived' }, { categoryTitle }).length,
+    [all, filters, categoryTitle],
+  )
+  const filtersActive =
+    filters.category !== 'all' ||
+    filters.status !== DEFAULT_PRODUCT_FILTERS.status ||
+    filters.q.trim() !== ''
+
+  // Скролл к сохранённой карточке — callback-ref: узел появится только после
+  // рефетча списка, и ловить его таймером или querySelector'ом незачем.
+  // rAF обязателен: Radix при закрытии диалога возвращает фокус на «+ Товар»
+  // (layout-эффект размонтирования), и браузер скроллит к кнопке.
+  const focusTile = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return
+    requestAnimationFrame(() => node.scrollIntoView({ block: 'center', behavior: 'smooth' }))
+  }, [])
+
+  useEffect(() => {
+    if (!focusId) return undefined
+    const timer = setTimeout(() => setFocusId(null), 2500)
+    return () => clearTimeout(timer)
+  }, [focusId])
+
+  const onSaved = useCallback(
+    (card: ProductCard) => {
+      // Сначала показать место, где карточка реально лежит: категорию меняют
+      // прямо в форме, а статус мог не совпасть с активным чипом.
+      setFilters(filtersShowing(filters, card))
+      setFocusId(card.id)
+    },
+    [filters, setFilters],
   )
 
   // Старый deep-link `?p=` (поиск, уведомления) → маршрут карточки.
+  // ВНИМАНИЕ: ранний return. Любой новый хук — ТОЛЬКО выше этой строки.
   const legacy = params.get('p')
   if (legacy) return <Navigate to={`/learn/products/${legacy}`} replace />
 
-  const counter = data ? nbsp(`${items.length} из ${plural(all.length, 'позиции', 'позиций', 'позиций')}`) : ''
+  const counter = data ? nbsp(`${items.length} из ${plural(total, 'позиции', 'позиций', 'позиций')}`) : ''
 
   const open = (card: ProductCard) => {
     if (card.status === 'published') void learnApi.openProduct(card.id)
-    navigate(`/learn/products/${card.id}`)
+    // Фильтры едут с собой: возврат «Ассортимент» вернёт в тот же срез.
+    navigate({ pathname: `/learn/products/${card.id}`, search: params.toString() })
   }
 
   return (
@@ -128,13 +220,70 @@ export function LearnProductsPage() {
         )}
       </header>
 
-      {(data?.categories.length ?? 0) > 0 && (
-        <div className="-mx-5 mt-4 flex gap-2 overflow-x-auto px-5 pb-1 [scrollbar-width:none] lg:mx-0 lg:mt-[22px] lg:flex-wrap lg:px-0">
-          <FilterChip active={category === 'all'} onClick={() => setCategory('all')}>
-            Все
+      {/* Поле 48px, input растянут на всю высоту строки: иначе фокус ловит 23px. */}
+      <div className="mt-4 lg:mt-[22px]">
+        <div className="flex min-h-[48px] items-center gap-2.5 rounded-xl border border-glass-border bg-tint px-3.5">
+          <Search className="h-[18px] w-[18px] shrink-0 text-text2" />
+          <input
+            type="text"
+            value={filters.q}
+            onChange={(e) => setFilters({ ...filters, q: e.target.value })}
+            placeholder="Название или категория"
+            aria-label="Поиск по ассортименту"
+            className="min-w-0 flex-1 self-stretch border-none bg-transparent text-[16px] text-text outline-none placeholder:text-text2"
+          />
+          {filters.q && (
+            <button
+              type="button"
+              onClick={() => setFilters({ ...filters, q: '' })}
+              aria-label="Очистить"
+              className="-mr-2.5 flex h-11 w-11 shrink-0 items-center justify-center text-text2 hover:text-text"
+            >
+              <X className="h-[18px] w-[18px]" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Статусы — только тем, кто ведёт контент: сотруднику сервер отдаёт
+          только опубликованное, и чип «Черновики» был бы вечной пустотой. */}
+      {canManage && (
+        <div
+          role="group"
+          aria-label="Статус"
+          className="-mx-5 mt-3 flex gap-2 overflow-x-auto px-5 pb-1 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:px-0"
+        >
+          {STATUS_CHIPS.map((chip) => (
+            <FilterChip
+              key={chip.value}
+              active={filters.status === chip.value}
+              title={chip.title}
+              onClick={() => setFilters({ ...filters, status: chip.value })}
+            >
+              {chip.label}
+            </FilterChip>
+          ))}
+        </div>
+      )}
+
+      {categories.length > 0 && (
+        <div
+          role="group"
+          aria-label="Категория"
+          className="-mx-5 mt-3 flex gap-2 overflow-x-auto px-5 pb-1 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:px-0"
+        >
+          <FilterChip
+            active={filters.category === 'all'}
+            onClick={() => setFilters({ ...filters, category: 'all' })}
+          >
+            Все категории
           </FilterChip>
-          {data!.categories.map((c) => (
-            <FilterChip key={c.id} active={category === c.id} onClick={() => setCategory(c.id)}>
+          {categories.map((c) => (
+            <FilterChip
+              key={c.id}
+              active={filters.category === c.id}
+              onClick={() => setFilters({ ...filters, category: c.id })}
+            >
               {c.title}
             </FilterChip>
           ))}
@@ -148,14 +297,28 @@ export function LearnProductsPage() {
           <EmptyState
             layout="card"
             icon={<ShoppingBag className="h-7 w-7" />}
-            title={category === 'all' ? 'Карточек пока нет' : 'В этой категории пусто'}
+            title={filtersActive ? 'Ничего не нашлось' : 'Карточек пока нет'}
             text={
-              canManage
-                ? 'Заведите позицию: состав, аллергены, срок, подача и фото — сотрудники откроют её у стойки.'
-                : 'Позиции ассортимента появятся здесь, как только их опубликуют.'
+              filtersActive
+                ? archivedHits > 0
+                  ? `Под этот запрос ничего нет, но в архиве есть ${plural(archivedHits, 'совпадение', 'совпадения', 'совпадений')}.`
+                  : 'Попробуйте другой запрос или снимите фильтры.'
+                : canManage
+                  ? 'Заведите позицию: состав, аллергены, срок, подача и фото — сотрудники откроют её у стойки.'
+                  : 'Позиции ассортимента появятся здесь, как только их опубликуют.'
             }
-            cta={canManage && category === 'all' ? 'Новый товар' : undefined}
-            onCta={canManage && category === 'all' ? () => setEditorCard('new') : undefined}
+            cta={canManage ? 'Новый товар' : undefined}
+            onCta={canManage ? () => setEditorCard('new') : undefined}
+            secondaryCta={
+              archivedHits > 0 ? 'Искать в архиве' : filtersActive ? 'Сбросить фильтры' : undefined
+            }
+            onSecondary={
+              archivedHits > 0
+                ? () => setFilters({ ...filters, status: 'archived' })
+                : filtersActive
+                  ? () => setFilters(DEFAULT_PRODUCT_FILTERS)
+                  : undefined
+            }
           />
         )}
         {items.length > 0 && (
@@ -165,7 +328,13 @@ export function LearnProductsPage() {
               // звезда это кнопка, а вложенная кнопка невалидна.
               <div
                 key={card.id}
-                className="relative flex flex-col overflow-hidden rounded-[14px] border border-hair bg-tint transition-colors hover:border-amber/50"
+                ref={card.id === focusId ? focusTile : undefined}
+                className={cn(
+                  'relative flex flex-col overflow-hidden rounded-[14px] border border-hair bg-tint transition-colors hover:border-amber/50',
+                  // Кольцо рисуется снаружи элемента, собственный overflow-hidden
+                  // его не режет (клипуются только дети).
+                  card.id === focusId && 'ring-2 ring-amber ring-offset-2 ring-offset-bg',
+                )}
               >
                 <button
                   type="button"
@@ -208,19 +377,17 @@ export function LearnProductsPage() {
       {editorCard !== null && (
         <ProductEditorDialog
           initial={editorCard === 'new' ? null : editorCard}
-          categories={data?.categories ?? []}
+          categories={categories}
+          defaultCategoryId={filters.category === 'all' ? '' : filters.category}
+          role={data?.content_role ?? 'none'}
+          onSaved={onSaved}
           onClose={() => setEditorCard(null)}
         />
       )}
       {categoriesOpen && (
-        <CategoriesDialog
-          categories={data?.categories ?? []}
-          onClose={() => {
-            setCategoriesOpen(false)
-            // Удалённая категория могла быть выбрана фильтром.
-            setCategory('all')
-          }}
-        />
+        // Сбрасывать фильтр вслепую нельзя: диалог закрывают и просто так.
+        // Удалённую категорию снимет clampProductFilters после рефетча.
+        <CategoriesDialog categories={categories} onClose={() => setCategoriesOpen(false)} />
       )}
     </div>
   )
@@ -231,13 +398,21 @@ export function LearnProductsPage() {
 export function LearnProductPage() {
   const { productId = '' } = useParams()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
   const { probe, canManage, data } = useProductsData()
   const [photoIdx, setPhotoIdx] = useState(0)
   const [editing, setEditing] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const setStatus = useProductMutation((status: 'published' | 'archived') =>
+    learnApi.setProductStatus(productId, status),
+  )
 
   const card = data?.items.find((i) => i.id === productId) ?? null
-  const back = () => navigate('/learn/products')
+  const role = data?.content_role ?? 'none'
+  // `replace`, а не push: иначе системная «Назад» возвращала бы на только что
+  // покинутую карточку. Фильтры списка приехали в адресе — возвращаем их.
+  const back = () =>
+    navigate({ pathname: '/learn/products', search: params.toString() }, { replace: true })
 
   const fields = card
     ? ([
@@ -312,6 +487,28 @@ export function LearnProductPage() {
 
   const Actions = canManage && card ? (
     <div className="flex flex-wrap gap-2">
+      {/* Публикация — первым действием: до этой правки её искали внутри
+          «Редактировать», и путь «завести товар» разрастался на два экрана. */}
+      {productStatusActions(role, card.status).map((action) => (
+        <Button
+          key={action.to}
+          variant="secondary"
+          className={GHOST_BTN}
+          disabled={setStatus.isPending}
+          onClick={() =>
+            void setStatus
+              .mutateAsync(action.to)
+              .then(() => toast.success(action.to === 'published' ? 'Опубликовано' : 'В архиве'))
+          }
+        >
+          {action.to === 'published' ? (
+            <Send className="h-4 w-4" />
+          ) : (
+            <Archive className="h-4 w-4" />
+          )}{' '}
+          {action.label}
+        </Button>
+      ))}
       <Button variant="secondary" className={GHOST_BTN} onClick={() => setEditing(true)}>
         <Pencil className="h-4 w-4" /> Редактировать
       </Button>
@@ -401,7 +598,12 @@ export function LearnProductPage() {
       )}
 
       {editing && card && (
-        <ProductEditorDialog initial={card} categories={data?.categories ?? []} onClose={() => setEditing(false)} />
+        <ProductEditorDialog
+          initial={card}
+          categories={data?.categories ?? []}
+          role={role}
+          onClose={() => setEditing(false)}
+        />
       )}
       {deleting && card && (
         <DeleteProductDialog
@@ -565,14 +767,24 @@ function CategoriesDialog({ categories, onClose }: { categories: ProductCategory
 function ProductEditorDialog({
   initial,
   categories,
+  defaultCategoryId = '',
+  role,
+  onSaved,
   onClose,
 }: {
   initial: ProductCard | null
   categories: { id: string; title: string }[]
+  /** Категория выбранного чипа: новый товар заводят «стоя» в ней. */
+  defaultCategoryId?: string
+  /** content_role: решает, показывать ли публикацию и аудиторию. */
+  role: string
+  /** Сохранённая карточка — списку: он покажет её и подсветит. */
+  onSaved?: (card: ProductCard) => void
   onClose: () => void
 }) {
+  const qc = useQueryClient()
   const [title, setTitle] = useState(initial?.title ?? '')
-  const [categoryId, setCategoryId] = useState(initial?.category_id ?? '')
+  const [categoryId, setCategoryId] = useState(initial?.category_id ?? defaultCategoryId)
   const [description, setDescription] = useState(initial?.description ?? '')
   const [composition, setComposition] = useState(initial?.composition ?? '')
   const [allergens, setAllergens] = useState(initial?.allergens ?? '')
@@ -609,12 +821,45 @@ function ProductEditorDialog({
     links: links.map((l) => ({ object_type: l.object_type, object_id: l.object_id })),
   })
 
-  const save = useProductMutation(() =>
-    initial ? learnApi.updateProduct(initial.id, buildBody()) : learnApi.createProduct(buildBody()),
-  )
+  const save = useProductMutation(async (publish: boolean) => {
+    const body = buildBody()
+    if (initial) return learnApi.updateProduct(initial.id, body)
+    const created = await learnApi.createProduct(body)
+    if (!publish) return created
+    try {
+      return await learnApi.setProductStatus(created.id, 'published')
+    } catch (err) {
+      // Товар УЖЕ создан. Пробрасывать ошибку нельзя: форма осталась бы
+      // открытой, и повторное нажатие завело бы дубль (уникального индекса
+      // на названии в product_cards нет).
+      toast.error('Товар создан, но опубликовать не удалось', {
+        description: extractErrorDetail(err),
+      })
+      return created
+    }
+  })
   const setStatus = useProductMutation((status: 'published' | 'archived' | 'draft') =>
     learnApi.setProductStatus(initial!.id, status),
   )
+
+  const submit = async (publish: boolean) => {
+    const saved = await save.mutateAsync(publish).catch(() => null)
+    if (!saved) return
+    // Тост по фактическому статусу, а не по нажатой кнопке: при мягком
+    // провале публикации он обязан сказать правду.
+    toast.success(
+      initial
+        ? 'Сохранено'
+        : saved.status === 'published'
+          ? 'Товар опубликован'
+          : 'Товар создан — черновик',
+    )
+    // ЖДЁМ перечитывания списка: плитка появится только после него, а
+    // вызывающий к ней скроллит (useProductMutation инвалидирует через void).
+    await qc.invalidateQueries({ queryKey: ['learn-products'] })
+    onClose()
+    onSaved?.(saved)
+  }
 
   const onPhotoPick = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = [...(e.target.files ?? [])].slice(0, 10 - photos.length)
@@ -633,6 +878,9 @@ function ProductEditorDialog({
     }
   }
 
+  const canPublish = canPublishProduct(role)
+  const valid = canSaveProduct(title)
+
   const FIELD = 'h-12 text-[15px] lg:h-11'
   const AREA =
     'flex w-full rounded-[10px] border border-glass-border bg-surface px-3.5 py-2.5 text-[15px] text-text focus-visible:border-amber focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber'
@@ -642,58 +890,65 @@ function ProductEditorDialog({
       open
       onOpenChange={(v) => !v && onClose()}
       title={initial ? 'Карточка товара' : 'Новый товар'}
-      description={initial ? undefined : 'Позиция создаётся черновиком — сотрудники увидят её после публикации.'}
+      description={
+        initial
+          ? undefined
+          : canPublish
+            ? 'Черновик виден только тем, кто ведёт контент. «Сохранить и опубликовать» сразу отдаёт позицию сотрудникам.'
+            : 'Позиция создаётся черновиком — сотрудники увидят её после публикации.'
+      }
       desktopWidth={680}
       footer={
         <>
-          {initial && initial.status !== 'published' && (
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() =>
-                void setStatus.mutateAsync('published').then(() => {
-                  toast.success('Опубликовано')
-                  onClose()
-                })
-              }
-            >
-              <Send className="h-4 w-4" /> Опубликовать
-            </Button>
-          )}
-          {initial && initial.status === 'published' && (
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() =>
-                void setStatus.mutateAsync('archived').then(() => {
-                  toast.success('В архиве')
-                  onClose()
-                })
-              }
-            >
-              <Archive className="h-4 w-4" /> В архив
-            </Button>
-          )}
-          {initial && (
+          {initial &&
+            productStatusActions(role, initial.status).map((action) => (
+              <Button
+                key={action.to}
+                type="button"
+                variant="secondary"
+                disabled={setStatus.isPending}
+                onClick={() =>
+                  void setStatus.mutateAsync(action.to).then(() => {
+                    toast.success(action.to === 'published' ? 'Опубликовано' : 'В архиве')
+                    onClose()
+                  })
+                }
+              >
+                {action.to === 'published' ? (
+                  <Send className="h-4 w-4" />
+                ) : (
+                  <Archive className="h-4 w-4" />
+                )}{' '}
+                {action.label}
+              </Button>
+            ))}
+          {initial && canEditProductAudience(role) && (
             <Button type="button" variant="secondary" onClick={() => setAudienceOpen(true)}>
               <Users className="h-4 w-4" /> Аудитория
             </Button>
           )}
           <span className="flex-1" />
-          <Button type="button" variant="secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={save.isPending}>
             Отмена
           </Button>
+          {/* Обе кнопки под одним isPending: двойной клик по разным кнопкам
+              иначе завёл бы два товара. */}
+          {!initial && canPublish && (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!valid || save.isPending}
+              onClick={() => void submit(true)}
+            >
+              <Send className="h-4 w-4" /> Сохранить и опубликовать
+            </Button>
+          )}
           <Button
             type="button"
-            disabled={!title.trim() || save.isPending}
-            onClick={() =>
-              void save.mutateAsync(undefined as never).then(() => {
-                toast.success('Сохранено')
-                onClose()
-              })
-            }
+            disabled={!valid || save.isPending}
+            onClick={() => void submit(false)}
           >
-            Сохранить
+            {save.isPending ? 'Сохраняем…' : 'Сохранить'}
           </Button>
         </>
       }
