@@ -50,10 +50,11 @@ from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskAssignee
 from app.services.personal_projects import (
     assert_full_project_access,
+    my_task_scope,
 )
 from app.services.project_access import require_project_role
 from app.services.projects import project_not_archived
-from app.services.task_assignees import assignee_exists, has_no_assignees
+from app.services.task_assignees import has_no_assignees
 from app.services.taskdates import (
     display_today,
     start_of_today_utc,
@@ -489,8 +490,8 @@ class MyStatsResponse(BaseModel):
 def _mine(employee_id: UUID):
     """Мои задачи для личной статистики — тот же набор, что на `/me/tasks`.
 
-    «Мои» — только через `assignee_exists` (EXISTS): наивный JOIN на
-    `task_assignees` размножил бы задачу по числу исполнителей и завысил цифры.
+    «Мои» — через EXISTS (`my_task_scope`), а не JOIN на `task_assignees`:
+    наивный JOIN размножил бы задачу по числу исполнителей и завысил цифры.
 
     Больше НИЧЕГО не фильтруем, и это не упущение:
 
@@ -511,8 +512,14 @@ def _mine(employee_id: UUID):
     Членство в проекте не проверяем — ровно как `/me/tasks`. (Инвариант
     «исполнитель всегда участник» на самом деле дырявый: удаление участника
     не чистит `task_assignees`. Но расходиться с `/me/tasks` в цифрах хуже.)
+
+    С 16.09 «моё» включает ещё и задачи МОЕГО личного проекта без исполнителей
+    — предикат общий с `/me/tasks` (`personal_projects.my_task_scope`), и это
+    обязательное условие, а не аккуратность: цифра «В работе» и список под ней
+    стоят на одном экране, и любое расхождение между ними человек читает как
+    «часть задач пропала».
     """
-    return and_(assignee_exists(employee_id), Task.archived_at.is_(None))
+    return and_(my_task_scope(employee_id), Task.archived_at.is_(None))
 
 
 def _in_window(column, start: datetime, end: datetime, label: str):

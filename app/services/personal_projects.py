@@ -37,11 +37,11 @@ from uuid import UUID
 import structlog
 from fastapi import HTTPException, status
 from signaris_auth import Principal
-from sqlalchemy import ColumnElement, or_, select
+from sqlalchemy import ColumnElement, and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.project import Project
+from app.models.project import Project, ProjectMember
 from app.models.task import Task, TaskAssignee, TaskWatcher
 from app.services.project_access import require_project_role
 from app.services.projects import create_project_record
@@ -212,6 +212,89 @@ def assert_not_personal(project: Project, *, action: str) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Личный проект нельзя {action}",
         )
+
+
+def my_task_scope(employee_id: UUID) -> ColumnElement[bool]:
+    """«Моё» для кросс-проектных списков: назначено мне ИЛИ лежит в моём личном.
+
+    Вторая ветка — КОРРЕЛИРОВАННЫЙ EXISTS, а не `Project.personal_owner_id ==
+    employee_id`, хотя во втором варианте она короче. Прямое сравнение требует
+    джойна на `projects` в КАЖДОМ запросе, куда предикат попадёт, а молча
+    требовать джойн нельзя: `my_daily_stmt` и `my_created_stmt` в `/me/stats`
+    его не делают, и SQLAlchemy на прямом сравнении добавляет `projects` в
+    FROM декартовым произведением (предупреждение «cartesian product», цифры
+    умножаются на число проектов). Предикат обязан быть самодостаточным — его
+    подставляют в четыре разных запроса.
+
+    Вторая ветка не косметика. С 16.09 `/my` — единственный вход в личное
+    пространство, а задача там может остаться без исполнителей: снять их
+    явным пустым списком разрешено (`test_personal_task_respects_explicit_
+    empty_assignees`), и `apply_personal_assignee_rules` на пустом наборе
+    ничего не делает. На одном `assignee_exists` такая задача исчезла бы с
+    экрана совсем — раньше её показывала секция «ЛИЧНОЕ» через ручку проекта.
+
+    Предикат ОБЩИЙ для `/me/tasks` и `/me/stats::_mine`: разойдутся — снова
+    получим «цифра на Главной не сходится со списком под ней».
+    """
+    return or_(
+        select(TaskAssignee.task_id)
+        .where(TaskAssignee.task_id == Task.id, TaskAssignee.employee_id == employee_id)
+        .correlate(Task)
+        .exists(),
+        select(Project.id)
+        .where(Project.id == Task.project_id, Project.personal_owner_id == employee_id)
+        # `correlate(Task)` обязателен: в `/me/tasks` внешний запрос джойнит и
+        # `tasks`, и `projects`, авто-корреляция забрала бы обе таблицы, и у
+        # подзапроса не осталось бы FROM вовсе (InvalidRequestError). Явная
+        # корреляция ровно по `tasks` делает предикат пригодным и там, где
+        # `projects` во внешнем запросе есть, и там, где его нет.
+        .correlate(Task)
+        .exists(),
+    )
+
+
+def personal_list_scope(employee_id: UUID) -> ColumnElement[bool]:
+    """Кросс-проектный двойник `personal_task_scope` — для выборок ПО АВТОРУ.
+
+    Держит две вещи разом:
+
+    1. **Я всё ещё участник проекта.** `/me/tasks` членство не проверяет вовсе
+       (там только `assignee_exists`), и задача из проекта, откуда меня убрали,
+       остаётся в списке, а карточка отвечает 404. Повторять эту ошибку в новой
+       ручке нельзя: строка, которая не открывается, хуже отсутствующей.
+    2. **В ЧУЖОМ личном — только то, к чему я причастен** (исполнитель или
+       наблюдатель), то есть ровно правило `personal_task_scope`.
+
+    **Ветки hub-admin здесь НЕТ, и это не упущение.** `require_project_role`
+    админа мимо членства пропускает, а `personal_task_scope` с 15.09 — нет:
+    админ, заведший задачу в чьём-то личном и не ставший участником, получил бы
+    строку в списке и 404 при клике по ней.
+    """
+    involved = or_(
+        select(TaskAssignee.task_id)
+        .where(TaskAssignee.task_id == Task.id, TaskAssignee.employee_id == employee_id)
+        .correlate(Task)
+        .exists(),
+        select(TaskWatcher.task_id)
+        .where(TaskWatcher.task_id == Task.id, TaskWatcher.employee_id == employee_id)
+        .correlate(Task)
+        .exists(),
+    )
+    return and_(
+        select(ProjectMember.project_id)
+        .where(
+            ProjectMember.project_id == Project.id,
+            ProjectMember.employee_id == employee_id,
+        )
+        # Корреляция по `projects`: подзапрос про проект, а не про задачу.
+        .correlate(Project)
+        .exists(),
+        or_(
+            Project.personal_owner_id.is_(None),
+            Project.personal_owner_id == employee_id,
+            involved,
+        ),
+    )
 
 
 def personal_task_scope(
