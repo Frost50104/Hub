@@ -179,6 +179,11 @@ deploy_backend() {
   echo "==> Backend deployed."
 }
 
+# Сколько дней держим хэшированные чанки прошлых сборок. Окно жизни вкладки в
+# PWA — недели (`registerType: 'prompt'`), поэтому месяц с запасом. Цена
+# измерена: весь dist — 4,5 МБ, на диске 25 ГБ свободно и стоит алерт на 8 ГБ.
+DIST_KEEP_DAYS=${DIST_KEEP_DAYS:-30}
+
 # ─── Deploy frontend ───────────────────────────────────────────────────────
 # Сборка фронта на VPS требует ~1 ГБ, а машина всего 1,9 ГБ и на ней живёт
 deploy_frontend() {
@@ -198,13 +203,33 @@ deploy_frontend() {
   }
 
   echo "==> Uploading dist to $ENV..."
-  # --delete только внутри web/dist: старые хэшированные чанки иначе копятся
-  # вечно (SW-precache ссылается на новые, старые — мусор).
+  # БЕЗ --delete, и это не оплошность (ОС 16.09: «работа не сохраняется, даже
+  # если не нажимали кнопку обновить»).
+  #
+  # `--delete` сносил старые хэшированные чанки в момент выката. Открытая
+  # вкладка продолжает их просить, получает 404, Vite шлёт `vite:preloadError`,
+  # и `lib/preloadRecovery.ts` перезагружает страницу — вместе с несохранённой
+  # работой. Бьёт это прицельно по редакторам: в `vite.config.ts` тяжёлые
+  # чанки (RichEditor, CourseBuilderPage, LearnEmployeesPage, LearnOrgPage,
+  # LearnAssessmentsPage) НАМЕРЕННО исключены из precache, то есть грузятся из
+  # сети ровно в момент открытия экрана.
+  #
+  # Файлы с постоянными именами (index.html, sw.js, version.json,
+  # manifest.webmanifest) перезаписываются и без --delete. Следствие, о
+  # котором надо помнить: файл, ИСЧЕЗНУВШИЙ из сборки, остаётся лежать —
+  # переименуем когда-нибудь sw.js, старый придётся снять руками.
   $SSH_CMD "mkdir -p ${REMOTE_BASE}/web/dist"
-  eval $RSYNC_CMD --delete \
+  eval $RSYNC_CMD \
     "$PROJECT_DIR/web/dist/" \
     "${SERVER_USER}@${SERVER_HOST}:${REMOTE_BASE}/web/dist/"
-  echo "==> Frontend deployed."
+
+  # Чистка по ВОЗРАСТУ, а не по «нет в текущей сборке»: второе — ровно то
+  # поведение, от которого мы ушли. Безопасно потому, что `vite build`
+  # переписывает весь dist каждой сборкой (замер: все файлы пишутся за
+  # полторы секунды), а rsync с -a переносит свежий mtime на сервер — под
+  # удаление попадает только то, чего не было в сборках месяц.
+  $SSH_CMD "find ${REMOTE_BASE}/web/dist/assets -type f -mtime +${DIST_KEEP_DAYS} -delete 2>/dev/null || true"
+  echo "==> Frontend deployed (старые чанки живут ${DIST_KEEP_DAYS} дней)."
 }
 
 # ─── Main ───────────────────────────────────────────────────────────────────

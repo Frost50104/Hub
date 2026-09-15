@@ -17,6 +17,20 @@ const UPDATE_CHECK_INTERVAL_MS = 60_000
  * Polling lives in a `useEffect` on `navigator.serviceWorker.ready`, NOT
  * inside `onRegisteredSW` — that callback only fires on first registration,
  * so users with an already-active SW would never get polled.
+ *
+ * САМ баннер страницу НЕ перезагружает, и это главное его свойство (ОС 16.09:
+ * «работа не сохраняется, даже если не нажимали кнопку обновить»). Здесь жил
+ * `useEffect`, заводивший `setTimeout(reload, 60_000)` — но привязан он был к
+ * `needRefresh`, то есть к ПОЯВЛЕНИЮ баннера, а не к нажатию «Обновить»
+ * (задумывалась подстраховка после клика — так написано было в его же
+ * комментарии). А `needRefresh` поднимает плагин сам по событию `waiting`,
+ * то есть по факту выката: человеку достаточно печатать в этот момент, чтобы
+ * через минуту потерять несохранённое. Нажавшего «Позже» спасал cleanup,
+ * всех остальных — нет.
+ *
+ * Подстраховка «iOS проигнорировал reload» осталась там, где ей и место, — в
+ * обработчике кнопки: `updateServiceWorker(true)` плюс собственный
+ * `setTimeout` на 1500 мс. Путей перезагрузки после клика по-прежнему два.
  */
 export function UpdateBanner() {
   const isDesktop = useIsDesktop()
@@ -55,14 +69,6 @@ export function UpdateBanner() {
       if (visListener) document.removeEventListener('visibilitychange', visListener)
     }
   }, [])
-
-  useEffect(() => {
-    if (!needRefresh) return undefined
-    // Safety net — `updateServiceWorker(true)` reloads itself, but iOS
-    // sometimes ignores the reload. Force after a minute.
-    const id = window.setTimeout(() => window.location.reload(), 60_000)
-    return () => window.clearTimeout(id)
-  }, [needRefresh])
 
   if (!needRefresh) return null
 
