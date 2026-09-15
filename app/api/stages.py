@@ -25,6 +25,7 @@ from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.stage import ProjectStage
 from app.models.task import Task
 from app.schemas.stage import StageCreate, StageResponse, StageUpdate
+from app.services.personal_projects import is_foreign_personal
 from app.services.project_access import require_project_role
 from app.services.stages import get_stage_in_project, list_stages
 
@@ -39,7 +40,11 @@ async def list_project_stages(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> list[StageResponse]:
-    await require_project_role(db, project_id, principal)
+    project, _role = await require_project_role(db, project_id, principal)
+    # Гостю ЧУЖОГО личного — пусто: в ответе ещё и счётчики задач по колонкам,
+    # то есть прямой пересчёт чужого инбокса.
+    if is_foreign_personal(project, principal):
+        return []
     stages = await list_stages(db, project_id)
     counts = await db.execute(
         select(Task.stage_id, func.count())

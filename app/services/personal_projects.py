@@ -15,7 +15,15 @@
   личные заметки сотрудников уезжают во внешнюю LLM;
 - участники разрешены, но приглашённый видит ТОЛЬКО свои задачи этого проекта
   (`personal_task_scope`) — назначение исполнителя даёт viewer-членство
-  (`project_access.ensure_project_member`), а оно открывало бы весь список;
+  (`project_access.ensure_project_member`), а оно открывало бы весь список.
+  Это правило распространяется и на МЕТАДАННЫЕ проекта (16.09): метки, колонки
+  со счётчиками и определения кастом-полей гостю отдаются ПУСТЫМИ
+  (`is_foreign_personal` — их зовёт карточка задачи, и 403 дал бы там тост
+  вместо тихой деградации), а значения полей всех задач и состав участников —
+  403 (`assert_full_project_access`), как остальные агрегаты. До правки эти
+  пять ручек стояли на голом `require_project_role` и утверждение выше было
+  неверным: гость по одному поручению читал метки владельца, его колонки и
+  список всех, кому тот что-то поручал;
 - гейт `can_create_project` сознательно обойдён: личное есть у каждого с
   hub-ролью, включая линейного `employee` и `hub:viewer`;
 - нельзя архивировать, класть в папку и публиковать ссылкой
@@ -266,6 +274,22 @@ def may_edit_delegated(task: Task, project: Project, principal: Principal) -> bo
         and owner_id != principal.employee_id
         and task.created_by == principal.employee_id
     )
+
+
+def is_foreign_personal(project: Project, principal: Principal) -> bool:
+    """«Это ЧУЖОЕ личное пространство, и я в нём гость».
+
+    Обёртка над `personal_task_scope` для ручек, которым скоуп применить не к
+    чему: у меток, колонок и определений кастом-полей нет столбца «чья задача»,
+    поэтому урезать их нечем — гостю они отдаются пустыми.
+
+    Пустой список, а не 403: эти три ручки кормят КАРТОЧКУ задачи
+    (`useLabels`/`useStages`/`useCustomFieldDefinitions`), и 403 там дал бы
+    гостю тост об ошибке вместо тихой деградации. Там, где ответ — агрегат по
+    всем задачам проекта (значения полей, состав участников), остаётся 403
+    через `assert_full_project_access`.
+    """
+    return personal_task_scope(project, principal) is not None
 
 
 def assert_full_project_access(project: Project, principal: Principal) -> None:

@@ -28,7 +28,7 @@ from app.schemas.label import (
     LabelUpdate,
 )
 from app.services.activity_writer import record_activity
-from app.services.personal_projects import require_task_access
+from app.services.personal_projects import is_foreign_personal, require_task_access
 from app.services.project_access import require_project_role
 
 router = APIRouter(tags=["labels"])
@@ -58,7 +58,12 @@ async def list_labels(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> list[LabelResponse]:
-    await require_project_role(db, project_id, principal)
+    project, _role = await require_project_role(db, project_id, principal)
+    # Гостю ЧУЖОГО личного — пусто: метки принадлежат всему проекту, урезать их
+    # до «моих задач» нечем, а список меток человека — такая же его подноготная,
+    # как список задач (см. `personal_projects.is_foreign_personal`).
+    if is_foreign_personal(project, principal):
+        return []
     rows = await db.execute(
         select(TaskLabel)
         .where(TaskLabel.project_id == project_id)

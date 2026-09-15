@@ -44,6 +44,7 @@ from app.services.attachments import (
 )
 from app.services.learn_media import check_free_space
 from app.services.personal_projects import (
+    assert_full_project_access,
     assert_not_personal,
     not_personal,
     personal_task_scope,
@@ -789,7 +790,13 @@ async def list_members(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> list[ProjectMemberResponse]:
-    await require_project_role(db, project_id, principal)
+    project, _role = await require_project_role(db, project_id, principal)
+    # Приглашённому в ЧУЖОЕ личное — 403: состав участников личного
+    # пространства это список тех, кому человек что-то поручал, то есть тот же
+    # агрегат «по всем задачам», что дашборд и календарь. Карточка задачи
+    # деградирует молча — она читает `members.data?.find(owner)` ради строки
+    # «запросить доступ у владельца» и без ответа просто её не рисует.
+    assert_full_project_access(project, principal)
     return await _list_members(db, project_id)
 
 

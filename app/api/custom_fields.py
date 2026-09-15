@@ -38,7 +38,11 @@ from app.services.custom_field_validator import (
 from app.services.custom_field_validator import (
     validate as validate_value,
 )
-from app.services.personal_projects import require_task_access
+from app.services.personal_projects import (
+    assert_full_project_access,
+    is_foreign_personal,
+    require_task_access,
+)
 from app.services.project_access import require_project_role
 
 router = APIRouter(tags=["custom_fields"])
@@ -65,7 +69,11 @@ async def list_custom_fields(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> list[CustomFieldDefinitionResponse]:
-    await require_project_role(db, project_id, principal)
+    project, _role = await require_project_role(db, project_id, principal)
+    # Гостю ЧУЖОГО личного — пусто: определения полей принадлежат проекту
+    # целиком, урезать их до «моих задач» нечем.
+    if is_foreign_personal(project, principal):
+        return []
     rows = await db.execute(
         select(CustomFieldDefinition)
         .where(CustomFieldDefinition.project_id == project_id)
@@ -240,8 +248,15 @@ async def list_project_custom_values(
     Avoids N+1 when the List view renders custom-field columns. The total
     payload is bounded by `defs.count × tasks.count`, both manageable for
     Hub-scale projects (≤ thousands of tasks, ≤ tens of fields).
+
+    Приглашённому в ЧУЖОЕ личное — 403, как и остальным агрегатам по всем
+    задачам проекта: ответ здесь — значения полей КАЖДОЙ задачи, включая те,
+    которых гость не видит (соседняя `list_task_custom_values` скоуп
+    применяет — через `require_task_access`). Ему эта ручка и не нужна: она
+    кормит колонки списка проекта, куда гость не ходит.
     """
-    await require_project_role(db, project_id, principal)
+    project, _role = await require_project_role(db, project_id, principal)
+    assert_full_project_access(project, principal)
     rows = await db.execute(
         select(TaskCustomFieldValue)
         .join(Task, Task.id == TaskCustomFieldValue.task_id)
