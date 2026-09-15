@@ -28,7 +28,7 @@ import { FilterChip } from '@/components/ui/FilterChip'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
-import { Select } from '@/components/ui/Select'
+import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useCourses, useProductMutation, useProducts } from '@/hooks/useLearn'
 import { audienceDraftProblem } from '@/lib/audienceHints'
@@ -960,14 +960,16 @@ function ProductEditorDialog({
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="p-category">Категория</Label>
-          <Select id="p-category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className={FIELD}>
-            <option value="">Без категории</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.title}
-              </option>
-            ))}
-          </Select>
+          <SearchableSelect
+            id="p-category"
+            sheetTitle="Категория"
+            placeholder="Без категории"
+            clearLabel="Без категории"
+            value={categoryId || null}
+            onChange={(v) => setCategoryId(v ?? '')}
+            className={FIELD}
+            options={categories.map((c) => ({ value: c.id, label: c.title }))}
+          />
         </div>
       </div>
 

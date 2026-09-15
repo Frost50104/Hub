@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { SegmentGroup, type SegmentOption } from '@/components/ui/SegmentGroup'
+import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { Switch } from '@/components/ui/Switch'
@@ -646,22 +647,19 @@ function ShiftFormDialog({ shift, onClose }: { shift: ShiftPosting | null; onClo
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="sh-store">Магазин</Label>
-            <Select
+            <SearchableSelect
               id="sh-store"
-              value={storeId}
+              sheetTitle="Магазин"
+              placeholder="— выберите —"
+              clearLabel={null}
+              value={storeId || null}
               disabled={!isNew}
-              onChange={(e) => setStoreId(e.target.value)}
+              onChange={(v) => setStoreId(v ?? '')}
               className={FIELD}
-            >
-              <option value="">— выберите —</option>
-              {(org.data?.stores ?? [])
+              options={(org.data?.stores ?? [])
                 .filter((s) => !s.archived_at || s.id === storeId)
-                .map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-            </Select>
+                .map((s) => ({ value: s.id, label: s.name }))}
+            />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="sh-pos">Должность</Label>

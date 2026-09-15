@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
+import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { Switch } from '@/components/ui/Switch'
@@ -261,18 +262,18 @@ function RuleEditorDialog({
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div>
               <Label htmlFor="ar-course">Назначить курс</Label>
-              <Select
+              <SearchableSelect
                 id="ar-course"
-                value={courseId}
-                onChange={(e) => setCourseId(e.target.value)}
-              >
-                <option value="">— выберите курс —</option>
-                {(courses.data?.items ?? []).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.title}
-                  </option>
-                ))}
-              </Select>
+                sheetTitle="Курс"
+                placeholder="— выберите курс —"
+                clearLabel={null}
+                value={courseId || null}
+                onChange={(v) => setCourseId(v ?? '')}
+                options={(courses.data?.items ?? []).map((c) => ({
+                  value: c.id,
+                  label: c.title,
+                }))}
+              />
             </div>
             <div>
               <Label htmlFor="ar-due">Срок, дней (пусто = без срока)</Label>

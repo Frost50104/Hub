@@ -4,6 +4,8 @@ import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/Button'
 import { SELECT_CLASS } from '@/components/ui/Input'
+import { Label } from '@/components/ui/Label'
+import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { useMe } from '@/hooks/useMe'
 import { useProject, useProjects } from '@/hooks/useProjects'
@@ -136,45 +138,46 @@ export function MoveTaskDialog({
         </p>
       ) : (
         <div className="flex flex-col gap-4">
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[13px] font-semibold text-text2">Проект</span>
-            <select
-              value={targetId}
-              onChange={(e) => {
-                setTargetId(e.target.value)
+          {/* Обёртка `<label>` заменена на `Label htmlFor` 16.09: у списка с
+              поиском триггер — кнопка, а интерактивный элемент внутри label
+              даёт двойной клик по себе же. Суффикс «(личное)» снят 16.09:
+              проект теперь так и называется — «Мои задачи». */}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="move-project" className="text-[13px] font-semibold text-text2">
+              Проект
+            </Label>
+            <SearchableSelect
+              id="move-project"
+              sheetTitle="Проект"
+              clearLabel={null}
+              className={SELECT_CLASS}
+              value={targetId || null}
+              onChange={(v) => {
+                setTargetId(v ?? '')
                 defaulted.current = null
               }}
-              className={SELECT_CLASS}
-            >
-              {targets.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {/* Суффикс «(личное)» снят 16.09: проект теперь так и
-                      называется — «Мои задачи», и приписка задваивала бы смысл. */}
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              options={targets.map((t) => ({ value: t.id, label: t.name, meta: t.key }))}
+            />
+          </div>
 
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[13px] font-semibold text-text2">Колонка</span>
-            <select
-              value={stageId ?? ''}
-              onChange={(e) => setStageId(e.target.value || null)}
+          {/* Прочерк — «без статуса» (0046): задача уходит с доски, оставаясь
+              в списке и поиске. У проекта без колонок это единственный вариант.
+              Поиск здесь не про длину «обычного» проекта: замер 16.09 — в
+              крупнейшем 64 колонки, свыше десяти их в пяти проектах. */}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="move-stage" className="text-[13px] font-semibold text-text2">
+              Колонка
+            </Label>
+            <SearchableSelect
+              id="move-stage"
+              sheetTitle="Колонка"
               className={SELECT_CLASS}
+              value={stageId}
+              onChange={setStageId}
               disabled={!stages.data || stages.data.length === 0}
-            >
-              {/* Прочерк — «без статуса» (0046): задача уходит с доски, оставаясь
-                  в списке и поиске. У проекта без колонок это единственный
-                  вариант. */}
-              <option value="">—</option>
-              {(stages.data ?? []).map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              options={(stages.data ?? []).map((s) => ({ value: s.id, label: s.name }))}
+            />
+          </div>
 
           <div className="flex flex-col gap-1.5 text-[14px] leading-[1.45] text-text2">
             {preview.isPending && <span>Считаем последствия…</span>}

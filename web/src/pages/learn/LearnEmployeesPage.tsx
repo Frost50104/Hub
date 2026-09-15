@@ -21,6 +21,7 @@ import {
   type AuthState,
 } from '@/lib/authState'
 import { employeeListCaption } from '@/lib/employeeList'
+import { filterOptions } from '@/lib/selectOptions'
 
 import { EmployeeListNote } from '@/components/learn/EmployeeListNote'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
@@ -37,6 +38,7 @@ import {
 } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
+import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
@@ -347,6 +349,7 @@ function EmployeeCardDialog({
     content_role: profile?.content_role ?? 'none',
     hired_at: profile?.hired_at ?? null,
   })
+  const [tuQuery, setTuQuery] = useState('')
   const [tuStores, setTuStores] = useState<Set<string> | null>(
     profile && profile.org_role === 'tu' ? new Set(profile.tu_store_ids) : null,
   )
@@ -507,20 +510,19 @@ function EmployeeCardDialog({
               {form.org_role !== 'office' && (
                 <div className="space-y-1.5">
                   <Label htmlFor="emp-store">Магазин</Label>
-                  <Select
+                  <SearchableSelect
                     id="emp-store"
-                    value={form.store_id ?? ''}
-                    onChange={(e) => set('store_id', e.target.value || null)}
-                  >
-                    <option value="">—</option>
-                    {org.stores
+                    sheetTitle="Магазин"
+                    value={form.store_id ?? null}
+                    onChange={(v) => set('store_id', v)}
+                    options={org.stores
                       .filter((s) => !s.archived_at)
-                      .map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                  </Select>
+                      .map((s) => ({ value: s.id, label: s.name }))}
+                    // Архивный магазин из списка отфильтрован, а в карточке он
+                    // мог остаться выбранным — без подписи поле выглядело бы
+                    // пустым, и его перезаписали бы, не заметив.
+                    currentLabel={org.stores.find((s) => s.id === form.store_id)?.name ?? null}
+                  />
                 </div>
               )}
               {form.org_role === 'office' && (
@@ -561,20 +563,24 @@ function EmployeeCardDialog({
               )}
               <div className="space-y-1.5">
                 <Label htmlFor="emp-manager">Руководитель</Label>
-                <Select
+                {/* 315 вариантов на проде, а руководителями выбраны 17 — то
+                    есть 94% списка прокручивали мимо (ОС 16.09). Источник
+                    данных остаётся `useEmployees`, а не `/tenant/members`:
+                    там только заходившие в Hub (233 против 315 карточек). */}
+                <SearchableSelect
                   id="emp-manager"
-                  value={form.manager_profile_id ?? ''}
-                  onChange={(e) => set('manager_profile_id', e.target.value || null)}
-                >
-                  <option value="">—</option>
-                  {(managers.data?.items ?? [])
+                  sheetTitle="Руководитель"
+                  value={form.manager_profile_id ?? null}
+                  onChange={(v) => set('manager_profile_id', v)}
+                  options={(managers.data?.items ?? [])
                     .filter((m) => m.id !== profile?.id)
-                    .map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.full_name}
-                      </option>
-                    ))}
-                </Select>
+                    .map((m) => ({ value: m.id, label: m.full_name, meta: m.email }))}
+                  currentLabel={
+                    (managers.data?.items ?? []).find((m) => m.id === form.manager_profile_id)
+                      ?.full_name ?? null
+                  }
+                  loading={managers.isFetching}
+                />
                 <EmployeeListNote data={managers.data} />
               </div>
               <div className="space-y-1.5">
@@ -595,10 +601,28 @@ function EmployeeCardDialog({
 
             {form.org_role === 'tu' && (
               <div className="space-y-1.5">
-                <Label>Закреплённые магазины ТУ</Label>
+                <Label htmlFor="emp-tu-search">Закреплённые магазины ТУ</Label>
+                {/* Выбор здесь множественный, поэтому не выпадашка, а список с
+                    поиском НАД ним: магазинов 63, и отметить три из них
+                    прокруткой в окне высотой 160px неудобно ровно так же, как
+                    искать руководителя в списке из 315. Правило фильтрации то
+                    же самое — `filterOptions`, пословно и с `ё→е`. */}
+                <Input
+                  id="emp-tu-search"
+                  type="search"
+                  value={tuQuery}
+                  onChange={(e) => setTuQuery(e.target.value)}
+                  placeholder="Поиск магазина…"
+                />
                 <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-glass-border p-2">
-                  {org.stores
-                    .filter((s) => !s.archived_at)
+                  {filterOptions(
+                    org.stores
+                      .filter((s) => !s.archived_at)
+                      .map((s) => ({ value: s.id, label: s.name })),
+                    tuQuery,
+                    { limit: Number.MAX_SAFE_INTEGER },
+                  )
+                    .visible.map((o) => ({ id: o.value, name: o.label }))
                     .map((s) => {
                       const checked = tuStores?.has(s.id) ?? false
                       return (
@@ -796,18 +820,20 @@ function UnlinkedDialog({ onClose }: { onClose: () => void }) {
               <p className="text-xs text-text3">{u.email}</p>
               {linking === u.employee_id ? (
                 <div className="mt-2 flex gap-2">
-                  <Select
+                  <SearchableSelect
                     className="flex-1"
-                    value={targetProfile}
-                    onChange={(e) => setTargetProfile(e.target.value)}
-                  >
-                    <option value="">Выберите карточку…</option>
-                    {unboundProfiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.full_name} ({p.email})
-                      </option>
-                    ))}
-                  </Select>
+                    sheetTitle="Карточка сотрудника"
+                    placeholder="Выберите карточку…"
+                    clearLabel={null}
+                    aria-label="Карточка сотрудника"
+                    value={targetProfile || null}
+                    onChange={(v) => setTargetProfile(v ?? '')}
+                    options={unboundProfiles.map((p) => ({
+                      value: p.id,
+                      label: p.full_name,
+                      meta: p.email,
+                    }))}
+                  />
                   <Button
                     type="button"
                     disabled={!targetProfile || link.isPending}

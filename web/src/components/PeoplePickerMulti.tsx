@@ -248,6 +248,14 @@ export function PeoplePickerMulti({
             placeholder="Поиск…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            // Radix Menu вешает typeahead на Content и считает «внутренним»
+            // любой keydown, включая набранный в этом поле: после первой же
+            // совпавшей буквы он делает `newItem.focus()` и забирает фокус —
+            // второй символ уходит в меню, а поиск замирает на одной букве.
+            // Замер 16.09 на стенде: фокус уезжал с INPUT на «Пётр Попов» с
+            // первого символа. Escape не страдает — Radix ловит его на
+            // document в фазе ЗАХВАТА.
+            onKeyDown={(e) => e.stopPropagation()}
             className="w-full rounded border border-glass-border bg-glass px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
           />
         </div>

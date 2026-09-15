@@ -180,16 +180,26 @@ export function TaskDependencies({
                 Добавить
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              className="max-h-[320px] w-[360px] overflow-y-auto"
-            >
-              <div className="px-2 py-1">
+            {/* Потолок высоты и прокрутку даёт сам `DropdownMenuContent`
+                (его берут у Radix, потому что меню строится и вверх) — свой
+                `max-h-[320px]` здесь лишь мешал. А поле поиска обязано быть
+                `sticky`, иначе уезжает за верхний край на первом движении:
+                в двух соседних пикерах это починили 14.09, сюда не доехало. */}
+            <DropdownMenuContent align="start" className="w-[360px]">
+              <div className="sticky top-0 z-10 bg-bg-alt px-2 py-1">
                 <input
                   type="text"
                   placeholder="Поиск по названию или номеру…"
                   value={rawQuery}
                   onChange={(e) => setRawQuery(e.target.value)}
+                  // Radix Menu вешает typeahead на Content и считает «внутренним»
+                  // любой keydown, включая набранный в этом поле: после первой же
+                  // совпавшей буквы он делает `newItem.focus()` и забирает фокус —
+                  // второй символ уходит в меню, а поиск замирает на одной букве.
+                  // Замер 16.09 на стенде: фокус уезжал с INPUT на «Пётр Попов» с
+                  // первого символа. Escape не страдает — Radix ловит его на
+                  // document в фазе ЗАХВАТА.
+                  onKeyDown={(e) => e.stopPropagation()}
                   className="w-full rounded border border-glass-border bg-glass px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
                 />
               </div>

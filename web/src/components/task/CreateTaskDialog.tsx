@@ -14,6 +14,7 @@ import {
 import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { PeoplePicker } from '@/components/PeoplePicker'
+import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { useDelegateTask } from '@/hooks/useDelegated'
 import { useMe } from '@/hooks/useMe'
 import { useProjects } from '@/hooks/useProjects'
@@ -164,30 +165,27 @@ export function CreateTaskDialog({
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="task-project">Проект</Label>
-              <select
+              {/* «Мои задачи» первым и по умолчанию: задача «на себя» — самый
+                  частый случай у того, кто не ведёт проектов. «Личные задачи
+                  сотрудника…» последним: поручение — не «ещё один проект», а
+                  отдельный адресат, и в общий список проектов его личное
+                  пространство не попадает никогда.
+                  Оба пункта закреплены (`pinnedTop`/`pinnedBottom`) и НЕ
+                  участвуют в фильтрации: иначе набранный запрос прятал бы и
+                  адресата по умолчанию, и единственный вход в поручение. */}
+              <SearchableSelect
                 id="task-project"
-                value={target}
-                onChange={(e) => setTarget(e.target.value)}
+                sheetTitle="Куда"
+                clearLabel={null}
                 disabled={nowhereToWrite}
-                className="flex h-9 w-full rounded-lg border border-glass-border bg-glass px-2 text-sm text-text focus:border-amber focus:outline-none"
-              >
-                {/* Прочерк первым и по умолчанию: задача «на себя» — самый
-                    частый случай у того, кто не ведёт проектов. */}
-                {/* Прочерк читался как «никуда, себе», пока личное было скрытым
-                    инбоксом. С 16.09 это полноценные «Мои задачи», и выбор между
-                    «—» и «Личные задачи сотрудника…» в одном селекте выглядел бы
-                    поломкой. */}
-                <option value={PERSONAL_TARGET}>Мои задачи</option>
-                {targets.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-                {/* Последним пунктом: поручение — не «ещё один проект», а
-                    отдельный адресат, и в общий список проектов его личное
-                    пространство не попадает никогда. */}
-                <option value={DELEGATE_TARGET}>Личные задачи сотрудника…</option>
-              </select>
+                value={target}
+                onChange={(v) => setTarget(v ?? PERSONAL_TARGET)}
+                pinnedTop={[{ value: PERSONAL_TARGET, label: 'Мои задачи' }]}
+                pinnedBottom={[
+                  { value: DELEGATE_TARGET, label: 'Личные задачи сотрудника…' },
+                ]}
+                options={targets.map((t) => ({ value: t.value, label: t.label }))}
+              />
             </div>
 
             {isDelegate && (

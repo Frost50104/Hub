@@ -17,11 +17,13 @@ import {
 } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
+import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useEmployees, useOrgMutation, useOrgSnapshot, useSites } from '@/hooks/useLearn'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/cn'
+import { optionMatches, queryTokens } from '@/lib/selectOptions'
 import {
   learnApi,
   type GroupKind,
@@ -240,20 +242,18 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
           onChange={(e) => setCode(e.target.value)}
           placeholder="Код"
         />
-        <Select
+        <SearchableSelect
           className="w-44"
-          value={franchiseeId}
-          onChange={(e) => setFranchiseeId(e.target.value)}
-        >
-          <option value="">Собственный</option>
-          {org.franchisees
+          sheetTitle="Франчайзи"
+          placeholder="Собственный"
+          clearLabel="Собственный"
+          aria-label="Франчайзи"
+          value={franchiseeId || null}
+          onChange={(v) => setFranchiseeId(v ?? '')}
+          options={org.franchisees
             .filter((f) => !f.archived_at)
-            .map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-        </Select>
+            .map((f) => ({ value: f.id, label: f.name }))}
+        />
         <Button type="submit" disabled={!name.trim() || create.isPending}>
           <Plus className="h-4 w-4" /> Добавить
         </Button>
@@ -413,18 +413,15 @@ function StoreEditForm({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="store-fr">Франчайзи</Label>
-          <Select
+          <SearchableSelect
             id="store-fr"
-            value={franchiseeId}
-            onChange={(e) => setFranchiseeId(e.target.value)}
-          >
-            <option value="">Собственный</option>
-            {franchisees.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </Select>
+            sheetTitle="Франчайзи"
+            placeholder="Собственный"
+            clearLabel="Собственный"
+            value={franchiseeId || null}
+            onChange={(v) => setFranchiseeId(v ?? '')}
+            options={franchisees.map((f) => ({ value: f.id, label: f.name }))}
+          />
         </div>
         {siteState.kind !== 'none' && (
           <div className="space-y-1.5">
@@ -664,18 +661,33 @@ function GroupMembersDialog({
 }) {
   const employees = useEmployees({ status: 'active' })
   const [selected, setSelected] = useState<Set<string>>(new Set(group.member_ids))
+  const [query, setQuery] = useState('')
   const save = useOrgMutation((ids: string[]) =>
     learnApi.replaceGroupMembers(kind, group.id, ids),
   )
 
-  const options: { id: string; label: string }[] =
+  const options: { id: string; label: string; meta?: string }[] =
     kind === 'position-groups'
       ? org.positions.map((p) => ({ id: p.id, label: p.name }))
       : kind === 'store-groups'
         ? org.stores.map((s) => ({ id: s.id, label: s.name }))
         : kind === 'franchisee-groups'
           ? org.franchisees.map((f) => ({ id: f.id, label: f.name }))
-          : (employees.data?.items ?? []).map((e) => ({ id: e.id, label: e.full_name }))
+          : (employees.data?.items ?? []).map((e) => ({
+              id: e.id,
+              label: e.full_name,
+              meta: e.email,
+            }))
+
+  // Отмеченные показываем ВСЕГДА, даже когда поиск их не вернул: иначе снять
+  // галочку можно было бы, только вспомнив фамилию, — та же причина, по которой
+  // `mergeSelected` существует у пикера людей.
+  const tokens = queryTokens(query)
+  const visible = options.filter(
+    (o) =>
+      selected.has(o.id) ||
+      optionMatches({ value: o.id, label: o.label, meta: o.meta }, tokens),
+  )
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -692,9 +704,23 @@ function GroupMembersDialog({
         <DialogHeader>
           <DialogTitle>«{group.name}» — участники</DialogTitle>
         </DialogHeader>
+        {/* Поиск НАД списком, а не выпадашка: выбор множественный. В группу
+            пользователей попадают все активные карточки — на проде их 315, и
+            отметить троих прокруткой окна в 288px невозможно. Правило поиска
+            общее с выпадашками (`filterOptions`): пословно, `ё→е`, по имени и
+            по почте — двух полных тёзок различает именно она. */}
+        {options.length > 8 && (
+          <Input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Поиск…"
+            aria-label="Поиск участника"
+          />
+        )}
         <div className="max-h-72 space-y-0.5 overflow-y-auto">
           {kind === 'user-groups' && employees.isLoading && <SkeletonRows rows={4} />}
-          {options.map((o) => (
+          {visible.map((o) => (
             <label
               key={o.id}
               className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text hover:bg-glass"
@@ -712,8 +738,10 @@ function GroupMembersDialog({
               ноль» независимы, и во время добора экран показывал скелетон И
               «Нет доступных участников.» одновременно — читалось как «в группу
               некого добавить». */}
-          {options.length === 0 && !(kind === 'user-groups' && employees.isLoading) && (
-            <p className="p-2 text-sm text-text3">Нет доступных участников.</p>
+          {visible.length === 0 && !(kind === 'user-groups' && employees.isLoading) && (
+            <p className="p-2 text-sm text-text3">
+              {options.length === 0 ? 'Нет доступных участников.' : 'Ничего не найдено.'}
+            </p>
           )}
         </div>
         {kind === 'user-groups' && <EmployeeListNote data={employees.data} />}
