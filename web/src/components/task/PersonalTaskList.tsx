@@ -138,9 +138,8 @@ export function PersonalTaskList({
             compact
             gridColumns={MY_TASKS_GRID.columns}
             subtasks={view.subtasksByParent.get(task.id)}
-            // Четвёртый элемент грида обязателен: без него аватары уехали бы в
-            // трек «Проект», а срок — в трек аватаров.
-            cells={<span aria-hidden />}
+            // Проект тут один на весь список — подпись была бы одинаковой в
+            // каждой строке.
             project={null}
             reserveContext={reserveContext}
             selected={selectedTaskId === task.id}

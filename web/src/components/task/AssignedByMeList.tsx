@@ -62,17 +62,10 @@ export function AssignedByMeList({
             task={task}
             compact
             gridColumns={MY_TASKS_GRID.columns}
-            // Кому поручено — видно по аватарам исполнителей в строке.
-            project={null}
+            // Проект — подписью под заголовком, как на остальных вкладках и на
+            // телефоне; кому поручено — видно по аватарам исполнителей.
+            project={projectLabel(task)}
             stage={task.stage_name}
-            cells={
-              <span
-                className="min-w-0 truncate pr-3.5 text-[14px] text-text2"
-                title={projectLabel(task) ?? undefined}
-              >
-                {projectLabel(task)}
-              </span>
-            }
             selected={selectedTaskId === task.id}
             onClick={() => onOpenTask(task)}
           />

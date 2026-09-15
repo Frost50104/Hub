@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { type CustomFieldDefinition, type CustomFieldType } from './customFields'
-import { projectTaskGrid } from './taskGrid'
+import { MY_TASKS_GRID, projectTaskGrid } from './taskGrid'
 
 function field(type: CustomFieldType, i = 0): CustomFieldDefinition {
   return {
@@ -14,6 +14,13 @@ function field(type: CustomFieldType, i = 0): CustomFieldDefinition {
     created_at: '2026-08-19T00:00:00Z',
   }
 }
+
+describe('MY_TASKS_GRID', () => {
+  it('без средних треков: проект — подпись под заголовком, а не колонка (16.09)', () => {
+    expect(MY_TASKS_GRID.columns.split(' ')).toHaveLength(3)
+    expect(MY_TASKS_GRID.columns).not.toContain('190px')
+  })
+})
 
 describe('projectTaskGrid', () => {
   it('без кастом-полей — три трека', () => {

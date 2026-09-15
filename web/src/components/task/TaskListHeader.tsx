@@ -12,17 +12,13 @@ export function TaskListHeader({
   gridColumns,
   fieldNames,
   compact = false,
-  leadLabel,
 }: {
   gridColumns: string
-  /** Подписи средних колонок в порядке треков. */
+  /** Подписи средних колонок в порядке треков; в «Моих задачах» их нет. */
   fieldNames: string[]
   compact?: boolean
-  /** Подпись первой средней колонки в «Моих задачах» — «Проект». */
-  leadLabel?: string
 }) {
   const cell = 'flex h-[38px] items-center text-[12px] font-bold uppercase tracking-[0.07em] text-text2'
-  const labels = leadLabel ? [leadLabel, ...fieldNames] : fieldNames
   return (
     <div
       style={{ gridTemplateColumns: gridColumns }}
@@ -32,7 +28,7 @@ export function TaskListHeader({
       )}
     >
       <span aria-hidden className={cell} />
-      {labels.map((name, i) => (
+      {fieldNames.map((name, i) => (
         // `truncate` на flex-контейнере не даёт многоточия: обрезает ВНУТРЕННИЙ
         // блочный span, а ячейка — min-w-0 + overflow-hidden, иначе подписи
         // семи кастом-полей налезали друг на друга (QA-0821 #9).

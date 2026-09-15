@@ -175,20 +175,13 @@ function DesktopMyTasks({ pane }: { pane: MyTasksPane }) {
       task={t}
       compact
       gridColumns={MY_TASKS_GRID.columns}
-      // Проект уже стоит колонкой справа — во второй раз в строке контекста
-      // он был бы дублем. На мобильном колонок нет, там он в строке.
-      project={null}
+      // Проект — подписью под заголовком, рядом с колонкой, как на телефоне
+      // (16.09): отдельный столбец «Проект» справа владелец попросил заменить
+      // этой парой — там имя стояло в 400px от задачи и читалось отдельно.
+      project={pane.projectLabel(t)}
       // Имя колонки чужого проекта приходит с сервера (/me/tasks): своих
       // `useStages` для него у страницы нет.
       stage={t.stage_name}
-      cells={
-        <span
-          className="min-w-0 truncate pr-3.5 text-[14px] text-text2"
-          title={pane.projectLabel(t) ?? undefined}
-        >
-          {pane.projectLabel(t)}
-        </span>
-      }
       selected={pane.openTaskId === t.id}
       onClick={() => pane.openTask(t)}
       onToggleDone={() => toggleDone(t)}
@@ -265,7 +258,6 @@ function DesktopMyTasks({ pane }: { pane: MyTasksPane }) {
               <TaskListHeader
                 gridColumns={MY_TASKS_GRID.columns}
                 fieldNames={[]}
-                leadLabel="Проект"
                 compact
               />
               {isGroupedTab(tab)
