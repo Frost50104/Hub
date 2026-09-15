@@ -72,14 +72,22 @@ async def test_due_windows_are_calendar_days(db: AsyncSession, tenant_id: uuid.U
         owner, db,
     )
     await update_task(closed.id, TaskUpdate(done=True), owner, db)
+    # Задача БЕЗ срока (ОС 15.09): на проде их 75% от назначенных, и окна
+    # прятали их целиком — `NULL >= ts` даёт NULL.
+    t_undated = await create_task(
+        project.id, TaskCreate(title="Без срока", assignee_ids=[a.employee_id]),
+        owner, db,
+    )
 
     overdue = {t.id for t in await _my(db, a, due_window="overdue")}
     today = {t.id for t in await _my(db, a, due_window="today")}
     upcoming = {t.id for t in await _my(db, a, due_window="upcoming")}
     assert overdue == {t_yesterday.id}
     # «Сегодня» = просроченные (не done) + срок сегодня (решение владельца).
+    # Бессрочной тут нет и быть не должно: окно про дату.
     assert today == {t_yesterday.id, t_today.id}
-    assert upcoming == {t_today.id, t_tomorrow.id}
+    # «Предстоит» = всё впереди, включая задачи без срока.
+    assert upcoming == {t_today.id, t_tomorrow.id, t_undated.id}
 
     # Статистика проекта: сегодняшняя — не просрочка, вчерашняя — да, done — нет.
     stats = await get_stats(project.id, principal=owner, db=db)

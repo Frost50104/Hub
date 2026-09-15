@@ -44,7 +44,9 @@ export interface PersonalListView<T> {
  *
  * Подзадачи в строки не попадают (как на странице проекта), но считаются в чип
  * родителя. Выполненные тонут вниз и по умолчанию урезаются: личный список —
- * это inbox, за полгода под инпутом накопилась бы стена «Готово».
+ * это inbox, за полгода под инпутом накопилась бы стена «Готово». Сколько
+ * именно показывать, решает вызывающий: секция «ЛИЧНОЕ» передаёт `doneLimit: 0`
+ * и раскрывает их чипом.
  */
 export function personalListView<
   T extends Pick<Task, 'id' | 'done' | 'parent_task_id'>,
@@ -155,7 +157,14 @@ export function personalSectionState(input: {
   return {
     kind: 'ready',
     projectId,
-    view: personalListView(input.tasks, { showAllDone: input.showAllDone }),
+    // `doneLimit: 0` — выполненных в списке по умолчанию НЕТ (ОС 15.09:
+    // «в личных показывать по умолчанию не выполненные, а выполненные скрыть
+    // за фильтром или чипом»). Дефолт самой `personalListView` (3) не трогаем:
+    // на нём стоят её тесты, а решение «сколько показывать» принимает экран.
+    view: personalListView(input.tasks, {
+      doneLimit: 0,
+      showAllDone: input.showAllDone,
+    }),
   }
 }
 

@@ -3,6 +3,9 @@
 Кормит панель «Главной» и страницу `/my`. Фильтры: `done`, `due_window`
 (overdue|today|upcoming|all), `include_archived`, `include_personal`.
 
+Окна и задачи БЕЗ срока: `upcoming` их включает (это «всё, что впереди»),
+`overdue` и `today` — нет (они про дату). `all` не фильтрует по сроку вовсе.
+
 Архивный проект сюда не попадает (31.08): архив значит «запарковано» — задачи
 уходят из личных списков и перестают порождать дедлайнные пуши. Правило одно на
 `/me/stats`, `jobs/due_soon.py`, `jobs/overdue.py` и инструменты ассистента,
@@ -101,7 +104,19 @@ async def list_my_tasks(
             or_(Task.done.is_(False), Task.due_at >= start_of_today_utc(now)),
         )
     elif due_window == "upcoming":
-        stmt = stmt.where(Task.due_at >= start_of_today_utc(now), Task.done.is_(False))
+        # Бессрочные — тоже «предстоит» (ОС 15.09: «в мои задачи не отображаются
+        # задачи без конкретного срока»). Срока нет у 75% назначенных задач на
+        # проде, и окно прятало их целиком: `NULL >= ts` даёт NULL, строка не
+        # проходит WHERE. Условие пишется ЯВНЫМ `or_`, а не надеется на
+        # сравнение. Что отсечение было непреднамеренным, видно по сортировке
+        # этого же запроса — `nulls_last()` место для них уже держит.
+        #
+        # `overdue` и `today` остаются как есть: они про дату, и задача без
+        # срока ни просроченной, ни «на сегодня» быть не может.
+        stmt = stmt.where(
+            or_(Task.due_at >= start_of_today_utc(now), Task.due_at.is_(None)),
+            Task.done.is_(False),
+        )
 
     rows = (await db.execute(stmt)).all()
     ids = [task.id for task, _, _ in rows]

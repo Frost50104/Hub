@@ -13,7 +13,6 @@ import { personalSectionState } from '@/lib/personalTasks'
 import { requestInlineCreate } from '@/lib/quickCreate'
 import { MY_TASKS_GRID } from '@/lib/taskGrid'
 import { type Task } from '@/lib/tasks'
-import { plural } from '@/lib/typography'
 import { PERSONAL_SECTION_KEY, useViewConfig } from '@/stores/viewConfig'
 
 interface PersonalTasksSectionProps {
@@ -127,14 +126,29 @@ export function PersonalTasksSection({
             Личное
           </span>
           {counts && (
-            <span className="font-mono text-[13px] text-text2">
-              {counts.open}
-              {counts.done > 0 && (
-                <span className="font-body text-text3"> · {counts.done} выполнено</span>
-              )}
-            </span>
+            <span className="font-mono text-[13px] text-text2">{counts.open}</span>
           )}
         </button>
+        {/* Чип, а не строка «Показать все выполненные» внизу списка (ОС 15.09):
+            выполненных в списке по умолчанию нет, и число обязано остаться на
+            виду — иначе человек решит, что задачи пропали. Переключается в обе
+            стороны; прежняя ссылка была односторонней. */}
+        {!collapsed && counts && counts.done > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowAllDone((v) => !v)}
+            aria-pressed={showAllDone}
+            className={cn(
+              'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[12px] font-semibold transition-colors',
+              showAllDone
+                ? 'border-amber/45 bg-amber/10 text-text'
+                : 'border-glass-border text-text2 hover:text-text',
+            )}
+          >
+            Выполненные
+            <span className="font-mono">{counts.done}</span>
+          </button>
+        )}
         {collapsed && (
           <button
             type="button"
@@ -206,19 +220,6 @@ export function PersonalTasksSection({
                 ),
               )}
 
-              {state.view.hiddenDone > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllDone(true)}
-                  className={cn(
-                    'min-h-11 text-left text-[13px] text-text2 hover:text-text lg:min-h-0 lg:py-1.5',
-                    desktop ? 'px-[11px]' : 'px-4',
-                  )}
-                >
-                  Показать все выполненные (
-                  {plural(state.view.counts.done, 'задача', 'задачи', 'задач')})
-                </button>
-              )}
             </>
           )}
 

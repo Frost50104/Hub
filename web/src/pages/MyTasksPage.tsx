@@ -22,7 +22,7 @@ import {
   resolvePersonalTaskParam,
   shouldFocusPersonalCreate,
 } from '@/lib/personalTasks'
-import { addDaysKey, dayKey, todayKey } from '@/lib/taskDates'
+import { GROUP_LABEL, groupTasksByDue } from '@/lib/myTasksGroups'
 import { MY_TASKS_GRID } from '@/lib/taskGrid'
 import { type Task } from '@/lib/tasks'
 
@@ -32,43 +32,6 @@ const TABS: { key: DueWindow; label: string }[] = [
   { key: 'today', label: 'Сегодня' },
   { key: 'all', label: 'Все' },
 ]
-
-// ─── Группировка «Все» по срокам ────────────────────────────────────────────
-
-type GroupKey = 'overdue' | 'today' | 'week' | 'later' | 'nodate'
-
-const GROUP_LABEL: Record<GroupKey, string> = {
-  overdue: 'Просрочено',
-  today: 'Сегодня',
-  week: 'Ближайшая неделя',
-  later: 'Позже',
-  nodate: 'Без срока',
-}
-
-const GROUP_ORDER: GroupKey[] = ['overdue', 'today', 'week', 'later', 'nodate']
-
-function groupTasksByDue(tasks: Task[]): { key: GroupKey; items: Task[] }[] {
-  // Ключи дней display tz (lib/taskDates) — та же семантика, что у окон
-  // сервера: день срока, а не мгновение.
-  const today = todayKey()
-  const weekEnd = addDaysKey(today, 7)
-
-  const buckets = new Map<GroupKey, Task[]>(GROUP_ORDER.map((k) => [k, []]))
-  for (const t of tasks) {
-    let key: GroupKey
-    if (!t.due_at) key = 'nodate'
-    else {
-      const day = dayKey(t.due_at)
-      // Выполненные задачи не считаем просроченными — оставляем в своей дате.
-      if (day < today && !t.done) key = 'overdue'
-      else if (day <= today) key = 'today'
-      else if (day <= weekEnd) key = 'week'
-      else key = 'later'
-    }
-    buckets.get(key)!.push(t)
-  }
-  return GROUP_ORDER.map((key) => ({ key, items: buckets.get(key)! }))
-}
 
 /**
  * Заголовок группы сроков. «Просрочено» красный — это главный факт экрана;
@@ -213,7 +176,11 @@ function emptyText(tab: DueWindow): string {
 function DesktopMyTasks({ personal }: { personal: PersonalPane }) {
   const [tab, setTab] = useState<DueWindow>('upcoming')
   const { tasks, toggleDone, openTask, projectName } = useMyTasksData(tab)
-  const grouped = tab === 'all'
+  // Группируем «Все» И «Предстоит»: с 15.09 во второе окно приходят задачи
+  // без срока, и без заголовка «Без срока» они читались бы как хвост
+  // просроченного. Пустые группы не рендерятся, поэтому у человека без
+  // бессрочных задач экран не меняется.
+  const grouped = tab === 'all' || tab === 'upcoming'
   const groups = useMemo(() => groupTasksByDue(tasks.data ?? []), [tasks.data])
 
   const row = (t: Task) => (
@@ -316,7 +283,11 @@ function MobileMyTasks({ personal }: { personal: PersonalPane }) {
   const [tab, setTab] = useState<DueWindow>('upcoming')
   const [pickerOpen, setPickerOpen] = useState(false)
   const { tasks, toggleDone, openTask, projectName } = useMyTasksData(tab)
-  const grouped = tab === 'all'
+  // Группируем «Все» И «Предстоит»: с 15.09 во второе окно приходят задачи
+  // без срока, и без заголовка «Без срока» они читались бы как хвост
+  // просроченного. Пустые группы не рендерятся, поэтому у человека без
+  // бессрочных задач экран не меняется.
+  const grouped = tab === 'all' || tab === 'upcoming'
   const groups = useMemo(() => groupTasksByDue(tasks.data ?? []), [tasks.data])
   const current = TABS.find((t) => t.key === tab)!
 

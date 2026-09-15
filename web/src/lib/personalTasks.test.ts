@@ -93,6 +93,38 @@ describe('personalListView', () => {
   })
 })
 
+describe('personalSectionState — выполненные скрыты по умолчанию', () => {
+  const t = (id: string, done: boolean) =>
+    ({ id, done, parent_task_id: null }) as unknown as Task
+
+  const state = (showAllDone: boolean) =>
+    personalSectionState({
+      meIsPending: false,
+      personalProjectId: 'p1',
+      isPending: false,
+      isError: false,
+      tasks: [t('a', false), t('b', true), t('c', true)],
+      showAllDone,
+    })
+
+  it('по умолчанию выполненных в списке нет, но счётчик их помнит', () => {
+    // ОС 15.09: «в личных показывать по умолчанию не выполненные, а
+    // выполненные скрыть за фильтром или чипом». Число нужно чипу.
+    const s = state(false)
+    expect(s.kind).toBe('ready')
+    if (s.kind !== 'ready') return
+    expect(s.view.done).toEqual([])
+    expect(s.view.counts).toEqual({ open: 1, done: 2 })
+  })
+
+  it('чип раскрывает все выполненные, а не первые три', () => {
+    const s = state(true)
+    if (s.kind !== 'ready') return
+    expect(s.view.done.map((x) => x.id)).toEqual(['b', 'c'])
+    expect(s.view.hiddenDone).toBe(0)
+  })
+})
+
 describe('resolvePersonalTaskParam', () => {
   const tasks = [task({ id: 'mine' })]
 
