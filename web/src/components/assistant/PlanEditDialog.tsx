@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
+import { DateField } from '@/components/ui/DateField'
 import { Button } from '@/components/ui/Button'
 import {
   Dialog,
@@ -115,12 +116,7 @@ export function PlanEditDialog({
             <>
               <div>
                 <Label htmlFor="plan-due">Срок</Label>
-                <Input
-                  id="plan-due"
-                  type="date"
-                  value={dueAt}
-                  onChange={(e) => setDueAt(e.target.value)}
-                />
+                <DateField id="plan-due" value={dueAt} onChange={setDueAt} />
               </div>
               <div>
                 <Label htmlFor="plan-priority">Приоритет</Label>

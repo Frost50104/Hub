@@ -5,8 +5,8 @@ import { toast } from 'sonner'
 
 import { CreateTaskDialog } from '@/components/task/CreateTaskDialog'
 import { QueryError } from '@/components/QueryError'
+import { DateField } from '@/components/ui/DateField'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { StatTile } from '@/components/ui/StatTile'
 import { cn } from '@/lib/cn'
@@ -289,24 +289,20 @@ export function ReportView({
             <div className="flex flex-wrap items-end gap-2 rounded-[14px] border border-glass-border bg-tint p-3.5">
               <label className="text-[13px] text-text2">
                 С
-                <Input
-                  type="date"
+                <DateField
                   className="mt-1"
-                  defaultValue={data.period.from}
-                  onChange={(e) =>
-                    setRange((r) => ({ from: e.target.value, to: r?.to ?? data.period.to }))
-                  }
+                  ariaLabel="Начало периода"
+                  value={range?.from ?? data.period.from}
+                  onChange={(v) => setRange((r) => ({ from: v, to: r?.to ?? data.period.to }))}
                 />
               </label>
               <label className="text-[13px] text-text2">
                 По
-                <Input
-                  type="date"
+                <DateField
                   className="mt-1"
-                  defaultValue={data.period.to}
-                  onChange={(e) =>
-                    setRange((r) => ({ from: r?.from ?? data.period.from, to: e.target.value }))
-                  }
+                  ariaLabel="Конец периода"
+                  value={range?.to ?? data.period.to}
+                  onChange={(v) => setRange((r) => ({ from: r?.from ?? data.period.from, to: v }))}
                 />
               </label>
               <Button size="sm" variant="ghost" onClick={() => setRange(null)}>

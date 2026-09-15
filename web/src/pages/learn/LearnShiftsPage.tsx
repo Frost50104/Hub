@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { SegmentGroup, type SegmentOption } from '@/components/ui/SegmentGroup'
+import { DateField } from '@/components/ui/DateField'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
@@ -684,7 +685,7 @@ function ShiftFormDialog({ shift, onClose }: { shift: ShiftPosting | null; onClo
         <div className="grid grid-cols-3 gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="sh-date">Дата</Label>
-            <Input id="sh-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className={FIELD} />
+            <DateField id="sh-date" value={date} onChange={setDate} className={FIELD} />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="sh-from">С</Label>

@@ -38,6 +38,7 @@ import {
 } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
+import { DateField } from '@/components/ui/DateField'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
@@ -469,11 +470,10 @@ function EmployeeCardDialog({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="emp-hired">Дата найма</Label>
-                <Input
+                <DateField
                   id="emp-hired"
-                  type="date"
                   value={form.hired_at ?? ''}
-                  onChange={(e) => set('hired_at', e.target.value || null)}
+                  onChange={(v) => set('hired_at', v || null)}
                 />
               </div>
               <div className="space-y-1.5">

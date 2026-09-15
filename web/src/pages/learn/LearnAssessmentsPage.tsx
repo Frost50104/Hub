@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { AudiencePicker, useAudienceDraft } from '@/components/learn/AudiencePicker'
 import { AttemptView, ResultView } from '@/components/learn/lesson/QuizRunner'
 import { QueryError } from '@/components/QueryError'
+import { DateField } from '@/components/ui/DateField'
 import { ActionRow } from '@/components/ui/ActionRow'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -1071,11 +1072,10 @@ function CreateCampaignDialog({ onClose }: { onClose: () => void }) {
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="camp-ends">Дедлайн (необязательно)</Label>
-          <Input
+          <DateField
             id="camp-ends"
-            type="date"
             value={endsAt}
-            onChange={(e) => setEndsAt(e.target.value)}
+            onChange={setEndsAt}
             className="h-12 text-[15px] lg:h-11"
           />
         </div>
