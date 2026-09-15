@@ -171,6 +171,13 @@ export function useUpdateTask(projectId: string) {
       qc.invalidateQueries({ queryKey: ['me-stats'] })
       qc.invalidateQueries({ queryKey: taskKeys.detail(vars.id) })
       qc.invalidateQueries({ queryKey: ['task', vars.id, 'activity'] })
+      // Смена исполнителя в ЛИЧНОМ — это переезд задачи к нему (15.09): из
+      // своего списка она пропала (инвалидация выше), а появиться обязана в
+      // «Я поставил». Ключ инвалидируем всегда: в обычном проекте он просто
+      // перечитает пустую выдачу.
+      if (vars.assignee_ids !== undefined || vars.assignee_id !== undefined) {
+        qc.invalidateQueries({ queryKey: ['me-delegated'] })
+      }
       // «N из M» в шапках колонок живёт в кэше этапов; done_count проекта —
       // в его карточке.
       if (vars.stage_id !== undefined || vars.done !== undefined) {
@@ -253,6 +260,9 @@ export function useToggleAssignee(projectId: string) {
       qc.invalidateQueries({ queryKey: ['me-stats'] })
       qc.invalidateQueries({ queryKey: taskKeys.detail(vars.taskId) })
       qc.invalidateQueries({ queryKey: ['task', vars.taskId, 'activity'] })
+      // См. `useUpdateTask`: назначение в личном = передача задачи, и секция
+      // «Я поставил» обязана увидеть её сразу.
+      qc.invalidateQueries({ queryKey: ['me-delegated'] })
     },
   })
 }

@@ -34,6 +34,7 @@ from app.api.search import search
 from app.api.share import create_project_share
 from app.api.stats import get_stats
 from app.api.tasks import (
+    add_task_assignee,
     create_task,
     delete_task,
     get_task,
@@ -51,7 +52,7 @@ from app.schemas.project import (
     ProjectUpdate,
 )
 from app.schemas.share import ShareCreate
-from app.schemas.task import TaskCreate, TaskUpdate
+from app.schemas.task import TaskAssigneeAdd, TaskCreate, TaskUpdate
 from app.services.onboarding import GUIDE_TASK_TITLE
 from app.services.personal_projects import (
     PERSONAL_KEY_BASE,
@@ -60,6 +61,10 @@ from app.services.personal_projects import (
     get_personal_project_id,
 )
 from app.services.project_access import ensure_project_member
+from app.services.task_assignees import (
+    apply_assignee_side_effects,
+    set_task_assignees,
+)
 from tests.integration.conftest import make_principal, seed_stages
 from tests.integration.test_project_access import _register
 
@@ -524,24 +529,258 @@ async def test_delegate_refuses_when_target_never_logged_in(db, tenant_id):
     assert err.value.status_code == 409
 
 
+# ─── Задача едет к исполнителю (15.09) ──────────────────────────────────────
+
+
+async def _pair(db, tenant_id, slug):
+    """Двое с готовыми личными пространствами: (я, коллега, моё, его)."""
+    me = await _member(db, tenant_id, f"{slug}-me")
+    mate = await _member(db, tenant_id, f"{slug}-mate", email=f"{slug}-mate@t.ru")
+    mine = await ensure_personal_project(db, me)
+    theirs = await ensure_personal_project(db, mate)
+    await db.commit()
+    return me, mate, mine, theirs
+
+
+async def _members(db, project_id):
+    return set(
+        (
+            await db.execute(
+                select(ProjectMember.employee_id).where(
+                    ProjectMember.project_id == project_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def test_assigning_colleague_hands_the_task_over(db, tenant_id):
+    """Решение владельца 15.09: «назначили лично мне — вижу в СВОЁМ личном».
+
+    До этого задача оставалась у автора, а исполнитель видел её только в
+    кросс-проектном списке и на странице ЧУЖОГО «Личного».
+    """
+    me, mate, mine, theirs = await _pair(db, tenant_id, "ho-basic")
+    # Заметка «для себя» — чтобы номера в двух проектах разошлись и было
+    # видно, что задача перенумеровалась, а не просто сменила project_id.
+    await create_task(mine, TaskCreate(title="Купить хлеб"), me, db)
+    task = await create_task(
+        mine,
+        TaskCreate(title="Забрать акты", assignee_ids=[mate.employee_id]),
+        me,
+        db,
+    )
+    await db.commit()
+
+    assert task.project_id == theirs
+    assert [a.employee_id for a in task.assignees] == [mate.employee_id]
+    # В моём личном она была третьей (инструкция + хлеб), в его — вторая:
+    # номер «KEY-42» уникален внутри проекта, и переезд его перевыдаёт.
+    assert task.seq == 2
+
+    # Получателю задача видна у себя, автору — только она одна.
+    assert task.id in {t.id for t in await _tasks(db, theirs, mate)}
+    assert [t.id for t in await _tasks(db, theirs, me)] == [task.id]
+    # Членство автору — явным шагом: без него карточка ответила бы 404.
+    assert me.employee_id in await _members(db, theirs)
+    assert (await get_task(task.id, me, db)).id == task.id
+    # В своём личном автор её больше не видит — она уехала.
+    assert task.id not in {t.id for t in await _tasks(db, mine, me)}
+
+
+async def test_handed_over_task_lands_in_my_delegated(db, tenant_id):
+    """«Я поставил» показывает и поручения, и переданные задачи.
+
+    Условие секции — `created_by = я` в чужом личном, а после переезда задача
+    ровно такая. Отдельной ветки не понадобилось.
+    """
+    me, mate, mine, _theirs = await _pair(db, tenant_id, "ho-deleg")
+    task = await create_task(
+        mine, TaskCreate(title="Свести отчёт", assignee_ids=[mate.employee_id]), me, db
+    )
+    await db.commit()
+    assert [t.id for t in await list_delegated(me, db)] == [task.id]
+
+
+async def test_handoff_does_not_open_the_rest_of_personal(db, tenant_id):
+    """Автор получил членство в чужом личном — и всё равно видит одну задачу."""
+    me, mate, mine, theirs = await _pair(db, tenant_id, "ho-priv")
+    private = await create_task(
+        theirs, TaskCreate(title="Записаться к врачу"), mate, db
+    )
+    task = await create_task(
+        mine, TaskCreate(title="Позвонить в банк", assignee_ids=[mate.employee_id]), me, db
+    )
+    await db.commit()
+
+    assert [t.id for t in await _tasks(db, theirs, me)] == [task.id]
+    with pytest.raises(HTTPException) as err:
+        await get_task(private.id, me, db)
+    assert err.value.status_code == 404
+    # Агрегаты чужого личного закрыты и после переезда.
+    with pytest.raises(HTTPException) as stats_err:
+        await get_stats(theirs, principal=me, db=db)
+    assert stats_err.value.status_code == 403
+
+
+async def test_patch_assignees_hands_the_task_over(db, tenant_id):
+    """Тот же путь из карточки: сменили исполнителя — задача уехала."""
+    me, mate, mine, theirs = await _pair(db, tenant_id, "ho-patch")
+    task = await create_task(mine, TaskCreate(title="Купить бумагу"), me, db)
+    await db.commit()
+    # Личная задача заводится на владельца — замена, а не добавление.
+    assert [a.employee_id for a in task.assignees] == [me.employee_id]
+
+    updated = await update_task(
+        task.id, TaskUpdate(assignee_ids=[mate.employee_id]), me, db
+    )
+    await db.commit()
+    assert updated.project_id == theirs
+    assert [a.employee_id for a in updated.assignees] == [mate.employee_id]
+
+
+async def test_handoff_is_reversible(db, tenant_id):
+    """Получатель вернул задачу автору — она уехала обратно к нему.
+
+    Правило симметрично по построению: `assert_movable` смотрит на источник
+    («мой личный») и на исполнителя, а не на историю задачи.
+    """
+    me, mate, mine, theirs = await _pair(db, tenant_id, "ho-back")
+    task = await create_task(
+        mine, TaskCreate(title="Сверить остатки", assignee_ids=[mate.employee_id]), me, db
+    )
+    await db.commit()
+    assert task.project_id == theirs
+
+    back = await update_task(task.id, TaskUpdate(assignee_ids=[me.employee_id]), mate, db)
+    await db.commit()
+    assert back.project_id == mine
+    assert mate.employee_id in await _members(db, mine)
+
+
+async def test_two_assignees_in_personal_are_refused(db, tenant_id):
+    """«Положить задачу в два личных» невозможно физически — говорим прямо."""
+    me, mate, mine, _theirs = await _pair(db, tenant_id, "ho-two")
+    task = await create_task(mine, TaskCreate(title="Смета"), me, db)
+    await db.commit()
+
+    with pytest.raises(HTTPException) as err:
+        await add_task_assignee(
+            task.id, TaskAssigneeAdd(employee_id=mate.employee_id), me, db
+        )
+    assert err.value.status_code == 409
+    assert "один исполнитель" in err.value.detail
+    # Ручка не пишет наполовину: транзакция откатывается целиком.
+    await db.rollback()
+    fresh = await db.get(Task, task.id)
+    assert fresh.project_id == mine
+
+
+async def test_handoff_refuses_subtask(db, tenant_id):
+    """Подзадача переезжает только вместе с родителем — иначе семья рвётся."""
+    me, mate, mine, _theirs = await _pair(db, tenant_id, "ho-sub")
+    parent = await create_task(mine, TaskCreate(title="Ремонт"), me, db)
+    await db.commit()
+    child = await create_task(
+        mine,
+        TaskCreate(title="Вызвать мастера", parent_task_id=parent.id, assignee_ids=[]),
+        me,
+        db,
+    )
+    await db.commit()
+
+    with pytest.raises(HTTPException) as err:
+        await update_task(child.id, TaskUpdate(assignee_ids=[mate.employee_id]), me, db)
+    assert err.value.status_code == 409
+    assert "Подзадачу" in err.value.detail
+    await db.rollback()
+
+
+async def test_handoff_refuses_when_target_never_logged_in(db, tenant_id):
+    """Личное пространство заводится первым входом — раньше его нет."""
+    me = await _member(db, tenant_id, "ho-new-me")
+    newbie = await _member(db, tenant_id, "ho-new-t", email="ho-new-target@t.ru")
+    mine = await ensure_personal_project(db, me)
+    await db.commit()
+
+    with pytest.raises(HTTPException) as err:
+        await create_task(
+            mine,
+            TaskCreate(title="Принять смену", assignee_ids=[newbie.employee_id]),
+            me,
+            db,
+        )
+    assert err.value.status_code == 409
+    assert "ни разу не заходил" in err.value.detail
+    await db.rollback()
+
+
+async def test_work_project_assignment_stays_put(db, tenant_id):
+    """Регресс: в обычном проекте назначение никуда задачу не двигает."""
+    me, mate, _mine, _theirs = await _pair(db, tenant_id, "ho-work")
+    work = await create_project(ProjectCreate(name="Рабочий проект"), me, db)
+    await db.commit()
+    task = await create_task(
+        work.id, TaskCreate(title="Общая", assignee_ids=[mate.employee_id]), me, db
+    )
+    await db.commit()
+    assert task.project_id == work.id
+
+    # И двое исполнителей там по-прежнему законны.
+    updated = await update_task(
+        task.id,
+        TaskUpdate(assignee_ids=[me.employee_id, mate.employee_id]),
+        me,
+        db,
+    )
+    await db.commit()
+    assert len(updated.assignees) == 2
+
+
 # ─── Приватность внутри чужого личного ──────────────────────────────────────
 
 
 async def _shared_personal(db, tenant_id, slug):
-    """(владелец, гость, id личного проекта, id задачи гостя, id личной задачи)."""
+    """(владелец, гость, id личного проекта, id задачи гостя, id личной задачи).
+
+    Состояние ЛЕГАСИ и собирается в обход ручек нарочно: с 15.09 назначенная
+    коллеге задача уезжает в ЕГО личное (`apply_personal_assignee_rules`), и
+    через API «чужой исполнитель в моём личном» больше не получить. Но строки,
+    заведённые до 15.09, живут дальше — разовая джоба перенесла только
+    невыполненные с одним исполнителем, выполненные остались историей. Значит
+    приватность обязана держать их по-прежнему: гость видит свою задачу и ни
+    одной чужой.
+    """
     owner = await _member(db, tenant_id, f"{slug}-o")
     guest = await _member(db, tenant_id, f"{slug}-g", email=f"{slug}-guest@t.ru")
     personal_id = await ensure_personal_project(db, owner)
     await db.commit()
 
-    shared = await create_task(
+    created = await create_task(
         personal_id,
-        TaskCreate(title="Забрать акты", assignee_ids=[guest.employee_id]),
+        TaskCreate(title="Забрать акты", assignee_ids=[]),
         owner,
         db,
     )
     private = await create_task(
         personal_id, TaskCreate(title="Записаться к врачу"), owner, db
+    )
+    shared = await db.get(Task, created.id)
+    diff = await set_task_assignees(
+        db,
+        task=shared,
+        employee_ids=[guest.employee_id],
+        actor_id=owner.employee_id,
+    )
+    await apply_assignee_side_effects(
+        db,
+        task=shared,
+        diff=diff,
+        actor_id=owner.employee_id,
+        actor_name="Владелец",
+        notify=False,
     )
     await db.commit()
     return owner, guest, personal_id, shared.id, private.id

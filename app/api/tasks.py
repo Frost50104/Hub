@@ -37,6 +37,7 @@ from app.schemas.task import (
 from app.services.activity_writer import record_activity
 from app.services.attachments import purge_blobs
 from app.services.notify import notify_done_changed
+from app.services.personal_handoff import apply_personal_assignee_rules
 from app.services.personal_projects import (
     may_edit_delegated,
     personal_task_scope,
@@ -251,6 +252,8 @@ async def create_task(
     # Доменная работа — в services/tasks.py: тот же путь использует импорт из
     # CSV (ему нельзя ходить через ручку из-за rate-limit).
     task = await create_task_record(db, principal=principal, project_id=project_id, body=body)
+    # Завели задачу в своём личном сразу на коллегу — она уезжает к нему.
+    await apply_personal_assignee_rules(db, task=task, principal=principal)
     await db.commit()
     await db.refresh(task)
     return await _serialize_one(db, task)
@@ -381,6 +384,9 @@ async def update_task(
                 actor_id=principal.employee_id,
                 actor_name=actor_name,
             )
+            # Личное пространство: назначил другого — задача уезжает к нему
+            # (15.09). Для обычных проектов вызов ничего не делает.
+            await apply_personal_assignee_rules(db, task=task, principal=principal)
 
     # Колонка доски и выполнение — независимые оси (0044). Перенос карточки
     # пишется в ленту, но людей не будит: на доске из пяти колонок пуш за
@@ -735,6 +741,7 @@ async def add_task_assignee(
             actor_id=principal.employee_id,
             actor_name=await _actor_name(db, principal.employee_id),
         )
+        await apply_personal_assignee_rules(db, task=task, principal=principal)
         await db.commit()
         await db.refresh(task)
     return await _serialize_one(db, task)
@@ -769,6 +776,7 @@ async def remove_task_assignee(
             actor_id=principal.employee_id,
             actor_name=await _actor_name(db, principal.employee_id),
         )
+        await apply_personal_assignee_rules(db, task=task, principal=principal)
         await db.commit()
         await db.refresh(task)
     return await _serialize_one(db, task)

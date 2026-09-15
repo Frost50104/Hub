@@ -105,14 +105,28 @@ def _active_token() -> Any:
 
 
 async def assert_movable(
-    *, task: Task, source: Project, target: Project, principal: Principal
+    *,
+    task: Task,
+    source: Project,
+    target: Project,
+    principal: Principal,
+    handoff: bool = False,
 ) -> None:
     """Запреты, которые не выводятся из ролей.
 
     Личный проект отдельным гейтом, а не общим `require_project_role`: тот
-    пропускает hub-admin мимо членства, а `personal_task_scope` для админа
-    возвращает None — то есть без этой проверки админ вытаскивал бы чужие
-    личные заметки в общий проект и заталкивал задачи в чужое личное.
+    пропускает hub-admin мимо членства — то есть без этой проверки админ
+    вытаскивал бы чужие личные заметки в общий проект и заталкивал задачи в
+    чужое личное. (С 15.09 `personal_task_scope` админа тоже не пропускает, но
+    этот гейт всё равно нужен: он про НАПРАВЛЕНИЕ переноса, а не про чтение —
+    и ловит в том числе задачу, которую админ видеть вправе, будучи её
+    наблюдателем.)
+
+    `handoff=True` — единственное послабление (решение владельца 15.09):
+    передача задачи в личное пространство ИСПОЛНИТЕЛЯ. «Назначили лично мне —
+    вижу у себя, а не у неё, ибо я исполнитель». Послабление касается ТОЛЬКО
+    цели: источник обязан остаться своим личным, иначе переносом можно было бы
+    вытащить чужую заметку.
     """
     if task.parent_task_id is not None:
         raise HTTPException(
@@ -130,6 +144,9 @@ async def assert_movable(
     for project in (source, target):
         owner = project.personal_owner_id
         if owner is not None and owner != principal.employee_id:
+            if handoff and project is target:
+                # Передача исполнителю: цель — ЕГО личное, и это законно.
+                continue
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Чужое личное пространство в переносе не участвует",
@@ -391,9 +408,12 @@ async def plan_move(
     target: Project,
     principal: Principal,
     stage_id: UUID | None = None,
+    handoff: bool = False,
 ) -> MovePlan:
     """Посчитать переезд, ничего не записывая. Права проверил вызывающий."""
-    await assert_movable(task=task, source=source, target=target, principal=principal)
+    await assert_movable(
+        task=task, source=source, target=target, principal=principal, handoff=handoff
+    )
     if stage_id is not None:
         await get_stage_in_project(db, target.id, stage_id)
 
