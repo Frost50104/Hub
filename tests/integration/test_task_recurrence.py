@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
@@ -129,7 +130,14 @@ async def test_copy_carries_labels_fields_and_assignees(
 
     label = TaskLabel(id=uuid.uuid4(), tenant_id=tenant_id, project_id=project.id, name="Смена")
     field = CustomFieldDefinition(
-        id=uuid.uuid4(), tenant_id=tenant_id, project_id=project.id, name="Точка", type="text"
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        project_id=project.id,
+        name="Точка",
+        type="text",
+        # `position` NOT NULL и без server_default — в обход ручки его обязан
+        # проставить сам тест (иначе NotNullViolationError на flush).
+        position=Decimal("1"),
     )
     db.add_all([label, field])
     await db.flush()
@@ -314,6 +322,9 @@ async def test_deleting_source_keeps_the_copy(db: AsyncSession, tenant_id: uuid.
     await db.delete(await db.get(Task, task.id))
     await db.commit()
 
-    alive = await db.get(Task, copy.id)
-    assert alive is not None
-    assert alive.recurrence_parent_id is None
+    assert await db.get(Task, copy.id) is not None
+    # Значение читаем колонкой, а не атрибутом объекта: `SET NULL` делает
+    # Postgres по FK, сессия живёт с `expire_on_commit=False` и отдала бы
+    # закешированного предка.
+    parent = await db.scalar(select(Task.recurrence_parent_id).where(Task.id == copy.id))
+    assert parent is None

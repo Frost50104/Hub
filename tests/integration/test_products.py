@@ -283,4 +283,8 @@ async def test_manage_listing_scopes(db: AsyncSession, tenant_id: uuid.UUID):
     assert foreign.id not in author_ids  # чужой архив автору не показываем
 
     # Роль none: manage=True ничего не открывает, только опубликованное.
-    assert {i.id for i in (await list_products(True, plain, db)).items} == {live.id}
+    # Сравниваем ПЕРЕСЕЧЕНИЕм со своей тройкой: тенант в файле общий, и
+    # опубликованные карточки соседних тестов тоже видны этому сотруднику —
+    # законно, но жёсткое равенство падало бы от порядка запуска.
+    plain_ids = {i.id for i in (await list_products(True, plain, db)).items}
+    assert plain_ids & {own.id, foreign.id, live.id} == {live.id}
