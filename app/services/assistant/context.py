@@ -30,6 +30,13 @@ from app.models.task import Task
 from app.services.personal_projects import personal_visible_to
 from app.services.project_access import is_hub_admin
 
+# Как люди называют своё личное пространство. Множество маленькое и закрытое:
+# частичное совпадение («личн») сюда добавлять нельзя — оно начало бы
+# перехватывать обычные проекты со словом «личный» в названии.
+_PERSONAL_SYNONYMS = frozenset(
+    {"личное", "личные", "личный проект", "мои задачи", "моё", "мое"}
+)
+
 _TASK_KEY_RE = re.compile(r"^\s*([A-Za-zА-Яа-я0-9]{1,16})[-\s]?(\d{1,7})\s*$")
 _UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -99,6 +106,21 @@ async def resolve_project(ctx: ToolContext, ref: str) -> Project:
     if not ref:
         raise NotFound("Не указан проект")
     base = visible_projects_stmt(ctx)
+
+    # «Личное» — синоним СВОЕГО личного проекта (16.09). До переименования он
+    # так и назывался, и фраза «добавь мне личную задачу» резолвилась обычным
+    # поиском по имени — ради неё `visible_projects_stmt` и держит свой личный
+    # видимым. После переименования в «Мои задачи» ни точное совпадение, ни
+    # `ilike '%личное%'` не сработали бы, и ассистент отвечал бы «проект не
+    # найден» на самую частую личную просьбу.
+    if ref.lower() in _PERSONAL_SYNONYMS:
+        mine = (
+            await ctx.db.execute(
+                base.where(Project.personal_owner_id == ctx.employee_id)
+            )
+        ).scalars().first()
+        if mine is not None:
+            return mine
 
     if _UUID_RE.match(ref):
         found = (await ctx.db.execute(base.where(Project.id == UUID(ref)))).scalars().first()

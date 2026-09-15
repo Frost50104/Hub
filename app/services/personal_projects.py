@@ -44,17 +44,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.project import Project, ProjectMember
 from app.models.task import Task, TaskAssignee, TaskWatcher
 from app.services.project_access import require_project_role
+from app.services.project_key import _FALLBACK, _candidate, generate_unique_key
 from app.services.projects import create_project_record
 
 log = structlog.get_logger(__name__)
 
-PERSONAL_PROJECT_NAME = "Личное"
-# Транслит «ЛИЧНОЕ» (project_key._CYRILLIC_MAP). Задан явно, а не через
-# generate_unique_key: та для «Личное» в обычном регистре даёт «L» — строчные
-# буквы в карте транслита отсутствуют. Суффикс ТОЛЬКО цифровой:
-# `_TASK_KEY_RE` ассистента (assistant/context.py) — [A-Za-zА-Яа-я0-9]{1,16},
-# и «LICNOE_3F9A-5» перестал бы резолвиться в resolve_task.
+# Имя одно на всех (16.09): личный проект перестал быть «Личным» сбоку от
+# «Моих задач» — он и ЕСТЬ «Мои задачи», экран открывает его, а не соседнюю
+# надстройку. Чужому личному это имя подменяется в ответе на «Личное · Имя»
+# (`personal_display_name`): гость читал бы «Мои задачи» как свои.
+PERSONAL_PROJECT_NAME = "Мои задачи"
+# Запасной ключ, когда из ФИО не собрать ничего пригодного (пустое имя, одни
+# цифры). Значение историческое — так назывались ВСЕ личные проекты до 16.09;
+# держим его константой, а не пересчитываем из слова «Личное»: карта
+# транслитерации с тех пор получила диграфы и дала бы «LICHNOE», то есть
+# третий формат ключа на ровном месте.
 PERSONAL_KEY_BASE = "LICNOE"
+# Потолок БАЗЫ ключа. 13, а не 16: `_TASK_KEY_RE` ассистента
+# (`assistant/context.py`) разрешает [A-Za-zА-Яа-я0-9]{1,16} на ключ ЦЕЛИКОМ, а
+# суффикс коллизии клеится после среза — «KORABLESTROITELE2» уже не резолвится
+# в `resolve_task`. 13 + до трёх цифр = ровно 16. Суффикс только цифровой: `_`
+# и `-` внутри ключа та же регулярка не принимает.
+PERSONAL_KEY_MAX_LEN = 13
 _KEY_MAX_SUFFIX = 100_000
 _CREATE_ATTEMPTS = 3
 
@@ -104,26 +115,53 @@ async def get_personal_project_id(db: AsyncSession, employee_id: UUID) -> UUID |
     ).scalar_one_or_none()
 
 
-async def allocate_personal_key(db: AsyncSession) -> str:
-    """LICNOE / LICNOE2 / … — первый свободный ключ в тенанте.
+def personal_key_base(full_name: str | None) -> str:
+    """«Пётр Попов» → `PETRPOPOV`: основа ключа личного проекта.
 
-    Не `generate_unique_key`: её cap `range(2, 1000)` рассчитан на
-    «патологический ввод», а здесь упирается в ЧИСЛЕННОСТЬ тенанта — в сети на
-    1000+ сотрудников автосоздание начало бы падать.
+    Берём ОБА слова, а не первое. Замер на 178 живых владельцах: первое слово
+    даёт 123 уникальных ключа из 178 (83 проекта с цифрой), оба — 171 (13 с
+    цифрой). Причина в данных: порядок слов в справочнике смешанный — у 139
+    человек фамилия вторым словом, у 70 первым (`services/people_search.py`),
+    поэтому «первое слово» через раз оказывается именем, и получается
+    `ANASTASIY`, `ANASTASIY2` … `ANASTASIY7` — тот же `LICNOE26` в профиль.
 
-    `tenant_id` вручную не фильтруем — это делает RLS.
+    Третье и дальше слова отбрасываем: отчество ключ только удлиняет, а
+    потолок 13 символов жёсткий.
+
+    Собрать из ФИО именно ФАМИЛИЮ нельзя в принципе — структурированного поля
+    нет ни в `shadow_users`, ни в `employee_profiles`. Приёмка разовой джобы
+    поэтому ручная, по отчёту dry-run.
+
+    Ничего пригодного (пустое имя, одни цифры, служебная строка) → `LICNOE`,
+    то есть прежнее поведение.
     """
-    rows = await db.execute(
-        select(Project.key).where(Project.key.like(f"{PERSONAL_KEY_BASE}%"))
+    words = (full_name or "").split()[:2]
+    base = _candidate(" ".join(words) if len(words) < 2 else "".join(words),
+                      max_len=PERSONAL_KEY_MAX_LEN)
+    return PERSONAL_KEY_BASE if base == _FALLBACK else base
+
+
+async def allocate_personal_key(
+    db: AsyncSession, *, owner_name: str | None, tenant_id: UUID
+) -> str:
+    """`PETRPOPOV` / `PETRPOPOV2` / … — первый свободный ключ в тенанте.
+
+    До 16.09 база была ОДНА на весь тенант (`LICNOE`, `LICNOE2`…), и свой
+    аллокатор существовал ровно поэтому: cap `generate_unique_key` в 999
+    упирался бы не в «патологический ввод», а в численность компании. С базой
+    из ФИО коллизии — это только тёзки (на проде 4 группы), так что общий
+    генератор подходит и второй реализации перебора суффиксов быть не должно.
+
+    Ключи личных и обычных проектов живут в ОДНОМ namespace
+    (`UNIQUE(tenant_id, key)`), и `generate_unique_key` проверяет весь тенант —
+    занятый рабочим проектом `POPOV` уведёт личный в `POPOV2`.
+    """
+    return await generate_unique_key(
+        db,
+        name=personal_key_base(owner_name),
+        tenant_id=tenant_id,
+        max_len=PERSONAL_KEY_MAX_LEN,
     )
-    used = {row[0] for row in rows.all()}
-    if PERSONAL_KEY_BASE not in used:
-        return PERSONAL_KEY_BASE
-    for i in range(2, _KEY_MAX_SUFFIX):
-        candidate = f"{PERSONAL_KEY_BASE}{i}"
-        if candidate not in used:
-            return candidate
-    raise RuntimeError("personal key space exhausted")
 
 
 async def ensure_personal_project(
@@ -145,7 +183,11 @@ async def ensure_personal_project(
 
     for _ in range(_CREATE_ATTEMPTS):
         try:
-            key = await allocate_personal_key(db)
+            key = await allocate_personal_key(
+                db,
+                owner_name=principal.full_name,
+                tenant_id=principal.tenant_id,
+            )
             # SAVEPOINT обязателен: без него IntegrityError аборти́т ВСЮ
             # транзакцию /api/me вместе с ensure_profile_for_principal, и
             # пользователь останется без learn-профиля. Ручка create_project
@@ -186,7 +228,12 @@ async def ensure_personal_project(
                 return winner
             # Иначе конфликт по uq_projects_tenant_key с ДРУГИМ сотрудником,
             # выбравшим тот же ключ, — пробуем следующий.
-        except RuntimeError:
+        except (RuntimeError, ValueError):
+            # ValueError — из `generate_unique_key`, когда исчерпаны суффиксы
+            # (999 тёзок). Ловить ОБА типа обязательно: единственный вызывающий
+            # — `GET /api/me`, то есть ВХОД в приложение, и исключение отсюда
+            # уронило бы его целиком. Деградация здесь — «личного пространства
+            # нет», а не «Hub не работает» (докстринг ручки обещает именно это).
             break
 
     log.warning(
@@ -373,6 +420,25 @@ def is_foreign_personal(project: Project, principal: Principal) -> bool:
     через `assert_full_project_access`.
     """
     return personal_task_scope(project, principal) is not None
+
+
+def personal_display_name(
+    project: Project, principal: Principal, *, owner_name: str | None = None
+) -> str:
+    """Имя проекта ГЛАЗАМИ вызывающего.
+
+    Своё личное с 16.09 называется «Мои задачи» — и ровно поэтому гостю его так
+    показывать нельзя: автор поручения, открыв карточку, прочитал бы «Проект:
+    Мои задачи» про чужой инбокс. Подменяем на «Личное · Имя», когда имя
+    владельца известно вызывающему, и на «Личное» — когда нет.
+
+    Приватность не страдает: гость и так участник этого личного пространства и
+    видит фамилию владельца в номере задачи (`PETRPOPOV-5`). Наружу по-прежнему
+    не уходит `personal_owner_id` — только строка.
+    """
+    if personal_task_scope(project, principal) is None:
+        return project.name
+    return f"Личное · {owner_name}" if owner_name else "Личное"
 
 
 def assert_full_project_access(project: Project, principal: Principal) -> None:

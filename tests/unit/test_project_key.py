@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+from app.services.assistant.context import _TASK_KEY_RE
+from app.services.personal_projects import PERSONAL_KEY_MAX_LEN, personal_key_base
 from app.services.project_key import _candidate
 
 
@@ -43,3 +45,51 @@ def test_candidate_always_starts_with_letter_and_fits_column() -> None:
         key = _candidate(name)
         assert key[0].isalpha() and key.isupper()
         assert len(key) <= 16  # запас под числовой суффикс до лимита 32
+
+
+# ─── Ключ личного проекта (16.09) ───────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("full_name", "expected"),
+    [
+        # Оба слова, а не первое: порядок слов в справочнике смешанный, и
+        # «первое слово» через раз оказывается именем (замер — 139 против 70).
+        ("Пётр Попов", "PETRPOPOV"),
+        ("Попов Пётр", "POPOVPETR"),
+        # Диграфы: до 16.09 карта давала ZUZGINA и SERBAKOVA.
+        ("Жужгина Мария", "ZHUZHGINAMARI"),
+        ("Щербакова Анна", "SCHERBAKOVAAN"),
+        # Служебные учётки кафе: имя — адрес. Читается лучше, чем LICNOE47.
+        ("Гороховая 16", "GOROHOVAYA16"),
+        # Отчество отбрасываем — потолок 13 символов жёсткий.
+        ("Иванов Иван Иванович", "IVANOVIVAN"),
+        # Одно слово — оно и есть база.
+        ("Мадонна", "MADONNA"),
+        # Нечего транслитерировать — прежний общий ключ.
+        ("", "LICNOE"),
+        ("   ", "LICNOE"),
+        ("1104", "LICNOE"),
+        (None, "LICNOE"),
+    ],
+)
+def test_personal_key_base(full_name: str | None, expected: str) -> None:
+    assert personal_key_base(full_name) == expected
+
+
+@pytest.mark.parametrize(
+    "full_name",
+    ["Константинопольская Александра", "Среднерогатская Кораблестроителей", "Ли Бо"],
+)
+def test_personal_key_survives_assistant_regex(full_name: str) -> None:
+    """Ключ + суффикс обязаны укладываться в регулярку ассистента.
+
+    `_TASK_KEY_RE` матчит «KEY-42» ЦЕЛИКОМ и разрешает 16 символов на ключ, а
+    суффикс коллизии клеится ПОСЛЕ среза базы. Импортируем настоящую регулярку,
+    а не копию: разъехавшись, модули молча сломали бы резолв «POPOV-42» в чате.
+    """
+    base = personal_key_base(full_name)
+    assert len(base) <= PERSONAL_KEY_MAX_LEN
+    assert base.isupper() and base[0].isalpha()
+    # Худший случай коллизии — трёхзначный суффикс.
+    assert _TASK_KEY_RE.match(f"{base}999-1")

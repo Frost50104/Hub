@@ -55,10 +55,10 @@ from app.schemas.share import ShareCreate
 from app.schemas.task import TaskAssigneeAdd, TaskCreate, TaskUpdate
 from app.services.onboarding import GUIDE_TASK_TITLE
 from app.services.personal_projects import (
-    PERSONAL_KEY_BASE,
     PERSONAL_PROJECT_NAME,
     ensure_personal_project,
     get_personal_project_id,
+    personal_key_base,
 )
 from app.services.project_access import ensure_project_member
 from app.services.task_assignees import (
@@ -164,7 +164,9 @@ async def test_ensure_creates_project_without_stages(db, tenant_id):
     project = await db.get(Project, project_id)
     assert project is not None
     assert project.name == PERSONAL_PROJECT_NAME
-    assert project.key.startswith(PERSONAL_KEY_BASE)
+    # Ключ из ФИО владельца (16.09), а не общий префикс на тенант: «LICNOE26-5»
+    # человеку ничего не говорило.
+    assert project.key.startswith(personal_key_base(principal.full_name))
     assert project.personal_owner_id == principal.employee_id
 
     # Колонок нет: личное пространство — список дел, а не доска, и задачи здесь
@@ -261,32 +263,40 @@ async def test_ensure_skips_principal_without_hub_role(db, tenant_id):
 
 
 async def test_ensure_recovers_after_key_collision(db, tenant_id):
-    """Ключ личного проекта занят обычным — ensure берёт следующий свободный."""
+    """Ключ личного занят ОБЫЧНЫМ проектом — ensure берёт следующий свободный.
+
+    Namespace ключей общий (`UNIQUE(tenant_id, key)`), поэтому «POPOV» вполне
+    может оказаться у рабочего проекта раньше, чем у Попова появится личный.
+    """
     owner = await _member(db, tenant_id, "pp-key")
-    manual = await create_project(
-        ProjectCreate(name="Личное", key=PERSONAL_KEY_BASE), owner, db
-    )
+    base = personal_key_base(owner.full_name)
+    manual = await create_project(ProjectCreate(name="Ручной", key=base), owner, db)
     assert manual.is_personal is False
 
     project_id = await ensure_personal_project(db, owner)
     await db.commit()
     project = await db.get(Project, project_id)
-    # Суффикс не фиксируем: allocate_personal_key полагается на RLS, а под
-    # дефолтной (superuser) ролью тестов он видит ключи всех тенантов сюиты.
-    assert project.key != PERSONAL_KEY_BASE
-    assert project.key.startswith(PERSONAL_KEY_BASE)
+    assert project.key != base
+    assert project.key.startswith(base)
 
 
-async def test_two_employees_get_distinct_keys(db, tenant_id):
+async def test_namesakes_get_distinct_keys(db, tenant_id):
+    """Полные тёзки — единственный источник коллизий после 16.09.
+
+    На проде таких 4 группы из 178: база из ФИО совпадает, различает их только
+    цифровой суффикс. Признака «кто есть кто» в ключе не будет — это принято.
+    """
     first = await _member(db, tenant_id, "pp-two-a")
     second = await _member(db, tenant_id, "pp-two-b")
+    assert first.full_name == second.full_name
     a = await ensure_personal_project(db, first)
     await db.commit()
     b = await ensure_personal_project(db, second)
     await db.commit()
     keys = [(await db.get(Project, a)).key, (await db.get(Project, b)).key]
+    base = personal_key_base(first.full_name)
     assert keys[0] != keys[1]
-    assert all(k.startswith(PERSONAL_KEY_BASE) for k in keys)
+    assert all(k.startswith(base) for k in keys)
 
 
 async def test_ensure_survives_integrity_error(db, tenant_id, database_url):
@@ -371,8 +381,12 @@ async def test_search_hides_foreign_personal(db, tenant_id):
     as_admin = await search(q="стоматолог", group_by=None, principal=admin, db=db)
     assert as_admin.tasks == []
 
-    # Личное не всплывает и как проект — даже владельцу.
-    by_name = await search(q="Личное", group_by=None, principal=owner, db=db)
+    # Личное не всплывает и как проект — даже владельцу. Константой, а не
+    # литералом: после переименования (16.09) литерал «Личное» продолжил бы
+    # проходить, ничего не проверяя.
+    by_name = await search(
+        q=PERSONAL_PROJECT_NAME, group_by=None, principal=owner, db=db
+    )
     assert personal_id not in [p.id for p in by_name.projects]
 
 
@@ -390,6 +404,11 @@ async def test_assistant_hides_foreign_personal(db, tenant_id):
     # Но резолв по имени работает — «создай мне личную задачу».
     resolved = await resolve_project(ctx, PERSONAL_PROJECT_NAME)
     assert resolved.personal_owner_id == owner.employee_id
+    # И по слову «личное» тоже: проект так назывался до 16.09, люди продолжат
+    # говорить именно так, а ни точное совпадение, ни `ilike` его больше не
+    # найдут — синоним держит `_PERSONAL_SYNONYMS`.
+    for phrase in ("личное", "Личное", "мои задачи", "личный проект"):
+        assert (await resolve_project(ctx, phrase)).id == resolved.id
 
     admin = await _member(db, tenant_id, "pp-ai-adm", role="admin", org_role=None)
     await db.commit()

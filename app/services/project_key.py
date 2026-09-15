@@ -21,15 +21,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project
 
+# Диграфы вместо однобуквенных замен (16.09): пока ключи собирались из
+# названий проектов, «Ж→Z» и «Щ→S» были незаметны, но с ключом из ФИО они
+# превращают Жужгину в ZUZGINA, а Щербакову в SERBAKOVA. Существующие ключи
+# иммутабельны, так что правка касается только новых.
 _CYRILLIC_MAP = str.maketrans(
     {
         "А": "A", "Б": "B", "В": "V", "Г": "G", "Д": "D",
-        "Е": "E", "Ё": "E", "Ж": "Z", "З": "Z", "И": "I",
+        "Е": "E", "Ё": "E", "Ж": "ZH", "З": "Z", "И": "I",
         "Й": "Y", "К": "K", "Л": "L", "М": "M", "Н": "N",
         "О": "O", "П": "P", "Р": "R", "С": "S", "Т": "T",
-        "У": "U", "Ф": "F", "Х": "H", "Ц": "C", "Ч": "C",
-        "Ш": "S", "Щ": "S", "Ъ": "",  "Ы": "Y", "Ь": "",
-        "Э": "E", "Ю": "Y", "Я": "Y",
+        "У": "U", "Ф": "F", "Х": "H", "Ц": "C", "Ч": "CH",
+        "Ш": "SH", "Щ": "SCH", "Ъ": "", "Ы": "Y", "Ь": "",
+        "Э": "E", "Ю": "YU", "Я": "YA",
     }
 )
 
@@ -37,8 +41,13 @@ _FALLBACK = "PROJ"
 _MAX_LEN = 16  # leave room for numeric suffix without exceeding 32 char limit
 
 
-def _candidate(name: str) -> str:
-    """Compute the base candidate key from a name (without collision check)."""
+def _candidate(name: str, *, max_len: int = _MAX_LEN) -> str:
+    """Compute the base candidate key from a name (without collision check).
+
+    `max_len` — потолок БАЗЫ, а не готового ключа: суффикс коллизии клеится
+    после среза. Полный ключ обязан уложиться в 16 символов — столько разрешает
+    `_TASK_KEY_RE` ассистента, а он матчит «KEY-42» целиком.
+    """
     # ВЕРХНИЙ РЕГИСТР ПЕРВЫМ. В таблице только заглавные буквы, поэтому
     # обратный порядок транслитерировал лишь первую букву обычного
     # русского названия, а остальные (строчные) выбрасывал фильтр ниже:
@@ -55,13 +64,13 @@ def _candidate(name: str) -> str:
     cleaned = re.sub(r"^[^A-Z]+", "", words[0])
     if not cleaned:
         return _FALLBACK
-    return cleaned[:_MAX_LEN]
+    return cleaned[:max_len]
 
 
 async def generate_unique_key(
-    db: AsyncSession, *, name: str, tenant_id: UUID
+    db: AsyncSession, *, name: str, tenant_id: UUID, max_len: int = _MAX_LEN
 ) -> str:
-    base = _candidate(name)
+    base = _candidate(name, max_len=max_len)
     rows = await db.execute(
         select(Project.key).where(
             Project.tenant_id == tenant_id, Project.key.like(f"{base}%")

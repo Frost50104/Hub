@@ -47,6 +47,7 @@ from app.services.personal_projects import (
     assert_full_project_access,
     assert_not_personal,
     not_personal,
+    personal_display_name,
     personal_task_scope,
 )
 from app.services.project_access import (
@@ -106,15 +107,21 @@ def _project_to_response(
     *,
     principal: Principal,
     counts: tuple[int, int] | None = None,
+    owner_name: str | None = None,
 ) -> ProjectResponse:
     """my_role — ФАКТИЧЕСКОЕ членство (для бейджа роли), может быть None у
     hub:admin вне проекта. Права для UI считаются отдельно: у админа они полные
-    независимо от членства."""
+    независимо от членства.
+
+    `owner_name` — имя владельца ЧУЖОГО личного проекта: подставляется в имя
+    (`personal_display_name`), чтобы гость не прочитал «Мои задачи» как свои.
+    Заполняет только `get_project` — в списки личные проекты не попадают вовсе.
+    """
     can_edit, can_manage = capabilities(principal, my_role)  # type: ignore[arg-type]
     return ProjectResponse(
         id=project.id,
         key=project.key,
-        name=project.name,
+        name=personal_display_name(project, principal, owner_name=owner_name),
         description=project.description,
         badge_emoji=project.badge_emoji,
         # Чистая функция от строки и секрета, без обращения к БД — поэтому её
@@ -275,12 +282,20 @@ async def get_project(
     counts = None if hide_counts else (await _task_counts(db, [project_id])).get(
         project_id, (0, 0)
     )
+    # Имя владельца — только на этой ветке и только для чужого личного: с 16.09
+    # все личные проекты называются «Мои задачи», и гость прочитал бы это как
+    # своё. Один SELECT на редком пути; в списках личных проектов нет вовсе.
+    owner_name = None
+    if hide_counts and project.personal_owner_id is not None:
+        owner = await db.get(ShadowUser, project.personal_owner_id)
+        owner_name = owner.full_name if owner else None
     return _project_to_response(
         project,
         my_role or member_role,
         is_favorite,
         principal=principal,
         counts=counts,
+        owner_name=owner_name,
     )
 
 
