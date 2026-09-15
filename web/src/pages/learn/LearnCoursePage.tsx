@@ -314,7 +314,7 @@ export function LearnCoursePage() {
       {data && (
         <>
           {preview && (
-            <div className="mx-5 mt-6 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber/45 bg-amber/10 px-3.5 py-2.5 lg:mx-0">
+            <div className="mx-5 mt-6 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber/45 bg-amber/10 px-3.5 py-2.5">
               <p className="text-[14px] text-text">
                 Вы смотрите курс глазами сотрудника: черновики скрыты, замки действуют.
               </p>
@@ -332,7 +332,10 @@ export function LearnCoursePage() {
             // Обратная дорога в конструктор с ОБЫЧНОГО просмотра курса: до
             // 26.08 она существовала только в режиме `?preview=1`, куда
             // попадают лишь из самого конструктора.
-            <div className="px-5 lg:px-0">
+            // Отступы — те же `px-5`, что у шапки и у списка уроков: колонка
+            // на десктопе их НЕ снимает (внешний `lg:px-8` идёт сверх них), и
+            // `lg:px-0` вырывал кнопку на 20px левее всего остального.
+            <div className="mt-3 px-5">
               <Link
                 to={`/learn/courses/${courseId}/edit`}
                 className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-glass-border bg-glass px-3 text-[14px] font-semibold text-text hover:bg-surface"
