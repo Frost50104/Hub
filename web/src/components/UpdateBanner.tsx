@@ -4,7 +4,11 @@ import { useRegisterSW } from 'virtual:pwa-register/react'
 import { Button } from '@/components/ui/Button'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 
-const UPDATE_CHECK_INTERVAL_MS = 60_000
+// 30 с, а не 60: деплоев в день много, а с 16.09 баннер сам ничего не
+// перезагружает — значит узнать об обновлении раньше стало дёшево, и человек
+// успевает применить его в удобный момент, а не наткнуться на расхождение с
+// бэкендом. Цена — условный GET `sw.js` раз в полминуты на вкладку, обычно 304.
+const UPDATE_CHECK_INTERVAL_MS = 30_000
 
 /**
  * Service Worker update banner.
