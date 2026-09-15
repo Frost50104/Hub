@@ -4,8 +4,10 @@ export interface TenantMember {
   employee_id: string
   email: string
   full_name: string
-  /** Lower-cased local-part of email — used in `@handle` mentions. */
+  /** Lower-cased local-part of email — подпись в попапе и legacy-токен. */
   handle: string
+  /** Готовый токен для вставки: `Имя_Фамилия` либо логин. Считает сервер. */
+  mention: string
 }
 
 export const tenantApi = {

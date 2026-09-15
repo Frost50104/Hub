@@ -29,3 +29,7 @@ class CommentResponse(BaseModel):
     # Enriched via JOIN shadow_users.
     author_email: str | None = None
     author_full_name: str | None = None
+    # Токен упоминания → текущее ФИО: чип рисует имя, а не логин почты.
+    # Считает сервер одним батчем на список — клиент словарь не собирает
+    # (раньше собирал из первых 10 сотрудников по алфавиту и врал остальным).
+    mention_names: dict[str, str] = {}

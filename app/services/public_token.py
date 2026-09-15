@@ -17,9 +17,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.share import PublicShareToken
+from app.services.mention_parser import normalize_token
 
-# Синхронизировано с mention-регексом фронта (web/src/components/Markdown.tsx).
-_MENTION_RE = re.compile(r"@([A-Za-z0-9._-]+)")
+# Синхронизировано с грамматикой токена (`app/services/mention_parser.py`
+# и `web/src/lib/mentions.ts`). Граница перед `@` здесь СОЗНАТЕЛЬНО не
+# проверяется: на публичной странице маскируются и почты, набранные в тексте
+# руками.
+_MENTION_RE = re.compile(r"@([\w.\-]+)")
 
 
 async def load_active_token(
@@ -64,21 +68,25 @@ def initials(name: str | None, email: str | None) -> str | None:
     return None
 
 
-def mask_mentions(body: str, names_by_handle: dict[str, str]) -> str:
+def mask_mentions(body: str, names_by_token: dict[str, str]) -> str:
     """Sanitize @mentions in comment bodies for anonymous public payloads.
 
-    Mention handles are email local-parts («@petr.popov.1104») — leaking them
-    in a login-less page is partial PII. Known handles become the person's
-    display name; anything unknown (including e-mails typed in comment text)
-    is masked down to its first letter. Deliberately aggressive: privacy over
-    display fidelity.
+    Токен упоминания — либо логин почты («@petr.popov.1104»), либо ФИО через
+    подчёркивание («@Иван_Петров»). Логин в странице без логина — частичные
+    ПДн, поэтому известные токены раскрываются в отображаемое имя, а всё
+    неизвестное (включая почты, набранные в тексте руками) схлопывается до
+    первой буквы. Сознательно агрессивно: приватность важнее точности показа.
     """
 
     def _sub(m: re.Match[str]) -> str:
-        handle = m.group(1)
-        name = names_by_handle.get(handle.lower())
+        raw = m.group(1)
+        core = raw.rstrip(".-")
+        tail = raw[len(core) :]
+        if not core:
+            return m.group(0)
+        name = names_by_token.get(normalize_token(raw))
         if name:
-            return f"@{name}"
-        return f"@{handle[0]}…"
+            return f"@{name}{tail}"
+        return f"@{core[0]}…{tail}"
 
     return _MENTION_RE.sub(_sub, body)

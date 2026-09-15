@@ -19,6 +19,7 @@ entire surface — kill switch without redeploy.
 
 from __future__ import annotations
 
+from collections import Counter
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
@@ -40,6 +41,8 @@ from app.schemas.share import (
     PublicTaskHit,
     PublicTaskView,
 )
+from app.services.mention_parser import normalize_token
+from app.services.people_search import is_token_safe, name_to_token
 from app.services.public_token import initials, load_active_token, mask_mentions
 from app.services.task_assignees import load_assignee_ids
 
@@ -111,17 +114,31 @@ async def _initials_for_many(
 
 
 async def _mention_names(session: AsyncSession) -> dict[str, str]:
-    """handle (email local-part, lower) → display name для mask_mentions.
+    """токен упоминания → display name для mask_mentions.
+
+    Токенов два вида — логин почты и `Имя_Фамилия` (см. mention_parser).
+    Неоднозначное имя (полные тёзки) из словаря выбрасывается: показать одно
+    ФИО вместо другого здесь безобидно, но правило «неоднозначное не
+    резолвится» должно быть одним на весь продукт.
 
     Tenant-scoped сессия + RLS ограничивают выборку своим tenant'ом.
     """
     rows = await session.execute(
         select(ShadowUser.email, ShadowUser.full_name).limit(500)
     )
+    people = [r for r in rows.all() if r.email and r.full_name]
+    name_tokens = Counter(
+        normalize_token(name_to_token(r.full_name))
+        for r in people
+        if is_token_safe(r.full_name)
+    )
     out: dict[str, str] = {}
-    for r in rows.all():
-        if r.email and r.full_name:
-            out[r.email.split("@", 1)[0].lower()] = r.full_name
+    for r in people:
+        out[normalize_token(r.email.split("@", 1)[0])] = r.full_name
+        if is_token_safe(r.full_name):
+            token = normalize_token(name_to_token(r.full_name))
+            if name_tokens[token] == 1:
+                out[token] = r.full_name
     return out
 
 

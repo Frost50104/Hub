@@ -15,3 +15,7 @@ class TenantMemberBrief(BaseModel):
     full_name: str
     # Local-part of email — convenience for client-side @mention rendering.
     handle: str
+    # Готовый токен для вставки в текст: `Имя_Фамилия` либо логин, если ФИО
+    # неуникально или содержит символы вне токена. Считает ТОЛЬКО сервер —
+    # клиент вставляет дословно (`web/src/lib/mentions.ts`).
+    mention: str

@@ -1,12 +1,11 @@
 import { ChevronDown, ChevronRight, History, Trash2 } from 'lucide-react'
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 
 import { Markdown } from '@/components/Markdown'
 import { MentionTextarea } from '@/components/task/MentionTextarea'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { useMe } from '@/hooks/useMe'
-import { useTenantMembers } from '@/hooks/useTenantMembers'
 import {
   useActivity,
   useComments,
@@ -22,12 +21,10 @@ function CommentBubble({
   comment,
   isMine,
   onDelete,
-  mentionNames,
 }: {
   comment: Comment
   isMine: boolean
   onDelete: () => void
-  mentionNames?: Record<string, string>
 }) {
   return (
     <div className="group flex gap-3">
@@ -64,7 +61,11 @@ function CommentBubble({
             </button>
           )}
         </div>
-        <Markdown text={comment.body} highlightMentions mentionNames={mentionNames} />
+        <Markdown
+          text={comment.body}
+          highlightMentions
+          mentionNames={comment.mention_names}
+        />
       </div>
     </div>
   )
@@ -94,13 +95,6 @@ interface TaskThreadProps {
 export function TaskThread({ taskId }: TaskThreadProps) {
   const me = useMe()
   const comments = useComments(taskId)
-  // handle → имя: mention-чипы показывают «@Имя Фамилия», не email-префикс.
-  const members = useTenantMembers('')
-  const mentionNames = useMemo(() => {
-    const out: Record<string, string> = {}
-    for (const m of members.data ?? []) out[m.handle] = m.full_name
-    return out
-  }, [members.data])
   const activity = useActivity(taskId)
   const create = useCreateComment(taskId)
   const del = useDeleteComment(taskId)
@@ -133,7 +127,6 @@ export function TaskThread({ taskId }: TaskThreadProps) {
             <CommentBubble
               key={c.id}
               comment={c}
-              mentionNames={mentionNames}
               isMine={c.author_id === me.data?.employee_id}
               onDelete={() => {
                 if (confirm('Удалить комментарий?')) {

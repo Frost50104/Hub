@@ -3,11 +3,12 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import { cn } from '@/lib/cn'
-
-const MENTION_TOKEN_RE = /(@[A-Za-z0-9._-]+)/g
+import { MENTION_TOKEN_RE, mentionParts } from '@/lib/mentions'
 
 /** Строковые дети → подсветка @mention; элементы — как есть.
- * `names` (handle → полное имя) превращает «@petr.popov.1104» в «@Петр Попов». */
+ * `names` (токен → полное имя) превращает и «@petr.popov.1104», и
+ * «@Иван_Петров» в читаемое «@Иван Петров». Грамматика токена — общая с
+ * сервером, живёт в `lib/mentions.ts`. */
 function withMentions(
   children: React.ReactNode,
   names?: Record<string, string>,
@@ -21,16 +22,19 @@ function withMentions(
         {parts.map((part, j) => {
           if (MENTION_TOKEN_RE.test(part)) {
             MENTION_TOKEN_RE.lastIndex = 0
-            const handle = part.slice(1).toLowerCase()
-            const display = names?.[handle] ? `@${names[handle]}` : part
+            // Хвостовая пунктуация — ВНЕ чипа: «@Иван Петров.» с точкой
+            // внутри подсветки читается как часть имени.
+            const { chip, tail } = mentionParts(part, names)
             return (
-              <span
-                key={j}
-                title={part}
-                className="rounded bg-amber/20 px-1 font-medium text-amber"
-              >
-                {display}
-              </span>
+              <Fragment key={j}>
+                <span
+                  title={part}
+                  className="rounded bg-amber/20 px-1 font-medium text-amber"
+                >
+                  {chip}
+                </span>
+                {tail}
+              </Fragment>
             )
           }
           return <Fragment key={j}>{part}</Fragment>
@@ -44,7 +48,7 @@ interface MarkdownProps {
   text: string
   /** Подсвечивать @mention внутри текста (комментарии). */
   highlightMentions?: boolean
-  /** handle → полное имя: чип показывает имя вместо email-префикса. */
+  /** токен → полное имя: чип показывает имя вместо логина почты. */
   mentionNames?: Record<string, string>
   className?: string
 }

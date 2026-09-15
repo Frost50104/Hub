@@ -11,6 +11,7 @@ import {
 import { Avatar } from '@/components/ui/Avatar'
 import { Textarea } from '@/components/ui/Input'
 import { useTenantMembers } from '@/hooks/useTenantMembers'
+import { applyMention, mentionContext } from '@/lib/mentions'
 
 interface MentionTextareaProps
   extends Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'onChange' | 'value'> {
@@ -19,14 +20,16 @@ interface MentionTextareaProps
 }
 
 /**
- * Textarea with `@handle` autocomplete popover.
+ * Textarea с попапом упоминаний.
  *
- * Watches the segment between `@` and the caret while it consists of
- * `[A-Za-z0-9._-]`, queries `/api/tenant/members?q=...`, shows suggestions.
- * Picking a suggestion replaces `@partial` with `@handle ` and re-focuses.
+ * Разбор ввода — в чистом `lib/mentions.ts` (там же тесты): попап открывается
+ * на кириллице и держится через один пробел, чтобы искать «Иван Петров», а не
+ * только первое слово. До 14.09 класс символов был `[A-Za-z0-9._-]`, и первая
+ * же русская буква закрывала попап — отсюда ОС «Хаб не находит человека».
  *
- * Mentions are sent verbatim — backend re-parses them with the same regex
- * (`app/services/mention_parser.py`), so client and server stay in sync.
+ * Вставляется `mention` — токен, который посчитал СЕРВЕР (`Имя_Фамилия` либо
+ * логин, если ФИО неуникально). Клиент это решение не принимает: тёзки должны
+ * разбираться в одном месте.
  */
 export const MentionTextarea = forwardRef<HTMLTextAreaElement, MentionTextareaProps>(
   ({ value, onValueChange, onKeyDown, ...rest }, ref) => {
@@ -40,43 +43,29 @@ export const MentionTextarea = forwardRef<HTMLTextAreaElement, MentionTextareaPr
     const members = useTenantMembers(query ?? '')
     const list = members.data ?? []
 
-    const computeMentionContext = (text: string, cursor: number) => {
-      let i = cursor - 1
-      while (i >= 0 && /[A-Za-z0-9._-]/.test(text[i]!)) i--
-      if (i < 0 || text[i] !== '@') return null
-      // Only trigger if `@` is at start or preceded by whitespace —
-      // matches the backend mention_parser boundary rule.
-      if (i > 0 && /[\w]/.test(text[i - 1]!)) return null
-      return { anchor: i, partial: text.slice(i + 1, cursor) }
-    }
-
     const onChangeInner = (e: ChangeEvent<HTMLTextAreaElement>) => {
       const text = e.target.value
       onValueChange(text)
-      const ctx = computeMentionContext(text, e.target.selectionStart ?? 0)
+      const ctx = mentionContext(text, e.target.selectionStart ?? 0)
       if (!ctx) {
         setQuery(null)
         return
       }
-      setQuery(ctx.partial)
+      setQuery(ctx.query)
       setAnchorAt(ctx.anchor)
       setSelectedIdx(0)
     }
 
-    const insertMention = (handle: string) => {
+    const insertMention = (token: string) => {
       const ta = innerRef.current
       if (!ta) return
       const cursor = ta.selectionStart ?? anchorAt + 1
-      const before = value.slice(0, anchorAt)
-      const after = value.slice(cursor)
-      const inserted = `@${handle} `
-      const next = before + inserted + after
+      const { next, caret } = applyMention(value, anchorAt, cursor, token)
       onValueChange(next)
       setQuery(null)
       requestAnimationFrame(() => {
-        const pos = before.length + inserted.length
         ta.focus()
-        ta.setSelectionRange(pos, pos)
+        ta.setSelectionRange(caret, caret)
       })
     }
 
@@ -94,7 +83,7 @@ export const MentionTextarea = forwardRef<HTMLTextAreaElement, MentionTextareaPr
         }
         if (e.key === 'Enter' || e.key === 'Tab') {
           e.preventDefault()
-          insertMention(list[selectedIdx]!.handle)
+          insertMention(list[selectedIdx]!.mention)
           return
         }
         if (e.key === 'Escape') {
@@ -115,14 +104,23 @@ export const MentionTextarea = forwardRef<HTMLTextAreaElement, MentionTextareaPr
           onKeyDown={handleKeyDown}
           {...rest}
         />
-        {query !== null && list.length > 0 && (
-          <div className="absolute left-0 right-0 z-30 mt-1 max-h-60 overflow-y-auto rounded-lg border border-glass-border bg-bg p-1 shadow-glass">
+        {/* Пустую выдачу показываем ЯВНО: раньше попап просто исчезал, и со
+            стороны человека это выглядело как «справочник не работает». */}
+        {query !== null && (
+          // Ниже lg попап встаёт НАД полем: на телефоне композер прижат к низу
+          // листа, и выпадашка под ним уходила бы за клавиатуру.
+          <div className="absolute bottom-full left-0 right-0 z-30 mb-1 max-h-60 overflow-y-auto rounded-lg border border-glass-border bg-bg p-1 shadow-glass lg:bottom-auto lg:top-full lg:mb-0 lg:mt-1">
+            {list.length === 0 && (
+              <p className="px-2 py-2 text-xs text-text2">
+                {members.isFetching ? 'Ищем…' : 'Никого не нашли'}
+              </p>
+            )}
             {list.map((m, i) => (
               <button
                 type="button"
                 key={m.employee_id}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => insertMention(m.handle)}
+                onClick={() => insertMention(m.mention)}
                 className={
                   'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left ' +
                   (i === selectedIdx ? 'bg-surface text-text' : 'text-text2 hover:bg-glass hover:text-text')

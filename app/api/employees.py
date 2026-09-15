@@ -56,6 +56,7 @@ from app.services.employee_profiles import (
 )
 from app.services.learn_notify import notify_new_audience_members
 from app.services.org_scope import resolve_scope
+from app.services.people_search import match_condition
 
 router = APIRouter(tags=["learn-employees"])
 
@@ -208,14 +209,14 @@ async def list_employees(
 
     if status_filter in ("active", "archived"):
         stmt = stmt.where(EmployeeProfile.status == status_filter)
-    if q:
-        needle = f"%{q.strip().lower()}%"
-        stmt = stmt.where(
-            or_(
-                func.lower(EmployeeProfile.full_name).like(needle),
-                func.lower(EmployeeProfile.email).like(needle),
-            )
-        )
+    # Поиск — общий с упоминаниями (`people_search`): пословно и в любом
+    # порядке. Прежняя одна подстрока не находила «Петров Иван», если в
+    # карточке «Иван Петров», а порядок слов в справочнике смешанный.
+    # Ранжирование здесь НЕ применяем: экран читает список страницами, и
+    # порядок обязан оставаться тем же от страницы к странице.
+    name_match = match_condition(EmployeeProfile.full_name, EmployeeProfile.email, q)
+    if name_match is not None:
+        stmt = stmt.where(name_match)
     if store_id is not None:
         stmt = stmt.where(EmployeeProfile.store_id == store_id)
     if position_id is not None:

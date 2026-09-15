@@ -10,6 +10,8 @@ export interface Comment {
   created_at: string
   author_email: string | null
   author_full_name: string | null
+  /** токен упоминания → текущее ФИО; считает сервер одним батчем на список. */
+  mention_names: Record<string, string>
 }
 
 export type WatcherReason = 'assignee' | 'creator' | 'mentioned' | 'manual'

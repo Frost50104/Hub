@@ -1,8 +1,15 @@
 """Task comments API.
 
 Auto-watch behavior: posting a comment makes the author a watcher of the task
-(reason `manual`). Mentions parsing (`@user` → reason `mentioned`) lands in
-Hub-MVP.3d.
+(reason `manual`); упомянутые подписываются с reason `mentioned`.
+
+**Упоминание ВЫДАЁТ viewer-членство в проекте** (решение владельца 14.09) —
+зеркало ручки наблюдателей (`app/api/watchers.py`): подписка без доступа вела
+бы в 404, а с 14.09 упомянуть можно любого сотрудника по имени, не зная его
+логина. Членство идемпотентно и НЕ отзывается, если упоминание убрали из
+текста, — ровно как у наблюдателей и исполнителей. В личном проекте это
+безопасно: `personal_task_scope` покажет приглашённому только ту задачу, где
+он исполнитель или наблюдатель, а не весь личный список.
 """
 
 from __future__ import annotations
@@ -21,9 +28,14 @@ from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskComment, TaskWatcher  # noqa: F401 — used below
 from app.schemas.comment import CommentCreate, CommentResponse, CommentUpdate
 from app.services.activity_writer import record_activity
-from app.services.mention_parser import resolve_mentions
+from app.services.mention_parser import (
+    mention_names,
+    render_mentions,
+    resolve_mentions,
+)
 from app.services.notify import notify_commented, notify_mentioned
 from app.services.personal_projects import require_task_access
+from app.services.project_access import ensure_project_member
 
 router = APIRouter(tags=["comments"])
 
@@ -54,8 +66,41 @@ async def _ensure_watcher(
     )
 
 
+async def _subscribe_mentioned(
+    db: AsyncSession,
+    *,
+    task_id: UUID,
+    project_id: UUID,
+    tenant_id: UUID,
+    mentioned_ids: list[UUID],
+    actor_id: UUID,
+) -> None:
+    """Упомянутый становится наблюдателем И участником проекта.
+
+    Членство обязательно: иначе пуш «вас упомянули» ведёт на карточку, которую
+    человек не видит (404). Зеркало `app/api/watchers.py::add_watcher`.
+    """
+    for emp_id in mentioned_ids:
+        if emp_id == actor_id:
+            continue
+        await _ensure_watcher(
+            db,
+            task_id=task_id,
+            tenant_id=tenant_id,
+            employee_id=emp_id,
+            reason="mentioned",
+        )
+        await ensure_project_member(
+            db,
+            project_id=project_id,
+            tenant_id=tenant_id,
+            employee_id=emp_id,
+            added_by=actor_id,
+        )
+
+
 async def _list_with_authors(
-    db: AsyncSession, task_id: UUID
+    db: AsyncSession, task_id: UUID, tenant_id: UUID
 ) -> list[CommentResponse]:
     rows = await db.execute(
         select(
@@ -81,6 +126,13 @@ async def _list_with_authors(
         )
         .order_by(TaskComment.created_at)
     )
+    comments = rows.all()
+    # Словарь «токен → ФИО» одним запросом на ВЕСЬ список. Раньше его строил
+    # клиент из `/tenant/members` с лимитом 10, и имя вместо логина видели
+    # только первые десять сотрудников по алфавиту.
+    names = await mention_names(
+        db, texts=[r.body for r in comments], tenant_id=tenant_id
+    )
     return [
         CommentResponse(
             id=r.id,
@@ -92,8 +144,9 @@ async def _list_with_authors(
             created_at=r.created_at,
             author_email=r.email,
             author_full_name=r.full_name,
+            mention_names=names,
         )
-        for r in rows.all()
+        for r in comments
     ]
 
 
@@ -103,8 +156,8 @@ async def list_comments(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> list[CommentResponse]:
-    await _fetch_task_visible(db, task_id, principal)
-    return await _list_with_authors(db, task_id)
+    task = await _fetch_task_visible(db, task_id, principal)
+    return await _list_with_authors(db, task_id, task.tenant_id)
 
 
 @router.post(
@@ -148,17 +201,15 @@ async def create_comment(
         employee_id=principal.employee_id,
         reason="manual",
     )
-    # Mentioned employees auto-subscribe (no-op if already watcher).
-    for emp_id in mentioned_ids:
-        if emp_id == principal.employee_id:
-            continue
-        await _ensure_watcher(
-            db,
-            task_id=task.id,
-            tenant_id=task.tenant_id,
-            employee_id=emp_id,
-            reason="mentioned",
-        )
+    # Упомянутые подписываются и получают доступ к проекту (см. докстринг).
+    await _subscribe_mentioned(
+        db,
+        task_id=task.id,
+        project_id=task.project_id,
+        tenant_id=task.tenant_id,
+        mentioned_ids=mentioned_ids,
+        actor_id=principal.employee_id,
+    )
     await record_activity(
         db,
         tenant_id=task.tenant_id,
@@ -183,6 +234,10 @@ async def create_comment(
     actor_name = (actor.full_name if actor else None) or (
         actor.email if actor else "Кто-то"
     )
+    # В тексте уведомления вместо токена должно стоять имя: «@Иван_Петров»
+    # в пуше читается как ошибка.
+    names = await mention_names(db, texts=[body.body], tenant_id=task.tenant_id)
+    shown_body = render_mentions(body.body, names)
     notified: set[UUID] = {principal.employee_id}
     for emp_id in mentioned_ids:
         if emp_id in notified:
@@ -190,7 +245,7 @@ async def create_comment(
         await notify_mentioned(
             db,
             task=task,
-            comment_body=body.body,
+            comment_body=shown_body,
             actor_name=actor_name,
             recipient_id=emp_id,
         )
@@ -204,7 +259,7 @@ async def create_comment(
         await notify_commented(
             db,
             task=task,
-            comment_body=body.body,
+            comment_body=shown_body,
             actor_name=actor_name,
             recipient_id=emp_id,
         )
@@ -213,7 +268,7 @@ async def create_comment(
     await db.commit()
     await db.refresh(comment)
     # Re-fetch with author JOIN.
-    out = await _list_with_authors(db, task_id)
+    out = await _list_with_authors(db, task_id, task.tenant_id)
     matching = next((c for c in out if c.id == comment.id), None)
     if matching is None:
         raise HTTPException(
@@ -246,18 +301,18 @@ async def update_comment(
         db, text=body.body, tenant_id=comment.tenant_id
     )
     comment.mentioned_ids = new_mentions
-    for emp_id in new_mentions:
-        if emp_id == principal.employee_id:
-            continue
-        await _ensure_watcher(
+    task = await db.get(Task, comment.task_id)
+    if task is not None:
+        await _subscribe_mentioned(
             db,
             task_id=comment.task_id,
+            project_id=task.project_id,
             tenant_id=comment.tenant_id,
-            employee_id=emp_id,
-            reason="mentioned",
+            mentioned_ids=new_mentions,
+            actor_id=principal.employee_id,
         )
     await db.commit()
-    out = await _list_with_authors(db, comment.task_id)
+    out = await _list_with_authors(db, comment.task_id, comment.tenant_id)
     matching = next((c for c in out if c.id == comment.id), None)
     if matching is None:
         raise HTTPException(
