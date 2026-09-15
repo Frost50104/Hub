@@ -1,8 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
 import { Button } from '@/components/ui/Button'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
+import { shouldOfferUpdate } from '@/lib/appVersion'
 
 // 30 с, а не 60: деплоев в день много, а с 16.09 баннер сам ничего не
 // перезагружает — значит узнать об обновлении раньше стало дёшево, и человек
@@ -35,6 +36,14 @@ const UPDATE_CHECK_INTERVAL_MS = 30_000
  * Подстраховка «iOS проигнорировал reload» осталась там, где ей и место, — в
  * обработчике кнопки: `updateServiceWorker(true)` плюс собственный
  * `setTimeout` на 1500 мс. Путей перезагрузки после клика по-прежнему два.
+ *
+ * ПОКАЗЫВАТЬ ли баннер, решает сравнение версий, а не состояние воркера
+ * (16.09). Прежний признак — событие `needRefresh` от плагина — в Safari
+ * теряется: у владельца ожидающий воркер БЫЛ, а баннера не было, и там же
+ * замерено, что `registration.update()` не резолвится вовсе. Версия от этого
+ * свободна: `__APP_VERSION__` вшит в бандл при сборке, `/version.json`
+ * отдаётся сервером с `no-store`, пишет обе величины один `write_version`.
+ * Событие плагина оставлено вторым признаком — хуже от него не станет.
  */
 export function UpdateBanner() {
   const isDesktop = useIsDesktop()
@@ -42,6 +51,40 @@ export function UpdateBanner() {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
   } = useRegisterSW()
+  // Версия на сервере. `null` — узнать не удалось (офлайн, дев-стенд без
+  // version.json): тогда молчим, см. `shouldOfferUpdate`.
+  const [serverVersion, setServerVersion] = useState<string | null>(null)
+  // Версия, отложенная кнопкой «Позже». Ref, а не state: перерисовка от него
+  // не нужна, решение принимается в момент рендера.
+  const dismissedRef = useRef<string | null>(null)
+
+  // Опрос версии живёт ОТДЕЛЬНО от опроса воркера и не зависит от него:
+  // в Safari `serviceWorker.ready` и `update()` подводят, а этот путь — нет.
+  useEffect(() => {
+    let cancelled = false
+    const readVersion = async () => {
+      if (!navigator.onLine) return
+      try {
+        const res = await fetch('/version.json', { cache: 'no-store' })
+        if (!res.ok) return
+        const data = (await res.json()) as { version?: string }
+        if (!cancelled && data.version) setServerVersion(data.version)
+      } catch {
+        // Офлайн или сервер недоступен: прежнее значение не трогаем.
+      }
+    }
+    const id = window.setInterval(() => void readVersion(), UPDATE_CHECK_INTERVAL_MS)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void readVersion()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    void readVersion()
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [])
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return undefined
@@ -74,7 +117,11 @@ export function UpdateBanner() {
     }
   }, [])
 
-  if (!needRefresh) return null
+  // Версия — главный признак; событие плагина оставлено вторым, но и оно
+  // уважает «Позже»: иначе отложенное обновление возвращалось бы само.
+  const byVersion = shouldOfferUpdate(__APP_VERSION__, serverVersion, dismissedRef.current)
+  const byEvent = needRefresh && serverVersion !== dismissedRef.current
+  if (!byVersion && !byEvent) return null
 
   return (
     <div
@@ -99,7 +146,14 @@ export function UpdateBanner() {
         </p>
       </div>
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={() => setNeedRefresh(false)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            dismissedRef.current = serverVersion
+            setNeedRefresh(false)
+          }}
+        >
           Позже
         </Button>
         <Button
