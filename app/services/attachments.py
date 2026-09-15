@@ -12,6 +12,7 @@ import contextlib
 import re
 import unicodedata
 from pathlib import Path
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 import structlog
@@ -136,8 +137,104 @@ def sniff_mismatch(mime: str, head: bytes) -> bool:
     return not any(head.startswith(m) for m in magics)
 
 
+# Символы, которых не должно быть в имени файла: разделители путей, служебные
+# знаки Windows и управляющие байты.
+_UNSAFE_IN_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
+_MULTISPACE = re.compile(r"\s+")
+# Расширение по mime — ЗЕРКАЛО `web/src/lib/materialFileName.ts::MIME_EXT`.
+EXT_BY_MIME: dict[str, str] = {
+    "application/pdf": "pdf",
+    "application/msword": "doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.ms-excel": "xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "application/vnd.ms-powerpoint": "ppt",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "image/heic": "heic",
+    "image/heif": "heif",
+    "text/plain": "txt",
+    "text/markdown": "md",
+    "text/csv": "csv",
+    "application/zip": "zip",
+}
+_BARE_EXT = re.compile(r"^[A-Za-z0-9]{1,5}$")
+
+
+def display_filename(name: str) -> str:
+    """Имя для ПОКАЗА и скачивания: юникод сохраняем, опасное убираем.
+
+    Отдельно от `_sanitize_filename` намеренно. Тот собирает имя для ФАЙЛОВОЙ
+    СИСТЕМЫ и выбрасывает всё не-ASCII — на кириллическом имени от него
+    остаётся один хвост: «ЛДМО.xlsx» → «xlsx», «Отчет_final.xlsx» → «final.xlsx».
+    Пока оба имени были одним значением, в БД уезжало искалеченное, и человек
+    получал файл «xlsx» (в Chrome — «xlsx.xlsx»), который Windows не открывает
+    (ОС 14.09). Путь в хранилище по-прежнему ASCII — его считает
+    `_sanitize_filename`, а это имя живёт только в колонке и в заголовке
+    Content-Disposition (Starlette сам кодирует не-ASCII по RFC 5987).
+
+    Хвостовые точки и пробелы срезаются: Windows их не сохраняет.
+    """
+    # И «/», и «\\»: браузер шлёт только базовое имя, но multipart можно
+    # набить руками, а на POSIX `Path` про windows-разделитель не знает.
+    base = Path(name.replace("\\", "/")).name
+    cleaned = _MULTISPACE.sub(" ", _UNSAFE_IN_NAME.sub(" ", base)).strip()
+    # Вычищенный символ не должен оставлять пробел перед точкой расширения:
+    # «отчёт*?.pdf» → «отчёт.pdf», а не «отчёт .pdf».
+    cleaned = re.sub(r"\s+(?=\.)", "", cleaned)
+    cleaned = cleaned.rstrip(". ")[:150].strip()
+    return cleaned or "file"
+
+
+def download_filename(stored: str | None, *, mime: str | None, fallback: str) -> str:
+    """Имя для скачивания, чинящее уже испорченные строки в БД.
+
+    Зеркало `web/src/lib/materialFileName.ts::materialDownloadName` — одно
+    правило на сервер и на системную шторку «Поделиться» в iOS PWA.
+
+    Если в имени есть точка не первым символом — отдаём как есть. Иначе (на
+    проде это 58 материалов и 19 вложений, у которых в колонке лежит голое
+    «xlsx»/«docx») собираем имя из осмысленного `fallback` — названия
+    материала — и расширения по mime; если mime незнаком, расширением служит
+    сама испорченная строка.
+    """
+    stored_clean = display_filename(stored or "") if stored else ""
+    if stored_clean == "file":
+        stored_clean = ""
+    if len(stored_clean) > 1 and "." in stored_clean and not stored_clean.startswith("."):
+        return stored_clean
+    ext = EXT_BY_MIME.get(mime or "")
+    if ext is None and _BARE_EXT.match(stored_clean):
+        ext = stored_clean.lower()
+    base = display_filename(fallback)
+    return f"{base}.{ext}" if ext else base
+
+
+def content_disposition(filename: str, *, disposition_type: str = "inline") -> str:
+    """Готовый заголовок `Content-Disposition` для РУЧНОЙ сборки ответа.
+
+    Заголовки HTTP кодируются latin-1, поэтому кириллица, вписанная в
+    `filename="…"` напрямую, роняет ответ в `UnicodeEncodeError` (500). Там,
+    где ответ собирает Starlette (`FileResponse(filename=…)`), это делается за
+    нас; там, где заголовок пишем руками — X-Accel у медиа, CSV-экспорты —
+    нужно звать эту функцию. Для не-ASCII отдаётся форма RFC 5987
+    (`filename*=utf-8''…`), которую понимают все живые браузеры.
+    """
+    quoted = quote(filename)
+    if quoted == filename:
+        safe = filename.replace('"', "")
+        return f'{disposition_type}; filename="{safe}"'
+    return f"{disposition_type}; filename*=utf-8''{quoted}"
+
+
 def _sanitize_filename(name: str) -> str:
     """Strip path components, normalize unicode, keep only [A-Za-z0-9._-].
+
+    Имя для ФАЙЛОВОЙ СИСТЕМЫ (`storage_key`), не для показа: не-ASCII здесь
+    теряется целиком, поэтому в БД должно уезжать `display_filename`.
 
     Returns a name no longer than 100 chars; falls back to `file` if empty.
     """
@@ -285,7 +382,9 @@ async def store_upload(
         tenant_id=tenant_id,
         task_id=task_id,
         uploaded_by=uploaded_by,
-        filename=sanitized_name,
+        # В колонку — ЧИТАЕМОЕ имя, в путь — ASCII-санитайзер: иначе
+        # кириллическое имя приезжало в БД обрезанным до расширения.
+        filename=display_filename(file.filename or sanitized_name),
         mime=mime,
         size_bytes=written,
         storage_key=storage_key,

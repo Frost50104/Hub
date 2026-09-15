@@ -1,4 +1,5 @@
 import { api } from './api'
+import { materialDownloadName } from './materialFileName'
 import { parseEcho, type VideoProgressEcho } from './videoWatch'
 
 // ─── Оргструктура ────────────────────────────────────────────────────────────
@@ -1895,7 +1896,8 @@ export const learnApi = {
       } else {
         const a = document.createElement('a')
         a.href = url
-        a.download = material.current_version?.file_name ?? material.title
+        // Не сырое `file_name`: в колонке встречается голое «xlsx».
+        a.download = materialDownloadName(material)
         document.body.appendChild(a)
         a.click()
         a.remove()

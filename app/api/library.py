@@ -57,7 +57,13 @@ from app.schemas.library import (
     VersionResponse,
 )
 from app.services import audit, lifecycle
-from app.services.attachments import SNIFF_HEAD_BYTES, resolve_mime, sniff_mismatch
+from app.services.attachments import (
+    SNIFF_HEAD_BYTES,
+    display_filename,
+    download_filename,
+    resolve_mime,
+    sniff_mismatch,
+)
 from app.services.audience_resolver import (
     set_object_audience,
     visible_filter,
@@ -832,7 +838,8 @@ async def upload_version(
         material_id=material.id,
         version_no=next_no,
         storage_key=storage_key,
-        file_name=sanitized,
+        # В колонку — ЧИТАЕМОЕ имя (юникод сохраняется), в путь — ASCII.
+        file_name=display_filename(file.filename or sanitized),
         mime=mime,
         size_bytes=written,
         uploaded_by=principal.employee_id,
@@ -1064,7 +1071,14 @@ async def download_material(
             db, tenant_id=material.tenant_id, profile_id=profile.id, material_id=material.id
         )
         await db.commit()
-    return FileResponse(path, media_type=row.mime, filename=row.file_name)
+    return FileResponse(
+        path,
+        media_type=row.mime,
+        # Имя чиним на отдаче: у 58 материалов в колонке лежит голое «xlsx»
+        # (кириллическое имя срезал ASCII-санитайзер загрузки), и файл
+        # скачивался как «xlsx.xlsx» — Windows такой не открывает (ОС 14.09).
+        filename=download_filename(row.file_name, mime=row.mime, fallback=material.title),
+    )
 
 
 # Короткий TTL: ссылка живёт ровно на «нажал и скачал». Ключ подписи включает
@@ -1142,16 +1156,21 @@ async def serve_material_file(
     if not verify_token(_material_file_key(material_id, v), e, s):
         raise HTTPException(status_code=403, detail="Ссылка недействительна или истекла")
     async with tenant_scoped_session(None, bypass_rls=True) as session:
-        row = (
+        # Название материала нужно тут же: у испорченных имён («xlsx») оно
+        # единственный источник осмысленного имени файла.
+        found = (
             await session.execute(
-                select(MaterialVersion).where(
+                select(MaterialVersion, LibraryMaterial.title)
+                .join(LibraryMaterial, LibraryMaterial.id == MaterialVersion.material_id)
+                .where(
                     MaterialVersion.material_id == material_id,
                     MaterialVersion.version_no == v,
                 )
             )
-        ).scalar_one_or_none()
-    if row is None:
+        ).first()
+    if found is None:
         raise HTTPException(status_code=404, detail="Версия не найдена")
+    row, material_title = found
     path = absolute_path(row.storage_key)
     if not path.is_file():
         raise HTTPException(status_code=410, detail="Файл отсутствует в хранилище")
@@ -1162,7 +1181,7 @@ async def serve_material_file(
     return FileResponse(
         path,
         media_type=row.mime,
-        filename=row.file_name,
+        filename=download_filename(row.file_name, mime=row.mime, fallback=material_title),
         content_disposition_type="inline",
     )
 

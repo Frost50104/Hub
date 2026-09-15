@@ -43,6 +43,7 @@ from app.schemas.survey import (
     SurveyUpdate,
 )
 from app.services import audit, lifecycle
+from app.services.attachments import content_disposition
 from app.services.audience_resolver import set_object_audience, visible_filter
 from app.services.content_access import require_content_role, resolve_content_role
 from app.services.learn_notify import _employee_ids
@@ -624,7 +625,14 @@ async def survey_results_csv(
     return StreamingResponse(
         iter([buffer.getvalue()]),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{safe or "survey"}-results.csv"'},
+        # `isalnum()` пропускает кириллицу, а заголовки кодируются latin-1 —
+        # до 14.09 экспорт опроса с русским названием отвечал 500 (все три
+        # опроса на проде такие). Кодирование — в `content_disposition`.
+        headers={
+            "Content-Disposition": content_disposition(
+                f"{safe or 'survey'}-results.csv", disposition_type="attachment"
+            )
+        },
     )
 
 

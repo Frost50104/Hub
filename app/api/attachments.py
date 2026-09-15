@@ -18,7 +18,7 @@ from app.models.shadow import ShadowUser
 from app.models.task import Task
 from app.schemas.attachment import AttachmentResponse
 from app.services.activity_writer import record_activity
-from app.services.attachments import absolute_path, store_upload
+from app.services.attachments import absolute_path, download_filename, store_upload
 from app.services.personal_projects import require_task_access
 from app.services.project_access import is_hub_admin
 
@@ -162,7 +162,11 @@ async def download_attachment(
     return FileResponse(
         path=path,
         media_type=attachment.mime,
-        filename=attachment.filename,
+        # Имена, испорченные прежним ASCII-санитайзером (в БД лежит голое
+        # «docx»), чиним на отдаче: без расширения Windows файл не открывает.
+        filename=download_filename(
+            attachment.filename, mime=attachment.mime, fallback="вложение"
+        ),
     )
 
 

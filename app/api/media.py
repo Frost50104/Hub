@@ -19,6 +19,11 @@ from app.config import get_settings
 from app.db import tenant_scoped_session
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.course import MediaFile
+from app.services.attachments import (
+    content_disposition,
+    display_filename,
+    download_filename,
+)
 from app.services.content_access import require_content_role
 from app.services.learn_media import (
     MEDIA_MIME_KINDS,
@@ -125,7 +130,9 @@ async def upload_media(
         )
 
     media.storage_key = storage_key
-    media.file_name = sanitized
+    # В колонку — ЧИТАЕМОЕ имя: ASCII-санитайзер нужен только пути, а от
+    # кириллического имени он оставлял одно расширение (ОС 14.09).
+    media.file_name = display_filename(file.filename or sanitized)
     media.size_bytes = written
     if kind == "video":
         # Длительность читаем СЕРВЕРОМ (0043): гейт досмотра делит на неё, а
@@ -136,7 +143,7 @@ async def upload_media(
     return {
         "id": str(media.id),
         "kind": kind,
-        "file_name": sanitized,
+        "file_name": media.file_name,
         "mime": mime,
         "size_bytes": written,
         "url": sign_media_path(media.id),
@@ -167,7 +174,7 @@ async def serve_media(
         return FileResponse(
             path,
             media_type=media.mime,
-            filename=media.file_name,
+            filename=download_filename(media.file_name, mime=media.mime, fallback="файл"),
             content_disposition_type="inline",
         )
 
@@ -177,7 +184,11 @@ async def serve_media(
         headers={
             "X-Accel-Redirect": f"/_protected_media/{media.storage_key}",
             "Content-Type": media.mime,
-            "Content-Disposition": f'inline; filename="{media.file_name}"',
+            # Заголовок собираем САМИ, значит и кодируем сами: кириллица,
+            # вписанная в filename="…", роняет ответ в latin-1 (500).
+            "Content-Disposition": content_disposition(
+                download_filename(media.file_name, mime=media.mime, fallback="файл")
+            ),
             "Cache-Control": "private, max-age=3600",
         },
     )
