@@ -11,7 +11,10 @@ import {
 } from '@/hooks/useAttachments'
 import {
   ATTACHMENT_ACCEPT,
+  ATTACHMENT_VIDEO_MAX_BYTES,
+  attachmentIsPlayable,
   attachmentsApi,
+  attachmentSizeError,
   attachmentTypeError,
   formatBytes,
   type Attachment,
@@ -19,7 +22,39 @@ import {
 import { DrawerSection } from '@/components/task/DrawerSection'
 import { cn } from '@/lib/cn'
 
-const MAX_BYTES = 20 * 1024 * 1024
+/**
+ * Плеер видео-вложения.
+ *
+ * `preload="metadata"` — не «auto»: гигабайтный файл начал бы выкачиваться в
+ * момент открытия карточки задачи, ещё до того как его кто-то попросил.
+ * `playsinline` — иначе iOS уводит воспроизведение в системный полноэкранный
+ * плеер, и изнутри карточки это выглядит как «приложение куда-то перебросило».
+ *
+ * `onError` обязателен: браузеры договорились не про все контейнеры (Chrome не
+ * декодирует MOV), и без обработчика человек видит чёрный прямоугольник без
+ * единого слова о том, что случилось и что делать.
+ */
+function AttachmentPlayer({ attachment }: { attachment: Attachment }) {
+  const [failed, setFailed] = useState(false)
+
+  if (failed) {
+    return (
+      <p className="px-2 pb-1.5 text-[12px] text-text2">
+        Этот браузер не проигрывает такое видео — скачайте файл, чтобы посмотреть.
+      </p>
+    )
+  }
+  return (
+    <video
+      src={attachment.preview_url ?? undefined}
+      controls
+      playsInline
+      preload="metadata"
+      onError={() => setFailed(true)}
+      className="max-h-[320px] w-full rounded-md bg-black"
+    />
+  )
+}
 
 function AttachmentRow({
   attachment,
@@ -30,43 +65,47 @@ function AttachmentRow({
   isMine: boolean
   onDelete: () => void
 }) {
+  const playable = attachmentIsPlayable(attachment)
   return (
-    <div className="group flex items-center gap-3 rounded-md border border-glass-border px-2 py-1.5">
-      <Paperclip className="h-3.5 w-3.5 shrink-0 text-text2" />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-text">{attachment.filename}</p>
-        <p className="text-[12px] text-text2">
-          {formatBytes(attachment.size_bytes)} ·{' '}
-          {attachment.uploader_full_name || attachment.uploader_email || '—'}
-        </p>
-      </div>
-      <button
-        type="button"
-        onClick={async () => {
-          try {
-            await attachmentsApi.download(attachment.id, attachment.filename)
-          } catch (err) {
-            toast.error('Не удалось скачать', {
-              description: (err as Error).message,
-            })
-          }
-        }}
-        className="rounded p-1 text-text2 hover:bg-glass hover:text-text"
-        title="Скачать"
-        aria-label="Скачать"
-      >
-        <Download className="h-3.5 w-3.5" />
-      </button>
-      {isMine && (
+    <div className="rounded-md border border-glass-border">
+      <div className="group flex items-center gap-3 px-2 py-1.5">
+        <Paperclip className="h-3.5 w-3.5 shrink-0 text-text2" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm text-text">{attachment.filename}</p>
+          <p className="text-[12px] text-text2">
+            {formatBytes(attachment.size_bytes)} ·{' '}
+            {attachment.uploader_full_name || attachment.uploader_email || '—'}
+          </p>
+        </div>
         <button
-          onClick={onDelete}
-          className="rounded p-1 text-text2 opacity-0 transition-opacity hover:text-red group-hover:opacity-100"
-          aria-label="Удалить"
-          title="Удалить"
+          type="button"
+          onClick={async () => {
+            try {
+              await attachmentsApi.download(attachment)
+            } catch (err) {
+              toast.error('Не удалось скачать', {
+                description: (err as Error).message,
+              })
+            }
+          }}
+          className="rounded p-1 text-text2 hover:bg-glass hover:text-text"
+          title="Скачать"
+          aria-label="Скачать"
         >
-          <Trash2 className="h-3.5 w-3.5" />
+          <Download className="h-3.5 w-3.5" />
         </button>
-      )}
+        {isMine && (
+          <button
+            onClick={onDelete}
+            className="rounded p-1 text-text2 opacity-0 transition-opacity hover:text-red group-hover:opacity-100"
+            aria-label="Удалить"
+            title="Удалить"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+      {playable && <AttachmentPlayer attachment={attachment} />}
     </div>
   )
 }
@@ -84,24 +123,26 @@ export function TaskAttachments({ taskId, canEdit = true }: TaskAttachmentsProps
   const del = useDeleteAttachment(taskId)
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
+  // Доля загруженного текущего файла. Гигабайт по мобильному каналу идёт
+  // десятки минут — без индикатора это неотличимо от зависшего приложения.
+  const [progress, setProgress] = useState<number | null>(null)
 
   const submitFile = async (file: File) => {
-    // Тип проверяем до запроса (accept обходится выбором «все файлы») —
-    // иначе сервер ответит голым 415 без списка допустимого.
-    const typeError = attachmentTypeError(file)
-    if (typeError) {
-      toast.error(typeError)
-      return
-    }
-    if (file.size > MAX_BYTES) {
-      toast.error(`«${file.name}» больше 20 МБ — не загрузится`)
+    // Тип и размер проверяем до запроса (accept обходится выбором «все
+    // файлы») — иначе сервер ответит голым 415, а nginx на слишком большом
+    // теле оборвёт загрузку 413-м вообще без текста, уже после ожидания.
+    const problem = attachmentTypeError(file) ?? attachmentSizeError(file)
+    if (problem) {
+      toast.error(problem)
       return
     }
     try {
-      await upload.mutateAsync(file)
+      await upload.mutateAsync({ file, onProgress: setProgress })
       toast.success(`«${file.name}» загружен`)
     } catch {
       // тост показывает глобальный onError мутаций
+    } finally {
+      setProgress(null)
     }
   }
 
@@ -115,6 +156,7 @@ export function TaskAttachments({ taskId, canEdit = true }: TaskAttachmentsProps
   }
 
   const meId = me.data?.employee_id
+  const percent = progress === null ? null : Math.round(progress * 100)
 
   return (
     <DrawerSection title="Вложения" count={list.data?.length ?? null}>
@@ -152,8 +194,16 @@ export function TaskAttachments({ taskId, canEdit = true }: TaskAttachmentsProps
             )}
           >
             <Upload className="h-3.5 w-3.5" />
-            {upload.isPending ? 'Загружаем…' : 'Перетащите файл или нажмите'}
-            <span className="text-[12px] opacity-60">до 20 МБ</span>
+            {upload.isPending
+              ? percent === null
+                ? 'Загружаем…'
+                : `Загружаем… ${percent}%`
+              : 'Перетащите файл или нажмите'}
+            {!upload.isPending && (
+              <span className="text-[12px] opacity-60">
+                до 20 МБ, видео до {formatBytes(ATTACHMENT_VIDEO_MAX_BYTES)}
+              </span>
+            )}
           </div>
           <input
             ref={inputRef}

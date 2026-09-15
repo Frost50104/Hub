@@ -12,6 +12,8 @@
 #   TELEGRAM_BOT_TOKEN=123456:ABC-...   (from @BotFather; empty = Telegram off)
 #   TELEGRAM_CHAT_ID=-100123456789
 #   HEALTHCHECK_PUSH_URLS="https://hub.signaris.ru/api/health/push ..."
+#   HEALTHCHECK_DISK_PATH=/
+#   HEALTHCHECK_DISK_MIN_GB=8
 set -euo pipefail
 
 URLS=${HEALTHCHECK_URLS:-"https://hub.signaris.ru/api/env https://hub-staging.signaris.ru/api/env"}
@@ -20,6 +22,15 @@ URLS=${HEALTHCHECK_URLS:-"https://hub.signaris.ru/api/env https://hub-staging.si
 # только транспорт, и снаружи это было неотличимо от «никому не писали»
 # (инцидент 26.08).
 PUSH_URLS=${HEALTHCHECK_PUSH_URLS:-"https://hub.signaris.ru/api/health/push https://hub-staging.signaris.ru/api/health/push"}
+# Свободное место. До 15.09 проверки диска здесь не было вообще, а
+# единственной защитой оставался statvfs-порог на загрузке медиа — то есть о
+# заканчивающемся диске узнавали бы в момент, когда сотрудник уже получил отказ.
+# С видео во вложениях (до 1 ГБ на файл) это перестало быть приемлемым.
+#
+# 8 ГБ — выше порога отказа загрузки (5 ГБ + размер файла), чтобы алерт пришёл
+# ДО того, как загрузки начнут отбиваться, а не вместе с ними.
+DISK_PATH=${HEALTHCHECK_DISK_PATH:-/}
+DISK_MIN_GB=${HEALTHCHECK_DISK_MIN_GB:-8}
 EMAIL=${HEALTHCHECK_ALERT_EMAIL:-ops@signaris.ru}
 THRESHOLD=${HEALTHCHECK_FAILURES_BEFORE_ALERT:-2}
 TG_TOKEN=${TELEGRAM_BOT_TOKEN:-}
@@ -93,3 +104,29 @@ for url in $PUSH_URLS; do
     fi
   fi
 done
+
+# --- Свободное место на диске ----------------------------------------------
+# Диск общий с Postgres/WAL: переполнение это не «не загрузился файл», а
+# остановка базы. Триггер краевой (состояние в файле) — иначе при нехватке
+# места алерт уходил бы каждые 5 минут, и его перестали бы читать.
+disk_state="$STATE_DIR/disk.$(slug "$DISK_PATH").state"
+disk_prev=$(cat "$disk_state" 2>/dev/null || echo 0)
+# `df -Pk` — POSIX-формат: одна строка на точку монтирования даже при длинном
+# имени устройства, значение в килобайтах.
+free_kb=$(df -Pk "$DISK_PATH" 2>/dev/null | awk 'NR==2 {print $4}')
+if [[ -n "${free_kb:-}" ]]; then
+  free_gb=$((free_kb / 1024 / 1024))
+  if [[ "$free_gb" -lt "$DISK_MIN_GB" ]]; then
+    echo 1 > "$disk_state"
+    logger -t signaris-hub-health "DISK LOW $DISK_PATH (${free_gb}G free, min ${DISK_MIN_GB}G)"
+    if [[ "$disk_prev" == "0" ]]; then
+      send_telegram "🔴 [Hub] мало места на диске: $DISK_PATH — свободно ${free_gb} ГБ (порог ${DISK_MIN_GB} ГБ). Загрузка вложений скоро начнёт отбиваться."
+    fi
+  else
+    if [[ "$disk_prev" != "0" ]]; then
+      logger -t signaris-hub-health "DISK RECOVERED $DISK_PATH (${free_gb}G free)"
+      send_telegram "✅ [Hub] с местом на диске снова порядок: $DISK_PATH — свободно ${free_gb} ГБ"
+    fi
+    echo 0 > "$disk_state"
+  fi
+fi

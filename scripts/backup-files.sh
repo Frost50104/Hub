@@ -17,9 +17,18 @@ set -euo pipefail
 BACKUP_ROOT="/opt/signaris-hub/backups/files"
 STAMP="$(date +%F)"
 
-for SRC in /opt/signaris-hub/attachments /opt/signaris-hub-staging/attachments; do
+# ТОЛЬКО прод (15.09). Staging бэкапился здесь же с самого начала, и это стоило
+# 3,8 ГБ из 5,3 ГБ всего дерева снапшотов — при том что offsite его никогда не
+# возил и восстанавливать тестовый стенд из бэкапа никто не собирался. Замер
+# 15.09: вложения прода 1,5 ГБ, вложения staging 3,7 ГБ, их снапшоты 3,8 ГБ.
+# Место понадобилось под видео во вложениях (до 1 ГБ на файл), и первым делом
+# освобождается то, что и так не нужно.
+#
+# Уже накопленные снапшоты staging эта правка НЕ удаляет — они снимаются
+# разово, руками, при выкате (см. docs/DEPLOY.md).
+for SRC in /opt/signaris-hub/attachments; do
   [[ -d "$SRC" ]] || continue
-  ENV_NAME="$(basename "$(dirname "$SRC")")"   # signaris-hub | signaris-hub-staging
+  ENV_NAME="$(basename "$(dirname "$SRC")")"   # signaris-hub
   DEST="$BACKUP_ROOT/$ENV_NAME/$STAMP"
   LATEST="$BACKUP_ROOT/$ENV_NAME/latest"
   mkdir -p "$DEST"

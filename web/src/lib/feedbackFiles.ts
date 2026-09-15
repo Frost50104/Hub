@@ -14,12 +14,25 @@ import {
 
 /** Столько же, сколько принимает сервер (`app/api/feedback.py::TEXT_MAX`). */
 export const FEEDBACK_TEXT_MAX = 5000
-/** Зеркало `attachment_max_bytes`: 20 МБ. */
+/**
+ * Зеркало `feedback.py::FILE_BYTES_MAX`: 20 МБ.
+ *
+ * СВОЁ число, а не `attachmentSizeLimit`. Вложение задачи с 15.09 принимает
+ * видео до гигабайта, но у формы обратной связи свой адрес под общей локацией
+ * nginx (`client_max_body_size 25M`) — сюда столько физически не проходит.
+ * Короткая запись экрана в баг-репорте при этом остаётся законной.
+ */
 const FEEDBACK_FILE_MAX = 20 * 1024 * 1024
 /** Зеркало `MAX_FILES` ручки — менять ПАРОЙ, иначе форма пустит в 422. */
 export const FEEDBACK_FILES_MAX = 10
-/** Зеркало `TOTAL_BYTES_MAX`: 50 МБ на всю отправку. */
-export const FEEDBACK_TOTAL_MAX = 50 * 1024 * 1024
+/**
+ * Зеркало `TOTAL_BYTES_MAX`: 24 МБ на всю отправку.
+ *
+ * Раньше здесь стояло 50 МБ — БОЛЬШЕ, чем принимает nginx: набор на 30 МБ
+ * проходил все четыре проверки формы и получал голый 413 (замер 15.09 на
+ * проде). Число обязано оставаться НИЖЕ `client_max_body_size 25M`.
+ */
+export const FEEDBACK_TOTAL_MAX = 24 * 1024 * 1024
 
 export { ATTACHMENT_ACCEPT as FEEDBACK_ACCEPT }
 
@@ -33,7 +46,7 @@ export function feedbackFileError(file: File): string | null {
   }
   const ext = fileExtension(file.name)
   if (!ext || !ATTACHMENT_ACCEPT.split(',').includes(ext)) {
-    return 'Такой тип файла приложить нельзя — подойдут картинка, PDF или документ'
+    return 'Такой тип файла приложить нельзя — подойдут картинка, видео, PDF или документ'
   }
   return null
 }

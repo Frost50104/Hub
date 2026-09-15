@@ -8,6 +8,7 @@ Storage layout (relative to `settings.attachments_root`):
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import re
 import unicodedata
@@ -57,8 +58,28 @@ ALLOWED_MIME: frozenset[str] = frozenset(
         "text/csv",
         # JSON
         "application/json",
+        # Видео (ОС 15.09: сотрудник не смог приложить запись к задаче).
+        # Три контейнера покрывают то, чем снимают на деле: Android и запись
+        # экрана дают mp4, iPhone — mov, браузерная запись — webm. Формат
+        # проигрывается не везде (mov не понимает Chrome), но вложение — это
+        # прежде всего файл: что не заиграло, то скачивается.
+        # Faststart, в отличие от медиа уроков, НЕ требуем: камера Android
+        # пишет moov в конец, и требование воспроизвело бы ту же жалобу.
+        "video/mp4",
+        "video/quicktime",
+        "video/webm",
     }
 )
+
+
+# Потолок размера зависит от вида файла: документам хватает 20 МБ, видео —
+# нет (минута 1080p с телефона ≈ 100 МБ). Зеркало клиента —
+# `web/src/lib/attachmentTypes.ts::attachmentSizeError`, менять ПАРОЙ.
+def attachment_size_limit(mime: str) -> int:
+    settings = get_settings()
+    if mime.startswith("video/"):
+        return settings.attachment_video_max_bytes
+    return settings.attachment_max_bytes
 
 
 # Восстановление MIME из расширения — ТОЛЬКО для явно перечисленных типов.
@@ -67,6 +88,15 @@ ALLOWED_MIME: frozenset[str] = frozenset(
 _EXT_FALLBACK_MIME: dict[str, str] = {
     ".heic": "image/heic",
     ".heif": "image/heif",
+    # Видео попадает сюда по той же причине, что и HEIC: файловые менеджеры
+    # Android и часть десктопных браузеров отдают его как octet-stream, и без
+    # восстановления человек получил бы 415 на обычной записи с телефона.
+    # Восстанавливать эти три можно ровно потому, что у них есть однозначная
+    # сигнатура и сразу за `resolve_mime` идёт `sniff_mismatch`; у `.svg`
+    # сигнатуры нет — поэтому его в карте нет и быть не должно.
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
 }
 
 
@@ -109,6 +139,8 @@ _MAGIC: dict[str, tuple[bytes, ...]] = {
 _HEIC_MIMES = frozenset(
     {"image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"}
 )
+# mp4 и mov — тот же контейнер ISO-BMFF, что и HEIC: бокс `ftyp` с 4-го байта.
+_ISOBMFF_MIMES = frozenset({"video/mp4", "video/quicktime"})
 # Сколько байт нужно читать для sniff_mismatch: PDF ищем в первом килобайте
 # (допустим BOM/мусор до `%PDF`), остальным хватает 12.
 SNIFF_HEAD_BYTES = 1024
@@ -128,9 +160,12 @@ def sniff_mismatch(mime: str, head: bytes) -> bool:
         return b"%PDF" not in head[:SNIFF_HEAD_BYTES]
     if mime == "image/webp":
         return not (head.startswith(b"RIFF") and head[8:12] == b"WEBP")
-    if mime in _HEIC_MIMES:
+    if mime in _HEIC_MIMES or mime in _ISOBMFF_MIMES:
         # ISO BMFF: размер бокса (4 байта) + 'ftyp' с 4-го байта.
         return head[4:8] != b"ftyp"
+    if mime == "video/webm":
+        # EBML-заголовок Matroska/WebM.
+        return not head.startswith(b"\x1a\x45\xdf\xa3")
     magics = _MAGIC.get(mime)
     if magics is None:
         return False
@@ -160,6 +195,9 @@ EXT_BY_MIME: dict[str, str] = {
     "text/markdown": "md",
     "text/csv": "csv",
     "application/zip": "zip",
+    "video/mp4": "mp4",
+    "video/quicktime": "mov",
+    "video/webm": "webm",
 }
 _BARE_EXT = re.compile(r"^[A-Za-z0-9]{1,5}$")
 
@@ -314,6 +352,7 @@ async def store_upload(
     tenant_id: UUID,
     task_id: UUID,
     uploaded_by: UUID,
+    max_bytes: int | None = None,
 ) -> TaskAttachment:
     """Проверить файл и записать его на диск; вернуть НЕсохранённую строку.
 
@@ -322,11 +361,16 @@ async def store_upload(
     магических байт пропускает html под видом png, а лимит без потоковой
     записи заполняет диск до отказа.
 
+    `max_bytes` — ПОТОЛОК ВЫЗЫВАЮЩЕГО, а не общая настройка. Гигабайтное видео
+    легально во вложении задачи и нелегально в форме обратной связи: у той своя
+    арифметика набора (10 файлов, суммарный вес) и свой потолок тела в nginx.
+    Пока лимит читался внутри, расширение его для видео молча подняло бы и
+    форму. `None` — «по виду файла», `attachment_size_limit(mime)`.
+
     Строку в сессию не добавляем — это дело вызывающего: он решает, в какой
     транзакции и с какой лентой она поедет. Частичный файл при ошибке
     удаляется здесь же: осиротевший блоб убирать в Hub некому.
     """
-    settings = get_settings()
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Имя файла обязательно"
@@ -351,7 +395,7 @@ async def store_upload(
     dest = absolute_path(storage_key)
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    max_bytes = settings.attachment_max_bytes
+    limit = attachment_size_limit(mime) if max_bytes is None else max_bytes
     written = 0
     try:
         with dest.open("wb") as fh:
@@ -360,14 +404,19 @@ async def store_upload(
                 if not chunk:
                     break
                 written += len(chunk)
-                if written > max_bytes:
+                if written > limit:
                     fh.close()
                     dest.unlink(missing_ok=True)
                     raise HTTPException(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail=f"Файл больше лимита {max_bytes // (1024 * 1024)} МБ",
+                        detail=f"Файл больше лимита {limit // (1024 * 1024)} МБ",
                     )
-                fh.write(chunk)
+                # Запись — В ПОТОК, а не в event loop: гигабайтное видео это
+                # 16 тысяч синхронных write(), и когда page cache упрётся в
+                # writeback, каждый встанет на десятки миллисекунд. Прод
+                # крутится на ОДНОМ uvicorn-воркере; Starlette по той же
+                # причине пишет свой спул через threadpool.
+                await asyncio.to_thread(fh.write, chunk)
     except HTTPException:
         raise
     except Exception as exc:

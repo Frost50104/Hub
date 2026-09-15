@@ -133,6 +133,8 @@ Staging-копии юнитов генерируются `ops/systemd/make-stagi
 
 локации `/api/*` и `/_protected_media/` ОБЯЗАНЫ иметь `^~` (иначе статик-regex перехватывает media → 404); media-локации (`/api/media/`, `/_protected_media/`) переиздают ПОЛНЫЙ набор security-заголовков с `X-Frame-Options SAMEORIGIN` + CSP `frame-ancestors 'self'` и БЕЗ `sandbox` (первый `add_header` в локации сбрасывает server-level набор; server-DENY убьёт PDF-iframe уроков); `location ^~ /api/ai/` — `proxy_read_timeout 120s` и без `add_header`; локация, которая переиздаёт заголовки И отдаёт SPA (`/p/`), обязана заканчивать `try_files $uri /index.html =404;` кодом, а не URI (иначе внутренний редирект теряет `Referrer-Policy: no-referrer`); `Permissions-Policy: microphone=(self)` во ВСЕХ дублях строки, кроме `/p/`; правка анти-FOUC скрипта темы в `index.html` требует пересчёта sha256 в CSP (`ops/nginx/hub-security-headers.conf`); шрифты self-hosted (`web/src/assets/fonts/`); staging обязан иметь `SIGNARIS_HUB_PUBLIC_BASE_URL`.
 
+**Потолок тела задаёт ЛОКАЦИЯ, а локацию нельзя навесить на путь с UUID (15.09).** Server-level `client_max_body_size` — 25 МБ; всё, что грузится крупнее, обязано иметь свой адрес БЕЗ переменных: `location = /api/learn/media` (350m) и `location = /api/attachments` (1100m, видео во вложениях). Regex-локация под `/api/tasks/{uuid}/attachments` не помогла бы — модификатор `^~` у `location ^~ /api/` **отменяет проверку regex-локаций**, блок прошёл бы `nginx -t` и не сработал никогда; поэтому ручка загрузки вложений и переехала на фиксированный `POST /api/attachments` с `task_id` в теле формы. Поднимать потолок всему `^~ /api/tasks/` нельзя — это разрешило бы гигабайтное тело в `PATCH /tasks/{id}`. У обеих upload-локаций `proxy_request_buffering off` (иначе nginx пишет тело на диск сам — лишняя копия) и увеличенный `proxy_read_timeout`. Отдача вложений — `location ^~ /api/attachments/` с зоной `hub_media` (перемотка видео это серия Range-запросов; в общей `hub_api` они ловят 429); локация накрывает ТРИ ручки (отдача, `/download`, `DELETE`), поэтому набор `proxy_set_header` в ней обязан быть полным. Под саму отдачу файла менять ничего не нужно: `^~ /_protected_media/` уже алиасит весь `attachments_root`.
+
 **Инструкции по Hub (`/guides/`, 25.08).** Две автономные HTML-страницы лежат в `guides/` в корне репо и приезжают обычным backend-rsync'ом в `/opt/signaris-hub[-staging]/guides/`. Отдаёт их `GET /api/guides/{kind}?e&s` (подпись как у медиа) через internal-локацию `^~ /_guides/` — публичной статикой класть нельзя: внутри реальные экраны с ФИО сотрудников и адресами точек. У локации СВОЙ набор заголовков с ослабленным `script-src 'self' 'unsafe-inline'` (у инструкции свой inline-скрипт: поиск по документу и отметки о прочтении) и `connect-src 'none'`; `~^/api/guides/` исключён из access_log — подписанная ссылка это capability. На staging обязателен `SIGNARIS_HUB_GUIDES_ROOT` в `.env` (как `ATTACHMENTS_ROOT`). Правка конфигов деплоем НЕ применяется: `scp` в `/etc/nginx/sites-available/`, `nginx -t`, `systemctl reload nginx`. Обновление самих инструкций — `scripts/sync_guides.py --apply`: копирует под фиксированными именами, проверяет совместимость с этой CSP (никакого `eval`/`new Function`, `blob:`, сети и соседних файлов — присланная 25.08 bundler-сборка нарушала всё сразу и молча теряла поиск с лайтбоксом) дописывает неприметный скроллбар как в сайдбаре Hub и плавающую ссылку «Вернуться в Hub» (в PWA на домашнем экране инструкция открывается ТЕМ ЖЕ окном — браузерной обвязки нет, выйти нечем; в обычной вкладке она новая, и её «Назад» тоже пуста).
 
 ## Память VPS: STT и сборка фронта
@@ -157,6 +159,14 @@ apt: `awscli` в Ubuntu 24.04 отсутствует как пакет, а ве�
 |---|---|---|
 | `db/` | дампы **прода** | staging воспроизводим, и это вторая копия тех же ПДн |
 | `attachments/` | ТОЛЬКО последний снапшот прода | hardlink'и в S3 не переживают: все 14 копий уехали бы как ~21 ГБ вместо 1,5 |
+
+**Локальные снапшоты — тоже только прод (15.09).** `backup-files.sh` снимал ещё и вложения staging, и это стоило 3,8 ГБ из 5,3 ГБ всего дерева снапшотов — при том что offsite их никогда не возил, а восстанавливать тестовый стенд из бэкапа никто не собирался. Место понадобилось под видео во вложениях. Уже накопленные снапшоты staging скрипт НЕ удаляет: снять их разово, убедившись, что прод на месте —
+
+```bash
+du -sh /opt/signaris-hub/backups/files/*          # что есть сейчас
+ls /opt/signaris-hub/backups/files/signaris-hub   # прод обязан быть непустым
+rm -rf /opt/signaris-hub/backups/files/signaris-hub-staging
+```
 | `secrets/` | зашифрованные архивы ключей | единицы килобайт |
 
 **Везде `rclone copy`, а не `sync`.** Синхронизация отражала бы локальную
@@ -212,6 +222,8 @@ TELEGRAM_BOT_TOKEN=123456:ABC-...
 TELEGRAM_CHAT_ID=-100123456789
 ```
 
+**Свободное место (15.09).** Тот же скрипт проверяет диск: `HEALTHCHECK_DISK_PATH` (default `/`) и `HEALTHCHECK_DISK_MIN_GB` (default 8). До этой правки проверки диска не было вовсе, и единственной защитой оставался statvfs-порог на загрузке медиа — то есть о заканчивающемся месте узнавали бы в момент, когда сотрудник уже получил отказ. Порог 8 ГБ выше порога отказа загрузки (`media_min_free_bytes` 5 ГБ + размер файла), чтобы алерт пришёл ДО того, как загрузки начнут отбиваться. Триггер краевой (состояние в `/var/lib/signaris-hub/disk.*.state`) — иначе сообщение уходило бы каждые 5 минут и его перестали бы читать. Проверка без ожидания реального заполнения: `HEALTHCHECK_DISK_MIN_GB=999 /opt/signaris-hub/scripts/healthcheck.sh` → алерт, затем обычный запуск → recovery.
+
 После правки env-файла ничего перезапускать не нужно (oneshot-сервис читает его при каждом запуске). Проверка: временно вписать несуществующий URL в `HEALTHCHECK_URLS` → через ~10 минут придёт DOWN-сообщение, после удаления — OK-сообщение.
 
 ## DNS
@@ -264,6 +276,7 @@ INTEGRATED_PRODUCTS: frozenset[str] = frozenset({"net", "sonar", "hub"})
 | `SITES_SYNC_ENABLED` | зеркало реестра объектов (0053): планировщика НЕТ, флаг гейтит живой прогон ручного `POST /api/learn/sites/sync` (false = форс dry-run) |
 | `SITES_SNAPSHOT_FRESH_DAYS` | свежесть снимка зеркала, фиксированные сутки (14): протухло → карточки магазинов показывают локальные поля с меткой |
 | `ATTACHMENTS_ROOT` / `ATTACHMENT_MAX_BYTES` | корень файлов (вложения задач + learn-медиа), лимит вложений задач |
+| `ATTACHMENT_VIDEO_MAX_BYTES` | отдельный потолок видео во вложениях (default 1 ГБ). Меняется ВМЕСТЕ с `client_max_body_size` у `location = /api/attachments` и с зеркалом `web/src/lib/attachmentTypes.ts` |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY_PATH` / `VAPID_SUBJECT` | Web Push |
 | `SENTRY_DSN` | включает Sentry backend (+frontend через /api/env); пока не задан |
 | `PUBLIC_LINKS_ENABLED` | feature-flag публичных ссылок (default true) |

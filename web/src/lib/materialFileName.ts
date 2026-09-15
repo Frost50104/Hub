@@ -36,6 +36,9 @@ const MIME_EXT: Record<string, string> = {
   'image/gif': 'gif',
   'image/heic': 'heic',
   'image/heif': 'heif',
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+  'video/webm': 'webm',
 }
 
 const BARE_EXT = /^[A-Za-z0-9]{1,5}$/
