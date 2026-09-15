@@ -547,13 +547,16 @@ export function TaskDetailDrawer({
                 </PropertyRow>
                 <PropertyRow label="Колонка">
                   {stages.data && stages.data.length > 0 ? (
+                    // `bare`: в силуэте поля триггер стоял рамкой посреди
+                    // прозрачных строк свойств (ОС владельца 16.09).
                     <SearchableSelect
                       sheetTitle="Колонка"
                       aria-label="Колонка"
+                      variant="bare"
                       value={task.stage_id ?? null}
                       disabled={!canStatus}
                       onChange={(v) => update.mutate({ id: task.id, stage_id: v })}
-                      className={MOBILE_CONTROL}
+                      className={cn(MOBILE_CONTROL, 'justify-end')}
                       options={stages.data.map((s) => ({ value: s.id, label: s.name }))}
                     />
                   ) : (

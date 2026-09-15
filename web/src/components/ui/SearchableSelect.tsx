@@ -1,3 +1,4 @@
+import { ChevronDown } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import {
@@ -56,6 +57,17 @@ export interface SearchableSelectProps {
    * атрибуте — то есть «как повезёт».
    */
   className?: string
+  /**
+   * `field` — поле формы в силуэте `SELECT_FIELD_CLASS` (по умолчанию).
+   * `bare` — без рамки, заливки и ширины: значение в строке свойств мобильной
+   * карточки (`PropertyRow`), где остальные контролы прозрачны и стоят по
+   * правому краю. Через `className` силуэт поля не снять: `cn` не убирает
+   * `border`/`rounded`/`w-full` без явных антонимов, и на телефоне «Колонка»
+   * выглядела рамкой-прямоугольником посреди прозрачных строк (ОС владельца).
+   * Шеврон — только у активного: у заблокированного значение читается как
+   * текст, а не как список.
+   */
+  variant?: 'field' | 'bare'
   /** Управляемый (обычно серверный) поиск: фильтрацию на себя берёт вызывающий. */
   searchValue?: string
   onSearchChange?: (query: string) => void
@@ -94,6 +106,7 @@ export function SearchableSelect({
   pinnedTop,
   pinnedBottom,
   className,
+  variant = 'field',
   searchValue,
   onSearchChange,
   loading,
@@ -141,13 +154,17 @@ export function SearchableSelect({
       disabled={disabled}
       aria-label={ariaLabel}
       className={cn(
-        'flex items-center text-left',
-        SELECT_FIELD_CLASS,
+        variant === 'bare'
+          ? 'inline-flex items-center gap-1.5 focus-visible:outline-none disabled:cursor-default'
+          : cn('flex items-center text-left', SELECT_FIELD_CLASS),
         !label && 'text-text3',
         className,
       )}
     >
       <span className="min-w-0 flex-1 truncate">{label ?? placeholder}</span>
+      {variant === 'bare' && !disabled && (
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" strokeWidth={2} />
+      )}
     </button>
   )
 
