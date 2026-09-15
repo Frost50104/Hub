@@ -1,30 +1,21 @@
 /**
- * Секция «ЛИЧНОЕ» на «Моих задачах»: вся условная логика без React.
+ * Вкладка «Личные» на «Моих задачах»: разбор списка без React.
  *
  * Компонент остаётся раскладкой — соглашение проекта (эталон пары
  * `inlineDraft.ts` ↔ `TaskInlineCreate.tsx`): jsdom в проекте нет, тестируются
  * только чистые функции.
+ *
+ * Здесь осталась одна функция. `excludeProject` (страховка «личные не
+ * дублируются в окнах»), `resolvePersonalTaskParam` (гвард `?task=`) и
+ * `personalSectionState` ушли вместе с секцией «ЛИЧНОЕ» 16.09: личные задачи
+ * теперь часть общего списка, а карточка открывается по id отдельным запросом
+ * и списка не ждёт.
  */
 
 import { type SubtaskStats, type Task } from './tasks'
 
 /** Сколько выполненных личных задач показываем без «показать все». */
 export const DONE_PREVIEW_LIMIT = 3
-
-/**
- * Выкинуть задачи личного проекта из кросс-проектного списка.
- *
- * Личная задача не должна стоять на экране дважды — в секции «ЛИЧНОЕ» и в окне
- * дедлайнов. Основной фильтр серверный (`/me/tasks?include_personal=false`);
- * это страховка на окно деплоя, когда новый бандл живёт со старым бэкендом.
- */
-export function excludeProject<T extends Pick<Task, 'project_id'>>(
-  tasks: readonly T[],
-  projectId: string | null | undefined,
-): T[] {
-  if (!projectId) return [...tasks]
-  return tasks.filter((t) => t.project_id !== projectId)
-}
 
 export interface PersonalListView<T> {
   /** Верхнеуровневые незавершённые, в порядке ответа сервера. */
@@ -40,12 +31,12 @@ export interface PersonalListView<T> {
 }
 
 /**
- * Разложить ответ `GET /projects/{personal}/tasks` в то, что рисует секция.
+ * Разложить ответ `GET /projects/{personal}/tasks` в то, что рисует вкладка.
  *
  * Подзадачи в строки не попадают (как на странице проекта), но считаются в чип
  * родителя. Выполненные тонут вниз и по умолчанию урезаются: личный список —
  * это inbox, за полгода под инпутом накопилась бы стена «Готово». Сколько
- * именно показывать, решает вызывающий: секция «ЛИЧНОЕ» передаёт `doneLimit: 0`
+ * именно показывать, решает вызывающий: вкладка «Личные» передаёт `doneLimit: 0`
  * и раскрывает их чипом.
  */
 export function personalListView<
@@ -78,97 +69,4 @@ export function personalListView<
     counts: { open: open.length, done: done.length },
     subtasksByParent,
   }
-}
-
-/** Что делать с `?task=` на `/my`. */
-export type PersonalTaskParam =
-  | { kind: 'none' }
-  /** Список ещё грузится — URL не трогаем, иначе потеряем ссылку. */
-  | { kind: 'wait' }
-  | { kind: 'open'; taskId: string }
-  /** Чужая или несуществующая задача — параметр вычистить. */
-  | { kind: 'drop' }
-
-/**
- * «Эту задачу мы только что создали»: списка с ней ещё нет, но id заведомо наш
- * и заведомо личный — его вернул POST в этой же вкладке.
- */
-export interface JustCreatedHint {
-  taskId: string
-  /** `Date.now()` в момент создания. */
-  at: number
-}
-
-/** Хинт живёт минуту: он едет в `history.state` и переживает перезагрузку. */
-export const JUST_CREATED_TTL_MS = 60_000
-
-/**
- * Карточку на `/my` открываем ТОЛЬКО для задач личного проекта: у drawer'а
- * `projectId` фиксирован, и для чужой задачи он показал бы чужие этапы,
- * чужую секцию и чужой `can_edit`.
- *
- * `hint` — единственное послабление, и оно НЕ белый список: id обязан совпасть.
- * Без него создание личной задачи молча закрывало бы карточку: `useCreateTask`
- * инвалидирует список с `refetchType: 'active'`, а неактивный кэш только
- * помечается протухшим и на маунте отдаётся синхронно — то есть без новой
- * задачи. Мы попадали в `drop`, и эффект страницы стирал `?task=`. Ждать
- * рефетча негде: тот же промах случается, когда человек УЖЕ на `/my`.
- *
- * `now` параметром — чтобы срок годности проверялся тестом (приём
- * `dates.ts::dataAgeLabel`, `taskDates.ts::todayKey`).
- */
-export function resolvePersonalTaskParam(
-  taskId: string | null,
-  personal: { tasks: readonly Pick<Task, 'id'>[] | undefined; isPending: boolean },
-  hint?: JustCreatedHint | null,
-  now: number = Date.now(),
-): PersonalTaskParam {
-  if (!taskId) return { kind: 'none' }
-  if (hint && hint.taskId === taskId && now - hint.at < JUST_CREATED_TTL_MS) {
-    return { kind: 'open', taskId }
-  }
-  if (personal.isPending || personal.tasks === undefined) return { kind: 'wait' }
-  return personal.tasks.some((t) => t.id === taskId)
-    ? { kind: 'open', taskId }
-    : { kind: 'drop' }
-}
-
-export type PersonalSectionState =
-  /** `/me` ещё грузится ИЛИ бэкенд поля не отдал — секции нет вовсе. */
-  | { kind: 'hidden' }
-  | { kind: 'loading'; projectId: string }
-  | { kind: 'error'; projectId: string }
-  | { kind: 'ready'; projectId: string; view: PersonalListView<Task> }
-
-export function personalSectionState(input: {
-  meIsPending: boolean
-  personalProjectId: string | undefined
-  isPending: boolean
-  isError: boolean
-  tasks: Task[] | undefined
-  showAllDone: boolean
-}): PersonalSectionState {
-  const { personalProjectId: projectId } = input
-  if (input.meIsPending || !projectId) return { kind: 'hidden' }
-  if (input.isError) return { kind: 'error', projectId }
-  if (input.isPending || input.tasks === undefined) {
-    return { kind: 'loading', projectId }
-  }
-  return {
-    kind: 'ready',
-    projectId,
-    // `doneLimit: 0` — выполненных в списке по умолчанию НЕТ (ОС 15.09:
-    // «в личных показывать по умолчанию не выполненные, а выполненные скрыть
-    // за фильтром или чипом»). Дефолт самой `personalListView` (3) не трогаем:
-    // на нём стоят её тесты, а решение «сколько показывать» принимает экран.
-    view: personalListView(input.tasks, {
-      doneLimit: 0,
-      showAllDone: input.showAllDone,
-    }),
-  }
-}
-
-/** FAB привёл на `/my` с просьбой поставить курсор в поле создания. */
-export function shouldFocusPersonalCreate(params: URLSearchParams): boolean {
-  return params.get('new') === 'personal'
 }

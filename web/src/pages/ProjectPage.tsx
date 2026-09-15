@@ -8,7 +8,7 @@ import {
   Tags,
 } from 'lucide-react'
 import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
 
 // `recharts` is ~370KB minified. Lazy-load the entire dashboard chunk so
 // the main bundle stays light for users who never open this tab.
@@ -51,6 +51,7 @@ import {
   useProjectCustomValues,
 } from '@/hooks/useCustomFields'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
+import { useMe } from '@/hooks/useMe'
 import {
   useProject,
   useSetFavorite,
@@ -75,6 +76,7 @@ import {
   sinkDone,
   toListFilters,
 } from '@/lib/taskFilters'
+import { personalProjectRedirect } from '@/lib/myTasksTabs'
 import { projectTaskGrid } from '@/lib/taskGrid'
 import { dataAgeLabel } from '@/lib/dates'
 import { requestInlineCreate } from '@/lib/quickCreate'
@@ -655,6 +657,7 @@ export function ProjectPage() {
   const { id } = useParams<{ id: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
   const project = useProject(id)
+  const myPersonalId = useMe().data?.personal_project_id
   // Вид живёт в URL рядом с фильтрами: ссылка на доску проекта должна
   // открывать доску, а не список.
   const tabParam = searchParams.get('view')
@@ -694,6 +697,18 @@ export function ProjectPage() {
   }
 
   if (!id) return null
+  // СВОЙ личный проект открывается не здесь, а на «Моих задачах» (16.09):
+  // экран поглотил его, и доски, участников, «Поделиться» и импорта CSV у
+  // личного пространства больше нет — по прямой ссылке они были доступны, хотя
+  // гейтились только архивация и удаление.
+  //
+  // Сравниваем именно с `me.personal_project_id`, а НЕ с `project.is_personal`:
+  // флаг истинен и для ЧУЖОГО личного, а туда ходит автор поручения — редирект
+  // по флагу выбрасывал бы его на собственные задачи, и поручённая становилась
+  // бы недостижимой.
+  if (myPersonalId && id === myPersonalId) {
+    return <Navigate to={personalProjectRedirect(searchParams)} replace />
+  }
   if (project.isLoading) {
     return (
       <div className="space-y-4 p-6">

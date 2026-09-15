@@ -192,7 +192,8 @@ export function projectAboutGate(project: ProjectAboutSource): ProjectAboutGate 
   if (canOpenSettings && personal) {
     // Владельцу личного пространства сказать «может только владелец» было бы
     // враньём: он и есть владелец.
-    settingsLimitNote = 'Личное пространство: его нельзя архивировать и удалить.'
+    settingsLimitNote =
+      'Личное пространство: его нельзя архивировать и удалить, а открывается оно на «Моих задачах».'
   } else if (canOpenSettings && !project.can_manage) {
     settingsLimitNote = 'Архивировать и удалить проект может только владелец.'
   }

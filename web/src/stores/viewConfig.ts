@@ -5,12 +5,6 @@ interface ProjectViewConfig {
   /** Custom-field IDs that should appear as columns in the List view.
    *  Order = render order; absence = hidden. */
   visibleCustomFields: string[]
-  /** Свёрнутые секции экрана (сегодня — только «ЛИЧНОЕ» на /my; секций
-   *  списка задач больше нет, см. 0047/0048).
-   *  Строка выросла до 64px, и сворачивание — главное средство
-   *  плотности на сотнях задач; в локальном useState оно сбрасывалось при
-   *  каждом переключении вкладки вида. */
-  collapsedSections?: string[]
 }
 
 interface ViewConfigState {
@@ -18,13 +12,13 @@ interface ViewConfigState {
   setVisibleCustomFields: (projectId: string, ids: string[]) => void
   toggleCustomField: (projectId: string, fieldId: string) => void
   getVisible: (projectId: string) => string[]
-  toggleSection: (projectId: string, sectionKey: string) => void
 }
 
-
-/** Ключ секции «ЛИЧНОЕ» на /my: у личного проекта секций нет, свёрнутость
- *  хранится здесь же — под id самого проекта. */
-export const PERSONAL_SECTION_KEY = '__personal__'
+// `collapsedSections` и `toggleSection` сняты 16.09 вместе с секцией «ЛИЧНОЕ»
+// на «Моих задачах» — она была их единственным потребителем (секций у списка
+// задач нет с 0047/0048). У людей в localStorage останется ключ
+// `collapsedSections: ['__personal__']`; он безвреден, но переиспользовать его
+// под новую сущность нельзя — у части людей она окажется «уже свёрнутой».
 
 const EMPTY: ProjectViewConfig = { visibleCustomFields: [] }
 
@@ -61,24 +55,12 @@ export const useViewConfig = create<ViewConfigState>()(
         }),
       getVisible: (projectId) =>
         get().byProject[projectId]?.visibleCustomFields ?? EMPTY.visibleCustomFields,
-      toggleSection: (projectId, sectionKey) =>
-        set((state) => {
-          const cfg = state.byProject[projectId] ?? EMPTY
-          const current = cfg.collapsedSections ?? []
-          const next = current.includes(sectionKey)
-            ? current.filter((k) => k !== sectionKey)
-            : [...current, sectionKey]
-          return {
-            byProject: {
-              ...state.byProject,
-              [projectId]: { ...cfg, collapsedSections: next },
-            },
-          }
-        }),
     }),
     {
       name: 'hub-view-config',
-      // v2: + collapsedSections. Поле опционально, миграция не нужна.
+      // v2 добавляла collapsedSections; поле снято 16.09, но версию НЕ
+      // откатываем: zustand просто смержит незнакомый ключ из localStorage, а
+      // понижение версии заставило бы его выбросить и настройки колонок.
       version: 2,
     },
   ),

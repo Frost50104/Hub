@@ -1,38 +1,139 @@
-import { ChevronDown, Filter } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo } from 'react'
+import { useLocation, useSearchParams } from 'react-router-dom'
 
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
+import { MobileViewControlBar } from '@/components/layout/MobileViewControlBar'
 import { QueryError } from '@/components/QueryError'
+import { AssignedByMeList } from '@/components/task/AssignedByMeList'
 import { MobileTaskRow } from '@/components/task/MobileTaskRow'
-import { DelegatedSection } from '@/components/task/DelegatedSection'
-import { PersonalTasksSection } from '@/components/task/PersonalTasksSection'
+import { PersonalTaskList } from '@/components/task/PersonalTaskList'
 import { TaskDetailDrawer } from '@/components/task/TaskDetailDrawer'
 import { TaskEmptyState, TaskListSkeleton } from '@/components/task/TaskListStates'
 import { TaskListHeader } from '@/components/task/TaskListHeader'
 import { TaskRow } from '@/components/task/TaskRow'
-import { BottomSheet, BottomSheetItem } from '@/components/ui/BottomSheet'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
-import { useMyTasks, type DueWindow } from '@/hooks/useMyTasks'
-import { usePersonalTasks } from '@/hooks/usePersonalTasks'
+import { useMe } from '@/hooks/useMe'
+import { useMyTasks } from '@/hooks/useMyTasks'
 import { useProjects } from '@/hooks/useProjects'
 import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
-import {
-  resolvePersonalTaskParam,
-  shouldFocusPersonalCreate,
-} from '@/lib/personalTasks'
 import { GROUP_LABEL, groupTasksByDue } from '@/lib/myTasksGroups'
+import {
+  MY_TASKS_TABS,
+  clearNewPersonalParams,
+  isDueWindowTab,
+  isGroupedTab,
+  myTasksEmptyText,
+  resolveMyTasksTab,
+  setMyTasksTab,
+  type MyTasksTab,
+} from '@/lib/myTasksTabs'
 import { MY_TASKS_GRID } from '@/lib/taskGrid'
+import { taskProjectLabel } from '@/lib/taskProjectLabel'
 import { type Task } from '@/lib/tasks'
 
-const TABS: { key: DueWindow; label: string }[] = [
-  { key: 'upcoming', label: 'Предстоит' },
-  { key: 'overdue', label: 'Просрочено' },
-  { key: 'today', label: 'Сегодня' },
-  { key: 'all', label: 'Все' },
-]
+/**
+ * «Мои задачи» — единственный вход в личную работу (16.09).
+ *
+ * До этого на одну идею приходились две сущности: кросс-проектный экран и
+ * скрытый проект «Личное», приклеенный к нему секцией сверху. Личное так и не
+ * нашли — свою задачу завели 9 человек из 178, — а сам экран был пуст у 136
+ * человек из 154 ровно потому, что их единственная задача личная, а личные из
+ * него вырезались. Теперь экран поглотил проект: личные задачи идут вперемешку
+ * с рабочими, `/projects/{мой личный}` редиректит сюда, а у личного
+ * пространства больше нет ни доски, ни участников, ни «Поделиться».
+ *
+ * Карточка задачи открывается ЗДЕСЬ, в drawer'е, а не уводит на страницу
+ * проекта: экран перестал быть оглавлением.
+ */
+export function MyTasksPage() {
+  const isDesktop = useIsDesktop()
+  const pane = useMyTasksPane()
+  return (
+    <>
+      {isDesktop ? <DesktopMyTasks pane={pane} /> : <MobileMyTasks pane={pane} />}
+      <TaskDetailDrawer
+        taskId={pane.openTaskId}
+        // Проект НАЖАТОЙ строки, а не личный: drawer считает всё от проекта
+        // задачи (`task?.project_id ?? projectId`), и пока задача летит с
+        // сервера, фолбэк определяет, за чьими колонками уйдёт первый запрос.
+        projectId={pane.openTaskProjectId ?? ''}
+        onClose={pane.closeTask}
+        onOpenTask={pane.openTaskById}
+      />
+    </>
+  )
+}
+
+interface MyTasksPane {
+  tab: MyTasksTab
+  setTab: (tab: MyTasksTab) => void
+  personalProjectId: string | undefined
+  openTaskId: string | null
+  openTaskProjectId: string | null
+  openTask: (task: Task) => void
+  openTaskById: (taskId: string) => void
+  closeTask: () => void
+  focusCreate: boolean
+  clearFocusCreate: () => void
+  projectLabel: (task: Task) => string | null
+}
+
+/**
+ * Состояние экрана в адресе: `?tab=`, `?task=`, `?new=personal`.
+ *
+ * Три параметра, которые обязаны уживаться, поэтому все правила — в чистом
+ * `lib/myTasksTabs.ts`, а здесь только их применение. Смена вкладки идёт через
+ * `replace`: «назад» на этом экране уже занят закрытием карточки, а ещё
+ * `TaskInlineCreate` коммитит черновик на unmount — переключение вкладки
+ * браузерным «назад» превратило бы недописанную фразу в задачу.
+ */
+function useMyTasksPane(): MyTasksPane {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
+  const me = useMe()
+  const projects = useProjects()
+  const personalProjectId = me.data?.personal_project_id
+  const tab = resolveMyTasksTab(searchParams, { hasPersonal: !!personalProjectId })
+
+  const setParam = (mutate: (next: URLSearchParams) => void, replace: boolean) => {
+    const next = new URLSearchParams(searchParams)
+    mutate(next)
+    setSearchParams(next, { replace })
+  }
+
+  // id проекта открытой задачи: нужен drawer'у как фолбэк на время загрузки.
+  // Берём из `history.state` — строка, по которой кликнули, его знает, а при
+  // холодном заходе по ссылке не знает никто, и фолбэк остаётся пустым.
+  const navState = location.state as { taskProjectId?: string } | null
+
+  return {
+    tab,
+    setTab: (next) => setSearchParams(setMyTasksTab(searchParams, next), { replace: true }),
+    personalProjectId: personalProjectId ?? undefined,
+    openTaskId: searchParams.get('task'),
+    openTaskProjectId: navState?.taskProjectId ?? null,
+    openTask: (task) => {
+      const next = new URLSearchParams(searchParams)
+      next.set('task', task.id)
+      setSearchParams(next, { state: { taskProjectId: task.project_id } })
+    },
+    openTaskById: (taskId) => setParam((next) => next.set('task', taskId), false),
+    closeTask: () => setParam((next) => next.delete('task'), true),
+    focusCreate: searchParams.get('new') === 'personal',
+    // Снять `new` и поставить `tab=personal` ОДНИМ движением: иначе вкладка
+    // отскочит на дефолт сразу после того, как человек попросил создать
+    // личную задачу (ссылка из FAB приходит без `?tab=`).
+    clearFocusCreate: () =>
+      setSearchParams(clearNewPersonalParams(searchParams), { replace: true }),
+    projectLabel: (task) =>
+      taskProjectLabel(task, {
+        namesById: new Map((projects.data ?? []).map((p) => [p.id, p.name])),
+        personalProjectId,
+      }).text,
+  }
+}
 
 /**
  * Заголовок группы сроков. «Просрочено» красный — это главный факт экрана;
@@ -54,135 +155,19 @@ function GroupHeader({ label, count }: { label: string; count: number }) {
   )
 }
 
-export function MyTasksPage() {
-  const isDesktop = useIsDesktop()
-  const personal = usePersonalPane()
-  return (
-    <>
-      {isDesktop ? (
-        <DesktopMyTasks personal={personal} />
-      ) : (
-        <MobileMyTasks personal={personal} />
-      )}
-      {/* Карточка личной задачи живёт ЗДЕСЬ, а не на странице проекта:
-          личного проекта по продукту «не существует», и открывать его целиком
-          (вкладки, участники, «Поделиться») было бы противоречием. */}
-      <TaskDetailDrawer
-        taskId={personal.openTaskId}
-        projectId={personal.projectId ?? ''}
-        onClose={personal.closeTask}
-        onOpenTask={personal.openTaskById}
-      />
-    </>
-  )
+/** Данные вкладок-окон. На «Личных» и «Назначенных мной» запрос не нужен. */
+function useWindowTasks(tab: MyTasksTab) {
+  const enabled = isDueWindowTab(tab)
+  const tasks = useMyTasks(enabled ? { due_window: tab } : {})
+  const toggleDoneWork = useToggleDone('')
+  return { tasks, enabled, toggleDoneWork }
 }
 
-interface PersonalPane {
-  projectId: string | undefined
-  /** id задачи, которую показывает карточка (null — карточка закрыта). */
-  openTaskId: string | null
-  openTask: (task: Task) => void
-  openTaskById: (taskId: string) => void
-  closeTask: () => void
-  focusCreate: boolean
-  clearFocusCreate: () => void
-}
-
-/** `?task=` и `?new=personal` в URL: deep-link, системное «назад» на телефоне
- *  и точка входа из шторки FAB. */
-function usePersonalPane(): PersonalPane {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const location = useLocation()
-  const { projectId, query } = usePersonalTasks()
-  const requested = searchParams.get('task')
-  // Диалог создания кладёт сюда id только что заведённой личной задачи: списка
-  // с ней ещё нет, и без этого карточка закрылась бы сама.
-  const nav = location.state as { justCreatedTaskId?: string; at?: number } | null
-  const hint =
-    nav?.justCreatedTaskId && typeof nav.at === 'number'
-      ? { taskId: nav.justCreatedTaskId, at: nav.at }
-      : null
-  const resolved = resolvePersonalTaskParam(
-    requested,
-    { tasks: query.data, isPending: query.isPending },
-    hint,
-  )
-
-  const setParam = (mutate: (next: URLSearchParams) => void, replace: boolean) => {
-    const next = new URLSearchParams(searchParams)
-    mutate(next)
-    setSearchParams(next, { replace })
-  }
-
-  // Чужая или несуществующая задача: карточка получила бы чужие этапы и чужой
-  // can_edit — параметр вычищаем. В эффекте, а не в рендере: setSearchParams
-  // во время рендера роняет предупреждение React об обновлении чужого стейта.
-  const shouldDrop = resolved.kind === 'drop'
-  useEffect(() => {
-    if (shouldDrop) setParam((next) => next.delete('task'), true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shouldDrop])
-
-  return {
-    projectId,
-    openTaskId: resolved.kind === 'open' ? resolved.taskId : null,
-    openTask: (task) => setParam((next) => next.set('task', task.id), false),
-    openTaskById: (taskId) => setParam((next) => next.set('task', taskId), false),
-    closeTask: () => setParam((next) => next.delete('task'), true),
-    focusCreate: shouldFocusPersonalCreate(searchParams),
-    clearFocusCreate: () => setParam((next) => next.delete('new'), true),
-  }
-}
-
-function personalSection(personal: PersonalPane, variant: 'desktop' | 'mobile') {
-  return (
-    <PersonalTasksSection
-      variant={variant}
-      onOpenTask={personal.openTask}
-      selectedTaskId={personal.openTaskId}
-      focusCreate={personal.focusCreate}
-      onFocusHandled={personal.clearFocusCreate}
-    />
-  )
-}
-
-function useMyTasksData(tab: DueWindow) {
-  const tasks = useMyTasks({ due_window: tab })
-  const projects = useProjects()
-  const navigate = useNavigate()
-  const toggleDone = useToggleDone('')
-  const projectsById = useMemo(
-    () => new Map((projects.data ?? []).map((p) => [p.id, p])),
-    [projects.data],
-  )
-  return {
-    tasks,
-    toggleDone,
-    // Карточка задачи живёт на странице проекта — deep-link (ОС 13.08: строки
-    // были некликабельны, до вложений было не добраться).
-    openTask: (t: Task) => navigate(`/projects/${t.project_id}?task=${t.id}`),
-    // Фолбэк на project_key: задача, назначенная мне в ЧУЖОМ личном проекте,
-    // в useProjects() не найдётся — личные скрыты из списка.
-    projectName: (t: Task) =>
-      projectsById.get(t.project_id)?.name ?? t.project_key ?? null,
-  }
-}
-
-function emptyText(tab: DueWindow): string {
-  if (tab === 'overdue') return 'Нет просроченных — отлично!'
-  if (tab === 'today') return 'На сегодня задач нет — и просроченных тоже.'
-  return 'Здесь пока пусто.'
-}
-
-function DesktopMyTasks({ personal }: { personal: PersonalPane }) {
-  const [tab, setTab] = useState<DueWindow>('upcoming')
-  const { tasks, toggleDone, openTask, projectName } = useMyTasksData(tab)
-  // Группируем «Все» И «Предстоит»: с 15.09 во второе окно приходят задачи
-  // без срока, и без заголовка «Без срока» они читались бы как хвост
-  // просроченного. Пустые группы не рендерятся, поэтому у человека без
-  // бессрочных задач экран не меняется.
-  const grouped = tab === 'all' || tab === 'upcoming'
+function DesktopMyTasks({ pane }: { pane: MyTasksPane }) {
+  const { tab } = pane
+  const { tasks } = useWindowTasks(tab)
   const groups = useMemo(() => groupTasksByDue(tasks.data ?? []), [tasks.data])
+  const toggleDone = useTabToggleDone(pane)
 
   const row = (t: Task) => (
     <TaskRow
@@ -199,12 +184,13 @@ function DesktopMyTasks({ personal }: { personal: PersonalPane }) {
       cells={
         <span
           className="min-w-0 truncate pr-3.5 text-[14px] text-text2"
-          title={projectName(t) ?? undefined}
+          title={pane.projectLabel(t) ?? undefined}
         >
-          {projectName(t)}
+          {pane.projectLabel(t)}
         </span>
       }
-      onClick={() => openTask(t)}
+      selected={pane.openTaskId === t.id}
+      onClick={() => pane.openTask(t)}
       onToggleDone={() => toggleDone(t)}
     />
   )
@@ -216,24 +202,19 @@ function DesktopMyTasks({ personal }: { personal: PersonalPane }) {
           Мои задачи
         </h1>
         <p className="text-[16px] leading-[1.5] text-text2">
-          Всё, что назначено на вас, в одном месте.
+          Всё, что назначено на вас, и ваши личные дела — в одном месте.
         </p>
       </header>
 
-      {personalSection(personal, 'desktop')}
-      <DelegatedSection variant="desktop" onOpenTask={openTask} />
-
-      {/* Граница вкладок читается как «фильтр, и всё под ним — его результат»:
-          секция «ЛИЧНОЕ» стоит ВЫШЕ неё и окнам дедлайнов не подчиняется. */}
-      <nav className="flex gap-0.5 border-b border-hair">
-        {TABS.map(({ key, label }) => (
+      <nav className="flex gap-0.5 overflow-x-auto border-b border-hair">
+        {MY_TASKS_TABS.map(({ key, label }) => (
           <button
             key={key}
             type="button"
-            onClick={() => setTab(key)}
+            onClick={() => pane.setTab(key)}
             aria-current={tab === key ? 'page' : undefined}
             className={cn(
-              'inline-flex h-[38px] items-center border-b-2 px-3 text-[15px] font-semibold transition-colors',
+              'inline-flex h-[38px] shrink-0 items-center border-b-2 px-3 text-[15px] font-semibold transition-colors',
               tab === key
                 ? 'border-amber text-text'
                 : 'border-transparent text-text2 hover:text-text',
@@ -244,62 +225,107 @@ function DesktopMyTasks({ personal }: { personal: PersonalPane }) {
         ))}
       </nav>
 
-      {tasks.isLoading && <TaskListSkeleton />}
-      {tasks.isError && (
-        <QueryError
-          error={tasks.error}
-          onRetry={() => void tasks.refetch()}
-          title="Не удалось загрузить задачи"
+      {tab === 'personal' && (
+        <PersonalTaskList
+          variant="desktop"
+          onOpenTask={pane.openTask}
+          selectedTaskId={pane.openTaskId}
+          focusCreate={pane.focusCreate}
+          onFocusHandled={pane.clearFocusCreate}
         />
       )}
-      {tasks.data && tasks.data.length === 0 && (
-        <TaskEmptyState title={emptyText(tab)} text="Новые задачи появятся здесь." />
+
+      {tab === 'assigned' && (
+        <AssignedByMeList
+          variant="desktop"
+          onOpenTask={pane.openTask}
+          selectedTaskId={pane.openTaskId}
+          projectLabel={pane.projectLabel}
+        />
       )}
 
-      {tasks.data && tasks.data.length > 0 && (
-        <div className="flex flex-col">
-          <TaskListHeader
-            gridColumns={MY_TASKS_GRID.columns}
-            fieldNames={[]}
-            leadLabel="Проект"
-            compact
-          />
-          {grouped
-            ? groups.map(
-                (g) =>
-                  g.items.length > 0 && (
-                    <section key={g.key}>
-                      <GroupHeader label={GROUP_LABEL[g.key]} count={g.items.length} />
-                      {g.items.map(row)}
-                    </section>
-                  ),
-              )
-            : tasks.data.map(row)}
-        </div>
+      {isDueWindowTab(tab) && (
+        <>
+          {tasks.isLoading && <TaskListSkeleton />}
+          {tasks.isError && (
+            <QueryError
+              error={tasks.error}
+              onRetry={() => void tasks.refetch()}
+              title="Не удалось загрузить задачи"
+            />
+          )}
+          {tasks.data && tasks.data.length === 0 && (
+            <TaskEmptyState
+              title={myTasksEmptyText(tab)}
+              text="Новые задачи появятся здесь."
+            />
+          )}
+          {tasks.data && tasks.data.length > 0 && (
+            <div className="flex flex-col">
+              <TaskListHeader
+                gridColumns={MY_TASKS_GRID.columns}
+                fieldNames={[]}
+                leadLabel="Проект"
+                compact
+              />
+              {isGroupedTab(tab)
+                ? groups.map(
+                    (g) =>
+                      g.items.length > 0 && (
+                        <section key={g.key}>
+                          <GroupHeader
+                            label={GROUP_LABEL[g.key]}
+                            count={g.items.length}
+                          />
+                          {g.items.map(row)}
+                        </section>
+                      ),
+                  )
+                : tasks.data.map(row)}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
 }
 
-function MobileMyTasks({ personal }: { personal: PersonalPane }) {
-  const [tab, setTab] = useState<DueWindow>('upcoming')
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const { tasks, toggleDone, openTask, projectName } = useMyTasksData(tab)
-  // Группируем «Все» И «Предстоит»: с 15.09 во второе окно приходят задачи
-  // без срока, и без заголовка «Без срока» они читались бы как хвост
-  // просроченного. Пустые группы не рендерятся, поэтому у человека без
-  // бессрочных задач экран не меняется.
-  const grouped = tab === 'all' || tab === 'upcoming'
+/**
+ * Галочка «готово» с диспетчеризацией по проекту задачи.
+ *
+ * `useToggleDone(projectId)` патчит кэш `['tasks', projectId]`, и один хук на
+ * весь экран означал бы, что галочка, поставленная на «Все», не долетает до
+ * вкладки «Личные» (та живёт на `['tasks', personalId]`) — и наоборот.
+ */
+function useTabToggleDone(pane: MyTasksPane) {
+  const togglePersonal = useToggleDone(pane.personalProjectId ?? '')
+  const toggleOther = useToggleDone('')
+  return (task: Task) =>
+    pane.personalProjectId && task.project_id === pane.personalProjectId
+      ? togglePersonal(task)
+      : toggleOther(task)
+}
+
+function MobileMyTasks({ pane }: { pane: MyTasksPane }) {
+  const { tab } = pane
+  const { tasks } = useWindowTasks(tab)
   const groups = useMemo(() => groupTasksByDue(tasks.data ?? []), [tasks.data])
-  const current = TABS.find((t) => t.key === tab)!
+  const toggleDone = useTabToggleDone(pane)
+
+  // Скроллим в начало при смене вкладки: с «Все» (десятки строк) на «Личные»
+  // (одна-две) человек иначе оказывается в конце короткого списка.
+  useEffect(() => {
+    window.scrollTo({ top: 0 })
+  }, [tab])
 
   const row = (t: Task) => (
     <MobileTaskRow
       key={t.id}
       task={t}
       stage={t.stage_name}
-      fallback={projectName(t)}
-      onClick={() => openTask(t)}
+      fallback={pane.projectLabel(t)}
+      selected={pane.openTaskId === t.id}
+      onClick={() => pane.openTask(t)}
       onToggleDone={() => toggleDone(t)}
     />
   )
@@ -308,63 +334,67 @@ function MobileMyTasks({ personal }: { personal: PersonalPane }) {
     <>
       <MobilePageHeader title="Мои задачи" />
 
-      {personalSection(personal, 'mobile')}
-      <DelegatedSection variant="mobile" onOpenTask={openTask} />
-
-      {/* Полоса на --tint с одной пилюлей-фильтром (иконка Filter): это
-          фильтр выборки, а не вкладка — и выглядит как фильтр. */}
-      <div className="border-b border-glass-border bg-tint px-4 py-2">
-        <button
-          type="button"
-          onClick={() => setPickerOpen(true)}
-          className="inline-flex min-h-11 items-center gap-2 rounded-full border border-glass-border px-4 text-[14px] font-semibold text-text active:bg-surface"
-        >
-          <Filter className="h-[15px] w-[15px] text-text2" strokeWidth={2} />
-          {current.label}
-          <ChevronDown className="h-3.5 w-3.5 text-text2" />
-        </button>
-      </div>
-
-      {tasks.isLoading && <TaskListSkeleton compact />}
-      {tasks.isError && (
-        <QueryError
-          error={tasks.error}
-          onRetry={() => void tasks.refetch()}
-          title="Не удалось загрузить задачи"
-          className="m-4"
+      {tab === 'personal' && (
+        <PersonalTaskList
+          variant="mobile"
+          onOpenTask={pane.openTask}
+          selectedTaskId={pane.openTaskId}
+          focusCreate={pane.focusCreate}
+          onFocusHandled={pane.clearFocusCreate}
         />
       )}
-      {tasks.data && tasks.data.length === 0 && (
-        <TaskEmptyState title={emptyText(tab)} text="Новые задачи появятся здесь." />
-      )}
-      {tasks.data &&
-        tasks.data.length > 0 &&
-        (grouped
-          ? groups.map(
-              (g) =>
-                g.items.length > 0 && (
-                  <section key={g.key}>
-                    <GroupHeader label={GROUP_LABEL[g.key]} count={g.items.length} />
-                    {g.items.map(row)}
-                  </section>
-                ),
-            )
-          : tasks.data.map(row))}
 
-      <BottomSheet open={pickerOpen} onOpenChange={setPickerOpen} title="Окно дедлайнов">
-        {TABS.map((t) => (
-          <BottomSheetItem
-            key={t.key}
-            onClick={() => {
-              setTab(t.key)
-              setPickerOpen(false)
-            }}
-            trailing={tab === t.key ? '✓' : null}
-          >
-            {t.label}
-          </BottomSheetItem>
-        ))}
-      </BottomSheet>
+      {tab === 'assigned' && (
+        <AssignedByMeList
+          variant="mobile"
+          onOpenTask={pane.openTask}
+          selectedTaskId={pane.openTaskId}
+          projectLabel={pane.projectLabel}
+        />
+      )}
+
+      {isDueWindowTab(tab) && (
+        <>
+          {tasks.isLoading && <TaskListSkeleton compact />}
+          {tasks.isError && (
+            <QueryError
+              error={tasks.error}
+              onRetry={() => void tasks.refetch()}
+              title="Не удалось загрузить задачи"
+              className="m-4"
+            />
+          )}
+          {tasks.data && tasks.data.length === 0 && (
+            <TaskEmptyState
+              title={myTasksEmptyText(tab)}
+              text="Новые задачи появятся здесь."
+            />
+          )}
+          {tasks.data &&
+            tasks.data.length > 0 &&
+            (isGroupedTab(tab)
+              ? groups.map(
+                  (g) =>
+                    g.items.length > 0 && (
+                      <section key={g.key}>
+                        <GroupHeader label={GROUP_LABEL[g.key]} count={g.items.length} />
+                        {g.items.map(row)}
+                      </section>
+                    ),
+                )
+              : tasks.data.map(row))}
+        </>
+      )}
+
+      {/* Плавающая пилюля, а не полоса вкладок: шесть подписей дают ~560px при
+          экране 390. Тот же компонент, что на странице проекта, — и он же
+          лечит прежнюю беду, когда фильтр стоял в потоке и уезжал вверх на
+          длинном списке. */}
+      <MobileViewControlBar
+        options={MY_TASKS_TABS}
+        value={tab}
+        onChange={pane.setTab}
+      />
 
       <FloatingActionButton />
     </>

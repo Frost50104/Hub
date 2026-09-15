@@ -1,14 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  DONE_PREVIEW_LIMIT,
-  excludeProject,
-  JUST_CREATED_TTL_MS,
-  personalListView,
-  personalSectionState,
-  resolvePersonalTaskParam,
-  shouldFocusPersonalCreate,
-} from './personalTasks'
+import { DONE_PREVIEW_LIMIT, personalListView } from './personalTasks'
 import { type Task } from './tasks'
 
 function task(over: Partial<Task> & { id: string }): Task {
@@ -32,26 +24,6 @@ function task(over: Partial<Task> & { id: string }): Task {
     ...over,
   } as Task
 }
-
-describe('excludeProject', () => {
-  it('выкидывает задачи личного проекта', () => {
-    const list = [task({ id: 'a' }), task({ id: 'b', project_id: 'personal' })]
-    expect(excludeProject(list, 'personal').map((t) => t.id)).toEqual(['a'])
-  })
-
-  it('без id личного проекта отдаёт список как есть (старый бэкенд)', () => {
-    const list = [task({ id: 'a' }), task({ id: 'b' })]
-    expect(excludeProject(list, undefined)).toHaveLength(2)
-    expect(excludeProject(list, null)).toHaveLength(2)
-  })
-
-  it('не мутирует вход', () => {
-    const list = [task({ id: 'a', project_id: 'personal' })]
-    excludeProject(list, 'personal')
-    expect(list).toHaveLength(1)
-  })
-})
-
 describe('personalListView', () => {
   it('подзадачи не строки, а чип родителя', () => {
     const view = personalListView([
@@ -92,169 +64,27 @@ describe('personalListView', () => {
     expect(view.counts).toEqual({ open: 0, done: 0 })
   })
 })
-
-describe('personalSectionState — выполненные скрыты по умолчанию', () => {
+describe('вкладка «Личные» — выполненные скрыты по умолчанию', () => {
   const t = (id: string, done: boolean) =>
     ({ id, done, parent_task_id: null }) as unknown as Task
 
-  const state = (showAllDone: boolean) =>
-    personalSectionState({
-      meIsPending: false,
-      personalProjectId: 'p1',
-      isPending: false,
-      isError: false,
-      tasks: [t('a', false), t('b', true), t('c', true)],
+  const view = (showAllDone: boolean) =>
+    personalListView([t('a', false), t('b', true), t('c', true)], {
+      doneLimit: 0,
       showAllDone,
     })
 
   it('по умолчанию выполненных в списке нет, но счётчик их помнит', () => {
     // ОС 15.09: «в личных показывать по умолчанию не выполненные, а
     // выполненные скрыть за фильтром или чипом». Число нужно чипу.
-    const s = state(false)
-    expect(s.kind).toBe('ready')
-    if (s.kind !== 'ready') return
-    expect(s.view.done).toEqual([])
-    expect(s.view.counts).toEqual({ open: 1, done: 2 })
+    const v = view(false)
+    expect(v.done).toEqual([])
+    expect(v.counts).toEqual({ open: 1, done: 2 })
   })
 
   it('чип раскрывает все выполненные, а не первые три', () => {
-    const s = state(true)
-    if (s.kind !== 'ready') return
-    expect(s.view.done.map((x) => x.id)).toEqual(['b', 'c'])
-    expect(s.view.hiddenDone).toBe(0)
-  })
-})
-
-describe('resolvePersonalTaskParam', () => {
-  const tasks = [task({ id: 'mine' })]
-
-  it('нет параметра — nothing to do', () => {
-    expect(resolvePersonalTaskParam(null, { tasks, isPending: false })).toEqual({
-      kind: 'none',
-    })
-  })
-
-  it('пока список грузится — ждём, URL не трогаем', () => {
-    expect(
-      resolvePersonalTaskParam('mine', { tasks: undefined, isPending: true }),
-    ).toEqual({ kind: 'wait' })
-  })
-
-  it('своя задача открывается', () => {
-    expect(resolvePersonalTaskParam('mine', { tasks, isPending: false })).toEqual({
-      kind: 'open',
-      taskId: 'mine',
-    })
-  })
-
-  it('чужая — параметр вычищаем', () => {
-    expect(resolvePersonalTaskParam('alien', { tasks, isPending: false })).toEqual({
-      kind: 'drop',
-    })
-  })
-
-  it('подзадача из того же ответа тоже открывается', () => {
-    const withKid = [...tasks, task({ id: 'kid', parent_task_id: 'mine' })]
-    expect(
-      resolvePersonalTaskParam('kid', { tasks: withKid, isPending: false }),
-    ).toEqual({ kind: 'open', taskId: 'kid' })
-  })
-})
-
-describe('personalSectionState', () => {
-  const base = {
-    meIsPending: false,
-    personalProjectId: 'personal',
-    isPending: false,
-    isError: false,
-    tasks: [task({ id: 'a' })],
-    showAllDone: false,
-  }
-
-  it('пока /me грузится — секции нет', () => {
-    expect(personalSectionState({ ...base, meIsPending: true }).kind).toBe('hidden')
-  })
-
-  it('старый бэкенд без personal_project_id — секции нет', () => {
-    expect(personalSectionState({ ...base, personalProjectId: undefined }).kind).toBe(
-      'hidden',
-    )
-  })
-
-  it('ошибка важнее загрузки', () => {
-    expect(personalSectionState({ ...base, isError: true, isPending: true }).kind).toBe(
-      'error',
-    )
-  })
-
-  it('данные — ready с разложенным видом', () => {
-    const state = personalSectionState(base)
-    expect(state.kind).toBe('ready')
-    if (state.kind === 'ready') expect(state.view.open).toHaveLength(1)
-  })
-})
-
-describe('shouldFocusPersonalCreate', () => {
-  it('распознаёт только ?new=personal', () => {
-    expect(shouldFocusPersonalCreate(new URLSearchParams('new=personal'))).toBe(true)
-    expect(shouldFocusPersonalCreate(new URLSearchParams('new=task'))).toBe(false)
-    expect(shouldFocusPersonalCreate(new URLSearchParams(''))).toBe(false)
-  })
-})
-
-describe('resolvePersonalTaskParam: только что созданная задача', () => {
-  const hint = { taskId: 'NEW', at: 1_000_000 }
-  const now = hint.at + 500
-
-  it('РЕГРЕССИЯ: список уже резолвнут и БЕЗ новой задачи — всё равно открываем', () => {
-    // Ровно та гонка, из-за которой карточка закрывалась сама: инвалидация с
-    // refetchType:'active' не трогает неактивный кэш, и на маунте приходит
-    // старый массив.
-    expect(
-      resolvePersonalTaskParam('NEW', { tasks: [{ id: 'OLD' }], isPending: false }, hint, now),
-    ).toEqual({ kind: 'open', taskId: 'NEW' })
-  })
-
-  it('список ещё грузится — открываем сразу, без мигания скелетоном', () => {
-    expect(
-      resolvePersonalTaskParam('NEW', { tasks: undefined, isPending: true }, hint, now),
-    ).toEqual({ kind: 'open', taskId: 'NEW' })
-  })
-
-  it('задача уже приехала в списке — тот же ответ, хинт ничего не портит', () => {
-    expect(
-      resolvePersonalTaskParam('NEW', { tasks: [{ id: 'NEW' }], isPending: false }, hint, now),
-    ).toEqual({ kind: 'open', taskId: 'NEW' })
-  })
-
-  it('хинт на ДРУГУЮ задачу не открывает чужую карточку', () => {
-    // Это не белый список: иначе на /my открылась бы задача чужого проекта с
-    // чужими этапами и чужим can_edit.
-    expect(
-      resolvePersonalTaskParam('OTHER', { tasks: [], isPending: false }, hint, now),
-    ).toEqual({ kind: 'drop' })
-  })
-
-  it('протухший хинт не действует', () => {
-    expect(
-      resolvePersonalTaskParam(
-        'NEW',
-        { tasks: [], isPending: false },
-        hint,
-        hint.at + JUST_CREATED_TTL_MS,
-      ),
-    ).toEqual({ kind: 'drop' })
-  })
-
-  it('без параметра задачи хинт не заставляет ничего открывать', () => {
-    expect(resolvePersonalTaskParam(null, { tasks: [], isPending: false }, hint, now)).toEqual({
-      kind: 'none',
-    })
-  })
-
-  it('без хинта поведение прежнее', () => {
-    expect(
-      resolvePersonalTaskParam('NEW', { tasks: [{ id: 'OLD' }], isPending: false }),
-    ).toEqual({ kind: 'drop' })
+    const v = view(true)
+    expect(v.done.map((x) => x.id)).toEqual(['b', 'c'])
+    expect(v.hiddenDone).toBe(0)
   })
 })

@@ -1,9 +1,6 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
-import { useCallback } from 'react'
 
-import { useMe } from '@/hooks/useMe'
 import { api } from '@/lib/api'
-import { excludeProject } from '@/lib/personalTasks'
 import { type Task } from '@/lib/tasks'
 
 export type DueWindow = 'overdue' | 'today' | 'upcoming' | 'all'
@@ -15,24 +12,21 @@ export interface MyTasksFilters {
   include_archived?: boolean
 }
 
+/**
+ * Кросс-проектный список «моего»: назначенное мне И мои личные задачи.
+ *
+ * Клиентской страховки `excludeProject` здесь больше нет (16.09). Она вырезала
+ * личные задачи из окон дедлайнов, пока те стояли на экране отдельной секцией
+ * «ЛИЧНОЕ» и строка иначе оказалась бы на экране дважды. Секции нет, личные —
+ * часть списка, и фильтр теперь прятал бы ровно то, ради чего всё затевалось.
+ *
+ * `include_personal` не шлём: серверный дефолт с 16.09 `true`. Явный параметр в
+ * queryKey развёл бы кэш «Главной» и `/my` на два запроса одного и того же.
+ */
 export function useMyTasks(filters: MyTasksFilters = {}): UseQueryResult<Task[]> {
-  const personalId = useMe().data?.personal_project_id ?? null
-  // Личные задачи живут в своей секции — в окнах дедлайнов они были бы вторым
-  // экземпляром той же строки. Основной фильтр серверный
-  // (`include_personal=false`), это страховка на окно деплоя.
-  //
-  // `select` не входит в queryKey: в кэше остаются серверные данные, поэтому
-  // оптимистика useUpdateTask (setQueriesData(['me-tasks'])) и откат работают
-  // как раньше. useCallback обязателен — TanStack пере-вычисляет select при
-  // смене идентичности функции.
-  const select = useCallback(
-    (tasks: Task[]) => excludeProject(tasks, personalId),
-    [personalId],
-  )
   return useQuery({
     queryKey: ['me-tasks', filters],
     queryFn: () =>
       api.get<Task[]>('/me/tasks', { params: filters }).then((r) => r.data),
-    select,
   })
 }

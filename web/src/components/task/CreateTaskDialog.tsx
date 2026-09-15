@@ -19,7 +19,6 @@ import { useMe } from '@/hooks/useMe'
 import { useProjects } from '@/hooks/useProjects'
 import { useCreateTask } from '@/hooks/useTasks'
 import {
-  createdTaskLocation,
   createTaskReady,
   DELEGATE_TARGET,
   PERSONAL_TARGET,
@@ -27,6 +26,7 @@ import {
   initialTarget,
   resolveProjectId,
 } from '@/lib/createTaskTargets'
+import { taskLocation } from '@/lib/taskLinks'
 
 interface CreateTaskDialogProps {
   open: boolean
@@ -118,23 +118,22 @@ export function CreateTaskDialog({
       setDescription('')
       onOpenChange(false)
       if (!openAfterCreate) return
-      const to = createdTaskLocation({
+      const to = taskLocation({
         taskId: created.id,
         projectId,
-        isPersonal,
+        personalProjectId: personalProjectId,
         pathname: location.pathname,
         search: location.search,
       })
       // Тиком позже: на FAB смена маршрута размонтирует и кнопку, и этот диалог
       // в том же коммите, что и закрытие Radix, — а тогда `pointer-events:none`
       // с body может не сняться (тот же приём в FloatingActionButton).
-      window.setTimeout(() => {
-        navigate(to, {
-          // Личный список ещё не перезапрошен — без хинта /my молча закрыл бы
-          // карточку (см. resolvePersonalTaskParam).
-          state: isPersonal ? { justCreatedTaskId: created.id, at: Date.now() } : undefined,
-        })
-      }, 0)
+      //
+      // Хинта «только что создана» больше нет (16.09): карточка на `/my`
+      // открывается по `?task=` отдельным запросом и списка не ждёт, а раньше
+      // она искала задачу в уже загруженном личном списке и без хинта
+      // закрывалась сама.
+      window.setTimeout(() => navigate(to), 0)
     } catch {
       // ввод сохраняем в форме; тост показывает глобальный onError мутаций
     }
@@ -174,7 +173,11 @@ export function CreateTaskDialog({
               >
                 {/* Прочерк первым и по умолчанию: задача «на себя» — самый
                     частый случай у того, кто не ведёт проектов. */}
-                <option value={PERSONAL_TARGET}>—</option>
+                {/* Прочерк читался как «никуда, себе», пока личное было скрытым
+                    инбоксом. С 16.09 это полноценные «Мои задачи», и выбор между
+                    «—» и «Личные задачи сотрудника…» в одном селекте выглядел бы
+                    поломкой. */}
+                <option value={PERSONAL_TARGET}>Мои задачи</option>
                 {targets.map((t) => (
                   <option key={t.value} value={t.value}>
                     {t.label}

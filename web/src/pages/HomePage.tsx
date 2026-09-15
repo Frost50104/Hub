@@ -19,6 +19,7 @@ import { useProjects } from '@/hooks/useProjects'
 import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { capitalizeFirst } from '@/lib/dates'
+import { taskLocation } from '@/lib/taskLinks'
 import { NBSP } from '@/lib/typography'
 
 function greeting(): string {
@@ -72,8 +73,16 @@ function useHomeData(tab: DueWindow) {
     projects,
     myTasks,
     toggleDone,
-    openTask: (id: string, projectId: string) =>
-      navigate(`/projects/${projectId}?task=${id}`),
+    // Личные задачи приезжают и сюда (16.09), а страницы личного проекта
+    // больше нет — адрес считает общая `taskLocation`.
+    openTask: (id: string, projectId: string) => {
+      const to = taskLocation({
+        taskId: id,
+        projectId,
+        personalProjectId: me.data?.personal_project_id,
+      })
+      navigate(`${to.pathname}${to.search}`)
+    },
     projectName: (projectId: string) => projectsById.get(projectId)?.name ?? null,
   }
 }

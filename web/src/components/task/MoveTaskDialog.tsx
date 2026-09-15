@@ -148,7 +148,9 @@ export function MoveTaskDialog({
             >
               {targets.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.isPersonal ? `${t.name} (личное)` : t.name}
+                  {/* Суффикс «(личное)» снят 16.09: проект теперь так и
+                      называется — «Мои задачи», и приписка задваивала бы смысл. */}
+                  {t.name}
                 </option>
               ))}
             </select>

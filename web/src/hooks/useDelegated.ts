@@ -1,9 +1,4 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  type UseQueryResult,
-} from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '@/lib/api'
 import { type Task } from '@/lib/tasks'
@@ -22,23 +17,15 @@ export interface DelegateBody {
   due_at?: string | null
 }
 
-/** Что я положил людям в личное и это ещё не закрыто. */
-export function useDelegated(): UseQueryResult<Task[]> {
-  return useQuery({
-    queryKey: ['me-delegated'],
-    queryFn: () => api.get<Task[]>('/me/delegated').then((r) => r.data),
-  })
-}
-
 export function useDelegateTask() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: DelegateBody) =>
       api.post<Task>('/me/delegate', body).then((r) => r.data),
     onSuccess: () => {
-      // Только своя секция: в `me-tasks` поручение не попадает — автор там не
+      // Только своя вкладка: в `me-tasks` поручение не попадает — автор там не
       // исполнитель, а получателю оно приедет его же запросом.
-      void qc.invalidateQueries({ queryKey: ['me-delegated'] })
+      void qc.invalidateQueries({ queryKey: ['me-assigned-by-me'] })
     },
   })
 }

@@ -47,6 +47,7 @@ import { Textarea } from '@/components/ui/Input'
 import { PropertyRow, PropertyRows } from '@/components/ui/PropertyRows'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
+import { useMe } from '@/hooks/useMe'
 import { useToggleWatcher, useWatchers } from '@/hooks/useThreads'
 import { useProject, useProjectMembers } from '@/hooks/useProjects'
 import { useStages } from '@/hooks/useStages'
@@ -70,6 +71,7 @@ import {
   recurrenceBlockReason,
 } from '@/lib/taskRecurrence'
 import { taskAssignees } from '@/lib/taskAssignees'
+import { taskLocation } from '@/lib/taskLinks'
 import { MobileDateCell } from '@/components/ui/MobileDateCell'
 import { dayKey, dueDayToIso, isOverdue, overdueDays } from '@/lib/taskDates'
 import { describeTaskDeletion } from '@/lib/taskDeletion'
@@ -150,12 +152,19 @@ export function TaskDetailDrawer({
   // собирала бы из ключа старого проекта и уже нового номера («PLP-12» —
   // номера, которого нет нигде).
   const taskProjectId = task?.project_id ?? projectId
+  const myPersonalId = useMe().data?.personal_project_id
   const project = useProject(taskProjectId)
   // Этапы проекта: статус в карточке — раскрывающийся список с их именами
   // (имена пользовательские, этапов сколько угодно — ряд чипов не годится).
   const stages = useStages(taskProjectId)
   // Права считает сервер: viewer → read-only, hub:admin вне членства → правит.
+  // `project.data` ещё нет = «не знаем», а не «нельзя»: fail-closed по правам
+  // (контролы заблокированы), но БЕЗ объяснения «вы наблюдатель». Иначе на
+  // «Моих задачах», где карточка открывается на месте, плашка мелькала бы на
+  // каждой рабочей задаче: `taskProjectId` известен только ПОСЛЕ загрузки
+  // задачи, и запрос проекта стартует на RTT позже её.
   const readOnly = !project.data?.can_edit
+  const rightsKnown = project.data !== undefined
   // Исполнитель закрывает свою задачу и двигает её по доске даже будучи
   // наблюдателем. Правило считает СЕРВЕР (TaskResponse.can_complete); `??` —
   // фолбэк для ручек, которые поле не заполняют (календарь, хронология,
@@ -164,7 +173,7 @@ export function TaskDetailDrawer({
   // Наблюдателю мало сказать «нельзя» — надо назвать, кого просить.
   // `GET /projects/{id}/members` открыт любой роли в проекте (включая
   // viewer), поэтому имя владельца доступно и ему.
-  const members = useProjectMembers(readOnly ? taskProjectId : undefined)
+  const members = useProjectMembers(readOnly && rightsKnown ? taskProjectId : undefined)
   const owner = members.data?.find((m) => m.role === 'owner')
   const update = useUpdateTask(taskProjectId)
   const toggleAssignee = useToggleAssignee(taskProjectId)
@@ -436,7 +445,7 @@ export function TaskDetailDrawer({
               </div>
             )}
 
-            {readOnly && task && (
+            {readOnly && rightsKnown && task && (
               <p className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-[10px] border border-glass-border bg-tint px-[11px] py-[9px] text-[14px] leading-[1.45] text-text2">
                 <span>
                   {canStatus
@@ -909,9 +918,17 @@ export function TaskDetailDrawer({
           }
           // Уводим на новое место. Без этого проп `projectId` страницы остаётся
           // старым, а с ним — колонки, кастом-поля и метки чужого проекта.
-          onMoved={(report) =>
-            navigate(`/projects/${report.project_id}?task=${task.id}`)
-          }
+          // Через `taskLocation`, а не прямым адресом: перенос В ЛИЧНОЕ ведёт
+          // на «Мои задачи» — страницы личного проекта больше нет, она
+          // редиректит (и ссылка теряла бы `?task=`, не будь редирект аккуратен).
+          onMoved={(report) => {
+            const to = taskLocation({
+              taskId: task.id,
+              projectId: report.project_id,
+              personalProjectId: myPersonalId,
+            })
+            navigate(`${to.pathname}${to.search}`)
+          }}
         />
       )}
       {task && (
