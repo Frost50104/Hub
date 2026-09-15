@@ -115,6 +115,11 @@ class Settings(BaseSettings):
     # rsync'ом деплоя вместе с кодом. На staging путь другой — задаётся env.
     guides_root: Path = Field(default=Path("/opt/signaris-hub/guides"))
     attachment_max_bytes: int = Field(default=20 * 1024 * 1024)
+    # Видео — отдельный потолок: минута съёмки с телефона в 1080p весит ~100 МБ,
+    # и общий двадцатимегабайтный лимит делал вложение-видео невозможным
+    # (ОС 15.09). Лимит выбирает `attachments.attachment_size_limit(mime)`;
+    # клиентское зеркало — `web/src/lib/attachmentTypes.ts`.
+    attachment_video_max_bytes: int = Field(default=1024 * 1024 * 1024)
 
     # Проект приёма обратной связи из настроек. Ключ, а не id: переживает
     # переименование проекта и читается человеком в .env.

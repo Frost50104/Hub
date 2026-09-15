@@ -1,28 +1,62 @@
-"""Task attachments API — multipart upload + streaming download + delete."""
+"""Task attachments API — multipart upload + streaming download + delete.
+
+Видео (ОС 15.09) отдаётся НЕ этой же ручкой скачивания: тег `<video>` не шлёт
+`Authorization`, а качать гигабайт в память JS, чтобы показать его в карточке,
+нельзя. Поэтому у вложений появился второй путь отдачи — подписанный URL без
+JWT плюс `X-Accel-Redirect`, ровно как у медиа уроков: Range/206 (перемотку)
+обрабатывает nginx, Python не стримит.
+"""
 
 from __future__ import annotations
 
-import shutil
-from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse, Response
 from signaris_auth import Principal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
+from app.db import tenant_scoped_session
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.attachment import TaskAttachment
 from app.models.shadow import ShadowUser
 from app.models.task import Task
 from app.schemas.attachment import AttachmentResponse
 from app.services.activity_writer import record_activity
-from app.services.attachments import absolute_path, download_filename, store_upload
+from app.services.attachments import (
+    absolute_path,
+    attachment_size_limit,
+    content_disposition,
+    download_filename,
+    resolve_mime,
+    store_upload,
+)
+from app.services.learn_media import check_free_space, issue_token, verify_token
 from app.services.personal_projects import require_task_access
 from app.services.project_access import is_hub_admin
 
 router = APIRouter(tags=["attachments"])
+
+
+def _sign_key(attachment_id: UUID) -> str:
+    """Ключ подписи. Префикс отделяет пространство вложений от медиа уроков:
+    подпись, выданную на один ресурс, нельзя предъявить другому."""
+    return f"attach:{attachment_id}"
+
+
+def preview_url_for(attachment_id: UUID, mime: str) -> str | None:
+    """Адрес для `<video>` — только видео и только ему.
+
+    Картинкам его не выдаём сознательно: inline-показ image/* в карточке — это
+    отдельная задача, и в whitelist'е записано, что при её появлении HEIC/HEIF
+    из превью надо исключить (браузеры их не декодируют).
+    """
+    if not mime.startswith("video/"):
+        return None
+    exp, sig = issue_token(_sign_key(attachment_id), get_settings().media_url_ttl_sec)
+    return f"/api/attachments/{attachment_id}/file?e={exp}&s={sig}"
 
 
 async def _fetch_task_visible(
@@ -68,6 +102,7 @@ async def _list_enriched(db: AsyncSession, task_id: UUID) -> list[AttachmentResp
             created_at=r.created_at,
             uploader_email=r.email,
             uploader_full_name=r.full_name,
+            preview_url=preview_url_for(r.id, r.mime),
         )
         for r in rows.all()
     ]
@@ -85,17 +120,35 @@ async def list_attachments(
     return await _list_enriched(db, task_id)
 
 
-@router.post(
-    "/tasks/{task_id}/attachments",
-    response_model=AttachmentResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def upload_attachment(
-    task_id: UUID,
-    file: UploadFile = File(...),
-    principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+def _assert_free_space(file: UploadFile) -> None:
+    """Не дать загрузке добить диск, общий с Postgres/WAL.
+
+    Проверка именно ЗДЕСЬ, а не внутри `store_upload`: к моменту вызова ручки
+    FastAPI уже разобрал multipart, и Starlette положила файл во временный
+    (спул больше 1 МБ уезжает на диск). То есть `check_free_space` уже видит
+    место, съеденное спулом, и запас нужен ровно на ОДНУ копию — ту, которую
+    сейчас запишет `store_upload`. Отсюда `+ file.size`, а не `+ лимит`:
+    двадцатикилобайтный скриншот не должен требовать гигабайта свободного.
+    """
+    settings = get_settings()
+    # `file.size` заполняет парсер multipart, и в живом запросе он есть всегда.
+    # Если его вдруг нет — считаем по ПОТОЛКУ вида файла, а не по нулю: гейт,
+    # который при неизвестном размере молча превращается в «места хватит»,
+    # хуже отсутствующего, потому что выглядит рабочим.
+    mime = resolve_mime(file.content_type, file.filename or "")
+    need = settings.media_min_free_bytes + (file.size or attachment_size_limit(mime))
+    if check_free_space() < need:
+        raise HTTPException(
+            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+            detail="На сервере мало места — загрузка временно недоступна. "
+            "Сообщите администратору.",
+        )
+
+
+async def _accept_upload(
+    db: AsyncSession, task_id: UUID, file: UploadFile, principal: Principal
 ) -> AttachmentResponse:
+    """Общее тело обеих ручек загрузки — фиксированной и старой, по задаче."""
     await enforce_rate_limit(
         bucket="attach:upload",
         employee_id=str(principal.employee_id),
@@ -107,6 +160,7 @@ async def upload_attachment(
     await require_task_access(
         db, task, principal, allow=("owner", "editor")
     )
+    _assert_free_space(file)
 
     attachment = await store_upload(
         file,
@@ -137,6 +191,114 @@ async def upload_attachment(
             detail="Не удалось перечитать вложение",
         )
     return matching
+
+
+@router.post(
+    "/attachments",
+    response_model=AttachmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_attachment(
+    task_id: UUID = Form(...),
+    file: UploadFile = File(...),
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> AttachmentResponse:
+    """Загрузка вложения. Путь ФИКСИРОВАН, и это требование nginx, а не вкус.
+
+    Потолок тела задаётся локацией, а видео не влезает в общие 25 МБ. Сделать
+    локацию под прежний адрес `/api/tasks/{uuid}/attachments` нельзя: он живёт
+    под `location ^~ /api/`, а модификатор `^~` ОТМЕНЯЕТ проверку
+    regex-локаций — блок `location ~ ^/api/tasks/…` прошёл бы `nginx -t` и не
+    сработал никогда. Поднимать же потолок всему `/api/tasks/` значит
+    разрешить гигабайтное тело в `PATCH /tasks/{id}`. Отсюда адрес без
+    переменных и точная локация `location = /api/attachments` — тем же
+    приёмом и по той же причине сделан `location = /api/learn/media`.
+    """
+    return await _accept_upload(db, task_id, file, principal)
+
+
+@router.post(
+    "/tasks/{task_id}/attachments",
+    response_model=AttachmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_attachment_legacy(
+    task_id: UUID,
+    file: UploadFile = File(...),
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> AttachmentResponse:
+    """Прежний адрес — для бандлов, выданных до этой правки.
+
+    PWA обновляется неделями (`registerType: 'prompt'`), и вчерашняя вкладка
+    обязана продолжать грузить документы. Видео она не предложит — у неё свой
+    список расширений, а на этом пути nginx всё равно режет тело на 25 МБ.
+    """
+    return await _accept_upload(db, task_id, file, principal)
+
+
+@router.get("/attachments/{attachment_id}/file")
+async def serve_attachment(
+    attachment_id: UUID,
+    e: int = Query(...),
+    s: str = Query(..., max_length=64),
+    dl: int = 0,
+) -> Response:
+    """Отдача по подписи, без JWT — чтобы файл мог запросить сам тег `<video>`.
+
+    Права проверяются на ВЫДАЧЕ адреса (`preview_url` попадает только в ответ
+    списка вложений, а тот стоит за `require_task_access`), здесь — только
+    подпись, как у медиа уроков. Сессия поэтому `bypass_rls=True`: без токена
+    tenant-контекста нет, а `get_db` его требует.
+    """
+    if not verify_token(_sign_key(attachment_id), e, s):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ссылка недействительна или истекла",
+        )
+
+    async with tenant_scoped_session(None, bypass_rls=True) as session:
+        attachment = await session.get(TaskAttachment, attachment_id)
+    if attachment is None or not attachment.storage_key:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
+
+    path = absolute_path(attachment.storage_key)
+    name = download_filename(
+        attachment.filename, mime=attachment.mime, fallback="вложение"
+    )
+    # `dl=1` — та же ссылка, но «сохранить», а не «показать». Отдельный
+    # параметр, а не отдельная ручка: скачивание гигабайтного видео обязано
+    # идти мимо JS (прежний путь тянул файл в память вкладки через
+    # responseType:'blob'), а показ в <video> требует именно inline.
+    disposition = "attachment" if dl else "inline"
+    settings = get_settings()
+    if not settings.media_accel_enabled:
+        if not path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE, detail="Файл на диске отсутствует"
+            )
+        # Range/206 здесь делает Starlette; в проде файл отдаёт nginx (ниже).
+        return FileResponse(
+            path,
+            media_type=attachment.mime,
+            filename=name,
+            content_disposition_type=disposition,
+        )
+
+    return Response(
+        status_code=200,
+        headers={
+            "X-Accel-Redirect": f"/_protected_media/{attachment.storage_key}",
+            "Content-Type": attachment.mime,
+            # Заголовок собираем САМИ, значит и кодируем сами: кириллица в
+            # filename="…" роняет ответ в latin-1 (500).
+            "Content-Disposition": content_disposition(
+                name, disposition_type=disposition
+            ),
+            "Cache-Control": "private, max-age=3600",
+        },
+    )
 
 
 @router.get("/attachments/{attachment_id}/download")
@@ -207,8 +369,3 @@ async def delete_attachment(
     )
     await db.delete(attachment)
     await db.commit()
-
-
-# Keep shutil alive — used elsewhere in storage cleanup paths (future).
-_ = shutil
-_ = Path

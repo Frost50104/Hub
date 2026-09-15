@@ -74,6 +74,10 @@ def test_sniff_real_signatures_pass():
     assert sniff_mismatch("application/msword", _OLE) is False
     assert sniff_mismatch("image/heic", b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00") is False
     assert sniff_mismatch("image/heif", b"\x00\x00\x00\x1cftypmif1") is False
+    # Видео: mp4/mov — тот же ISO-BMFF, что и HEIC; webm — EBML.
+    assert sniff_mismatch("video/mp4", b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00") is False
+    assert sniff_mismatch("video/quicktime", b"\x00\x00\x00\x14ftypqt  ") is False
+    assert sniff_mismatch("video/webm", b"\x1a\x45\xdf\xa3\x01\x00\x00\x00") is False
 
 
 def test_sniff_renamed_executable_is_rejected():
@@ -85,6 +89,13 @@ def test_sniff_renamed_executable_is_rejected():
     assert sniff_mismatch("application/msword", mz) is True
     assert sniff_mismatch("image/heic", mz) is True
     assert sniff_mismatch("image/webp", b"RIFF\x00\x00\x00\x00AVI LIST") is True
+    # Ключевой кейс видео: whitelist обходится переименованием, поэтому
+    # заявленный video/* обязан подтверждаться сигнатурой.
+    assert sniff_mismatch("video/mp4", mz) is True
+    assert sniff_mismatch("video/quicktime", mz) is True
+    assert sniff_mismatch("video/webm", mz) is True
+    # AVI — тоже RIFF, но не WebM: EBML-заголовка в нём нет.
+    assert sniff_mismatch("video/webm", b"RIFF\x00\x00\x00\x00AVI LIST") is True
 
 
 def test_sniff_pdf_with_junk_before_header_passes():
@@ -99,6 +110,49 @@ def test_sniff_skips_text_and_unknown_types():
     assert sniff_mismatch("application/x-unknown", b"MZ") is False
     # Пустой файл — решает whitelist, не сниффер.
     assert sniff_mismatch("image/png", b"") is False
+
+
+def test_octet_stream_video_recovers():
+    """Главная причина, по которой видео не грузилось бы и после правки.
+
+    Файловые менеджеры Android и часть десктопных браузеров отдают видео как
+    `application/octet-stream` — ровно та же история, из-за которой в карте
+    появились `.heic/.heif`. Без восстановления человек снова получил бы 415.
+    """
+    assert resolve_mime("application/octet-stream", "VID_20260915.mp4") == "video/mp4"
+    assert resolve_mime(None, "IMG_0042.MOV") == "video/quicktime"
+    assert resolve_mime("", "screen.webm") == "video/webm"
+    for mime in ("video/mp4", "video/quicktime", "video/webm"):
+        assert mime in ALLOWED_MIME
+
+
+def test_recovered_video_still_faces_the_sniffer():
+    """Почему восстанавливать видео можно, а SVG — нельзя.
+
+    Карта расширений сама по себе whitelist не обходит: следом идёт сниффер, и
+    у всех трёх контейнеров есть однозначная сигнатура. У SVG её нет — поэтому
+    его в карте нет и быть не должно (см. test_octet_stream_svg_not_rescued).
+    """
+    mime = resolve_mime("application/octet-stream", "fake.mp4")
+    assert sniff_mismatch(mime, b"MZ\x90\x00\x03\x00\x00\x00") is True
+
+
+class TestSizeLimit:
+    """Потолок зависит от вида файла: 20 МБ документам, гигабайт видео."""
+
+    def test_video_gets_its_own_ceiling(self):
+        from app.services.attachments import attachment_size_limit
+
+        assert attachment_size_limit("video/mp4") == 1024 * 1024 * 1024
+        assert attachment_size_limit("video/quicktime") == 1024 * 1024 * 1024
+        assert attachment_size_limit("video/webm") == 1024 * 1024 * 1024
+
+    def test_documents_keep_twenty_megabytes(self):
+        from app.services.attachments import attachment_size_limit
+
+        assert attachment_size_limit("application/pdf") == 20 * 1024 * 1024
+        assert attachment_size_limit("image/png") == 20 * 1024 * 1024
+        assert attachment_size_limit("text/plain") == 20 * 1024 * 1024
 
 
 class TestStorageKey:

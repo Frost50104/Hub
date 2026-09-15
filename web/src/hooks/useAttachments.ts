@@ -21,10 +21,23 @@ export function useAttachments(
   })
 }
 
+/**
+ * Переменные мутации — объект, а не голый `File`, ради `onProgress`.
+ *
+ * Состояние прогресса живёт в КОМПОНЕНТЕ, а не в хуке: гигабайтная загрузка
+ * идёт десятки минут, и это ровно то время, когда пользователь ждёт обратной
+ * связи именно от той дропзоны, в которую бросил файл.
+ */
+export interface UploadAttachmentVars {
+  file: File
+  onProgress?: (fraction: number) => void
+}
+
 export function useUploadAttachment(taskId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (file: File) => attachmentsApi.upload(taskId, file),
+    mutationFn: ({ file, onProgress }: UploadAttachmentVars) =>
+      attachmentsApi.upload(taskId, file, onProgress),
     meta: { errorMessage: 'Не удалось загрузить файл' },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.list(taskId) })

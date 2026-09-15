@@ -21,3 +21,7 @@ class AttachmentResponse(BaseModel):
     # Enriched via JOIN shadow_users (optional — may be null if reaped).
     uploader_email: str | None = None
     uploader_full_name: str | None = None
+    # Подписанный адрес для тега <video>; заполняется ТОЛЬКО у video/*.
+    # Одиночные ручки (загрузка, удаление) его тоже отдают — поле собирает
+    # общий `_list_enriched`, другого пути в ответ у вложения нет.
+    preview_url: str | None = None

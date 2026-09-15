@@ -59,9 +59,17 @@ TEXT_MAX = 5000
 # Десять — с запасом на «серия скриншотов одного бага»; упрётся кто-то —
 # поднять здесь и в `web/src/lib/feedback.ts` ПАРОЙ.
 MAX_FILES = 10
-# Потолок на всю отправку. Каждый файл и так ограничен `attachment_max_bytes`
-# (20 МБ), но десять таких — это 200 МБ в одном запросе на машине с 2 ГБ.
-TOTAL_BYTES_MAX = 50 * 1024 * 1024
+# Потолок на ОДИН файл — свой, а не общий `attachment_size_limit`. Вложение
+# задачи с 15.09 принимает видео до гигабайта; форме обратной связи столько не
+# нужно и нельзя: её адрес живёт под общей локацией nginx с `client_max_body_size
+# 25M`, то есть большой файл всё равно упёрся бы в 413 без внятного текста.
+FILE_BYTES_MAX = 20 * 1024 * 1024
+# Потолок на всю отправку. Раньше здесь стояло 50 МБ — БОЛЬШЕ, чем принимает
+# nginx: набор на 30 МБ проходил все четыре клиентские проверки и получал
+# голый 413 (замер 15.09 на проде: 413 после 65 КБ отправленного). Число
+# обязано остаться НИЖЕ `client_max_body_size`; зеркало — `FEEDBACK_TOTAL_MAX`
+# в `web/src/lib/feedbackFiles.ts`, менять ПАРОЙ.
+TOTAL_BYTES_MAX = 24 * 1024 * 1024
 
 
 class FeedbackResponse(BaseModel):
@@ -193,6 +201,7 @@ async def send_feedback(
                     tenant_id=principal.tenant_id,
                     task_id=task.id,
                     uploaded_by=principal.employee_id,
+                    max_bytes=FILE_BYTES_MAX,
                 )
                 written.append(attachment.storage_key)
                 total += attachment.size_bytes
