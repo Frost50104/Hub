@@ -11,12 +11,14 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from fastapi import HTTPException
 from signaris_auth import Principal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.calendar import list_calendar_tasks
 from app.api.me import get_me
+from app.api.me_delegate import DelegateCreate, delegate_personal_task, list_delegated
 from app.api.me_tasks import list_my_tasks
 from app.api.projects import (
     archive_project,
@@ -31,7 +33,13 @@ from app.api.projects import (
 from app.api.search import search
 from app.api.share import create_project_share
 from app.api.stats import get_stats
-from app.api.tasks import create_task, delete_task, get_task, list_tasks
+from app.api.tasks import (
+    create_task,
+    delete_task,
+    get_task,
+    list_tasks,
+    update_task,
+)
 from app.api.timeline import get_timeline
 from app.models.project import Project, ProjectMember
 from app.models.stage import ProjectStage
@@ -43,7 +51,7 @@ from app.schemas.project import (
     ProjectUpdate,
 )
 from app.schemas.share import ShareCreate
-from app.schemas.task import TaskCreate
+from app.schemas.task import TaskCreate, TaskUpdate
 from app.services.onboarding import GUIDE_TASK_TITLE
 from app.services.personal_projects import (
     PERSONAL_KEY_BASE,
@@ -392,6 +400,130 @@ def _guide_id(tasks):
     return next(t.id for t in tasks if t.title == GUIDE_TASK_TITLE)
 
 
+# ─── Поручение задачи в ЧУЖОЕ личное (15.09) ────────────────────────────────
+
+
+async def _delegated(db, tenant_id, slug):
+    """(автор, получатель, id личного получателя, поручённая задача).
+
+    Строится «снизу вверх», в отличие от `_shared_personal`: задачу заводит
+    ПОСТОРОННИЙ, а не владелец личного. До 15.09 такой путь был закрыт вовсе —
+    `POST /projects/{id}/tasks` отвечал автору 404.
+    """
+    author = await _member(db, tenant_id, f"{slug}-a")
+    target = await _member(db, tenant_id, f"{slug}-t", email=f"{slug}-target@t.ru")
+    personal_id = await ensure_personal_project(db, target)
+    # Личная заметка получателя — её автор видеть НЕ должен.
+    await create_task(personal_id, TaskCreate(title="Записаться к врачу"), target, db)
+    await db.commit()
+
+    task = await delegate_personal_task(
+        DelegateCreate(employee_id=target.employee_id, title="Собрать акты"),
+        author,
+        db,
+    )
+    return author, target, personal_id, task
+
+
+async def test_delegate_puts_task_into_personal_inbox(db, tenant_id):
+    author, target, personal_id, task = await _delegated(db, tenant_id, "dl-put")
+    assert task.project_id == personal_id
+    # Исполнитель — получатель, а не автор: иначе задача осела бы у автора.
+    assert [a.employee_id for a in task.assignees] == [target.employee_id]
+    # Личная задача заводится без колонки — это список дел, а не доска.
+    assert task.stage_id is None
+
+
+async def test_author_sees_only_delegated_task(db, tenant_id):
+    author, target, personal_id, task = await _delegated(db, tenant_id, "dl-scope")
+    # Ровно то, ради чего затевалось: автор видит СВОЮ задачу и ничего больше.
+    visible = await _tasks(db, personal_id, author)
+    assert [t.id for t in visible] == [task.id]
+
+    # А получатель видит и её, и свою заметку, и задачу-инструкцию.
+    owner_view = await _tasks(db, personal_id, target)
+    assert task.id in {t.id for t in owner_view}
+    assert len(owner_view) == 3
+
+
+async def test_author_cannot_open_other_personal_tasks(db, tenant_id):
+    author, target, personal_id, _task = await _delegated(db, tenant_id, "dl-private")
+    private = next(
+        t for t in await _tasks(db, personal_id, target) if t.title == "Записаться к врачу"
+    )
+    with pytest.raises(HTTPException) as err:
+        await get_task(private.id, author, db)
+    # 404, а не 403: существование чужой личной задачи скрываем.
+    assert err.value.status_code == 404
+
+
+async def test_author_blocked_from_aggregates(db, tenant_id):
+    author, _target, personal_id, _task = await _delegated(db, tenant_id, "dl-aggr")
+    with pytest.raises(HTTPException) as err:
+        await get_stats(personal_id, principal=author, db=db)
+    assert err.value.status_code == 403
+
+
+async def test_author_gets_no_counts_of_foreign_personal(db, tenant_id):
+    author, _target, personal_id, _task = await _delegated(db, tenant_id, "dl-counts")
+    # Членство открывает карточку проекта — но не число чужих заметок в ней.
+    as_guest = await get_project(personal_id, author, db)
+    assert as_guest.task_count is None
+    assert as_guest.done_count is None
+
+
+async def test_author_edits_and_withdraws_own_delegation(db, tenant_id):
+    author, _target, _personal_id, task = await _delegated(db, tenant_id, "dl-edit")
+    # Автор там viewer, но СВОЮ задачу правит: иначе опечатку не исправить.
+    updated = await update_task(task.id, TaskUpdate(title="Собрать акты до пятницы"), author, db)
+    assert updated.title == "Собрать акты до пятницы"
+    # И отзывает её целиком.
+    await delete_task(task.id, author, db)
+    assert await db.get(Task, task.id) is None
+
+
+async def test_target_can_close_delegated_task(db, tenant_id):
+    _author, target, _personal_id, task = await _delegated(db, tenant_id, "dl-close")
+    done = await update_task(task.id, TaskUpdate(done=True), target, db)
+    assert done.done is True
+
+
+async def test_delegated_shows_up_in_my_section(db, tenant_id):
+    author, target, _personal_id, task = await _delegated(db, tenant_id, "dl-list")
+    mine = await list_delegated(author, db)
+    assert [t.id for t in mine] == [task.id]
+    # Закрытые уходят из секции: «Я поставил» — про незавершённое.
+    await update_task(task.id, TaskUpdate(done=True), target, db)
+    await db.commit()
+    assert await list_delegated(author, db) == []
+    # И чужие поручения в свою секцию не подмешиваются.
+    assert await list_delegated(target, db) == []
+
+
+async def test_delegate_refuses_self(db, tenant_id):
+    author = await _member(db, tenant_id, "dl-self")
+    await ensure_personal_project(db, author)
+    await db.commit()
+    with pytest.raises(HTTPException) as err:
+        await delegate_personal_task(
+            DelegateCreate(employee_id=author.employee_id, title="Сам себе"), author, db
+        )
+    assert err.value.status_code == 400
+
+
+async def test_delegate_refuses_when_target_never_logged_in(db, tenant_id):
+    author = await _member(db, tenant_id, "dl-new-a")
+    target = await _member(db, tenant_id, "dl-new-t", email="dl-new-target@t.ru")
+    # Личного пространства у получателя нет — оно заводится при первом входе.
+    with pytest.raises(HTTPException) as err:
+        await delegate_personal_task(
+            DelegateCreate(employee_id=target.employee_id, title="Подготовить смену"),
+            author,
+            db,
+        )
+    assert err.value.status_code == 409
+
+
 # ─── Приватность внутри чужого личного ──────────────────────────────────────
 
 
@@ -494,16 +626,33 @@ async def test_guest_blocked_from_aggregates(db, tenant_id):
         assert exc.value.status_code == 403
 
 
-async def test_admin_keeps_pointwise_access(db, tenant_id):
-    """Решение владельца: точечный доступ админа по ссылке остаётся."""
+async def test_admin_does_not_see_foreign_personal(db, tenant_id):
+    """Решение владельца 15.09: админ в чужом личном — такой же гость.
+
+    Прежде у него был точечный доступ по прямой ссылке («разобраться, когда
+    человек просит помочь»). Владелец зашёл под админской учёткой, увидел в
+    чужом личном проекте чужие заметки и сказал: «я не должен видеть её личные
+    задачи, где я не участник».
+    """
     _owner, _guest, personal_id, _shared, private_id = await _shared_personal(
         db, tenant_id, "pp-adm-point"
     )
     admin = await _member(db, tenant_id, "pp-adm-point-a", role="admin", org_role=None)
     await db.commit()
-    assert (await get_task(private_id, admin, db)).id == private_id
-    # Две созданные тестом задачи + задача-инструкция от первого входа.
-    assert len(await _tasks(db, personal_id, admin)) == 3
+    # 404, а не 403: существование чужой личной задачи скрываем и от админа.
+    with pytest.raises(HTTPException) as err:
+        await get_task(private_id, admin, db)
+    assert err.value.status_code == 404
+    # Список пуст: он там никто — ни исполнитель, ни наблюдатель.
+    assert await _tasks(db, personal_id, admin) == []
+    # Удалить то, чего не видит, тоже нельзя — иначе «не вижу, но стираю».
+    with pytest.raises(HTTPException) as del_err:
+        await delete_task(private_id, admin, db)
+    assert del_err.value.status_code == 404
+    # Агрегаты — 403, как любому приглашённому.
+    with pytest.raises(HTTPException) as stats_err:
+        await get_stats(personal_id, principal=admin, db=db)
+    assert stats_err.value.status_code == 403
 
 
 # ─── /me/tasks ──────────────────────────────────────────────────────────────

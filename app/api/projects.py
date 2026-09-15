@@ -43,7 +43,11 @@ from app.services.attachments import (
     sniff_mismatch,
 )
 from app.services.learn_media import check_free_space
-from app.services.personal_projects import assert_not_personal, not_personal
+from app.services.personal_projects import (
+    assert_not_personal,
+    not_personal,
+    personal_task_scope,
+)
 from app.services.project_access import (
     CREATE_PROJECT_DENIED,
     EDIT_ROLES,
@@ -260,13 +264,22 @@ async def get_project(
     member_role, is_favorite = await _my_membership(
         db, project_id, principal.employee_id
     )
-    counts = await _task_counts(db, [project_id])
+    # Гостю в ЧУЖОМ личном счётчики НЕ отдаём (15.09): членство там выдаётся
+    # ради одной задачи — назначением, упоминанием или поручением, — а
+    # `_task_counts` считает по ВСЕМ задачам проекта и выдал бы «37 задач, 12
+    # закрыто» про чужие заметки. Задач гость не получит (`personal_task_scope`),
+    # но и числа ему знать незачем. `None` клиент понимает как «не знаем» и
+    # счётчик просто не рисует.
+    hide_counts = personal_task_scope(project, principal) is not None
+    counts = None if hide_counts else (await _task_counts(db, [project_id])).get(
+        project_id, (0, 0)
+    )
     return _project_to_response(
         project,
         my_role or member_role,
         is_favorite,
         principal=principal,
-        counts=counts.get(project_id, (0, 0)),
+        counts=counts,
     )
 
 

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   createdTaskLocation,
+  createTaskReady,
+  DELEGATE_TARGET,
   PERSONAL_TARGET,
   createTaskTargets,
   initialTarget,
@@ -76,6 +78,35 @@ describe('resolveProjectId', () => {
   it('нет личного проекта — писать некуда', () => {
     expect(resolveProjectId(PERSONAL_TARGET, null)).toBeNull()
     expect(resolveProjectId(PERSONAL_TARGET, undefined)).toBeNull()
+  })
+})
+
+describe('поручение в чужое личное', () => {
+  it('проектом не адресуется — его резолвит сервер по человеку', () => {
+    expect(resolveProjectId(DELEGATE_TARGET, 'my-personal')).toBeNull()
+  })
+
+  it('без выбранного человека форма не отправляется', () => {
+    const base = { target: DELEGATE_TARGET, title: 'Собрать акты', projectId: null }
+    expect(createTaskReady({ ...base, delegateTo: null })).toBe(false)
+    expect(createTaskReady({ ...base, delegateTo: 'emp-1' })).toBe(true)
+  })
+
+  it('обычной задаче человек не нужен, а проект обязателен', () => {
+    const base = { target: 'proj-1', title: 'Задача', delegateTo: null }
+    expect(createTaskReady({ ...base, projectId: 'proj-1' })).toBe(true)
+    expect(createTaskReady({ ...base, projectId: null })).toBe(false)
+  })
+
+  it('пустое название не отправляется ни в одной ветке', () => {
+    expect(
+      createTaskReady({
+        target: DELEGATE_TARGET,
+        title: '   ',
+        projectId: null,
+        delegateTo: 'emp-1',
+      }),
+    ).toBe(false)
   })
 })
 

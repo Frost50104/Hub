@@ -6,6 +6,7 @@ import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { MobileTaskRow } from '@/components/task/MobileTaskRow'
+import { DelegatedSection } from '@/components/task/DelegatedSection'
 import { PersonalTasksSection } from '@/components/task/PersonalTasksSection'
 import { TaskDetailDrawer } from '@/components/task/TaskDetailDrawer'
 import { TaskEmptyState, TaskListSkeleton } from '@/components/task/TaskListStates'
@@ -220,6 +221,7 @@ function DesktopMyTasks({ personal }: { personal: PersonalPane }) {
       </header>
 
       {personalSection(personal, 'desktop')}
+      <DelegatedSection variant="desktop" onOpenTask={openTask} />
 
       {/* Граница вкладок читается как «фильтр, и всё под ним — его результат»:
           секция «ЛИЧНОЕ» стоит ВЫШЕ неё и окнам дедлайнов не подчиняется. */}
@@ -307,6 +309,7 @@ function MobileMyTasks({ personal }: { personal: PersonalPane }) {
       <MobilePageHeader title="Мои задачи" />
 
       {personalSection(personal, 'mobile')}
+      <DelegatedSection variant="mobile" onOpenTask={openTask} />
 
       {/* Полоса на --tint с одной пилюлей-фильтром (иконка Filter): это
           фильтр выборки, а не вкладка — и выглядит как фильтр. */}

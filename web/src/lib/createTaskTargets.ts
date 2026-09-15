@@ -15,6 +15,15 @@ export interface CreateTaskTarget {
 export const PERSONAL_TARGET = ''
 
 /**
+ * «Личные задачи сотрудника» — поручение (15.09).
+ *
+ * Отдельное значение, а не id проекта: чужой личный проект клиенту неизвестен
+ * и знать его он не должен (`GET /projects` личные не отдаёт никому). Адресуем
+ * человеком, проект резолвит сервер — `POST /api/me/delegate`.
+ */
+export const DELEGATE_TARGET = 'delegate'
+
+/**
  * Проекты, куда человек реально может писать.
  *
  * Фильтр по `can_edit` обязателен: `GET /projects` отдаёт и те, где ты
@@ -56,8 +65,27 @@ export function resolveProjectId(
   target: string,
   personalProjectId: string | null | undefined,
 ): string | null {
+  // Поручение проектом не адресуется — его резолвит сервер по человеку.
+  if (target === DELEGATE_TARGET) return null
   if (target !== PERSONAL_TARGET) return target
   return personalProjectId ?? null
+}
+
+/**
+ * Можно ли отправлять форму.
+ *
+ * Три ветки вместо одной `projectId !== null`: у поручения проекта нет вовсе,
+ * зато обязателен выбранный человек — без него форма молча улетала бы в 422.
+ */
+export function createTaskReady(input: {
+  target: string
+  title: string
+  projectId: string | null
+  delegateTo: string | null
+}): boolean {
+  if (!input.title.trim()) return false
+  if (input.target === DELEGATE_TARGET) return input.delegateTo !== null
+  return input.projectId !== null
 }
 
 /**

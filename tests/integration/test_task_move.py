@@ -602,8 +602,15 @@ async def test_editor_without_rights_in_the_target_is_refused(
 async def test_someone_elses_personal_is_refused_even_to_admin(
     db: AsyncSession, tenant_id: uuid.UUID
 ):
-    """`require_project_role` пропускает админа мимо членства, а
-    `personal_task_scope` для него возвращает None — общий гейт не помешал бы."""
+    """Чужое личное закрыто админу с ОБЕИХ сторон, но ответы разные.
+
+    Втолкнуть задачу в чужое личное — 409 из `assert_movable`: саму задачу
+    админ видит, отказ по направлению переноса. Вытащить оттуда — 404 ещё
+    раньше, на чтении: с 15.09 `personal_task_scope` админа не пропускает
+    («я не должен видеть её личные задачи, где я не участник»), и о
+    существовании чужой заметки он не узнаёт. Общий `require_project_role` не
+    помешал бы ни тому, ни другому — он пропускает админа мимо членства.
+    """
     owner, source, _target = await _pair(db, tenant_id, "mv16")
     admin = make_principal(
         tenant_id, email="adm-mv16@t.ru", role="admin", tenant_slug="mv16"
@@ -624,7 +631,7 @@ async def test_someone_elses_personal_is_refused_even_to_admin(
     await db.commit()
     with pytest.raises(HTTPException) as out_of:
         await move_task(mine.id, TaskMoveRequest(project_id=source.id), admin, db)
-    assert out_of.value.status_code == 409
+    assert out_of.value.status_code == 404
 
 
 async def test_own_personal_moves_both_ways(db: AsyncSession, tenant_id: uuid.UUID):

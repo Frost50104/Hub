@@ -13,11 +13,15 @@ import {
 } from '@/components/ui/Dialog'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
+import { PeoplePicker } from '@/components/PeoplePicker'
+import { useDelegateTask } from '@/hooks/useDelegated'
 import { useMe } from '@/hooks/useMe'
 import { useProjects } from '@/hooks/useProjects'
 import { useCreateTask } from '@/hooks/useTasks'
 import {
   createdTaskLocation,
+  createTaskReady,
+  DELEGATE_TARGET,
   PERSONAL_TARGET,
   createTaskTargets,
   initialTarget,
@@ -66,6 +70,7 @@ export function CreateTaskDialog({
   const personalProjectId = useMe().data?.personal_project_id ?? null
   const targets = createTaskTargets(projects.data)
   const [target, setTarget] = useState<string>(PERSONAL_TARGET)
+  const [delegateTo, setDelegateTo] = useState<string | null>(null)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
 
@@ -79,13 +84,31 @@ export function CreateTaskDialog({
 
   const projectId = resolveProjectId(target, personalProjectId)
   const isPersonal = target === PERSONAL_TARGET
+  const isDelegate = target === DELEGATE_TARGET
   const create = useCreateTask(projectId ?? '')
+  const delegate = useDelegateTask()
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const trimmed = title.trim()
-    if (!trimmed || !projectId) return
+    if (!createTaskReady({ target, title, projectId, delegateTo })) return
     try {
+      if (isDelegate && delegateTo) {
+        // Поручение: задача уходит в личное пространство человека, и адрес её
+        // карточки автору не нужен — он найдёт её в секции «Я поставил».
+        await delegate.mutateAsync({
+          employee_id: delegateTo,
+          title: trimmed,
+          description: description.trim() || undefined,
+        })
+        toast.success('Задача поручена лично')
+        setTitle('')
+        setDescription('')
+        setDelegateTo(null)
+        onOpenChange(false)
+        return
+      }
+      if (!projectId) return
       const created = await create.mutateAsync({
         title: trimmed,
         description: description.trim() || undefined,
@@ -131,9 +154,11 @@ export function CreateTaskDialog({
             <DialogDescription>
               {nowhereToWrite
                 ? 'Вам пока некуда добавить задачу: в рабочих проектах вы наблюдатель, а личное пространство не заведено. Обратитесь к администратору.'
-                : isPersonal
-                  ? 'Без проекта — задача попадёт в ваши личные задачи, коллеги её не увидят.'
-                  : 'Задача попадёт в выбранный проект и будет видна его участникам.'}
+                : isDelegate
+                  ? 'Задача ляжет в личные задачи сотрудника: увидите её только вы двое, остальные его личные задачи вам не откроются.'
+                  : isPersonal
+                    ? 'Без проекта — задача попадёт в ваши личные задачи, коллеги её не увидят.'
+                    : 'Задача попадёт в выбранный проект и будет видна его участникам.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -155,8 +180,25 @@ export function CreateTaskDialog({
                     {t.label}
                   </option>
                 ))}
+                {/* Последним пунктом: поручение — не «ещё один проект», а
+                    отдельный адресат, и в общий список проектов его личное
+                    пространство не попадает никогда. */}
+                <option value={DELEGATE_TARGET}>Личные задачи сотрудника…</option>
               </select>
             </div>
+
+            {isDelegate && (
+              <div className="space-y-1.5">
+                <Label htmlFor="task-delegate">Кому</Label>
+                <PeoplePicker
+                  value={delegateTo}
+                  onChange={setDelegateTo}
+                  placeholder="Выберите сотрудника"
+                  sheetTitle="Кому поручить"
+                  allowClear={false}
+                />
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label htmlFor="task-title">Название</Label>
@@ -185,15 +227,23 @@ export function CreateTaskDialog({
               type="button"
               variant="secondary"
               onClick={() => onOpenChange(false)}
-              disabled={create.isPending}
+              disabled={create.isPending || delegate.isPending}
             >
               Отмена
             </Button>
             <Button
               type="submit"
-              disabled={create.isPending || !title.trim() || !projectId}
+              disabled={
+                create.isPending ||
+                delegate.isPending ||
+                !createTaskReady({ target, title, projectId, delegateTo })
+              }
             >
-              {create.isPending ? 'Создаём…' : 'Создать'}
+              {create.isPending || delegate.isPending
+                ? 'Создаём…'
+                : isDelegate
+                  ? 'Поручить'
+                  : 'Создать'}
             </Button>
           </DialogFooter>
         </form>

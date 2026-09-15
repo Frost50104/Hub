@@ -216,6 +216,7 @@ def create_app() -> FastAPI:
     from app.api import learn_search as learn_search_api
     from app.api import library as library_api
     from app.api import me as me_api
+    from app.api import me_delegate as me_delegate_api
     from app.api import me_tasks as me_tasks_api
     from app.api import media as media_api
     from app.api import news as news_api
@@ -246,6 +247,7 @@ def create_app() -> FastAPI:
     app.include_router(guides_api.router, prefix="/api")
     app.include_router(me_api.router, prefix="/api")
     app.include_router(me_tasks_api.router, prefix="/api")
+    app.include_router(me_delegate_api.router, prefix="/api")
     app.include_router(projects_api.router, prefix="/api")
     app.include_router(project_folders_api.router, prefix="/api")
     app.include_router(stages_api.router, prefix="/api")

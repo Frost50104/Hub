@@ -37,11 +37,14 @@ from app.schemas.task import (
 from app.services.activity_writer import record_activity
 from app.services.attachments import purge_blobs
 from app.services.notify import notify_done_changed
-from app.services.personal_projects import personal_task_scope, require_task_access
+from app.services.personal_projects import (
+    may_edit_delegated,
+    personal_task_scope,
+    require_task_access,
+)
 from app.services.project_access import (
     EDIT_ROLES,
     ProjectRole,
-    is_hub_admin,
     require_project_role,
 )
 from app.services.recurrence_dates import describe
@@ -309,6 +312,14 @@ async def update_task(
     allow: tuple[ProjectRole, ...] = ("owner", "editor")
     if touched and touched <= ASSIGNEE_EDITABLE_FIELDS and await is_task_assignee(
         db, task.id, principal.employee_id
+    ):
+        allow = ("owner", "editor", "viewer")
+    # Поручение в чужое личное (15.09): автор там viewer, но СВОЮ задачу правит
+    # целиком — иначе не исправить опечатку и не отозвать её. Правило узкое,
+    # см. `personal_projects.may_edit_delegated`.
+    project_for_rule = await db.get(Project, task.project_id)
+    if project_for_rule is not None and may_edit_delegated(
+        task, project_for_rule, principal
     ):
         allow = ("owner", "editor", "viewer")
     await require_task_access(db, task, principal, allow=allow)
@@ -835,8 +846,20 @@ async def delete_task(
     task = await db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
-    if not is_hub_admin(principal):
-        await require_task_access(db, task, principal, allow=EDIT_ROLES)
+    # Админ проходит гейт ролей внутри `require_task_access` (байпас в
+    # `require_project_role`), но НЕ обходит видимость: с 15.09
+    # `personal_task_scope` не делает для него исключений, и удалять то, чего
+    # он не может открыть, нельзя — иначе «не вижу, но стираю».
+    #
+    # Автор поручения отзывает СВОЮ задачу из чужого личного, оставаясь там
+    # viewer'ом (15.09) — см. `may_edit_delegated`.
+    project_for_rule = await db.get(Project, task.project_id)
+    allow_delete: tuple[ProjectRole, ...] = EDIT_ROLES
+    if project_for_rule is not None and may_edit_delegated(
+        task, project_for_rule, principal
+    ):
+        allow_delete = ("owner", "editor", "viewer")
+    await require_task_access(db, task, principal, allow=allow_delete)
 
     # Ключи блобов — ДО удаления и вместе с подзадачами: их вложения уедут тем
     # же каскадом, а файлы остались бы на диске навсегда.
