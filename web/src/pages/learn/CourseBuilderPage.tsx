@@ -110,6 +110,26 @@ export function CourseBuilderPage() {
   // браузере возвращал бы его же. Сразу после применения параметр снимаем.
   const deepLinkUsed = useRef(false)
   const [audienceOpen, setAudienceOpen] = useState(false)
+  // Высоту топбара МЕРЯЕМ, а не хардкодим: он flex-wrap, и на узком десктопе
+  // (1024-1200px) с длинным названием курса переносится на вторую строку —
+  // константа спрятала бы под ним липкую панель редактора.
+  const topbarRef = useRef<HTMLDivElement | null>(null)
+  const [topbarHeight, setTopbarHeight] = useState(0)
+
+  useEffect(() => {
+    const node = topbarRef.current
+    if (!node) {
+      setTopbarHeight(0)
+      return undefined
+    }
+    // Меряем ГРАНИЧНУЮ рамку, а не contentRect: у топбара py-3 + border-b, и
+    // content-box отдавал 41px вместо фактических 65 — панель уезжала под него.
+    const ro = new ResizeObserver(() => {
+      setTopbarHeight(Math.round(node.getBoundingClientRect().height))
+    })
+    ro.observe(node)
+    return () => ro.disconnect()
+  }, [isDesktop, data])
   const [assignOpen, setAssignOpen] = useState(false)
   const navigate = useNavigate()
   const setStatus = useCourseMutation((status: ContentStatus) =>
@@ -139,15 +159,29 @@ export function CourseBuilderPage() {
     : ''
 
   return (
-    <div className={isDesktop ? undefined : 'mx-auto max-w-3xl'}>
+    <div
+      className={isDesktop ? undefined : 'mx-auto max-w-3xl'}
+      // Липкая панель редактора встаёт ПОД топбаром: смещение отдаём
+      // переменной, чтобы RichEditor ничего не знал про своё окружение
+      // (в редакторе новостей топбара нет, и там переменная не ставится).
+      style={{ '--rich-toolbar-top': `${topbarHeight}px` } as CSSProperties}
+    >
       {!isDesktop && (
         <MobilePageHeader eyebrow="Конструктор" title={data?.title ?? 'Курс'} />
       )}
       {/* Десктопный топбар по макету «Конструктор»: назад-чип, название и
           мета, бейдж статуса, действия курса — lifecycle тут, а не в карточке
-          настроек; в карточке остаются сохранение и удаление. */}
+          настроек; в карточке остаются сохранение и удаление.
+          z-20, а НЕ z-10: липкая панель редактора тоже z-10 и лежит НИЖЕ по
+          дереву — на равном слое она перекрывала топбар в тот момент, когда
+          конец карточки редактора выталкивает её вверх (ОС 14.09: «в нижнем
+          положении панель наезжает на другие элементы»). Панель обязана
+          уезжать ЗА топбар, а не поверх него. */}
       {isDesktop && data && (
-        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b border-hair bg-bg px-5 py-3">
+        <div
+          ref={topbarRef}
+          className="sticky top-0 z-20 flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b border-hair bg-bg px-5 py-3"
+        >
           <Link
             to="/learn/courses"
             className="inline-flex h-9 shrink-0 items-center gap-[7px] rounded-[10px] border border-glass-border px-3 text-[13px] font-semibold text-text2 hover:text-text"

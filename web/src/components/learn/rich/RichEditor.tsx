@@ -85,11 +85,23 @@ function ToolbarButton({
  * тулбар в обычном состоянии не распухает. */
 function TableControls({ editor }: { editor: Editor }) {
   const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLSpanElement | null>(null)
+  const [anchored, setAnchored] = useState<{ top: number; left: number } | null>(null)
   const [rows, setRows] = useState(3)
   const [cols, setCols] = useState(3)
   const [withHeader, setWithHeader] = useState(true)
 
   const inTable = editor.isActive('table')
+
+  // Координаты берём в момент открытия: панель липкая, но пока поповер открыт,
+  // она не движется (страница под ним не прокручивается пальцем по кнопке).
+  useEffect(() => {
+    if (!open) return setAnchored(null)
+    if (window.matchMedia('(min-width: 1024px)').matches) return setAnchored(null)
+    const rect = btnRef.current?.getBoundingClientRect()
+    if (rect) setAnchored({ top: Math.round(rect.bottom), left: Math.round(rect.left) })
+    return undefined
+  }, [open])
 
   const insert = () => {
     editor
@@ -135,12 +147,26 @@ function TableControls({ editor }: { editor: Editor }) {
   }
 
   return (
-    <span className="relative shrink-0">
-      <ToolbarButton title="Вставить таблицу" active={open} onClick={() => setOpen((v) => !v)}>
+    <span ref={btnRef} className="relative shrink-0">
+      <ToolbarButton
+        title="Вставить таблицу"
+        active={open}
+        onClick={() => setOpen((v) => !v)}
+      >
         <TableIcon className="h-4 w-4" />
       </ToolbarButton>
       {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 w-44 space-y-2 rounded-lg border border-glass-border bg-bg-alt p-2 shadow-glass">
+        <div
+          // Ниже lg панель — горизонтально прокручиваемая полоса, а
+          // `overflow-x: auto` по спецификации делает и `overflow-y: auto`:
+          // absolute-поповер обрезался бы. Там считаем координаты от кнопки и
+          // выходим из потока целиком.
+          style={anchored ?? undefined}
+          className={cn(
+            'z-20 mt-1 w-44 space-y-2 rounded-lg border border-glass-border bg-bg-alt p-2 shadow-glass',
+            anchored ? 'fixed' : 'absolute left-0 top-full',
+          )}
+        >
           <label className="flex items-center justify-between gap-2 text-xs text-text2">
             Строк
             <input
@@ -214,7 +240,7 @@ function Toolbar({ editor }: { editor: Editor }) {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-0.5 border-b border-glass-border p-1">
+    <div className="flex flex-nowrap items-center gap-0.5 overflow-x-auto border-b border-glass-border p-1 [scrollbar-width:none] lg:flex-wrap lg:overflow-visible">
       <ToolbarButton
         title="Жирный"
         active={editor.isActive('bold')}
@@ -459,12 +485,28 @@ export default function RichEditor({
         className,
       )}
     >
-      <Toolbar editor={editor} />
-      {extraToolbar && (
-        <div className="flex flex-wrap items-center gap-0.5 border-b border-glass-border p-1">
-          {extraToolbar(editor)}
-        </div>
-      )}
+      {/* Панель едет вместе с текстом: на длинном уроке за фото и заголовком
+          больше не надо возвращаться в начало страницы (ОС 14.09). Липкость
+          ограничена этой карточкой — ушли ниже редактора, панель отцепилась.
+
+          `top` считаем из двух переменных: `--rich-toolbar-top` ставит
+          страница (в конструкторе там высота липкого топбара, в новостях её
+          нет), `--safe-top` — вырез статус-бара, который на мобильном теперь
+          обязан учитывать сам липкий элемент.
+
+          На телефоне строки меняются местами: медиа сверху — за фото тянутся
+          чаще, чем за курсивом, а полоса прокручивается вбок. */}
+      <div
+        style={{ top: 'calc(var(--safe-top, 0px) + var(--rich-toolbar-top, 0px))' }}
+        className="sticky z-10 flex flex-col-reverse rounded-t-lg bg-bg-alt lg:flex-col"
+      >
+        <Toolbar editor={editor} />
+        {extraToolbar && (
+          <div className="flex flex-nowrap items-center gap-0.5 overflow-x-auto border-b border-glass-border p-1 [scrollbar-width:none] lg:flex-wrap lg:overflow-visible">
+            {extraToolbar(editor)}
+          </div>
+        )}
+      </div>
       <EditorContent editor={editor} />
     </div>
   )

@@ -107,8 +107,15 @@ export function Shell() {
           20px и фон --bg закрывают точечную сетку, а overflow-y:auto заодно
           подрезает контент под форму. На мобильном панели нет — там скроллится
           документ, и скругление было бы лишним. */}
+      {/* `overflow-y-auto` — ТОЛЬКО с lg. На мобильном скроллится документ, а
+          лишний overflow делал <main> скролл-портом для липких потомков: они
+          привязывались к нему и уезжали вместе со страницей, то есть
+          `position: sticky` не работал на телефоне НИГДЕ (замер 14.09: липкий
+          элемент ушёл с top 487 на −113). Следствие для страниц: sticky теперь
+          держится за вьюпорт, и верхний вырез ему нужно учитывать самому —
+          `--safe-top` раздаёт padding'ом ниже, а не позицией. */}
       <main
-        className="min-w-0 flex-1 overflow-y-auto pb-20 lg:rounded-[20px] lg:bg-bg lg:pb-0 lg:overflow-y-auto"
+        className="min-w-0 flex-1 pb-20 lg:rounded-[20px] lg:bg-bg lg:pb-0 lg:overflow-y-auto"
         style={
           !isDesktop
             ? {

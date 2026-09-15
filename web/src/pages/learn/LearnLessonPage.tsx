@@ -244,8 +244,12 @@ export function LearnLessonPage() {
           отжимала бы крупную вниз на свою высоту. */}
       {data && (
         <div
+          // `top` из переменной, а не `top-0`: с 14.09 sticky на мобильном
+          // держится за вьюпорт, и без выреза шапка залезла бы под статус-бар
+          // в PWA на домашнем экране (на десктопе env() даёт 0).
+          style={{ top: 'var(--safe-top, 0px)' }}
           className={cn(
-            'sticky top-0 z-20 h-0 transition-[opacity,transform] duration-[180ms] ease-out',
+            'sticky z-20 h-0 transition-[opacity,transform] duration-[180ms] ease-out',
             showMini
               ? 'translate-y-0 opacity-100'
               : 'pointer-events-none -translate-y-2 opacity-0',
