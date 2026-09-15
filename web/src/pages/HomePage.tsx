@@ -302,8 +302,8 @@ function MobileHome() {
                 <MobileTaskRow
                   key={t.id}
                   task={t}
-                  context="fallback"
-                  fallback={projectName(t.project_id)}
+                  context="plain"
+                  project={projectName(t.project_id)}
                   onClick={() => openTask(t.id, t.project_id)}
                   onToggleDone={() => toggleDone(t)}
                 />

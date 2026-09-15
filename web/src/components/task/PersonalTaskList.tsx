@@ -4,11 +4,11 @@ import { QueryError } from '@/components/QueryError'
 import { MobileTaskRow } from '@/components/task/MobileTaskRow'
 import { TaskInlineCreate } from '@/components/task/TaskInlineCreate'
 import { TaskRow } from '@/components/task/TaskRow'
-import { hasTaskContext } from '@/components/task/TaskContextLine'
 import { usePersonalTasks } from '@/hooks/usePersonalTasks'
 import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { personalListView } from '@/lib/personalTasks'
+import { hasTaskContext } from '@/lib/taskContext'
 import { requestInlineCreate } from '@/lib/quickCreate'
 import { MY_TASKS_GRID } from '@/lib/taskGrid'
 import { type Task } from '@/lib/tasks'
@@ -71,7 +71,7 @@ export function PersonalTaskList({
   // показать: у личных задач обычно нет ни меток, ни счётчиков, и пустая
   // полоса поднимала заголовок над чекбоксом (ОС 24.08).
   const reserveContext = rows.some((t) =>
-    hasTaskContext(t, { subtasks: view.subtasksByParent.get(t.id), fallback: null }),
+    hasTaskContext(t, { subtasks: view.subtasksByParent.get(t.id) }),
   )
 
   return (
@@ -141,7 +141,7 @@ export function PersonalTaskList({
             // Четвёртый элемент грида обязателен: без него аватары уехали бы в
             // трек «Проект», а срок — в трек аватаров.
             cells={<span aria-hidden />}
-            fallback={null}
+            project={null}
             reserveContext={reserveContext}
             selected={selectedTaskId === task.id}
             onClick={() => onOpenTask(task)}
@@ -152,7 +152,7 @@ export function PersonalTaskList({
             key={task.id}
             task={task}
             subtasks={view.subtasksByParent.get(task.id)}
-            fallback={null}
+            project={null}
             reserveContext={reserveContext}
             selected={selectedTaskId === task.id}
             onClick={() => onOpenTask(task)}

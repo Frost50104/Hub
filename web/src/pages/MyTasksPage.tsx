@@ -176,8 +176,8 @@ function DesktopMyTasks({ pane }: { pane: MyTasksPane }) {
       compact
       gridColumns={MY_TASKS_GRID.columns}
       // Проект уже стоит колонкой справа — во второй раз в строке контекста
-      // он был бы дублем. На мобильном колонок нет, там fallback остаётся.
-      fallback={null}
+      // он был бы дублем. На мобильном колонок нет, там он в строке.
+      project={null}
       // Имя колонки чужого проекта приходит с сервера (/me/tasks): своих
       // `useStages` для него у страницы нет.
       stage={t.stage_name}
@@ -323,7 +323,7 @@ function MobileMyTasks({ pane }: { pane: MyTasksPane }) {
       key={t.id}
       task={t}
       stage={t.stage_name}
-      fallback={pane.projectLabel(t)}
+      project={pane.projectLabel(t)}
       selected={pane.openTaskId === t.id}
       onClick={() => pane.openTask(t)}
       onToggleDone={() => toggleDone(t)}

@@ -7,6 +7,7 @@ import { AvatarStack } from '@/components/ui/AvatarStack'
 import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
 import { taskAssignees } from '@/lib/taskAssignees'
+import { type TaskContextMode } from '@/lib/taskContext'
 import { isOverdue, shortDate } from '@/lib/taskDates'
 import { type SubtaskStats, type Task } from '@/lib/tasks'
 
@@ -14,15 +15,15 @@ interface MobileTaskRowProps {
   task: Task
   labels?: Label[]
   subtasks?: SubtaskStats
-  /** Секция или проект — чем занять строку контекста, когда она пуста. */
-  fallback?: string | null
+  /** Имя проекта — подпись строки контекста рядом с чипами (16.09). */
+  project?: string | null
   /** Имя колонки доски — чип в строке контекста. */
   stage?: string | null
   selected?: boolean
   onClick?: () => void
   onToggleDone?: () => void
-  /** `fallback` — в строке контекста только проект (узкие списки «Главной»). */
-  context?: 'auto' | 'fallback'
+  /** `plain` — в строке контекста только проект (узкие списки «Главной»). */
+  context?: TaskContextMode
   /** См. TaskContextLine.reserve. */
   reserveContext?: boolean
 }
@@ -42,7 +43,7 @@ export function MobileTaskRow({
   task,
   labels,
   subtasks,
-  fallback,
+  project,
   stage,
   selected = false,
   onClick,
@@ -90,7 +91,7 @@ export function MobileTaskRow({
           task={task}
           labels={labels}
           subtasks={subtasks}
-          fallback={fallback}
+          project={project}
           compact
           mode={context}
           reserve={reserveContext}

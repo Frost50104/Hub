@@ -3,14 +3,21 @@ import { Link2, ListTree, MessageSquare, Paperclip, Repeat } from 'lucide-react'
 import { TaskLabelChip } from '@/components/task/TaskLabelChip'
 import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
+import { hasChips, type TaskContextMode } from '@/lib/taskContext'
 import { describeRecurrence, shortRecurrence } from '@/lib/taskRecurrence'
 import { type SubtaskStats, type Task } from '@/lib/tasks'
 
 /**
  * Вторая строка строки задачи. Рендерится ВСЕГДА, даже когда меток и подзадач
- * нет: иначе высота строки скачет и список перестаёт сканироваться. Если
- * рассказывать нечего — её занимает название секции (в «Моих задачах» и на
- * «Главной» — название проекта).
+ * нет: иначе высота строки скачет и список перестаёт сканироваться.
+ *
+ * Слева — подпись проекта, за ней чипы. С 16.09 они показываются ВМЕСТЕ: до
+ * этого проект приходил пропом `fallback` и рисовался, только если чипов нет
+ * вовсе, — а колонка есть почти у каждой рабочей задачи, и на «Моих задачах»
+ * имя проекта молча пропадало (ОС владельца: «стоит указывать не только в
+ * каком столбце задача, но и в каком проекте»). Решение «что показать» живёт
+ * в `lib/taskContext.ts` — одно на строку и на списки, которые резервируют
+ * под неё полосу.
  *
  * Счётчики комментариев/вложений/зависимостей приходят с сервера только в
  * списке задач проекта. `undefined` — «не знаем» (чип не рисуем), `0` —
@@ -37,33 +44,6 @@ function MetaChip({
   )
 }
 
-/**
- * Будет ли строке контекста что показать. Один источник истины для самой
- * строки и для списков, которые решают, резервировать ли под неё полосу.
- */
-export function hasTaskContext(
-  task: Pick<Task, 'comment_count' | 'attachment_count' | 'blocker_count' | 'recurrence'>,
-  opts: {
-    labels?: Label[]
-    subtasks?: SubtaskStats
-    fallback?: string | null
-    stage?: string | null
-    mode?: 'auto' | 'fallback'
-  } = {},
-): boolean {
-  if (opts.fallback) return true
-  if (opts.mode === 'fallback') return false
-  if (opts.stage) return true
-  return (
-    !!task.recurrence ||
-    (opts.labels?.length ?? 0) > 0 ||
-    (opts.subtasks?.total ?? 0) > 0 ||
-    (task.comment_count ?? 0) > 0 ||
-    (task.attachment_count ?? 0) > 0 ||
-    (task.blocker_count ?? 0) > 0
-  )
-}
-
 interface TaskContextLineProps {
   task: Task
   labels?: Label[]
@@ -74,21 +54,25 @@ interface TaskContextLineProps {
    * «взяли в работу» от «лежит нетронутой».
    */
   stage?: string | null
-  /** Что показать, когда рассказывать нечего: секция или проект. */
-  fallback?: string | null
+  /**
+   * Имя проекта — подпись строки. Показывается ВСЕГДА, когда передано, и
+   * соседствует с чипами; внутри проекта его не передают (там оно дубль), на
+   * десктопе «Моих задач» — тоже: там проект стоит отдельной колонкой грида.
+   */
+  project?: string | null
   /** На мобильном по месту влезает одна метка, остальные схлопываются в «+N». */
   compact?: boolean
   /**
-   * `fallback` — показывать ТОЛЬКО подпись (проект), без чипов. Нужно узким
+   * `plain` — показывать ТОЛЬКО подпись (проект), без чипов. Нужно узким
    * спискам «Главной»: там проект важнее меток и счётчиков, а места на оба
    * набора нет.
    */
-  mode?: 'auto' | 'fallback'
+  mode?: TaskContextMode
   /**
    * Резервировать полосу 22px, когда показывать нечего. По умолчанию да:
    * в смешанном списке иначе «дышат» заголовки — у строк с контекстом они
    * выше, у пустых по центру. Списки, где контекста нет НИ У ОДНОЙ строки
-   * (секция «ЛИЧНОЕ»), передают `false` — иначе заголовок висит выше
+   * (вкладка «Личные»), передают `false` — иначе заголовок висит выше
    * чекбокса и правых ячеек, которые центрируются по всей строке.
    */
   reserve?: boolean
@@ -100,7 +84,7 @@ export function TaskContextLine({
   labels,
   subtasks,
   stage,
-  fallback,
+  project,
   compact = false,
   mode = 'auto',
   reserve = true,
@@ -113,17 +97,9 @@ export function TaskContextLine({
   const files = task.attachment_count ?? 0
   const blocked = (task.blocker_count ?? 0) > 0
   const repeats = task.recurrence ?? null
-  const bare =
-    mode === 'fallback' ||
-    (!stage &&
-      shownLabels.length === 0 &&
-      !hasSubs &&
-      !comments &&
-      !files &&
-      !blocked &&
-      !repeats)
+  const chips = hasChips(task, { labels, subtasks, stage, mode })
 
-  if (bare && !fallback && !reserve) return null
+  if (!project && !chips && !reserve) return null
 
   return (
     <span
@@ -133,30 +109,37 @@ export function TaskContextLine({
         className,
       )}
     >
-      {bare && fallback && (
-        <span className="min-w-0 truncate text-[13px] text-text2">{fallback}</span>
+      {project && (
+        <span className="min-w-0 truncate text-[13px] text-text2">{project}</span>
       )}
-      {mode !== 'fallback' && repeats && (
+      {mode !== 'plain' && repeats && (
         <MetaChip icon={Repeat} title={`Повторяется ${describeRecurrence(repeats)}`}>
           {shortRecurrence(repeats)}
         </MetaChip>
       )}
-      {mode !== 'fallback' && stage && (
+      {mode !== 'plain' && stage && (
+        // `max-w` и `truncate` только в compact: на телефоне чип соседствует с
+        // именем проекта, а имена колонок бывают длинными — на проде есть
+        // живые задачи с колонкой в 50 символов. Без потолка чип (он
+        // `shrink-0`) съедал бы строку и оставлял от проекта одну букву.
         <span
-          className="inline-flex h-[22px] shrink-0 items-center rounded-md bg-surface px-1.5 text-[12px] font-semibold text-text2"
+          className={cn(
+            'inline-flex h-[22px] shrink-0 items-center rounded-md bg-surface px-1.5 text-[12px] font-semibold text-text2',
+            compact && 'max-w-[45%] truncate',
+          )}
           title={`Колонка: ${stage}`}
         >
           {stage}
         </span>
       )}
-      {mode !== 'fallback' && compact && hasSubs && (
+      {mode !== 'plain' && compact && hasSubs && (
         <MetaChip icon={ListTree} title={`Подзадачи: ${subtasks!.done} из ${subtasks!.total}`}>
           {subtasks!.done}/{subtasks!.total}
         </MetaChip>
       )}
-      {mode !== 'fallback' &&
+      {mode !== 'plain' &&
         shownLabels.map((l) => <TaskLabelChip key={l.id} label={l} />)}
-      {mode !== 'fallback' && hiddenLabels > 0 && (
+      {mode !== 'plain' && hiddenLabels > 0 && (
         <span className="inline-flex h-[22px] shrink-0 items-center rounded-md bg-surface px-1.5 text-[12px] font-bold text-text2">
           +{hiddenLabels}
         </span>

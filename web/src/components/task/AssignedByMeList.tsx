@@ -63,7 +63,7 @@ export function AssignedByMeList({
             compact
             gridColumns={MY_TASKS_GRID.columns}
             // Кому поручено — видно по аватарам исполнителей в строке.
-            fallback={null}
+            project={null}
             stage={task.stage_name}
             cells={
               <span
@@ -81,7 +81,7 @@ export function AssignedByMeList({
             key={task.id}
             task={task}
             stage={task.stage_name}
-            fallback={projectLabel(task)}
+            project={projectLabel(task)}
             selected={selectedTaskId === task.id}
             onClick={() => onOpenTask(task)}
           />

@@ -18,8 +18,12 @@ interface TaskRowProps {
   cells?: React.ReactNode
   labels?: Label[]
   subtasks?: SubtaskStats
-  /** Чем занять строку контекста, когда рассказывать нечего. */
-  fallback?: string | null
+  /**
+   * Имя проекта — подпись строки контекста. На «Моих задачах» его НЕ передают:
+   * там проект стоит отдельной колонкой грида (`cells`), и в строке он был бы
+   * дублем.
+   */
+  project?: string | null
   /** Имя колонки доски — чип в строке контекста. */
   stage?: string | null
   /** Строка, открытая в карточке задачи. */
@@ -50,7 +54,7 @@ export function TaskRow({
   cells,
   labels,
   subtasks,
-  fallback,
+  project,
   stage,
   selected = false,
   onClick,
@@ -103,7 +107,7 @@ export function TaskRow({
             labels={labels}
             subtasks={subtasks}
             stage={stage}
-            fallback={fallback}
+            project={project}
             reserve={reserveContext}
           />
         </span>

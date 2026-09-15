@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { hasTaskContext } from '@/components/task/TaskContextLine'
+import { hasChips, hasTaskContext } from './taskContext'
 
 /**
  * `hasTaskContext` — единый источник истины для строки контекста И для списков,
@@ -31,7 +31,24 @@ describe('hasTaskContext', () => {
     ).toBe(true)
   })
 
-  it('режим fallback перебивает всё', () => {
-    expect(hasTaskContext(bare, { mode: 'fallback', stage: 'В работе' })).toBe(false)
+  it('режим plain перебивает чипы, но не подпись проекта', () => {
+    // Узкие списки «Главной»: там проект важнее меток и счётчиков.
+    expect(hasChips(bare, { mode: 'plain', stage: 'В работе' })).toBe(false)
+    expect(hasTaskContext(bare, { mode: 'plain', stage: 'В работе' })).toBe(false)
+    expect(hasTaskContext(bare, { mode: 'plain', project: 'Развитие Hub' })).toBe(true)
+  })
+
+  it('проект и колонка живут в строке ВМЕСТЕ', () => {
+    // Регресс на ОС владельца 16.09. Раньше подпись была альтернативой чипам,
+    // и колонка (а она есть у 25 задач из 28) молча съедала имя проекта — при
+    // том что «В работе» встречается в 44 проектах, а имя проекта уникально.
+    const opts = { project: 'Развитие Hub', stage: 'Входящие' }
+    expect(hasChips(bare, opts)).toBe(true)
+    expect(hasTaskContext(bare, opts)).toBe(true)
+  })
+
+  it('один проект без чипов — строка всё равно есть', () => {
+    expect(hasChips(bare, { project: 'Развитие Hub' })).toBe(false)
+    expect(hasTaskContext(bare, { project: 'Развитие Hub' })).toBe(true)
   })
 })
