@@ -159,6 +159,7 @@ export function MembersTab({ projectId, canManage }: MembersTabProps) {
                 onChange={setNewPersonId}
                 excludeIds={memberIds}
                 placeholder="Выберите сотрудника"
+                sheetTitle="Добавить участника"
                 allowClear={false}
               />
             </div>

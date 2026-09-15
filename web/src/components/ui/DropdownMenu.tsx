@@ -11,13 +11,27 @@ export const DropdownMenuGroup = DropdownPrimitive.Group
 export const DropdownMenuContent = forwardRef<
   ElementRef<typeof DropdownPrimitive.Content>,
   ComponentPropsWithoutRef<typeof DropdownPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
+>(({ className, sideOffset = 4, collisionPadding = 8, ...props }, ref) => (
   <DropdownMenuPortal>
     <DropdownPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
+      collisionPadding={collisionPadding}
       className={cn(
         'glass-solid z-50 min-w-[8rem] overflow-hidden rounded-lg p-1 text-text shadow-glass',
+        // Потолок высоты + прокрутка — ОБЯЗАТЕЛЬНЫ, и не ради красоты (ОС
+        // 14.09 «список имён не двигается пальцем»). Radix Menu в модальном
+        // режиме оборачивает САМ Content в `RemoveScroll`, а тот считает
+        // элемент с `overflow: hidden` непрокручиваемым, не находит внутри ни
+        // одного скроллера и ОТМЕНЯЕТ каждый `touchmove`. Без этой пары
+        // выпадашка исполнителей на iPhone была 889px при экране 800, стояла
+        // на `top: −463` и не двигалась вовсе.
+        //
+        // Потолок берём у Radix, а не константой: меню умеет строиться и
+        // вверх, и `max-h-[60vh]` оставил бы часть списка за экраном.
+        // `overflow-hidden` остаётся ради скруглений по X — `twMerge` классы
+        // не схлопывает, в итоге `overflow-x: hidden, overflow-y: auto`.
+        'max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto overscroll-contain',
         'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
         className,
       )}

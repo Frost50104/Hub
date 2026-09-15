@@ -166,6 +166,7 @@ export function TaskFilterBar({
           value={value.assignee ?? null}
           onChange={(id) => set({ assignee: id ?? undefined })}
           placeholder="Исполнитель: все"
+          sheetTitle="Исполнитель"
         />
       </span>
 

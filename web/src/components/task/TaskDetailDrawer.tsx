@@ -646,6 +646,7 @@ export function TaskDetailDrawer({
                   <dd className="m-0 min-w-0">
                     <PeoplePickerMulti
                       variant="chips"
+                      sheetTitle="Исполнители"
                       value={taskAssignees(task)}
                       onToggle={(person, next) =>
                         toggleAssignee.mutate({ taskId: task.id, person, next })
@@ -677,6 +678,7 @@ export function TaskDetailDrawer({
                   <dd className="m-0 min-w-0">
                     <PeoplePickerMulti
                       variant="chips"
+                      sheetTitle="Наблюдатели"
                       value={(watchers.data ?? []).map((w) => ({
                         employee_id: w.employee_id,
                         email: w.email,

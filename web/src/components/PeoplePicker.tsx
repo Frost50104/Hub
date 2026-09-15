@@ -1,5 +1,5 @@
 import { Check, ChevronDown, UserRound } from 'lucide-react'
-import { useState } from 'react'
+import { useState, type ButtonHTMLAttributes } from 'react'
 
 import { Avatar } from '@/components/ui/Avatar'
 import {
@@ -8,8 +8,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
+import { SheetPicker } from '@/components/ui/SheetPicker'
+import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useTenantMembers } from '@/hooks/useTenantMembers'
 import { cn } from '@/lib/cn'
+
+/** Псевдо-id пункта «Очистить» в шторке: настоящих id-пустышек там нет. */
+const CLEAR_ID = '__clear__'
 
 const TRIGGER_CLASS =
   'w-full rounded-md border border-glass-border bg-glass px-2 py-1 text-sm text-text placeholder:text-text2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60'
@@ -29,6 +34,8 @@ interface PeoplePickerProps {
   placeholder?: string
   /** Показывать пункт «Очистить» при выбранном значении. */
   allowClear?: boolean
+  /** Заголовок мобильной шторки. */
+  sheetTitle?: string
   /**
    * `filter` — компактный комбобокс тулбара: 32px, 12/500, в один ряд с
    * нативными селектами фильтров (у них общая геометрия SELECT_CLASS).
@@ -39,6 +46,10 @@ interface PeoplePickerProps {
 /**
  * Поиск и выбор сотрудника tenant'а (дебаунс — внутри useTenantMembers).
  * Список ограничен shadow_users — теми, кто хотя бы раз заходил в Hub.
+ *
+ * Раскладок две, как у `PeoplePickerMulti`: от `lg` — выпадашка, ниже —
+ * нижняя шторка (решение владельца 15.09 после ОС «список имён не
+ * скроллится»).
  */
 export function PeoplePicker({
   value,
@@ -49,8 +60,11 @@ export function PeoplePicker({
   currentEmail,
   placeholder = '—',
   allowClear = true,
+  sheetTitle = 'Выберите человека',
   variant = 'field',
 }: PeoplePickerProps) {
+  const isDesktop = useIsDesktop()
+  const [sheetOpen, setSheetOpen] = useState(false)
   const [query, setQuery] = useState('')
   const members = useTenantMembers(query)
   const excluded = new Set(excludeIds ?? [])
@@ -64,17 +78,19 @@ export function PeoplePicker({
 
   const isFilter = variant === 'filter'
 
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild disabled={disabled}>
+  // Одна кнопка на обе раскладки: на десктопе её забирает
+  // DropdownMenuTrigger, на телефоне она открывает шторку.
+  const trigger = (props: ButtonHTMLAttributes<HTMLButtonElement>) => (
         <button
           type="button"
+          disabled={disabled}
           className={cn(
             isFilter
               ? 'inline-flex h-8 shrink-0 items-center gap-[7px] whitespace-nowrap rounded-md border border-glass-border bg-glass px-2.5 text-[12px] font-medium text-text2 hover:bg-surface focus-visible:border-amber focus-visible:outline-none'
               : cn(TRIGGER_CLASS, 'flex items-center justify-between gap-2 text-left'),
             disabled && 'cursor-not-allowed opacity-60',
           )}
+          {...props}
         >
           <div className="flex min-w-0 items-center gap-2">
             {value ? (
@@ -105,9 +121,57 @@ export function PeoplePicker({
             strokeWidth={2.2}
           />
         </button>
+  )
+
+  if (!isDesktop) {
+    return (
+      <>
+        {trigger({ onClick: () => !disabled && setSheetOpen(true) })}
+        <SheetPicker
+          open={sheetOpen}
+          onOpenChange={setSheetOpen}
+          title={sheetTitle}
+          searchable
+          searchPlaceholder="Фамилия или имя…"
+          searchValue={query}
+          onSearchChange={setQuery}
+          loading={members.isFetching}
+          emptyText="Никого не нашли"
+          items={[
+            ...options.map((m) => ({
+              id: m.employee_id,
+              label: m.full_name || m.email || m.employee_id,
+              // Почта различает полных тёзок — на проде таких две пары.
+              meta: m.email || undefined,
+              selected: m.employee_id === value,
+              icon: (
+                <Avatar
+                  employeeId={m.employee_id}
+                  name={m.full_name}
+                  email={m.email}
+                  className="h-8 w-8 text-[13px]"
+                />
+              ),
+            })),
+            ...(allowClear && value
+              ? [{ id: CLEAR_ID, label: 'Очистить' }]
+              : []),
+          ]}
+          onSelect={(id) => onChange(id === CLEAR_ID ? null : id)}
+        />
+      </>
+    )
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild disabled={disabled}>
+        {trigger({})}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-[260px]">
-        <div className="px-2 py-1">
+        {/* sticky: у Content появился потолок высоты и прокрутка, иначе поиск
+            уезжает за верхний край меню на первом же движении. */}
+        <div className="sticky top-0 z-10 bg-bg-alt px-2 py-1">
           <input
             type="text"
             placeholder="Поиск…"
@@ -117,7 +181,9 @@ export function PeoplePicker({
           />
         </div>
         {options.length === 0 && (
-          <div className="px-2 py-1.5 text-[13px] text-text2">Никого не нашли</div>
+          <div className="px-2 py-1.5 text-[13px] text-text2">
+            {members.isFetching ? 'Ищем…' : 'Никого не нашли'}
+          </div>
         )}
         {options.map((m) => (
           <DropdownMenuItem

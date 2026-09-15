@@ -25,6 +25,17 @@ interface SheetPickerProps {
   /** Поле поиска 44px над списком (фильтр по label/meta на клиенте). */
   searchable?: boolean
   searchPlaceholder?: string
+  /**
+   * УПРАВЛЯЕМЫЙ поиск: значение и обработчик снаружи, локальный фильтр
+   * выключается. Нужен там, где список отдаёт сервер и фильтровать на клиенте
+   * нечего — справочник людей приходит по 25 строк из 227. Включается ТОЛЬКО
+   * при переданном `onSearchChange`: прежние вызовы (колонка доски, папка
+   * проекта) продолжают фильтровать локально.
+   */
+  searchValue?: string
+  onSearchChange?: (value: string) => void
+  /** Запрос в полёте — вместо «ничего не найдено» показываем «Ищем…». */
+  loading?: boolean
   /** Выбор нескольких: шторка не закрывается после клика. */
   multi?: boolean
   emptyText?: string
@@ -46,15 +57,24 @@ export function SheetPicker({
   onSelect,
   searchable = false,
   searchPlaceholder = 'Поиск…',
+  searchValue,
+  onSearchChange,
+  loading = false,
   multi = false,
   emptyText = 'Ничего не найдено',
   footer,
 }: SheetPickerProps) {
-  const [q, setQ] = useState('')
+  const controlled = onSearchChange !== undefined
+  const [localQ, setLocalQ] = useState('')
+  const q = controlled ? (searchValue ?? '') : localQ
   useEffect(() => {
-    if (!open) setQ('')
-  }, [open])
+    if (!open && !controlled) setLocalQ('')
+  }, [open, controlled])
   const visible = useMemo(() => {
+    // В управляемом режиме список уже отфильтрован сервером — второй раз
+    // фильтровать нельзя: выбранные люди приходят вне выдачи поиска и
+    // локальный фильтр выбросил бы их, сделав снятие невозможным.
+    if (controlled) return items
     const needle = q.trim().toLowerCase()
     if (!needle) return items
     return items.filter(
@@ -62,7 +82,7 @@ export function SheetPicker({
         i.label.toLowerCase().includes(needle) ||
         (i.meta ?? '').toLowerCase().includes(needle),
     )
-  }, [items, q])
+  }, [items, q, controlled])
 
   return (
     <ResponsiveDialog
@@ -81,7 +101,9 @@ export function SheetPicker({
           <input
             type="search"
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) =>
+              controlled ? onSearchChange(e.target.value) : setLocalQ(e.target.value)
+            }
             placeholder={searchPlaceholder}
             className="h-11 w-full rounded-[10px] border border-glass-border bg-surface pl-10 pr-3 text-[15px] text-text placeholder:text-text2 focus:border-amber focus:outline-none"
           />
@@ -89,7 +111,11 @@ export function SheetPicker({
       )}
       <ul className="flex max-h-[min(60vh,420px)] flex-col overflow-y-auto">
         {visible.length === 0 && (
-          <li className="px-3 py-4 text-center text-[14px] text-text2">{emptyText}</li>
+          <li className="px-3 py-4 text-center text-[14px] text-text2">
+            {/* Молчащий экран читается как «справочник не работает» — ровно на
+                этом обожглись в упоминаниях (ОС 14.09). */}
+            {loading ? 'Ищем…' : emptyText}
+          </li>
         )}
         {visible.map((item) => (
           <li key={item.id}>
