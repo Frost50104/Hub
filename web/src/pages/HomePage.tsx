@@ -20,6 +20,8 @@ import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { capitalizeFirst } from '@/lib/dates'
 import { taskLocation } from '@/lib/taskLinks'
+import { taskProjectLabel } from '@/lib/taskProjectLabel'
+import { type Task } from '@/lib/tasks'
 import { NBSP } from '@/lib/typography'
 
 function greeting(): string {
@@ -62,8 +64,8 @@ function useHomeData(tab: DueWindow) {
   const myTasks = useMyTasks({ due_window: tab })
   const toggleDone = useToggleDone('')
   const navigate = useNavigate()
-  const projectsById = useMemo(
-    () => new Map((projects.data ?? []).map((p) => [p.id, p])),
+  const namesById = useMemo(
+    () => new Map((projects.data ?? []).map((p) => [p.id, p.name])),
     [projects.data],
   )
   return {
@@ -83,7 +85,11 @@ function useHomeData(tab: DueWindow) {
       })
       navigate(`${to.pathname}${to.search}`)
     },
-    projectName: (projectId: string) => projectsById.get(projectId)?.name ?? null,
+    // Подпись и адрес проекта — общие с «Моими задачами» (`taskProjectLabel`).
+    // Раньше имя искалось в `GET /projects`, где личных проектов нет ни у
+    // кого, и личные задачи с поручениями оставались вовсе без подписи.
+    projectLabel: (t: Task) =>
+      taskProjectLabel(t, { namesById, personalProjectId: me.data?.personal_project_id }),
   }
 }
 
@@ -117,7 +123,7 @@ function Panel({
 
 function DesktopHome() {
   const [taskTab, setTaskTab] = useState<DueWindow>('upcoming')
-  const { greetingText, projects, myTasks, toggleDone, openTask, projectName } =
+  const { greetingText, projects, myTasks, toggleDone, openTask, projectLabel } =
     useHomeData(taskTab)
 
   const today = capitalizeFirst(
@@ -177,7 +183,7 @@ function DesktopHome() {
               <CompactTaskRow
                 key={t.id}
                 task={t}
-                subtitle={projectName(t.project_id)}
+                project={projectLabel(t)}
                 onClick={() => openTask(t.id, t.project_id)}
                 onToggleDone={() => toggleDone(t)}
               />
@@ -255,7 +261,7 @@ function MobilePanel({
 }
 
 function MobileHome() {
-  const { greetingText, projects, myTasks, toggleDone, openTask, projectName } =
+  const { greetingText, projects, myTasks, toggleDone, openTask, projectLabel } =
     useHomeData('upcoming')
   const recentProjects = (projects.data ?? []).slice(0, 6)
   const tasks = (myTasks.data ?? []).slice(0, 5)
@@ -303,7 +309,7 @@ function MobileHome() {
                   key={t.id}
                   task={t}
                   context="plain"
-                  project={projectName(t.project_id)}
+                  project={projectLabel(t)}
                   onClick={() => openTask(t.id, t.project_id)}
                   onToggleDone={() => toggleDone(t)}
                 />

@@ -35,20 +35,26 @@ describe('hasTaskContext', () => {
     // Узкие списки «Главной»: там проект важнее меток и счётчиков.
     expect(hasChips(bare, { mode: 'plain', stage: 'В работе' })).toBe(false)
     expect(hasTaskContext(bare, { mode: 'plain', stage: 'В работе' })).toBe(false)
-    expect(hasTaskContext(bare, { mode: 'plain', project: 'Развитие Hub' })).toBe(true)
+    expect(hasTaskContext(bare, { mode: 'plain', project: { text: 'Развитие Hub' } })).toBe(true)
   })
 
   it('проект и колонка живут в строке ВМЕСТЕ', () => {
     // Регресс на ОС владельца 16.09. Раньше подпись была альтернативой чипам,
     // и колонка (а она есть у 25 задач из 28) молча съедала имя проекта — при
     // том что «В работе» встречается в 44 проектах, а имя проекта уникально.
-    const opts = { project: 'Развитие Hub', stage: 'Входящие' }
+    const opts = { project: { text: 'Развитие Hub' }, stage: 'Входящие' }
     expect(hasChips(bare, opts)).toBe(true)
     expect(hasTaskContext(bare, opts)).toBe(true)
   })
 
   it('один проект без чипов — строка всё равно есть', () => {
-    expect(hasChips(bare, { project: 'Развитие Hub' })).toBe(false)
-    expect(hasTaskContext(bare, { project: 'Развитие Hub' })).toBe(true)
+    expect(hasChips(bare, { project: { text: 'Развитие Hub' } })).toBe(false)
+    expect(hasTaskContext(bare, { project: { text: 'Развитие Hub' } })).toBe(true)
+  })
+
+  it('подпись «unknown» (text: null) полосу не резервирует', () => {
+    // Старый бэкенд без project_is_personal и project_key: подписи нет —
+    // значит и полосы нет, иначе список «дышал» бы на пустых строках.
+    expect(hasTaskContext(bare, { project: { text: null } })).toBe(false)
   })
 })

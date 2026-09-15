@@ -9,15 +9,16 @@ import { type Label } from '@/lib/labels'
 import { taskAssignees } from '@/lib/taskAssignees'
 import { type TaskContextMode } from '@/lib/taskContext'
 import { isOverdue, shortDate } from '@/lib/taskDates'
+import { type TaskProjectLabel } from '@/lib/taskProjectLabel'
 import { type SubtaskStats, type Task } from '@/lib/tasks'
 
 interface MobileTaskRowProps {
   task: Task
   labels?: Label[]
   subtasks?: SubtaskStats
-  /** Имя проекта — подпись строки контекста рядом с чипами (16.09). */
-  project?: string | null
-  /** Имя колонки доски — чип в строке контекста. */
+  /** Проект — чип-ссылка в строке контекста рядом с колонкой (16.09). */
+  project?: TaskProjectLabel | null
+  /** Имя колонки доски — текстом в строке контекста. */
   stage?: string | null
   selected?: boolean
   onClick?: () => void

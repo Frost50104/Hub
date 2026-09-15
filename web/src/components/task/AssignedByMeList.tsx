@@ -4,6 +4,7 @@ import { TaskEmptyState, TaskListSkeleton } from '@/components/task/TaskListStat
 import { TaskRow } from '@/components/task/TaskRow'
 import { useAssignedByMe } from '@/hooks/useAssignedByMe'
 import { MY_TASKS_GRID } from '@/lib/taskGrid'
+import { type TaskProjectLabel } from '@/lib/taskProjectLabel'
 import { type Task } from '@/lib/tasks'
 
 /**
@@ -26,8 +27,8 @@ export function AssignedByMeList({
   variant: 'desktop' | 'mobile'
   onOpenTask: (task: Task) => void
   selectedTaskId?: string | null
-  /** Подпись проекта в строке — общая с остальными вкладками. */
-  projectLabel: (task: Task) => string | null
+  /** Подпись и адрес проекта для чипа в строке — общие с остальными вкладками. */
+  projectLabel: (task: Task) => TaskProjectLabel
 }) {
   const query = useAssignedByMe()
   const desktop = variant === 'desktop'

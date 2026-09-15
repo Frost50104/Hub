@@ -1,22 +1,25 @@
+import { ProjectChip } from '@/components/task/ProjectChip'
 import { TaskDoneControl } from '@/components/task/TaskDoneControl'
 import { PriorityBar } from '@/components/task/PriorityBar'
 import { cn } from '@/lib/cn'
 import { isOverdue, shortDate } from '@/lib/taskDates'
+import { type TaskProjectLabel } from '@/lib/taskProjectLabel'
 import { type Task } from '@/lib/tasks'
 
 /**
  * Узкая строка задачи для панели «Мои задачи» на «Главной»: 60px, без колонок.
- * Панель узкая, поэтому проект уходит во вторую строку, а исполнители и
- * кастом-поля не показываются вовсе — на них нет места, а не «они не важны».
+ * Панель узкая, поэтому проект уходит во вторую строку чипом-ссылкой, а
+ * исполнители и кастом-поля не показываются вовсе — на них нет места, а не
+ * «они не важны».
  */
 export function CompactTaskRow({
   task,
-  subtitle,
+  project,
   onClick,
   onToggleDone,
 }: {
   task: Task
-  subtitle?: string | null
+  project?: TaskProjectLabel | null
   onClick?: () => void
   onToggleDone?: () => void
 }) {
@@ -50,9 +53,9 @@ export function CompactTaskRow({
         >
           {task.title}
         </span>
-        {subtitle && (
-          <span className="min-w-0 truncate text-[13px] text-text2">{subtitle}</span>
-        )}
+        {/* `self-start`: контейнер — flex-col, и без него чип растянулся бы на
+            всю ширину строки (align-self: stretch по умолчанию). */}
+        <ProjectChip label={project} className="max-w-full self-start" />
       </span>
       <span
         className={cn(

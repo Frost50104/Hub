@@ -14,7 +14,7 @@ import { cn } from '@/lib/cn'
  * Цвет метки не задаётся классом: он произвольный и считается в
  * `lib/labelChip.ts` (краска по контрасту + затемнение заливки).
  */
-const chipVariants = cva(
+export const chipVariants = cva(
   'inline-flex shrink-0 items-center rounded-md px-2 text-[12px] font-semibold leading-none',
   {
     variants: {

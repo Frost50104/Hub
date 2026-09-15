@@ -1,9 +1,9 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import {
   Archive,
+  ArrowRightLeft,
   Bell,
   Calendar,
-  ChevronRight,
   Trash2,
   CornerLeftUp,
   Flag,
@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { Markdown } from '@/components/Markdown'
@@ -72,7 +72,7 @@ import {
   recurrenceBlockReason,
 } from '@/lib/taskRecurrence'
 import { taskAssignees } from '@/lib/taskAssignees'
-import { taskLocation } from '@/lib/taskLinks'
+import { locationWithoutTask, projectLocation, taskLocation } from '@/lib/taskLinks'
 import { MobileDateCell } from '@/components/ui/MobileDateCell'
 import { dayKey, dueDayToIso, isOverdue, overdueDays } from '@/lib/taskDates'
 import { describeTaskDeletion } from '@/lib/taskDeletion'
@@ -109,11 +109,18 @@ function Dt({ icon: Icon, children }: { icon?: typeof Flag; children: React.Reac
    «поле не передали». `SearchableSelect` отдаёт ровно `null`, поэтому
    отдельный конвертер значения селекта больше не нужен (был `stageValue`). */
 
-/** Строка «Проект» на десктопе: силуэт селекта, но открывает диалог переноса —
- *  у переезда есть цена (новый номер, отвал меток), и тихим выбором он быть
- *  не может. */
-const PROJECT_BUTTON =
-  'inline-flex h-9 max-w-[320px] items-center gap-1.5 rounded-[9px] border border-glass-border bg-surface px-3 font-body text-[14px] text-text hover:border-amber focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60'
+/** Строка «Проект» на десктопе: один силуэт селекта, ДВА контрола (16.09).
+ *  Имя — ссылка на страницу проекта; стрелка ⇄ — диалог переноса: у переезда
+ *  есть цена (новый номер, отвал меток), и тихим выбором он быть не может,
+ *  а цену называет сам диалог. Наблюдатель видит только имя. `overflow-hidden`
+ *  на группе и `ring-inset` на сегментах — иначе фокус-ринг и hover сегмента
+ *  торчат за скруглённую рамку. */
+const PROJECT_GROUP =
+  'inline-flex h-9 max-w-[320px] overflow-hidden rounded-[9px] border border-glass-border bg-surface font-body text-[14px] text-text'
+const PROJECT_LINK =
+  'flex min-w-0 items-center px-3 hover:bg-glass focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber/60'
+const PROJECT_MOVE =
+  'flex w-9 shrink-0 items-center justify-center border-l border-glass-border text-text2 hover:bg-glass hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber/60'
 
 const STAGE_SELECT =
   'h-9 max-w-[320px] rounded-[9px] border border-glass-border bg-surface px-3 font-body text-[14px] text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 disabled:cursor-default'
@@ -201,6 +208,29 @@ export function TaskDetailDrawer({
   const repeatBlocked = task ? recurrenceBlockReason(task) : null
   const repeatAllowed = task ? canSetRecurrence(task) : false
   const navigate = useNavigate()
+  const location = useLocation()
+  // Адрес страницы проекта БЕЗ `?task=`: «открыть проект» — увидеть проект, а
+  // не проект с этой же карточкой поверх. На той же странице снимается только
+  // `task`, фильтры (`?view=board&f_*`) остаются.
+  const projectTo = projectLocation({
+    projectId: taskProjectId,
+    personalProjectId: myPersonalId,
+    pathname: location.pathname,
+    search: location.search,
+  })
+  const openProject = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    // Cmd/Ctrl/Shift/средняя кнопка — браузер сам откроет новую вкладку.
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    e.preventDefault()
+    onClose()
+    // Карточка открыта на странице своего же проекта: `onClose` уже снял
+    // `task`, второй переход на тот же адрес положил бы дубль в историю.
+    if (projectTo === locationWithoutTask(location.pathname, location.search)) return
+    // Тиком позже: мобильный лист — модальный Radix, и смена маршрута в одном
+    // коммите с его закрытием оставляет `pointer-events:none` на body (тот же
+    // приём в CreateTaskDialog и FloatingActionButton).
+    window.setTimeout(() => navigate(projectTo), 0)
+  }
 
   useEffect(() => {
     if (task) {
@@ -486,17 +516,33 @@ export function TaskDetailDrawer({
               // на телефоне превращались в стену из шести разнородных блоков.
               <PropertyRows>
                 {/* Первой: на «Моих задачах» и в поиске карточка иначе не
-                    говорит, из какого задача проекта. */}
-                <PropertyRow
-                  label="Проект"
-                  onClick={readOnly ? undefined : () => setMoveOpen(true)}
-                >
-                  <span className="truncate">{project.data?.name ?? '—'}</span>
-                  {!readOnly && (
-                    <ChevronRight
-                      className="ml-1 h-4 w-4 shrink-0 text-text2"
-                      strokeWidth={1.9}
-                    />
+                    говорит, из какого задача проекта. Два контрола внутри
+                    (имя → страница проекта, ⇄ → перенос), поэтому строка
+                    БЕЗ `onClick`: с ним `PropertyRow` рендерит `<button>`, а
+                    кнопка в кнопке невалидна. */}
+                <PropertyRow label="Проект">
+                  {project.data ? (
+                    <>
+                      <Link
+                        to={projectTo}
+                        onClick={openProject}
+                        className="inline-flex min-h-[46px] min-w-0 items-center pr-2.5 text-right text-[16px] text-text focus-visible:outline-none"
+                      >
+                        <span className="min-w-0 truncate">{project.data.name}</span>
+                      </Link>
+                      {!readOnly && (
+                        <button
+                          type="button"
+                          onClick={() => setMoveOpen(true)}
+                          aria-label="Перенести в другой проект"
+                          className="flex h-[46px] w-11 shrink-0 items-center justify-center text-text2 active:bg-glass"
+                        >
+                          <ArrowRightLeft className="h-[18px] w-[18px]" strokeWidth={1.9} />
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <span className="truncate">—</span>
                   )}
                 </PropertyRow>
                 <PropertyRow label="Колонка">
@@ -583,23 +629,30 @@ export function TaskDetailDrawer({
                     <>
                       <Dt icon={FolderOpen}>Проект</Dt>
                       <dd className="m-0 min-w-0">
-                        {readOnly ? (
-                          <span className="text-[14px] text-text">
-                            {project.data?.name ?? '—'}
+                        {project.data ? (
+                          <span className={PROJECT_GROUP}>
+                            <Link
+                              to={projectTo}
+                              onClick={openProject}
+                              title="Открыть проект"
+                              className={PROJECT_LINK}
+                            >
+                              <span className="min-w-0 truncate">{project.data.name}</span>
+                            </Link>
+                            {!readOnly && (
+                              <button
+                                type="button"
+                                onClick={() => setMoveOpen(true)}
+                                aria-label="Перенести в другой проект"
+                                title="Перенести в другой проект"
+                                className={PROJECT_MOVE}
+                              >
+                                <ArrowRightLeft className="h-4 w-4" strokeWidth={1.9} />
+                              </button>
+                            )}
                           </span>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => setMoveOpen(true)}
-                            title="Перенести в другой проект"
-                            className={PROJECT_BUTTON}
-                          >
-                            <span className="truncate">{project.data?.name ?? '—'}</span>
-                            <ChevronRight
-                              className="h-4 w-4 shrink-0 text-text2"
-                              strokeWidth={1.9}
-                            />
-                          </button>
+                          <span className="text-[14px] text-text">—</span>
                         )}
                       </dd>
 

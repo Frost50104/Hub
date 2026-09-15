@@ -8,6 +8,7 @@ import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
 import { taskAssignees } from '@/lib/taskAssignees'
 import { isOverdue, shortDate } from '@/lib/taskDates'
+import { type TaskProjectLabel } from '@/lib/taskProjectLabel'
 import { type SubtaskStats, type Task } from '@/lib/tasks'
 
 interface TaskRowProps {
@@ -19,12 +20,12 @@ interface TaskRowProps {
   labels?: Label[]
   subtasks?: SubtaskStats
   /**
-   * Имя проекта — подпись строки контекста рядом с чипом колонки. Передают
+   * Проект — чип-ссылка в строке контекста (`ProjectChip`). Передают
    * кросс-проектные списки («Мои задачи», «Назначенные мной»); внутри проекта
    * и на вкладке «Личные» его нет — там он был бы одинаковым в каждой строке.
    */
-  project?: string | null
-  /** Имя колонки доски — чип в строке контекста. */
+  project?: TaskProjectLabel | null
+  /** Имя колонки доски — текстом в строке контекста. */
   stage?: string | null
   /** Строка, открытая в карточке задачи. */
   selected?: boolean

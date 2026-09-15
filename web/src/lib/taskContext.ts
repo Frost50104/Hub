@@ -21,8 +21,11 @@ export type TaskContextMode = 'auto' | 'plain'
 export interface TaskContextOpts {
   labels?: Label[]
   subtasks?: SubtaskStats
-  /** Имя проекта — подпись строки. */
-  project?: string | null
+  /**
+   * Подпись проекта — `TaskProjectLabel` или любой объект с `text`;
+   * `text: null` («unknown») подписи не даёт и полосу не резервирует.
+   */
+  project?: { text: string | null } | null
   /** Имя колонки доски. */
   stage?: string | null
   /** `plain` — только подпись, без чипов (узкие списки «Главной»). */
@@ -35,7 +38,9 @@ type CountedTask = Pick<
 >
 
 /**
- * Есть ли ЧИПЫ: колонка, повтор, метки, подзадачи, счётчики.
+ * Есть ли что показать КРОМЕ подписи проекта: колонка, повтор, метки,
+ * подзадачи, счётчики. «Чипы» в имени — историческое: колонка с 16.09 —
+ * текст, а чипом стал проект; в контексте строки колонка по-прежнему.
  *
  * Отдельно от подписи проекта, потому что с 16.09 они показываются ВМЕСТЕ.
  * Раньше подпись была альтернативой чипам («fallback»), и на «Моих задачах»
@@ -64,5 +69,5 @@ export function hasChips(task: CountedTask, opts: TaskContextOpts = {}): boolean
  * ответ использует сам компонент, поэтому разойтись они не могут.
  */
 export function hasTaskContext(task: CountedTask, opts: TaskContextOpts = {}): boolean {
-  return !!opts.project || hasChips(task, opts)
+  return !!opts.project?.text || hasChips(task, opts)
 }

@@ -30,7 +30,7 @@ import {
   type MyTasksTab,
 } from '@/lib/myTasksTabs'
 import { MY_TASKS_GRID } from '@/lib/taskGrid'
-import { taskProjectLabel } from '@/lib/taskProjectLabel'
+import { taskProjectLabel, type TaskProjectLabel } from '@/lib/taskProjectLabel'
 import { type Task } from '@/lib/tasks'
 
 /**
@@ -77,7 +77,7 @@ interface MyTasksPane {
   closeTask: () => void
   focusCreate: boolean
   clearFocusCreate: () => void
-  projectLabel: (task: Task) => string | null
+  projectLabel: (task: Task) => TaskProjectLabel
 }
 
 /**
@@ -131,7 +131,7 @@ function useMyTasksPane(): MyTasksPane {
       taskProjectLabel(task, {
         namesById: new Map((projects.data ?? []).map((p) => [p.id, p.name])),
         personalProjectId,
-      }).text,
+      }),
   }
 }
 
@@ -175,9 +175,10 @@ function DesktopMyTasks({ pane }: { pane: MyTasksPane }) {
       task={t}
       compact
       gridColumns={MY_TASKS_GRID.columns}
-      // Проект — подписью под заголовком, рядом с колонкой, как на телефоне
-      // (16.09): отдельный столбец «Проект» справа владелец попросил заменить
-      // этой парой — там имя стояло в 400px от задачи и читалось отдельно.
+      // Проект — чипом-ссылкой под заголовком, рядом с колонкой, как на
+      // телефоне (16.09): отдельный столбец «Проект» справа владелец попросил
+      // заменить этой парой — там имя стояло в 400px от задачи и читалось
+      // отдельно.
       project={pane.projectLabel(t)}
       // Имя колонки чужого проекта приходит с сервера (/me/tasks): своих
       // `useStages` для него у страницы нет.

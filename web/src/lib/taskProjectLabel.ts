@@ -20,13 +20,24 @@
  * не срабатывает вовсе.
  */
 
+import { projectLocation } from './taskLinks'
 import { type Task } from './tasks'
 
+/**
+ * `to` — куда ведёт клик по чипу (16.09): своё личное — на вкладку «Личные»
+ * (`/my?tab=personal`, страницы у личного проекта нет), обычный проект и чужое
+ * личное — на страницу проекта (участник по построению: чужое личное видно
+ * только исполнителю и наблюдателю, а им `ensure_project_member` выдал
+ * viewer). Фолбэк ключа — `null`: имени нет в `GET /projects`, значит меня в
+ * проекте нет, и страница ответила бы 404. Пока `/me` не ответил, своё личное
+ * на долю секунды выглядит как чужое — `/projects/{мой личный}` сам редиректит
+ * на «Мои задачи».
+ */
 export type TaskProjectLabel =
-  | { kind: 'personal'; text: string }
-  | { kind: 'foreign-personal'; text: string }
-  | { kind: 'project'; text: string }
-  | { kind: 'unknown'; text: null }
+  | { kind: 'personal'; text: string; to: string }
+  | { kind: 'foreign-personal'; text: string; to: string }
+  | { kind: 'project'; text: string; to: string | null }
+  | { kind: 'unknown'; text: null; to: null }
 
 export interface ProjectLabelContext {
   /** Имена видимых проектов по id — обычно из `useProjects()`. */
@@ -39,15 +50,22 @@ export function taskProjectLabel(
   task: Pick<Task, 'project_id' | 'project_key' | 'project_is_personal'>,
   ctx: ProjectLabelContext,
 ): TaskProjectLabel {
+  const to = projectLocation({
+    projectId: task.project_id,
+    personalProjectId: ctx.personalProjectId,
+  })
   if (ctx.personalProjectId && task.project_id === ctx.personalProjectId) {
-    return { kind: 'personal', text: 'Личное' }
+    return { kind: 'personal', text: 'Личное', to }
   }
   const name = ctx.namesById.get(task.project_id)
-  if (name) return { kind: 'project', text: name }
+  if (name) return { kind: 'project', text: name, to }
   if (task.project_is_personal) {
-    return { kind: 'foreign-personal', text: 'Личное коллеги' }
+    return { kind: 'foreign-personal', text: 'Личное коллеги', to }
   }
+  // Ключ вместо имени = проекта нет в `GET /projects` = я не участник:
+  // `require_project_role` прячет существование проекта 404. Чип есть,
+  // ссылки нет.
   return task.project_key
-    ? { kind: 'project', text: task.project_key }
-    : { kind: 'unknown', text: null }
+    ? { kind: 'project', text: task.project_key, to: null }
+    : { kind: 'unknown', text: null, to: null }
 }
