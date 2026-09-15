@@ -22,9 +22,6 @@ export interface SelectOption {
 /** Зеркало `people_search.MAX_TOKENS`: больше четырёх слов в запрос не берём. */
 const MAX_TOKENS = 4
 
-/** Сколько пунктов показываем разом (см. `filterOptions`). */
-export const DEFAULT_LIMIT = 50
-
 /** `ё → е` и нижний регистр — как `people_search.normalize`. */
 export function normalize(value: string): string {
   return value.toLowerCase().replace(/ё/g, 'е').trim()
@@ -47,27 +44,22 @@ export function optionMatches(option: SelectOption, tokens: readonly string[]): 
   return tokens.every((token) => haystack.includes(token))
 }
 
-export interface FilterResult {
-  visible: SelectOption[]
-  /** Сколько подошло, но не поместилось в потолок. */
-  hidden: number
-}
-
 /**
- * Отфильтровать и обрезать.
+ * Отфильтровать — и отдать ВСЁ, что подошло.
  *
- * Потолок нужен не ради красоты: список сотрудников добирается до 2000 строк
- * (`employeeList.ts`), и меню из двух тысяч узлов DOM браузер собирает
- * заметно. Приём и текст «Показаны первые N» взяты у `TaskDependencies`.
+ * Потолка выдачи здесь нет и быть не должно (решение владельца 16.09, после
+ * живого бага). Сначала я обрезал список до 50 строк «ради экономии узлов
+ * DOM» — и это молча спрятало 84% справочника: «Пётр Попов» стоит 246-м из 313
+ * по алфавиту, то есть в списке руководителей его просто не было. Нативный
+ * `<select>`, который мы заменяли, показывал всех и прокручивался. Экономия,
+ * из-за которой человека нельзя выбрать, — не экономия.
  */
 export function filterOptions(
   options: readonly SelectOption[],
   query: string,
-  { limit = DEFAULT_LIMIT }: { limit?: number } = {},
-): FilterResult {
+): SelectOption[] {
   const tokens = queryTokens(query)
-  const matched = options.filter((o) => optionMatches(o, tokens))
-  return { visible: matched.slice(0, limit), hidden: Math.max(0, matched.length - limit) }
+  return options.filter((o) => optionMatches(o, tokens))
 }
 
 /**

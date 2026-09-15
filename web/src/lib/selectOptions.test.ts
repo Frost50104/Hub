@@ -20,11 +20,11 @@ describe('порядок слов', () => {
     // Ради этого кейса поиск и пословный. Справочник записан в смешанном
     // порядке (139 «Имя Фамилия» против 70 «Фамилия Имя»), и подстрочный
     // includes находил 0 из 225 двухсловных ФИО при обратном порядке.
-    expect(filterOptions(people, 'Попов Пётр').visible.map((o) => o.value)).toEqual(['1'])
+    expect(filterOptions(people, 'Попов Пётр').map((o) => o.value)).toEqual(['1'])
   })
 
   it('одно слово находит всех однофамильцев', () => {
-    expect(filterOptions(people, 'попов').visible.map((o) => o.value)).toEqual(['1', '2'])
+    expect(filterOptions(people, 'попов').map((o) => o.value)).toEqual(['1', '2'])
   })
 
   it('больше четырёх слов в запрос не берём', () => {
@@ -35,15 +35,15 @@ describe('порядок слов', () => {
 describe('нормализация', () => {
   it('ё и регистр не различаются', () => {
     expect(normalize('Пётр')).toBe('петр')
-    expect(filterOptions(people, 'петр').visible.map((o) => o.value)).toEqual(['1'])
-    expect(filterOptions(people, 'ПЁТР').visible.map((o) => o.value)).toEqual(['1'])
+    expect(filterOptions(people, 'петр').map((o) => o.value)).toEqual(['1'])
+    expect(filterOptions(people, 'ПЁТР').map((o) => o.value)).toEqual(['1'])
   })
 })
 
 describe('поле meta', () => {
   it('ищется наравне с подписью', () => {
     // Двух полных тёзок на проде различает именно почта.
-    expect(filterOptions(people, 'anna@').visible.map((o) => o.value)).toEqual(['2'])
+    expect(filterOptions(people, 'anna@').map((o) => o.value)).toEqual(['2'])
   })
 
   it('пункт без meta не роняет поиск', () => {
@@ -53,33 +53,27 @@ describe('поле meta', () => {
 
 describe('пустой запрос', () => {
   it('отдаёт всё', () => {
-    expect(filterOptions(people, '').visible).toHaveLength(3)
-    expect(filterOptions(people, '   ').visible).toHaveLength(3)
+    expect(filterOptions(people, '')).toHaveLength(3)
+    expect(filterOptions(people, '   ')).toHaveLength(3)
   })
 })
 
-describe('потолок выдачи', () => {
+describe('выдача не обрезается', () => {
   const many: SelectOption[] = Array.from({ length: 315 }, (_, i) => ({
     value: String(i),
     label: `Сотрудник ${i}`,
   }))
 
-  it('315 сотрудников превращаются в 50 видимых и 265 скрытых', () => {
-    // Список добирается до 2000 строк — столько узлов DOM в меню не нужно.
-    const { visible, hidden } = filterOptions(many, '')
-    expect(visible).toHaveLength(50)
-    expect(hidden).toBe(265)
+  it('315 сотрудников отдаются все 315', () => {
+    // Регресс на живой баг 16.09: выдача резалась до 50 строк, и «Пётр Попов»,
+    // стоящий 246-м из 313 по алфавиту, просто отсутствовал в списке
+    // руководителей. Нативный select, который мы заменяли, показывал всех.
+    expect(filterOptions(many, '')).toHaveLength(315)
   })
 
-  it('скрытых нет, когда всё поместилось', () => {
-    expect(filterOptions(people, '').hidden).toBe(0)
-  })
-
-  it('потолок считается ПОСЛЕ фильтра, а не до', () => {
-    // Иначе запрос находил бы только среди первых 50 строк исходного списка.
-    const { visible, hidden } = filterOptions(many, 'Сотрудник 300')
-    expect(visible.map((o) => o.value)).toEqual(['300'])
-    expect(hidden).toBe(0)
+  it('дальний по алфавиту находится и без запроса, и с запросом', () => {
+    expect(filterOptions(many, '').map((o) => o.value)).toContain('300')
+    expect(filterOptions(many, 'Сотрудник 300').map((o) => o.value)).toEqual(['300'])
   })
 })
 

@@ -620,9 +620,8 @@ function EmployeeCardDialog({
                       .filter((s) => !s.archived_at)
                       .map((s) => ({ value: s.id, label: s.name })),
                     tuQuery,
-                    { limit: Number.MAX_SAFE_INTEGER },
                   )
-                    .visible.map((o) => ({ id: o.value, name: o.label }))
+                    .map((o) => ({ id: o.value, name: o.label }))
                     .map((s) => {
                       const checked = tuStores?.has(s.id) ?? false
                       return (

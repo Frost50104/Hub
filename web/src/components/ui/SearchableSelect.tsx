@@ -120,9 +120,7 @@ export function SearchableSelect({
 
   // В управляемом режиме выдачу собрал вызывающий (обычно сервер) — фильтровать
   // её повторно нельзя: в ней уже нет того, что не подошло под запрос.
-  const { visible, hidden } = controlled
-    ? { visible: [...options], hidden: 0 }
-    : filterOptions(options, query)
+  const visible = controlled ? [...options] : filterOptions(options, query)
 
   const label =
     selectedLabel(options, value, currentLabel) ??
@@ -169,7 +167,6 @@ export function SearchableSelect({
           open={open}
           onOpenChange={setOpen}
           title={sheetTitle}
-          description={hidden > 0 ? `Показаны первые ${visible.length} из ${visible.length + hidden}` : undefined}
           items={items}
           onSelect={(picked) => pick(picked === CLEAR_ID ? null : picked)}
           searchable={showSearch}
@@ -231,11 +228,6 @@ export function SearchableSelect({
           </div>
         )}
         {visible.map(renderItem)}
-        {hidden > 0 && (
-          <div className="px-2 py-1.5 text-[12px] text-text3">
-            Показаны первые {visible.length} из {visible.length + hidden} — уточните поиск
-          </div>
-        )}
         {(pinnedBottom ?? []).map(renderItem)}
       </DropdownMenuContent>
     </DropdownMenu>

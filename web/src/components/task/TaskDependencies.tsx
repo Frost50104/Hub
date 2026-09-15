@@ -38,9 +38,6 @@ interface TaskDependenciesProps {
 
 const DONE_TONE = (done: boolean) => (done ? 'text-green' : 'text-text2')
 
-/** Пикер показывает максимум столько совпадений (виртуализации нет). */
-const MAX_VISIBLE = 50
-
 /**
  * "Зависит от" + "Блокирует" секция в TaskDetailDrawer. Пикер — по паттерну
  * PeoplePicker (поиск внутри дропдауна): ОС 13.08 — «все задачи без меток,
@@ -92,7 +89,9 @@ export function TaskDependencies({
       (key !== undefined && key !== null && key.includes(query))
     )
   })
-  const visible = candidates.slice(0, MAX_VISIBLE)
+  // Потолка выдачи нет (решение владельца 16.09): обрезка молча прячет то, что
+  // человек ищет, а списки здесь и так сужены поиском и правами.
+  const visible = candidates
 
   const onAdd = async (predId: string) => {
     setPickerOpen(false)
@@ -249,12 +248,6 @@ export function TaskDependencies({
                   </DropdownMenuItem>
                 )
               })}
-              {candidates.length > MAX_VISIBLE && (
-                <p className="px-2 py-1.5 text-[12px] text-text2">
-                  Показаны первые {MAX_VISIBLE} из {candidates.length} — уточните
-                  запрос.
-                </p>
-              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}
