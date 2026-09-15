@@ -41,7 +41,7 @@ import {
 } from '@/components/ui/Dialog'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
-import { Select } from '@/components/ui/Select'
+import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { RailRow, RailSection, RightRail } from '@/components/ui/RightRail'
 import { StatTile } from '@/components/ui/StatTile'
@@ -1127,18 +1127,15 @@ function MaterialFormDialog({
             )}
             <div className="space-y-1.5">
               <Label htmlFor="mat-section">Раздел</Label>
-              <Select
+              <SearchableSelect
                 id="mat-section"
-                value={sectionId}
-                onChange={(e) => setSectionId(e.target.value)}
-              >
-                <option value="">Без раздела</option>
-                {data.sections.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.title}
-                  </option>
-                ))}
-              </Select>
+                sheetTitle="Раздел"
+                placeholder="Без раздела"
+                clearLabel="Без раздела"
+                value={sectionId || null}
+                onChange={(v) => setSectionId(v ?? '')}
+                options={data.sections.map((s) => ({ value: s.id, label: s.title }))}
+              />
             </div>
             <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
               <input

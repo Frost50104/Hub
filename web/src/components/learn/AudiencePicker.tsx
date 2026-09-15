@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
+import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { Select } from '@/components/ui/Select'
 import {
   useAudienceDimensionCounts,
@@ -480,35 +480,37 @@ function RuleRow({
             </option>
           ))}
         </Select>
-        {dimKey === 'profile_ids' && (
-          <Input
-            type="search"
-            value={employeeQ}
-            onChange={(e) => onEmployeeQ(e.target.value)}
-            placeholder="Поиск сотрудника…"
-            className="w-44"
-          />
-        )}
         {dimKey === 'profile_ids' && employeesNote && (
           <p className="basis-full text-xs text-text3">{employeesNote}</p>
         )}
-        <Select
+        {/* Отдельного поля «Поиск сотрудника…» рядом больше нет: поиск переехал
+            ВНУТРЬ списка, и для измерения «Сотрудник» он остаётся серверным —
+            строка уходит в `q` с прежним дебаунсом 300 мс. Для остальных
+            измерений (магазины, отделы, группы) выдача уже целиком на руках,
+            и `SearchableSelect` фильтрует её локально. */}
+        <SearchableSelect
           className="min-w-[160px] flex-1"
-          value={pickId}
-          onChange={(e) => setPickId(e.target.value)}
-        >
-          <option value="">Выберите…</option>
-          {available.map((o) => {
+          sheetTitle="Значение условия"
+          aria-label="Значение условия"
+          placeholder="Выберите…"
+          clearLabel={null}
+          value={pickId || null}
+          onChange={(v) => setPickId(v ?? '')}
+          options={available.map((o) => {
             const n = countFor(dimKey, o.id)
-            return (
-              <option key={o.id} value={o.id}>
-                {n === null
-                  ? o.label
-                  : `${o.label} · ${n} ${plural(n, 'сотрудник', 'сотрудника', 'сотрудников')}`}
-              </option>
-            )
+            return {
+              value: o.id,
+              label: o.label,
+              meta:
+                n === null
+                  ? undefined
+                  : `${n} ${plural(n, 'сотрудник', 'сотрудника', 'сотрудников')}`,
+            }
           })}
-        </Select>
+          {...(dimKey === 'profile_ids'
+            ? { searchValue: employeeQ, onSearchChange: onEmployeeQ }
+            : {})}
+        />
         <Button type="button" variant="secondary" onClick={addCondition} disabled={!pickId}>
           <Plus className="h-3.5 w-3.5" /> Условие
         </Button>

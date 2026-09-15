@@ -43,6 +43,7 @@ import {
 import { AutoGrowTextarea } from '@/components/ui/AutoGrowTextarea'
 import { Button } from '@/components/ui/Button'
 import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
+import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { Textarea } from '@/components/ui/Input'
 import { PropertyRow, PropertyRows } from '@/components/ui/PropertyRows'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
@@ -104,11 +105,9 @@ function Dt({ icon: Icon, children }: { icon?: typeof Flag; children: React.Reac
 }
 
 /** Select этапа в карточке: max-width 320, 36px, r9, --surface (макет). */
-/** Значение селекта «Колонка» → тело PATCH. Пустая строка это прочерк, а он
- *  означает «снять статус» — то есть явный `null`, а не «поле не передали». */
-function stageValue(e: React.ChangeEvent<HTMLSelectElement>): string | null {
-  return e.target.value || null
-}
+/* Прочерк в «Колонке» означает «снять статус» — то есть явный `null`, а не
+   «поле не передали». `SearchableSelect` отдаёт ровно `null`, поэтому
+   отдельный конвертер значения селекта больше не нужен (был `stageValue`). */
 
 /** Строка «Проект» на десктопе: силуэт селекта, но открывает диалог переноса —
  *  у переезда есть цена (новый номер, отвал меток), и тихим выбором он быть
@@ -502,20 +501,15 @@ export function TaskDetailDrawer({
                 </PropertyRow>
                 <PropertyRow label="Колонка">
                   {stages.data && stages.data.length > 0 ? (
-                    <select
-                      value={task.stage_id ?? ''}
-                      disabled={!canStatus}
+                    <SearchableSelect
+                      sheetTitle="Колонка"
                       aria-label="Колонка"
-                      onChange={(e) => update.mutate({ id: task.id, stage_id: stageValue(e) })}
+                      value={task.stage_id ?? null}
+                      disabled={!canStatus}
+                      onChange={(v) => update.mutate({ id: task.id, stage_id: v })}
                       className={MOBILE_CONTROL}
-                    >
-                      <option value="">—</option>
-                      {stages.data.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
+                      options={stages.data.map((s) => ({ value: s.id, label: s.name }))}
+                    />
                   ) : (
                     <span className="text-text2">—</span>
                   )}
@@ -616,20 +610,15 @@ export function TaskDetailDrawer({
                             «без статуса»: задача уходит с доски, оставаясь
                             в списке и поиске (0046). */}
                         {stages.data && stages.data.length > 0 ? (
-                          <select
-                            value={task.stage_id ?? ''}
-                            disabled={!canStatus}
+                          <SearchableSelect
+                            sheetTitle="Колонка"
                             aria-label="Колонка"
-                            onChange={(e) => update.mutate({ id: task.id, stage_id: stageValue(e) })}
+                            value={task.stage_id ?? null}
+                            disabled={!canStatus}
+                            onChange={(v) => update.mutate({ id: task.id, stage_id: v })}
                             className={STAGE_SELECT}
-                          >
-                            <option value="">—</option>
-                            {stages.data.map((s) => (
-                              <option key={s.id} value={s.id}>
-                                {s.name}
-                              </option>
-                            ))}
-                          </select>
+                            options={stages.data.map((s) => ({ value: s.id, label: s.name }))}
+                          />
                         ) : (
                           <span className="text-text2">—</span>
                         )}
