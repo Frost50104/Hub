@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
 import { Button } from '@/components/ui/Button'
@@ -47,16 +47,19 @@ const UPDATE_CHECK_INTERVAL_MS = 30_000
  */
 export function UpdateBanner() {
   const isDesktop = useIsDesktop()
-  const {
-    needRefresh: [needRefresh, setNeedRefresh],
-    updateServiceWorker,
-  } = useRegisterSW()
+  // `useRegisterSW` вызывается РАДИ РЕГИСТРАЦИИ: виртуальный модуль плагина —
+  // единственное место, где регистрируется наш Service Worker (в собранном
+  // `index.html` никакой регистрации нет). Из его состояния мы больше ничего
+  // не берём: `needRefresh` поднимается на любой смене воркера, в том числе
+  // когда бандл у человека уже свежий, — замер на staging 16.09 показал ровно
+  // это, баннер висел при совпадающих версиях.
+  const { updateServiceWorker } = useRegisterSW()
   // Версия на сервере. `null` — узнать не удалось (офлайн, дев-стенд без
   // version.json): тогда молчим, см. `shouldOfferUpdate`.
   const [serverVersion, setServerVersion] = useState<string | null>(null)
-  // Версия, отложенная кнопкой «Позже». Ref, а не state: перерисовка от него
-  // не нужна, решение принимается в момент рендера.
-  const dismissedRef = useRef<string | null>(null)
+  // Версия, отложенная кнопкой «Позже»: откладывается КОНКРЕТНАЯ версия, и
+  // следующая новая покажется снова.
+  const [dismissed, setDismissed] = useState<string | null>(null)
 
   // Опрос версии живёт ОТДЕЛЬНО от опроса воркера и не зависит от него:
   // в Safari `serviceWorker.ready` и `update()` подводят, а этот путь — нет.
@@ -117,11 +120,7 @@ export function UpdateBanner() {
     }
   }, [])
 
-  // Версия — главный признак; событие плагина оставлено вторым, но и оно
-  // уважает «Позже»: иначе отложенное обновление возвращалось бы само.
-  const byVersion = shouldOfferUpdate(__APP_VERSION__, serverVersion, dismissedRef.current)
-  const byEvent = needRefresh && serverVersion !== dismissedRef.current
-  if (!byVersion && !byEvent) return null
+  if (!shouldOfferUpdate(__APP_VERSION__, serverVersion, dismissed)) return null
 
   return (
     <div
@@ -149,10 +148,7 @@ export function UpdateBanner() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => {
-            dismissedRef.current = serverVersion
-            setNeedRefresh(false)
-          }}
+          onClick={() => setDismissed(serverVersion)}
         >
           Позже
         </Button>
