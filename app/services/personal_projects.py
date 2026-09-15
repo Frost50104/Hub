@@ -32,6 +32,7 @@
 
 from __future__ import annotations
 
+import re
 from uuid import UUID
 
 import structlog
@@ -135,9 +136,13 @@ def personal_key_base(full_name: str | None) -> str:
     Ничего пригодного (пустое имя, одни цифры, служебная строка) → `LICNOE`,
     то есть прежнее поведение.
     """
+    # Разделители вычищаем ДО `_candidate`: он на двух и более «словах» уходит
+    # в ветку инициалов, и «Блохина 1/75» (служебная учётка кафе, слэш в
+    # адресе) дала бы ключ «B». Склеиваем первые два слова в один токен —
+    # тогда ветка инициалов не срабатывает никогда.
     words = (full_name or "").split()[:2]
-    base = _candidate(" ".join(words) if len(words) < 2 else "".join(words),
-                      max_len=PERSONAL_KEY_MAX_LEN)
+    raw = re.sub(r"[^\w]", "", "".join(words), flags=re.UNICODE)
+    base = _candidate(raw, max_len=PERSONAL_KEY_MAX_LEN)
     return PERSONAL_KEY_BASE if base == _FALLBACK else base
 
 
