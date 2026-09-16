@@ -371,3 +371,195 @@ async def test_audience_rules_still_work_for_people(
     await db.flush()
     await rebuild_tenant(db, tenant_id)
     assert await _members(db, [person.id]) == [person.id]
+
+
+# --- claim `signaris:account_kind` в токене (auth, 16.09 20:50 UTC) ----------
+#
+# Зазор, который claim закрывает: точка С РОЛЬЮ hub открыла Hub раньше тика
+# синка (до 15 минут; на staging синка нет вовсе) — до правки она получала
+# карточку `person`, членство и пуши «назначен курс» на кассу. Выгрузка штата
+# при этом остаётся главной: claim работает ТОЛЬКО там, где выгрузка учётку
+# ещё не видела (`staff_synced_at IS NULL`).
+
+
+async def _shadow(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    *,
+    email: str,
+    name: str,
+    kind: str | None,
+    synced: bool,
+) -> uuid.UUID:
+    """Тень как её заводит client-lib на первом же запросе. `synced` — видел ли
+    строку прогон выгрузки (именно это, а не свежесть снимка, решает спор)."""
+    from datetime import UTC, datetime
+
+    employee_id = uuid.uuid4()
+    db.add(
+        ShadowUser(
+            employee_id=employee_id,
+            tenant_id=tenant_id,
+            email=email,
+            full_name=name,
+            account_kind=kind,
+            staff_synced_at=datetime.now(UTC) if synced else None,
+        )
+    )
+    await db.flush()
+    return employee_id
+
+
+def _principal(
+    tenant_id: uuid.UUID, employee_id: uuid.UUID, email: str, name: str, **extra
+) -> Principal:
+    return Principal(
+        employee_id=employee_id,
+        email=email,
+        tenant_id=tenant_id,
+        tenant_slug="test",
+        full_name=name,
+        product_roles={"hub": "member"},
+        jti=str(uuid.uuid4()),
+        **extra,
+    )
+
+
+async def _login(db: AsyncSession, principal: Principal, monkeypatch) -> tuple:
+    """Первый вход. Возвращает (карточка, сколько членств ПРИБАВИЛОСЬ).
+
+    Считаем именно прибавленное, а не число вызовов notify: вызов стоит в
+    общем пути безусловно, а `notify_new_audience_members` на пустом `added`
+    выходит первой же строкой. Рассылку порождает granted_at нового членства,
+    поэтому ноль здесь и означает «кассе ничего не ушло».
+    """
+    from app.services import employee_profiles as ep
+
+    added = 0
+
+    async def _spy(db_, diffs):
+        nonlocal added
+        added += sum(len(d.added) for d in diffs.values())
+
+    monkeypatch.setattr(ep, "notify_new_audience_members", _spy)
+    result = await ep.ensure_profile_for_principal(db, principal)
+    return result.profile, added
+
+
+async def test_service_claim_blocks_learner_card(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """(а) Первый вход кассы с ролью hub: карточка служебная, notify молчит."""
+    db.add(Audience(tenant_id=tenant_id))  # аудитория «всем» — контроль
+    await db.flush()
+
+    employee_id = await _shadow(
+        db, tenant_id, email="k19@t.ru", name="Кондратьевский, 19", kind=None, synced=False
+    )
+    principal = _principal(
+        tenant_id, employee_id, "k19@t.ru", "Кондратьевский, 19", account_kind="service"
+    )
+    profile, granted = await _login(db, principal, monkeypatch)
+
+    assert profile is not None
+    assert profile.account_kind == "service"
+    assert await _members(db, [profile.id]) == []
+    assert granted == 0, "кассе прибавилось членство — уйдут пуши о курсах"
+
+
+async def test_person_login_unaffected_by_claim_work(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """Контроль к (а): человек тем же путём карточку и членство получает."""
+    db.add(Audience(tenant_id=tenant_id))
+    await db.flush()
+
+    employee_id = await _shadow(
+        db, tenant_id, email="ivanova@t.ru", name="Иванова Мария", kind=None, synced=False
+    )
+    principal = _principal(
+        tenant_id, employee_id, "ivanova@t.ru", "Иванова Мария", account_kind="person"
+    )
+    profile, granted = await _login(db, principal, monkeypatch)
+
+    assert profile.account_kind == "person"
+    assert await _members(db, [profile.id]) == [profile.id]
+    # `>= 1`, а не `== 1`: роль testcontainers — суперюзер, RLS её не режет, и
+    # аудитории, закоммиченные соседними тестами, живут в том же тенанте. У
+    # кассы ноль остаётся нолём при любом их числе, а здесь важен сам факт —
+    # человек членство получил, то есть предикат не задел живых людей.
+    assert granted >= 1
+
+
+async def test_token_without_claim_behaves_as_before(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """(б) Токен без claim'а — старый бандл, откат auth, поля нет в контракте.
+
+    Отсутствие ключа значит «не знаю», а НЕ `service`: fail-open, иначе откат
+    auth разом превратил бы всех входящих в служебные учётки.
+    """
+    employee_id = await _shadow(
+        db, tenant_id, email="petrov@t.ru", name="Петров Иван", kind=None, synced=False
+    )
+    principal = _principal(tenant_id, employee_id, "petrov@t.ru", "Петров Иван")
+    assert getattr(principal, "account_kind", None) is None
+
+    profile, _ = await _login(db, principal, monkeypatch)
+    assert profile.account_kind == "person"
+
+
+async def test_claim_never_rewrites_existing_card(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """(в) `person` в токене против карточки, размеченной синком служебной.
+
+    Вид существующей карточки меняет ТОЛЬКО синк. Иначе устаревший токен (до
+    15 минут) спорил бы с выгрузкой, и каждый откат в `person` заново слал бы
+    кассе пуши о курсах.
+    """
+    till = await _profile(db, tenant_id, name="Волковский 30", email="v30@t.ru", kind="service")
+    await db.flush()
+    principal = _principal(
+        tenant_id, till.employee_id, "v30@t.ru", "Волковский 30", account_kind="person"
+    )
+
+    profile, granted = await _login(db, principal, monkeypatch)
+    assert profile.id == till.id
+    assert profile.account_kind == "service", "claim переписал вид существующей карточки"
+    assert granted == 0
+
+
+async def test_staff_feed_beats_claim_for_new_card(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """Спор выгрузки и токена решается в пользу выгрузки.
+
+    Тень уже прошла через прогон штата и размечена служебной, а токен на руках
+    старый и говорит `person`. Карточки ещё нет — и завести её человеком было
+    бы регрессом ровно в тот баг, который чиним.
+    """
+    employee_id = await _shadow(
+        db, tenant_id, email="a5@t.ru", name="Аптекарский 5", kind="service", synced=True
+    )
+    principal = _principal(
+        tenant_id, employee_id, "a5@t.ru", "Аптекарский 5", account_kind="person"
+    )
+    profile, granted = await _login(db, principal, monkeypatch)
+
+    assert profile.account_kind == "service"
+    assert granted == 0
+
+
+def test_unknown_kind_maps_to_service():
+    """Третий вид из auth не должен ронять запись: CHECK знает только два.
+
+    Юнит-часть — в CI бегут только такие: интеграционные там не запускаются.
+    """
+    from app.services.employee_profiles import normalize_account_kind
+
+    assert normalize_account_kind("person") == "person"
+    assert normalize_account_kind("service") == "service"
+    assert normalize_account_kind("bot") == "service"
+    assert normalize_account_kind("kiosk-terminal-extended") == "service"
+    assert normalize_account_kind(None) == "person"

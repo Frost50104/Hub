@@ -30,11 +30,48 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.employee_profile import EmployeeProfile
+from app.models.shadow import ShadowUser
 from app.services import audit
 from app.services.audience_resolver import recalc_profile
 from app.services.learn_notify import notify_new_audience_members
 
 log = structlog.get_logger("employee_profiles")
+
+ACCOUNT_KINDS = ("person", "service")
+
+
+def normalize_account_kind(value: str | None) -> str:
+    """Привести вид учётки к тому, что физически влезает в схему.
+
+    На карточке стоит CHECK IN ('person','service'), а вид приезжает из auth —
+    из выгрузки штата и (с 16.09) из claim'а токена. Появись там третье
+    значение, незнакомое нам, запись карточки упала бы IntegrityError и
+    откатила ВЕСЬ прогон синка — каждые 15 минут, до выката. Поэтому всё, что
+    не `person`, считаем служебным: для learn-домена важна ровно эта граница
+    («учится» / «не учится»), и ошибиться в сторону «не учится» безопаснее —
+    лишняя рассылка курсов на кассу необратима, а её отсутствие чинится.
+
+    `None` — это «не знаю» (старый токен, откат auth, поля нет в контракте), и
+    оно даёт `person`: fail-open, тот же довод, что у `staff_snapshot_fresh` —
+    иначе пропажа признака разом опустошила бы все экраны.
+    """
+    if value is None:
+        return "person"
+    return value if value in ACCOUNT_KINDS else "service"
+
+
+def _kind_for_new_profile(shadow: ShadowUser | None, claim: str | None) -> str:
+    """Вид для карточки, которой ещё нет: выгрузка штата > claim токена.
+
+    Выгрузка выигрывает всегда, и условие «она эту учётку видела» — именно
+    `staff_synced_at IS NOT NULL`, а не свежесть снимка: свежесть отвечает на
+    другой вопрос («не протух ли снимок целиком»). Claim нужен ровно в зазоре,
+    которого выгрузка закрыть не может: точка с ролью hub, открывшая Hub
+    раньше ближайшего тика синка (до 15 минут; на staging синка нет вовсе).
+    """
+    if shadow is not None and shadow.staff_synced_at is not None:
+        return normalize_account_kind(shadow.account_kind)
+    return normalize_account_kind(claim)
 
 
 def normalize_email(email: str) -> str:
@@ -146,6 +183,29 @@ async def ensure_profile_for_principal(db: AsyncSession, principal: Principal) -
     # карточки вручную admin по-прежнему может через `/restore`.
     twin = await find_latest_archived_by_email(db, email)
 
+    # Вид НОВОЙ карточки. До 16.09 он здесь не считался вовсе — карточка
+    # рождалась с дефолтом `person`, и точка с ролью hub, зашедшая раньше тика
+    # синка, получала обычную учебную карточку: `recalc_profile` ниже выдавал
+    # ей членство, `notify_new_audience_members` слал пуши о курсах НА КАССУ.
+    # Разбор auth 16.09 («Где claim вам действительно нужен»): это основной
+    # путь заведения точки, а не редкий угол.
+    #
+    # Вид пишется В ТОТ ЖЕ INSERT — обязательно ДО `recalc_profile`: тот
+    # смотрит `profile.account_kind` и на служебной карточке уходит в ветку
+    # снятия членства, то есть diffs пустые и уведомлять нечего. Отдельным
+    # UPDATE после вставки этого не добиться: между ними уже уйдут пуши.
+    #
+    # Карточку служебной учётке всё же ЗАВОДИМ (а не отказываем, как делает
+    # `link_only` у синка): решение владельца 04.09 — карточки кафе остаются,
+    # на кассе точки открыт её аккаунт, и непривязанная карточка показывала
+    # «без учётки» при живой учётке в auth. Меняем вид, а не факт заведения.
+    shadow = (
+        await db.execute(
+            select(ShadowUser).where(ShadowUser.employee_id == principal.employee_id)
+        )
+    ).scalar_one_or_none()
+    kind = _kind_for_new_profile(shadow, getattr(principal, "account_kind", None))
+
     stmt = (
         pg_insert(EmployeeProfile)
         .values(
@@ -154,6 +214,7 @@ async def ensure_profile_for_principal(db: AsyncSession, principal: Principal) -
             email=email,
             full_name=principal.full_name,
             last_activity_at=now,
+            account_kind=kind,
         )
         .on_conflict_do_nothing(
             index_elements=["tenant_id", func.lower(EmployeeProfile.email)],
@@ -241,6 +302,10 @@ async def ensure_profile_for_staff_row(
     WHERE status='active'.
     """
     from app.services.audience_resolver import recalc_profile
+
+    # Нормализуем на границе записи, а не у вызывающего: эту функцию зовёт и
+    # синк, и тесты, и любой будущий код, а CHECK на колонке один на всех.
+    account_kind = normalize_account_kind(account_kind)
 
     existing = await _find_by_employee_id(db, employee_id)
     if existing is not None:

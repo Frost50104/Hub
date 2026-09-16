@@ -59,6 +59,7 @@ from app.services.employee_profiles import (
     archive_profile,
     classify_staff_row,
     ensure_profile_for_staff_row,
+    normalize_account_kind,
 )
 
 log = structlog.get_logger("staff_sync")
@@ -207,7 +208,17 @@ async def _apply_tenant(
         is_active = row.get("is_active")
         # Дефолт "person" сознательно: контракт аддитивный, поле auth не
         # уберёт; строже гейтит is_active ниже.
-        account_kind = row.get("account_kind") or "person"
+        #
+        # Нормализация обязательна и вот почему: до неё любое значение уезжало
+        # в карточку как есть, а там CHECK IN ('person','service') — третий вид
+        # из auth уронил бы IntegrityError'ом ВЕСЬ прогон, каждые 15 минут, до
+        # выката (замечание auth 16.09). Незнакомое значение при этом не
+        # теряется молча: пишем WARNING, чтобы узнать о расширении контракта
+        # из журнала, а не по сломанному синку.
+        raw_kind = row.get("account_kind")
+        account_kind = normalize_account_kind(raw_kind)
+        if raw_kind is not None and raw_kind != account_kind:
+            log.warning("staff_sync.unknown_account_kind", raw=raw_kind, stored=account_kind)
 
         # Тень: INSERT новых легален (pull-bootstrap, не фид) и положен ВСЕМ,
         # включая сервисные учётки. Непустое имя из pull не перетирается
