@@ -14,6 +14,7 @@ describe('adminSegmentsFor', () => {
     expect(adminSegmentsFor(me('admin', 'employee'))).toEqual([
       'review',
       'analytics',
+      'progress',
       'employees',
       'automations',
       'audit',
@@ -25,13 +26,30 @@ describe('adminSegmentsFor', () => {
     expect(adminSegmentsFor(me('member', 'office'))).toEqual([])
   })
 
-  it('офис с publisher — проверка и аналитика', () => {
-    expect(adminSegmentsFor(me('member', 'office', 'publisher'))).toEqual(['review', 'analytics'])
+  it('офис с publisher — проверка, аналитика и прогресс', () => {
+    expect(adminSegmentsFor(me('member', 'office', 'publisher'))).toEqual([
+      'review',
+      'analytics',
+      'progress',
+    ])
   })
 
-  it('ТУ и франчайзи без publisher — только аналитика (скоуп магазинов)', () => {
-    expect(adminSegmentsFor(me('member', 'tu'))).toEqual(['analytics'])
-    expect(adminSegmentsFor(me('member', 'franchisee_owner'))).toEqual(['analytics'])
+  it('ТУ и франчайзи без publisher — аналитика и прогресс (скоуп магазинов)', () => {
+    expect(adminSegmentsFor(me('member', 'tu'))).toEqual(['analytics', 'progress'])
+    expect(adminSegmentsFor(me('member', 'franchisee_owner'))).toEqual([
+      'analytics',
+      'progress',
+    ])
+  })
+
+  /** Порядок не косметика: `LearnAdminPage` берёт `allowed[0]` как вкладку по
+   *  умолчанию, поэтому `progress` перед `analytics` молча увёл бы каждого ТУ
+   *  с привычного экрана на новый. */
+  it('прогресс идёт ПОСЛЕ аналитики — иначе сменится вкладка по умолчанию', () => {
+    for (const who of [me('admin', 'employee'), me('member', 'tu'), me('member', 'office', 'publisher')]) {
+      const segments = adminSegmentsFor(who)
+      expect(segments.indexOf('progress')).toBeGreaterThan(segments.indexOf('analytics'))
+    }
   })
 
   it('линейный сотрудник и отсутствие профиля — ничего', () => {
@@ -67,4 +85,5 @@ describe('canManageCourses', () => {
       expect(coursesSectionTitle(content, hub)).toBe(manages ? 'Учебные курсы' : 'Моё обучение')
     }
   })
+
 })

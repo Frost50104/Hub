@@ -1,4 +1,7 @@
 import { api } from './api'
+// Строка прогресса объявлена рядом с правилами экрана (`learnProgress.ts`):
+// тип и логика, которая его читает, обязаны меняться вместе.
+import type { EmployeeProgressRow } from './learnProgress'
 import { materialDownloadName } from './materialFileName'
 import { parseEcho, type VideoProgressEcho } from './videoWatch'
 
@@ -945,6 +948,63 @@ export interface AnalyticsData {
   acks: { id: string; title: string; acked: number; total: number }[]
 }
 
+// ─── Прогресс обучения по сотрудникам ────────────────────────────────────────
+
+export type { EmployeeProgressRow }
+
+/** Строка прогресса. Тип строки списка и шапки панели — намеренно один. */
+export interface EmployeeProgressSummary {
+  people: number
+  without_account: number
+  never_active: number
+  completed_all: number
+  completed_none: number
+  mandatory_total: number
+  mandatory_done: number
+  mandatory_pct: number | null
+}
+
+export interface EmployeeProgressList {
+  scope: string
+  total: number
+  /** Упёрлись в серверный потолок — подпись обязана сказать об этом вслух. */
+  truncated: boolean
+  summary: EmployeeProgressSummary
+  items: EmployeeProgressRow[]
+}
+
+export interface EmployeeProgressCourse {
+  course_id: string
+  title: string
+  course_type: CourseType
+  course_status: string
+  required: boolean
+  /** audience | assignment | progress_only (последнее — снятый с публикации). */
+  source: string
+  status: 'not_started' | 'in_progress' | 'completed'
+  lessons_total: number
+  lessons_completed: number
+  started_at: string | null
+  completed_at: string | null
+  due_at: string | null
+  certificate_serial: string | null
+}
+
+export interface EmployeeProgressAttempt {
+  attempt_id: string
+  quiz_title: string
+  attempt_no: number
+  finished_at: string | null
+  score_pct: number | null
+  state: 'in_progress' | 'pending_review' | 'passed' | 'failed'
+}
+
+export interface EmployeeProgressDetail {
+  profile: EmployeeProgressRow
+  courses: EmployeeProgressCourse[]
+  attempts: EmployeeProgressAttempt[]
+}
+
 export type AutomationTrigger = 'profile_activated' | 'position_assigned'
 
 export const AUTOMATION_TRIGGER_LABEL: Record<AutomationTrigger, string> = {
@@ -1699,6 +1759,18 @@ export const learnApi = {
     api.get<LearnSearchData>('/learn/search', { params: { q } }).then((r) => r.data),
   analytics: (): Promise<AnalyticsData> =>
     api.get<AnalyticsData>('/learn/analytics').then((r) => r.data),
+  employeeProgress: (params: {
+    q?: string
+    store_id?: string
+    position_id?: string
+  }): Promise<EmployeeProgressList> =>
+    api
+      .get<EmployeeProgressList>('/learn/analytics/employees', { params })
+      .then((r) => r.data),
+  employeeProgressDetail: (profileId: string): Promise<EmployeeProgressDetail> =>
+    api
+      .get<EmployeeProgressDetail>(`/learn/analytics/employees/${profileId}`)
+      .then((r) => r.data),
   /** «Напомнить неознакомленным» — батч library.ack_required по отчёту об ознакомлении. */
   remindMaterial: (id: string): Promise<{ notified: number; pending: number }> =>
     api
@@ -1719,8 +1791,15 @@ export const learnApi = {
     a.remove()
     setTimeout(() => URL.revokeObjectURL(url), 60_000)
   },
-  downloadAnalyticsCsv: async (): Promise<void> => {
-    const resp = await api.get('/learn/analytics/export', { responseType: 'blob' })
+  downloadAnalyticsCsv: async (params: {
+    q?: string
+    store_id?: string
+    position_id?: string
+  } = {}): Promise<void> => {
+    const resp = await api.get('/learn/analytics/export', {
+      params,
+      responseType: 'blob',
+    })
     const url = URL.createObjectURL(resp.data as Blob)
     const a = document.createElement('a')
     a.href = url
