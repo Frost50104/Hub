@@ -13,6 +13,7 @@ Permissions:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.deps import get_db, require_auth
 from app.models.employee_profile import EmployeeProfile
 from app.models.org import (
@@ -39,6 +41,7 @@ from app.models.org import (
     UserGroup,
     UserGroupMember,
 )
+from app.models.shadow import ShadowUser
 from app.schemas.org import (
     AudienceDryRunBody,
     AudienceDryRunResponse,
@@ -398,6 +401,88 @@ async def delete_store(
 ) -> None:
     in_use = await _profiles_use(db, EmployeeProfile.store_id, ref_id)
     await _delete_ref(db, principal, Store, ref_id, "store", in_use=in_use)
+
+
+class PointAccountResponse(BaseModel):
+    """Учётка точки — касса, за которой стоит планшет в зале."""
+
+    profile_id: UUID
+    store_id: UUID | None
+    full_name: str
+    email: str
+    auth_state: str
+    last_activity_at: datetime | None
+    archived: bool
+
+
+@router.get("/learn/org/points/accounts", response_model=list[PointAccountResponse])
+async def point_accounts(
+    principal: Principal = Depends(_ADMIN),
+    db: AsyncSession = Depends(get_db),
+) -> list[PointAccountResponse]:
+    """Учётные записи точек — для раздела «Оргструктура → Точки».
+
+    Отдельная ручка под hub-admin, а НЕ поле в `org_snapshot`: тот стоит на
+    `require_auth()` и кормит пикеры всему тенанту, а почта кассы — это доступ
+    к кассе. Тем же доводом закрыт реестр объектов (`GET /learn/sites`).
+
+    Отдаются и кассы без точки: с 16.09 карточки касс не показываются в
+    «Сотрудниках», и если такую не показать здесь, она станет невидимой и
+    неисправимой. На проде такая одна — карточка, про которую auth не знает.
+    """
+    from app.api.employees import auth_state_for, staff_snapshot_fresh
+
+    settings = get_settings()
+    staff_synced = staff_snapshot_fresh(
+        (await db.execute(select(func.max(ShadowUser.staff_synced_at)))).scalar_one_or_none(),
+        now=datetime.now(UTC),
+        interval_sec=settings.staff_sync_interval_sec,
+    )
+    rows = (
+        (
+            await db.execute(
+                select(EmployeeProfile)
+                .where(EmployeeProfile.account_kind == "service")
+                .order_by(EmployeeProfile.full_name)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    shadows: dict[UUID, tuple[bool, bool | None]] = {}
+    employee_ids = [p.employee_id for p in rows if p.employee_id is not None]
+    if employee_ids:
+        for eid, deleted_at, auth_active in await db.execute(
+            select(
+                ShadowUser.employee_id, ShadowUser.deleted_at, ShadowUser.auth_active
+            ).where(ShadowUser.employee_id.in_(employee_ids))
+        ):
+            shadows[eid] = (deleted_at is not None, auth_active)
+    out = []
+    for p in rows:
+        shadow_deleted, auth_active = (
+            shadows.get(p.employee_id, (False, None)) if p.employee_id else (False, None)
+        )
+        out.append(
+            PointAccountResponse(
+                profile_id=p.id,
+                store_id=p.store_id,
+                full_name=p.full_name,
+                email=p.email,
+                # Словарь тот же, что на «Сотрудниках»: два экрана про одну
+                # учётку обязаны говорить одно и то же.
+                auth_state=auth_state_for(
+                    employee_id=p.employee_id,
+                    last_activity_at=p.last_activity_at,
+                    shadow_deleted=shadow_deleted,
+                    auth_active=auth_active,
+                    staff_synced=staff_synced,
+                ),
+                last_activity_at=p.last_activity_at,
+                archived=p.status == "archived",
+            )
+        )
+    return out
 
 
 # --- Отделы -------------------------------------------------------------------

@@ -53,6 +53,7 @@ from app.schemas.quiz import (
     SnapshotQuestion,
 )
 from app.services import audit, lifecycle, points
+from app.services.audience_resolver import learning_population_filter
 from app.services.content_access import require_content_role, resolve_content_role
 from app.services.learn_media import sign_media_path
 from app.services.learn_notify import _employee_ids
@@ -693,7 +694,7 @@ async def blocked_quizzes(
             Quiz.attempts_limit.is_not(None),
             Quiz.is_required.is_(True),
             Quiz.status == "published",
-            EmployeeProfile.status == "active",
+            learning_population_filter(),
         )
         .order_by(QuizAttempt.finished_at)
     )
@@ -870,6 +871,7 @@ async def rating(
                 LEFT JOIN stores s ON s.id = p.store_id
                 WHERE e.occurred_at >= {since_expr}
                   AND p.status = 'active'
+                  AND p.account_kind = 'person'
                   {store_filter}
                 GROUP BY p.id, p.full_name, pos.name, s.name
                 ORDER BY pts DESC, p.full_name

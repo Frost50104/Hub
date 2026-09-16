@@ -24,6 +24,7 @@ from app.models.automation import AutomationJob, AutomationRule
 from app.models.course import Course
 from app.models.employee_profile import EmployeeProfile
 from app.models.progress import CourseAssignment
+from app.services.audience_resolver import learning_population_filter
 from app.services.learn_notify import _employee_ids
 from app.services.notify_batch import notify_many
 
@@ -35,7 +36,7 @@ CHUNK = 200
 async def _materialize(session, rule: AutomationRule) -> int:  # noqa: ANN001
     """Создать pending-jobs для новых подходящих профилей. → сколько создано."""
     stmt = select(EmployeeProfile.id).where(
-        EmployeeProfile.status == "active",
+        learning_population_filter(),
         EmployeeProfile.employee_id.is_not(None),  # активирован = входил
         EmployeeProfile.created_at >= rule.applies_from,
     )

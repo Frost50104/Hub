@@ -509,10 +509,10 @@ function EmployeeCardDialog({
               </div>
               {form.org_role !== 'office' && (
                 <div className="space-y-1.5">
-                  <Label htmlFor="emp-store">Магазин</Label>
+                  <Label htmlFor="emp-store">Точка</Label>
                   <SearchableSelect
                     id="emp-store"
-                    sheetTitle="Магазин"
+                    sheetTitle="Точка"
                     value={form.store_id ?? null}
                     onChange={(v) => set('store_id', v)}
                     options={org.stores
@@ -601,9 +601,9 @@ function EmployeeCardDialog({
 
             {form.org_role === 'tu' && (
               <div className="space-y-1.5">
-                <Label htmlFor="emp-tu-search">Закреплённые магазины ТУ</Label>
+                <Label htmlFor="emp-tu-search">Закреплённые точки ТУ</Label>
                 {/* Выбор здесь множественный, поэтому не выпадашка, а список с
-                    поиском НАД ним: магазинов 63, и отметить три из них
+                    поиском НАД ним: точек 63, и отметить три из них
                     прокруткой в окне высотой 160px неудобно ровно так же, как
                     искать руководителя в списке из 315. Правило фильтрации то
                     же самое — `filterOptions`, пословно и с `ё→е`. */}
@@ -612,7 +612,7 @@ function EmployeeCardDialog({
                   type="search"
                   value={tuQuery}
                   onChange={(e) => setTuQuery(e.target.value)}
-                  placeholder="Поиск магазина…"
+                  placeholder="Поиск точки…"
                 />
                 <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-glass-border p-2">
                   {filterOptions(
@@ -642,7 +642,7 @@ function EmployeeCardDialog({
                 </div>
                 <p className="text-[11px] text-text3">
                   ТУ автоматически видит материалы и сотрудников закреплённых
-                  магазинов.
+                  точек.
                 </p>
               </div>
             )}
@@ -725,7 +725,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
           <DialogDescription>
             Колонки: email, full_name (обязательные), phone, position, store,
             department, franchisee, org_role, manager_email, hired_at.
-            Разделитель — «;» или «,». Недостающие должности/магазины создадутся
+            Разделитель — «;» или «,». Недостающие должности/точки создадутся
             автоматически, существующие email пропускаются.
           </DialogDescription>
         </DialogHeader>

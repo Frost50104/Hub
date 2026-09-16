@@ -86,8 +86,8 @@ const DIMENSIONS: { key: DimensionKey; label: string }[] = [
   { key: 'org_roles', label: 'Контур' },
   { key: 'position_ids', label: 'Должность' },
   { key: 'position_group_ids', label: 'Группа должностей' },
-  { key: 'store_ids', label: 'Магазин' },
-  { key: 'store_group_ids', label: 'Группа магазинов' },
+  { key: 'store_ids', label: 'Точка' },
+  { key: 'store_group_ids', label: 'Группа точек' },
   { key: 'franchisee_ids', label: 'Франчайзи' },
   { key: 'franchisee_group_ids', label: 'Группа франчайзи' },
   { key: 'department_ids', label: 'Отдел' },
@@ -486,7 +486,7 @@ function RuleRow({
         {/* Отдельного поля «Поиск сотрудника…» рядом больше нет: поиск переехал
             ВНУТРЬ списка, и для измерения «Сотрудник» он остаётся серверным —
             строка уходит в `q` с прежним дебаунсом 300 мс. Для остальных
-            измерений (магазины, отделы, группы) выдача уже целиком на руках,
+            измерений (точки, отделы, группы) выдача уже целиком на руках,
             и `SearchableSelect` фильтрует её локально. */}
         <SearchableSelect
           className="min-w-[160px] flex-1"

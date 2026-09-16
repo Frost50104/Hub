@@ -67,16 +67,16 @@ describe('emptyPickReason', () => {
     const reason = emptyPickReason(
       [
         cond('position_ids', 'seller', 'Должность', 'Продавец'),
-        cond('store_ids', 'nevskaya', 'Магазин', 'Невская, 3'),
+        cond('store_ids', 'nevskaya', 'Точка', 'Невская, 3'),
       ],
       counts,
     )
     expect(reason).toEqual({
       kind: 'intersection',
-      dimensionLabels: ['Должность', 'Магазин'],
+      dimensionLabels: ['Должность', 'Точка'],
     })
     expect(emptyPickText(reason!)).toBe(
-      'Нет сотрудников, у которых одновременно совпадают должность и магазин.',
+      'Нет сотрудников, у которых одновременно совпадают должность и точка.',
     )
   })
 

@@ -52,7 +52,7 @@ import { nbsp } from '@/lib/typography'
 
 const DIMENSION_LABEL: Record<string, string> = {
   '': 'Без среза',
-  store_id: 'По магазинам',
+  store_id: 'По точкам',
   position_id: 'По должностям',
   franchisee_id: 'По франчайзи',
   department_id: 'По отделам',

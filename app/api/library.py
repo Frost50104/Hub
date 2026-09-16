@@ -65,6 +65,7 @@ from app.services.attachments import (
     sniff_mismatch,
 )
 from app.services.audience_resolver import (
+    learning_population_filter,
     set_object_audience,
     visible_filter,
 )
@@ -208,7 +209,7 @@ async def _audience_profile_ids(
     """Члены аудитории; NULL = все активные профили."""
     if audience_id is None:
         rows = await db.execute(
-            select(EmployeeProfile.id).where(EmployeeProfile.status == "active")
+            select(EmployeeProfile.id).where(learning_population_filter())
         )
     else:
         rows = await db.execute(
@@ -1364,7 +1365,7 @@ async def ack_report(
             .join(AudienceMember, AudienceMember.profile_id == EmployeeProfile.id)
             .where(
                 AudienceMember.audience_id == material.audience_id,
-                EmployeeProfile.status == "active",
+                learning_population_filter(),
             )
         )
         members: list[tuple[EmployeeProfile, datetime | None]] = [
@@ -1375,7 +1376,7 @@ async def ack_report(
             (p, None)
             for p in (
                 await db.execute(
-                    select(EmployeeProfile).where(EmployeeProfile.status == "active")
+                    select(EmployeeProfile).where(learning_population_filter())
                 )
             )
             .scalars()

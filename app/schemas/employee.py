@@ -80,6 +80,9 @@ class EmployeeResponse(BaseModel):
     department_id: UUID | None
     franchisee_id: UUID | None
     manager_profile_id: UUID | None
+    #: `person` | `service` — касса точки (0056). Карточка остаётся, но
+    #: учеником не является и в списке сотрудников не показывается.
+    account_kind: str
     org_role: str
     content_role: str
     hired_at: date | None

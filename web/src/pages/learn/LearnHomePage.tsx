@@ -596,7 +596,7 @@ export function LearnHomePage() {
                   to="/learn/admin?tab=org"
                   icon={<GraduationCap className="h-[19px] w-[19px]" />}
                   title="Оргструктура"
-                  meta="Должности, магазины, франчайзи, отделы, группы"
+                  meta="Должности, точки, франчайзи, отделы, группы"
                 />
                 <Row
                   to="/learn/admin?tab=employees"

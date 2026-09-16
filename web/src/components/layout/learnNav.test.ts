@@ -34,7 +34,7 @@ describe('adminSegmentsFor', () => {
     ])
   })
 
-  it('ТУ и франчайзи без publisher — аналитика и прогресс (скоуп магазинов)', () => {
+  it('ТУ и франчайзи без publisher — аналитика и прогресс (скоуп точек)', () => {
     expect(adminSegmentsFor(me('member', 'tu'))).toEqual(['analytics', 'progress'])
     expect(adminSegmentsFor(me('member', 'franchisee_owner'))).toEqual([
       'analytics',

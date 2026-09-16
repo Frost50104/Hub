@@ -1,6 +1,7 @@
 import { api } from './api'
 // Строка прогресса объявлена рядом с правилами экрана (`learnProgress.ts`):
 // тип и логика, которая его читает, обязаны меняться вместе.
+import type { AuthState } from './authState'
 import type { EmployeeProgressRow } from './learnProgress'
 import { materialDownloadName } from './materialFileName'
 import { parseEcho, type VideoProgressEcho } from './videoWatch'
@@ -110,6 +111,8 @@ export interface EmployeeProfile {
   department_id: string | null
   franchisee_id: string | null
   manager_profile_id: string | null
+  /** `service` — касса точки: карточка живёт, но учеником не является (0056). */
+  account_kind: 'person' | 'service'
   org_role: OrgRole
   content_role: ContentRole
   hired_at: string | null
@@ -1005,6 +1008,17 @@ export interface EmployeeProgressDetail {
   attempts: EmployeeProgressAttempt[]
 }
 
+/** Учётка точки — касса за планшетом в зале (0056). */
+export interface PointAccount {
+  profile_id: string
+  store_id: string | null
+  full_name: string
+  email: string
+  auth_state: AuthState
+  last_activity_at: string | null
+  archived: boolean
+}
+
 export type AutomationTrigger = 'profile_activated' | 'position_assigned'
 
 export const AUTOMATION_TRIGGER_LABEL: Record<AutomationTrigger, string> = {
@@ -1759,6 +1773,8 @@ export const learnApi = {
     api.get<LearnSearchData>('/learn/search', { params: { q } }).then((r) => r.data),
   analytics: (): Promise<AnalyticsData> =>
     api.get<AnalyticsData>('/learn/analytics').then((r) => r.data),
+  pointAccounts: (): Promise<PointAccount[]> =>
+    api.get<PointAccount[]>('/learn/org/points/accounts').then((r) => r.data),
   employeeProgress: (params: {
     q?: string
     store_id?: string

@@ -221,6 +221,7 @@ async def _apply_tenant(
                 full_name=full_name or email,
                 hub_role=role,
                 auth_active=bool(is_active) if is_active is not None else None,
+                account_kind=account_kind,
                 staff_synced_at=now,
             )
             stmt = stmt.on_conflict_do_update(
@@ -231,6 +232,7 @@ async def _apply_tenant(
                     "full_name": stmt.excluded.full_name,
                     "hub_role": role,
                     "auth_active": stmt.excluded.auth_active,
+                    "account_kind": account_kind,
                     "staff_synced_at": now,
                 },
             )
@@ -281,6 +283,7 @@ async def _apply_tenant(
                     email=email,
                     full_name=full_name,
                     link_only=True,
+                    account_kind=account_kind,
                 )
             if outcome == "linked":
                 report.profiles_linked += 1
@@ -301,6 +304,7 @@ async def _apply_tenant(
                 employee_id=employee_uuid,
                 email=email,
                 full_name=full_name,
+                account_kind=account_kind,
             )
         if outcome == "created":
             report.profiles_created += 1

@@ -32,6 +32,7 @@ from app.models.library import LibraryMaterial, MaterialAcknowledgement
 from app.models.progress import CourseProgress
 from app.models.quiz import Quiz, QuizAttempt
 from app.services import lifecycle
+from app.services.audience_resolver import learning_population_filter
 from app.services.content_access import resolve_content_role
 from app.services.learning_progress import (
     ROWS_HARD_CAP,
@@ -213,7 +214,7 @@ async def _scope_profile_ids(
                     EmployeeProfile.store_id.in_(scope.store_ids or frozenset()),
                     EmployeeProfile.id == (scope.profile_id or UUID(int=0)),
                 ),
-                EmployeeProfile.status == "active",
+                learning_population_filter(),
             )
         )
         return "stores", [r[0] for r in rows]

@@ -196,7 +196,12 @@ async def list_employees(
     db: AsyncSession = Depends(get_db),
 ) -> EmployeeListResponse:
     scope = await resolve_scope(db, principal)
-    stmt = select(EmployeeProfile)
+    # Кассы точек отсекаются НА СЕРВЕРЕ, чтобы `total` считался после
+    # предиката: клиентский фильтр оставил бы `total` прежним, и
+    # `employeeListCaption` навсегда переключился бы на «Показаны N из M —
+    # уточните поиск». Управление карточкой кассы живёт в «Оргструктура →
+    # Точки» (решение владельца 16.09).
+    stmt = select(EmployeeProfile).where(EmployeeProfile.account_kind == "person")
     if scope.kind == "stores":
         stmt = stmt.where(
             or_(
@@ -309,7 +314,15 @@ async def list_unlinked_logins(
     rows = await db.execute(
         select(ShadowUser)
         .outerjoin(EmployeeProfile, EmployeeProfile.employee_id == ShadowUser.employee_id)
-        .where(ShadowUser.deleted_at.is_(None), EmployeeProfile.id.is_(None))
+        .where(
+            ShadowUser.deleted_at.is_(None),
+            EmployeeProfile.id.is_(None),
+            # Касса без карточки — не «опечатка в email», а штатное состояние:
+            # карточки сервисным не заводятся вовсе. До этой правки экран на
+            # проде на 100% состоял из таких строк, показывая проблему там,
+            # где её нет.
+            ShadowUser.account_kind.is_distinct_from("service"),
+        )
         .order_by(ShadowUser.last_seen_at.desc())
     )
     return [

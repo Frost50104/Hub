@@ -39,7 +39,11 @@ from app.schemas.news import (
     ReactionBody,
 )
 from app.services import audit, lifecycle
-from app.services.audience_resolver import set_object_audience, visible_filter
+from app.services.audience_resolver import (
+    learning_population_filter,
+    set_object_audience,
+    visible_filter,
+)
 from app.services.content_access import require_content_role, resolve_content_role
 from app.services.learn_notify import _employee_ids
 from app.services.notify_batch import notify_many
@@ -130,7 +134,7 @@ async def _reindex(db: AsyncSession, post: NewsPost) -> None:
 async def _audience_profile_ids(db: AsyncSession, audience_id: UUID | None) -> list[UUID]:
     if audience_id is None:
         rows = await db.execute(
-            select(EmployeeProfile.id).where(EmployeeProfile.status == "active")
+            select(EmployeeProfile.id).where(learning_population_filter())
         )
     else:
         rows = await db.execute(

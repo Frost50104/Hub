@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 import structlog
-from sqlalchemy import delete, select, text
+from sqlalchemy import and_, delete, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -313,12 +313,31 @@ def _attrs_from_profile(profile: EmployeeProfile, maps: _OrgMaps) -> EmployeeAtt
     )
 
 
+def learning_population_filter():  # noqa: ANN201 — SQLAlchemy expression
+    """Кто вообще может учиться: активный человек, а НЕ касса точки.
+
+    Одно определение вместо пятнадцати рукописных копий `status == "active"`
+    по `app/api/`. Копии появились потому, что ветка «видно всем»
+    (`audience_id IS NULL`) членство не читает вовсе и выводит популяцию
+    заново — и `load_attrs_map` до неё не дотягивается. Пока условие жило в
+    пятнадцати местах, исключить кассы «в одном месте» было невозможно.
+
+    `service` — учётка кассы: общий логин на планшете, в имени адрес. Карточка
+    у неё остаётся (на кассе открыт её аккаунт, решение владельца 04.09), но
+    учеником она не является: ни аудиторий, ни рассылок, ни рейтинга.
+    """
+    return and_(
+        EmployeeProfile.status == "active",
+        EmployeeProfile.account_kind == "person",
+    )
+
+
 async def load_attrs_map(
     db: AsyncSession, *, profile_ids: list[UUID] | None = None
 ) -> dict[UUID, EmployeeAttrs]:
     """Атрибуты всех АКТИВНЫХ профилей (или только заданных) без N+1."""
     maps = await _load_org_maps(db)
-    stmt = select(EmployeeProfile).where(EmployeeProfile.status == "active")
+    stmt = select(EmployeeProfile).where(learning_population_filter())
     if profile_ids is not None:
         stmt = stmt.where(EmployeeProfile.id.in_(profile_ids))
     profiles = (await db.execute(stmt)).scalars().all()
@@ -435,7 +454,11 @@ async def recalc_profile(db: AsyncSession, profile: EmployeeProfile) -> dict[UUI
         )
     }
 
-    if profile.status != "active":
+    # Касса обрабатывается как архивная — членство снимается. Без этой ветки
+    # профиль, отфильтрованный в `load_attrs_map`, попадал бы ниже в проверку
+    # `attrs is None` и выходил по ветке «гонка», ничего не удалив: 220 строк
+    # членства повисли бы до полного пересчёта.
+    if profile.status != "active" or profile.account_kind != "person":
         if current_rows:
             await db.execute(
                 delete(AudienceMember).where(AudienceMember.profile_id == profile.id)
@@ -482,7 +505,12 @@ async def recalc_profile(db: AsyncSession, profile: EmployeeProfile) -> dict[UUI
 
 
 async def rebuild_tenant(db: AsyncSession, tenant_id: UUID) -> dict[UUID, MembershipDiff]:
-    """Полный reconcile тенанта (nightly / админ-кнопка). Diff, не truncate."""
+    """Полный reconcile тенанта. Diff, не truncate.
+
+    Запускается ТОЛЬКО админ-кнопкой «Пересчитать доступы»: ночной джобы нет —
+    юнита в `ops/systemd/` не существует (прежний докстринг обещал «nightly» и
+    вводил в заблуждение).
+    """
     diffs: dict[UUID, MembershipDiff] = {}
     attrs_map = await load_attrs_map(db)
     audiences = (await db.execute(select(Audience))).scalars().all()

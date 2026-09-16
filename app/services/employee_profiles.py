@@ -210,6 +210,7 @@ async def ensure_profile_for_staff_row(
     email: str,
     full_name: str,
     link_only: bool = False,
+    account_kind: str = "person",
 ) -> StaffRowOutcome:
     """Матчинг/создание карточки из PULL-строки штата (staff-sync, 0052).
 
@@ -241,6 +242,21 @@ async def ensure_profile_for_staff_row(
     """
     existing = await _find_by_employee_id(db, employee_id)
     if existing is not None:
+        # Вид карточки сверяем ДАЖЕ у уже привязанной — иначе признак был бы
+        # неполучаемым: на проде 54 карточки-кассы из 55 уже привязаны, и эта
+        # ветка возвращала бы `already_linked` до любой записи. Так синк лечит
+        # себя сам, а разовый бэкфилл нужен только тем, у кого тени нет.
+        if existing.account_kind != account_kind:
+            await db.execute(
+                update(EmployeeProfile)
+                .where(EmployeeProfile.id == existing.id)
+                .values(account_kind=account_kind)
+            )
+            log.info(
+                "staff_sync.account_kind_synced",
+                profile_id=str(existing.id),
+                account_kind=account_kind,
+            )
         return "already_linked"
 
     norm = normalize_email(email)
@@ -250,7 +266,7 @@ async def ensure_profile_for_staff_row(
             result = await db.execute(
                 update(EmployeeProfile)
                 .where(EmployeeProfile.id == active.id, EmployeeProfile.employee_id.is_(None))
-                .values(employee_id=employee_id)
+                .values(employee_id=employee_id, account_kind=account_kind)
             )
             if result.rowcount:
                 log.info("staff_sync.profile_linked", profile_id=str(active.id))

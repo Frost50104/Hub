@@ -55,6 +55,11 @@ class ShadowUser(Base):
     # pull-синк. NULL в auth_active = синка ещё не было.
     hub_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
     auth_active: Mapped[bool | None] = mapped_column(nullable=True)
+    # Вид учётки, как его знает auth (0056): `person` | `service`.
+    # NULL = синк ещё не видел строку и трактуется как person — fail-open по
+    # тому же доводу, что и `staff_snapshot_fresh`: иначе поломка ключа
+    # опустошила бы экраны.
+    account_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
     staff_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
