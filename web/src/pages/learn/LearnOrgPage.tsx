@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query'
 import { Archive, ArchiveRestore, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
@@ -24,16 +25,10 @@ import { useEmployees, useOrgMutation, useOrgSnapshot, useSites } from '@/hooks/
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/cn'
 import { optionMatches, queryTokens } from '@/lib/selectOptions'
-import {
-  learnApi,
-  type GroupKind,
-  type OrgDepartment,
-  type OrgGroup,
-  type OrgRef,
-  type OrgSnapshot,
-  type OrgStore,
-  type SiteMirror,
-} from '@/lib/learn'
+import { AUTH_STATE_LABEL, showAuthStateBadge } from '@/lib/authState'
+import type { PointAccount } from '@/lib/learn'
+import { shortDate } from '@/lib/taskDates'
+import { learnApi, type GroupKind, type OrgDepartment, type OrgGroup, type OrgRef, type OrgSnapshot, type OrgStore, type SiteMirror } from '@/lib/learn'
 import { duplicateGroups, siteDisplay, type SiteLinkState } from '@/lib/siteLink'
 
 import { useAdminEmbedded } from './adminEmbed'
@@ -42,7 +37,7 @@ type TabKey = 'positions' | 'stores' | 'franchisees' | 'departments' | 'groups' 
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'positions', label: 'Должности' },
-  { key: 'stores', label: 'Магазины' },
+  { key: 'stores', label: 'Точки' },
   { key: 'franchisees', label: 'Франчайзи' },
   { key: 'departments', label: 'Отделы' },
   { key: 'groups', label: 'Группы' },
@@ -194,6 +189,23 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
   )
   const snapshotFresh = sites.data?.snapshot_fresh ?? false
   const dupes = useMemo(() => duplicateGroups(org.stores), [org.stores])
+  // Учётки касс. С 16.09 карточки касс не показываются в «Сотрудниках», и
+  // этот раздел — единственное место, где их видно: и привязанные к точке, и
+  // осиротевшие (на проде такая одна — auth про неё не знает).
+  const accounts = useQuery({
+    queryKey: ['learn-point-accounts'],
+    queryFn: learnApi.pointAccounts,
+    staleTime: 60_000,
+  })
+  const accountByStore = useMemo(() => {
+    const map = new Map<string, PointAccount>()
+    for (const a of accounts.data ?? []) if (a.store_id) map.set(a.store_id, a)
+    return map
+  }, [accounts.data])
+  const homeless = useMemo(
+    () => (accounts.data ?? []).filter((a) => !a.store_id),
+    [accounts.data],
+  )
 
   const create = useOrgMutation(
     (body: { name: string; code?: string; franchisee_id?: string | null }) =>
@@ -234,7 +246,7 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
           className="min-w-[160px] flex-1"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Название магазина…"
+          placeholder="Название точки…"
         />
         <Input
           className="w-24"
@@ -261,7 +273,7 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
       {dupes.length > 0 && (
         <div className="rounded-xl border border-amber/40 bg-amber/5 p-3">
           <p className="text-sm font-semibold text-amber">
-            Магазины с общим объектом реестра — сливать нельзя
+            Точки с общим объектом реестра — сливать нельзя
           </p>
           <p className="mt-0.5 text-xs text-text3">
             Каждая пара указывает на одну физическую точку. Слияние или архивация
@@ -279,7 +291,7 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
       )}
       <ul className="divide-y divide-glass-border rounded-xl border border-glass-border bg-glass">
         {org.stores.length === 0 && (
-          <li className="p-4 text-sm text-text3">Пока пусто — добавьте первый магазин.</li>
+          <li className="p-4 text-sm text-text3">Пока пусто — добавьте первую точку.</li>
         )}
         {org.stores.map((s) => (
           <li key={s.id} className="flex items-center gap-2 px-4 py-2.5">
@@ -301,6 +313,7 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
                 )}
               </span>
               <SiteLine state={siteDisplay(s, siteById.get(s.site_id ?? ''), snapshotFresh)} />
+              <AccountLine account={accountByStore.get(s.id)} />
             </span>
             <IconAction
               title="Изменить"
@@ -328,6 +341,7 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
           </li>
         ))}
       </ul>
+      <HomelessAccounts accounts={homeless} />
 
       <Dialog open={editing !== null} onOpenChange={(v) => !v && setEditing(null)}>
         <DialogContent>
@@ -352,6 +366,55 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
 
 /** Строка под именем магазина: адрес из реестра, метки архива и протухания.
  *  Состояний три, не два — «stale» обязан быть виден (lib/siteLink.ts). */
+/**
+ * Учётка точки под её названием.
+ *
+ * Показываем ТОЛЬКО почту и последний вход: это доступ к кассе, поэтому вся
+ * ручка стоит под hub-admin и в общий `org_snapshot` не входит. Состояние
+ * учётки берём тем же словарём, что «Сотрудники» (`AUTH_STATE_LABEL`), —
+ * иначе два экрана про одну кассу сказали бы разное.
+ */
+function AccountLine({ account }: { account: PointAccount | undefined }) {
+  if (!account) {
+    return <span className="block text-xs text-text3">учётки нет</span>
+  }
+  return (
+    <span className="block truncate text-xs text-text3">
+      {account.email}
+      {account.last_activity_at
+        ? ` · был ${shortDate(account.last_activity_at)}`
+        : ' · не заходила'}
+      {showAuthStateBadge(account.auth_state) && (
+        <span className="text-amber"> · {AUTH_STATE_LABEL[account.auth_state]}</span>
+      )}
+    </span>
+  )
+}
+
+/** Кассы, не привязанные ни к одной точке: иначе они стали бы невидимы. */
+function HomelessAccounts({ accounts }: { accounts: PointAccount[] }) {
+  if (accounts.length === 0) return null
+  return (
+    <div className="rounded-xl border border-hair bg-tint p-3">
+      <p className="text-[12px] font-bold uppercase tracking-[0.09em] text-text2">
+        Учётки без точки
+      </p>
+      <p className="mt-1 text-xs text-text2">
+        Карточки касс, не привязанные к точке. В «Сотрудниках» они не
+        показываются — разобрать их можно только здесь.
+      </p>
+      <ul className="mt-2 flex flex-col gap-1">
+        {accounts.map((a) => (
+          <li key={a.profile_id} className="text-sm text-text">
+            {a.full_name}
+            <span className="ml-2 text-xs text-text3">{a.email}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function SiteLine({ state }: { state: SiteLinkState }) {
   if (state.kind === 'none') return null
   if (state.kind === 'stale') {
@@ -400,7 +463,7 @@ function StoreEditForm({
       }}
     >
       <DialogHeader>
-        <DialogTitle>Магазин</DialogTitle>
+        <DialogTitle>Точка</DialogTitle>
       </DialogHeader>
       <div className="space-y-4">
         <div className="space-y-1.5">
@@ -456,7 +519,7 @@ function SiteCard({ site }: { site: SiteMirror }) {
     <div className="space-y-0.5 rounded-lg border border-glass-border bg-surface px-3 py-2 text-xs text-text2">
       {site.archived_at && (
         <p className="font-semibold text-amber">
-          Объект в архиве реестра — магазин при этом живёт своей жизнью
+          Объект в архиве реестра — точка при этом живёт своей жизнью
         </p>
       )}
       <p>{[site.code, site.name].filter(Boolean).join(' · ')}</p>
@@ -560,7 +623,7 @@ function DepartmentsTab({ departments }: { departments: OrgDepartment[] }) {
 
 const GROUP_KINDS: { kind: GroupKind; label: string }[] = [
   { kind: 'position-groups', label: 'Группы должностей' },
-  { kind: 'store-groups', label: 'Группы магазинов' },
+  { kind: 'store-groups', label: 'Группы точек' },
   { kind: 'franchisee-groups', label: 'Группы франчайзи' },
   { kind: 'user-groups', label: 'Группы сотрудников' },
 ]

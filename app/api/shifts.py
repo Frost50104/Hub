@@ -30,6 +30,7 @@ from app.models.org import Position, Store
 from app.models.progress import CourseProgress
 from app.models.shift import ShiftApplication, ShiftPosting
 from app.services import audit
+from app.services.audience_resolver import learning_population_filter
 from app.services.learn_notify import _employee_ids
 from app.services.notify_batch import notify_many
 from app.services.org_scope import get_profile, resolve_scope
@@ -470,7 +471,7 @@ async def create_posting(
         r[0]
         for r in await db.execute(
             select(EmployeeProfile.id).where(
-                EmployeeProfile.status == "active",
+                learning_population_filter(),
                 EmployeeProfile.position_id == posting.position_id,
                 EmployeeProfile.employee_id.is_not(None),
             )

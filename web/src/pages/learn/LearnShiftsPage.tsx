@@ -625,7 +625,7 @@ function ShiftFormDialog({ shift, onClose }: { shift: ShiftPosting | null; onClo
       description={
         isNew
           ? 'Подходящие по должности сотрудники получат уведомление сразу после публикации.'
-          : 'Магазин и должность не меняются: по ним уже разосланы уведомления. Создайте новую смену, если нужна другая точка.'
+          : 'Точка и должность не меняются: по ним уже разосланы уведомления. Создайте новую смену, если нужна другая точка.'
       }
       footer={
         <>
@@ -647,10 +647,10 @@ function ShiftFormDialog({ shift, onClose }: { shift: ShiftPosting | null; onClo
       >
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="sh-store">Магазин</Label>
+            <Label htmlFor="sh-store">Точка</Label>
             <SearchableSelect
               id="sh-store"
-              sheetTitle="Магазин"
+              sheetTitle="Точка"
               placeholder="— выберите —"
               clearLabel={null}
               value={storeId || null}

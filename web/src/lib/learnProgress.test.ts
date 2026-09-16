@@ -228,7 +228,7 @@ describe('compareProgress(name|store)', () => {
     expect(sorted.map((r) => r.profile_id)).toEqual(['e', 'yo', 'ya'])
   })
 
-  it('без магазина — в хвост', () => {
+  it('без точки — в хвост', () => {
     const sorted = sortProgressRows(
       [
         row({ profile_id: 'office', store_name: null }),
@@ -247,7 +247,7 @@ describe('filterProgressRows', () => {
     expect(found).toHaveLength(1)
   })
 
-  it('ищет и по магазину с должностью', () => {
+  it('ищет и по точке с должностью', () => {
     const rows = [row({ profile_id: 'x', store_name: 'Галерея' })]
     expect(
       filterProgressRows(rows, { ...EMPTY_PROGRESS_FILTERS, q: 'галерея' }),
@@ -287,7 +287,7 @@ describe('filterProgressRows', () => {
     expect(found.map((r) => r.profile_id)).toEqual(['barista'])
   })
 
-  it('корзина и магазин складываются по И', () => {
+  it('корзина и точка складываются по И', () => {
     const rows = [
       row({ profile_id: 'hit', store_id: 's1', mandatory_done: 0 }),
       row({ profile_id: 'other-store', store_id: 's2', mandatory_done: 0 }),

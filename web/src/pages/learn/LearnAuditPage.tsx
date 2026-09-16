@@ -25,11 +25,11 @@ const ACTION_LABEL: Record<string, string> = {
 const OBJECT_LABEL: Record<string, string> = {
   employee_profile: 'Сотрудник',
   position: 'Должность',
-  store: 'Магазин',
+  store: 'Точка',
   franchisee: 'Франчайзи',
   department: 'Отдел',
   position_group: 'Группа должностей',
-  store_group: 'Группа магазинов',
+  store_group: 'Группа точек',
   franchisee_group: 'Группа франчайзи',
   user_group: 'Группа сотрудников',
   audience: 'Аудитория',

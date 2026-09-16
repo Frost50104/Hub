@@ -41,6 +41,12 @@ PROFILE_STATUSES = ("active", "archived")
 # ушёл, а спрашивать об этом значило бы дать возможность ответить неверно.
 ARCHIVE_REASONS = ("manual", "auto_inactivity", "auth_deleted")
 
+#: Вид учётной записи (0056). `service` — касса точки: общий логин на планшете,
+#: в поле имени адрес. Такая карточка остаётся в Hub (на кассе открыт её
+#: аккаунт — решение владельца 04.09), но учеником не является: не попадает в
+#: аудитории, рассылки, рейтинг и списки сотрудников.
+ACCOUNT_KINDS = ("person", "service")
+
 
 class EmployeeProfile(Base):
     __tablename__ = "employee_profiles"
@@ -56,6 +62,10 @@ class EmployeeProfile(Base):
         CheckConstraint(
             "status IN ('active', 'archived')",
             name="ck_employee_profiles_status",
+        ),
+        CheckConstraint(
+            "account_kind IN ('person', 'service')",
+            name="ck_employee_profiles_account_kind",
         ),
         CheckConstraint(
             "archive_reason IS NULL OR "
@@ -112,6 +122,12 @@ class EmployeeProfile(Base):
         index=True,
     )
 
+    # Вид карточки (0056). Предикат «не касса» стоит на всём learn-домене —
+    # почему на карточке, а не на тени, разобрано в докстринге миграции:
+    # у части касс тени нет вовсе.
+    account_kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="person"
+    )
     org_role: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default=text("'employee'")
     )

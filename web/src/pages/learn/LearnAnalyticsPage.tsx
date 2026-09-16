@@ -47,7 +47,7 @@ export function LearnAnalyticsPage() {
           <div className="flex flex-wrap items-center gap-2">
             {a && (
               <span className="text-[13px] text-text2">
-                {a.scope === 'all' ? 'срез: вся сеть' : 'срез: мои магазины'} · считает сервер
+                {a.scope === 'all' ? 'срез: вся сеть' : 'срез: мои точки'} · считает сервер
               </span>
             )}
             <Button variant="secondary" className="bg-transparent" onClick={() => void learnApi.downloadAnalyticsCsv()}>

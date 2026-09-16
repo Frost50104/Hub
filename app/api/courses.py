@@ -49,7 +49,11 @@ from app.schemas.course import (
 )
 from app.schemas.library import AudienceBody, StatusBody
 from app.services import audit, lifecycle
-from app.services.audience_resolver import set_object_audience, visible_filter
+from app.services.audience_resolver import (
+    learning_population_filter,
+    set_object_audience,
+    visible_filter,
+)
 from app.services.certificate import issue_if_earned
 from app.services.content_access import require_content_role, resolve_content_role
 from app.services.learn_media import sign_media_path
@@ -862,7 +866,7 @@ async def change_course_status(
         # Уведомляем аудиторию (mandatory — особенно) о новом курсе.
         if course.audience_id is None:
             rows = await db.execute(
-                select(EmployeeProfile.id).where(EmployeeProfile.status == "active")
+                select(EmployeeProfile.id).where(learning_population_filter())
             )
         else:
             rows = await db.execute(

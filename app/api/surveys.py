@@ -44,7 +44,11 @@ from app.schemas.survey import (
 )
 from app.services import audit, lifecycle
 from app.services.attachments import content_disposition
-from app.services.audience_resolver import set_object_audience, visible_filter
+from app.services.audience_resolver import (
+    learning_population_filter,
+    set_object_audience,
+    visible_filter,
+)
 from app.services.content_access import require_content_role, resolve_content_role
 from app.services.learn_notify import _employee_ids
 from app.services.learn_settings import get_settings_dict
@@ -379,7 +383,7 @@ async def change_survey_status(
     if survey.status == "published" and not was_published:
         if survey.audience_id is None:
             rows = await db.execute(
-                select(EmployeeProfile.id).where(EmployeeProfile.status == "active")
+                select(EmployeeProfile.id).where(learning_population_filter())
             )
         else:
             rows = await db.execute(
@@ -652,7 +656,7 @@ async def survey_results(
         audience_size = (
             await db.execute(
                 select(func.count()).select_from(EmployeeProfile).where(
-                    EmployeeProfile.status == "active"
+                    learning_population_filter()
                 )
             )
         ).scalar_one()

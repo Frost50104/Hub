@@ -246,7 +246,7 @@ export type ProgressSort = 'lagging' | 'name' | 'store'
 export const PROGRESS_SORTS: { key: ProgressSort; label: string }[] = [
   { key: 'lagging', label: 'Отстающие сверху' },
   { key: 'name', label: 'По алфавиту' },
-  { key: 'store', label: 'По магазину' },
+  { key: 'store', label: 'По точке' },
 ]
 
 /**

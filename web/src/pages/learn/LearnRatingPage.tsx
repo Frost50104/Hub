@@ -65,7 +65,7 @@ const PERIODS: SegmentOption<'month' | 'quarter'>[] = [
 ]
 const SCOPES: SegmentOption<'all' | 'store'>[] = [
   { value: 'all', label: 'Вся сеть' },
-  { value: 'store', label: 'Мой магазин' },
+  { value: 'store', label: 'Моя точка' },
 ]
 
 export function LearnRatingPage() {

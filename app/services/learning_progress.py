@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.activity import ActivityEvent, Certificate
@@ -243,9 +243,19 @@ def summarize(rows: list[LearningRow]) -> LearningSummary:
 
 
 def profiles_filter(profile_ids: list[UUID] | None, status: str = "active"):
-    """WHERE по скоупу. `None` = вся сеть (RLS уже режет по тенанту)."""
+    """WHERE по скоупу. `None` = вся сеть (RLS уже режет по тенанту).
+
+    Кассы точек отсекаются ТОЛЬКО в ветке «вся сеть». В ветке по явным id
+    предикат ставить нельзя: `collect_person_detail` начинается с
+    `collect_learning_rows(...)[0]`, и на исключённом профиле это IndexError —
+    500 вместо «покажите историю точки». Спросили про конкретную карточку —
+    отвечаем про неё, какого бы она ни была вида.
+    """
     if profile_ids is None:
-        return EmployeeProfile.status == status
+        return and_(
+            EmployeeProfile.status == status,
+            EmployeeProfile.account_kind == "person",
+        )
     return EmployeeProfile.id.in_(profile_ids or [_EMPTY])
 
 

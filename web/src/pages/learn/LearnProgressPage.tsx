@@ -129,7 +129,7 @@ export function LearnProgressPage() {
           <div className="flex flex-wrap items-center gap-2">
             {data.data && (
               <span className="text-[13px] text-text2">
-                {data.data.scope === 'all' ? 'срез: вся сеть' : 'срез: мои магазины'} ·
+                {data.data.scope === 'all' ? 'срез: вся сеть' : 'срез: мои точки'} ·
                 считает сервер
               </span>
             )}
@@ -150,8 +150,8 @@ export function LearnProgressPage() {
         {data.data && data.data.scope === 'stores' && rows.length === 0 && (
           <EmptyState
             layout="card"
-            title="За вами не закреплено ни одного магазина"
-            text="Пока точки не назначены, прогресс показывать не по кому — попросите администратора закрепить магазины."
+            title="За вами не закреплено ни одной точки"
+            text="Пока точки не назначены, прогресс показывать не по кому — попросите администратора закрепить точки."
           />
         )}
 
@@ -219,16 +219,16 @@ export function LearnProgressPage() {
                 <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-text3" />
                 <Input
                   className="pl-8"
-                  placeholder="Поиск по имени, почте, магазину…"
+                  placeholder="Поиск по имени, почте, точке…"
                   value={urlFilters.q}
                   onChange={(e) => patch({ q: e.target.value })}
                 />
               </div>
               <SearchableSelect
                 className="w-[200px]"
-                sheetTitle="Магазин"
-                placeholder="Все магазины"
-                clearLabel="Все магазины"
+                sheetTitle="Точка"
+                placeholder="Все точки"
+                clearLabel="Все точки"
                 value={filters.storeId}
                 onChange={(value) => patch({ storeId: value })}
                 options={storeOptions}
@@ -287,7 +287,7 @@ export function LearnProgressPage() {
               <div className="overflow-hidden rounded-[14px] border border-hair bg-tint">
                 <div className="hidden grid-cols-[minmax(0,1fr)_188px_172px_108px] items-center gap-3 bg-surface px-3.5 py-2.5 text-[12px] font-bold uppercase tracking-[0.07em] text-text2 lg:grid">
                   <span>Сотрудник</span>
-                  <span>Магазин · должность</span>
+                  <span>Точка · должность</span>
                   <span>Обязательные</span>
                   <span>Состояние</span>
                 </div>
