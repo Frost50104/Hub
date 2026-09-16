@@ -7,6 +7,7 @@
 
 export type AuthState =
   | 'no_account'
+  | 'invited' // почта есть среди непринятых приглашений auth (16.09)
   | 'not_linked' // до первого синка «без учётки» утверждать нельзя — только «не привязан»
   | 'not_logged_in'
   | 'active'
@@ -15,6 +16,7 @@ export type AuthState =
 
 export const AUTH_STATE_LABEL: Record<AuthState, string> = {
   no_account: 'Без учётки',
+  invited: 'Приглашён(а) в auth',
   not_linked: 'Не привязан(а)',
   not_logged_in: 'Не входил(а)',
   active: 'Активен',
@@ -24,7 +26,14 @@ export const AUTH_STATE_LABEL: Record<AuthState, string> = {
 
 /** Тон бейджа: amber = требует внимания, red = доступ закрыт, без тона = норма. */
 export function authStateTone(state: AuthState): 'amber' | 'red' | null {
-  if (state === 'no_account' || state === 'not_linked' || state === 'not_logged_in') return 'amber'
+  if (
+    state === 'no_account' ||
+    state === 'invited' ||
+    state === 'not_linked' ||
+    state === 'not_logged_in'
+  ) {
+    return 'amber'
+  }
   if (state === 'blocked' || state === 'deleted') return 'red'
   return null
 }
@@ -38,6 +47,25 @@ export const HUB_ROLE_LABEL: Record<string, string> = {
 /** «Активен» не бейджим — иначе список на 260 строк превращается в радугу. */
 export function showAuthStateBadge(state: AuthState | null | undefined): state is AuthState {
   return !!state && state !== 'active'
+}
+
+/** Чипы фильтра на экране «Сотрудники». */
+export type AuthFilter = 'all' | 'no_account' | 'not_logged_in'
+
+/**
+ * «Без учётки» — всё, у чего учётки ещё нет: `no_account`, осторожное
+ * `not_linked` (до первого синка) и `invited` (приглашён, но не принял —
+ * учётки по-прежнему нет, и HR ждёт именно этих людей).
+ */
+export function matchesAuthFilter(
+  filter: AuthFilter,
+  state: AuthState | null | undefined,
+): boolean {
+  if (filter === 'all') return true
+  if (filter === 'no_account') {
+    return state === 'no_account' || state === 'not_linked' || state === 'invited'
+  }
+  return state === filter
 }
 
 export interface StaffSyncToastInput {

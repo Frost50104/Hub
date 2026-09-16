@@ -138,6 +138,7 @@ export function mandatoryShort(done: number, total: number): string {
  */
 export function accountNote(row: EmployeeProgressRow): string | null {
   if (row.auth_state === 'no_account') return 'нет учётки — в Hub не заходил'
+  if (row.auth_state === 'invited') return 'приглашён(а) в auth — ещё не принял(а)'
   if (row.auth_state === 'not_linked') return 'в Hub не заходил'
   if (row.auth_state === 'blocked') return 'учётка заблокирована'
   if (row.auth_state === 'deleted') return 'учётка удалена'

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { authStateTone, showAuthStateBadge, staffSyncToast } from './authState'
+import {
+  AUTH_STATE_LABEL,
+  authStateTone,
+  matchesAuthFilter,
+  showAuthStateBadge,
+  staffSyncToast,
+} from './authState'
 
 describe('authState', () => {
   it('норма не бейджится, внимание — амбер, закрытый доступ — красный', () => {
@@ -12,6 +18,22 @@ describe('authState', () => {
     expect(authStateTone('blocked')).toBe('red')
     expect(authStateTone('deleted')).toBe('red')
     expect(authStateTone('active')).toBeNull()
+  })
+
+  it('«приглашён(а)» — внимание (амбер), с собственной подписью', () => {
+    expect(authStateTone('invited')).toBe('amber')
+    expect(AUTH_STATE_LABEL.invited).toBe('Приглашён(а) в auth')
+    expect(showAuthStateBadge('invited')).toBe(true)
+  })
+
+  it('фильтр «Без учётки» держит приглашённых и осторожное not_linked', () => {
+    expect(matchesAuthFilter('no_account', 'no_account')).toBe(true)
+    expect(matchesAuthFilter('no_account', 'invited')).toBe(true)
+    expect(matchesAuthFilter('no_account', 'not_linked')).toBe(true)
+    expect(matchesAuthFilter('no_account', 'active')).toBe(false)
+    expect(matchesAuthFilter('not_logged_in', 'not_logged_in')).toBe(true)
+    expect(matchesAuthFilter('not_logged_in', 'invited')).toBe(false)
+    expect(matchesAuthFilter('all', null)).toBe(true)
   })
 })
 

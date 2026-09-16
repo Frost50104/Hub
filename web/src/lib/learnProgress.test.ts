@@ -110,6 +110,12 @@ describe('accountNote', () => {
     )
   })
 
+  it('приглашённый — не «без учётки»: движение уже есть', () => {
+    expect(accountNote(row({ auth_state: 'invited' as AuthState }))).toBe(
+      'приглашён(а) в auth — ещё не принял(а)',
+    )
+  })
+
   it('not_linked ≠ no_account — до синка так говорить нельзя', () => {
     expect(accountNote(row({ auth_state: 'not_linked' as AuthState }))).toBe(
       'в Hub не заходил',

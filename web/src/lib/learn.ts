@@ -190,8 +190,9 @@ export interface UnlinkedLogin {
   last_seen_at: string
 }
 
+/** Отчёт CSV-импорта (update-only с 16.09): карточки не создаются. */
 export interface ImportReport {
-  created: number
+  updated: number
   skipped: number
   errors: string[]
   dry_run: boolean
@@ -1335,8 +1336,6 @@ export const learnApi = {
     api.get<EmployeeList>('/learn/employees', { params }).then((r) => r.data),
   employee: (id: string): Promise<EmployeeProfile> =>
     api.get<EmployeeProfile>(`/learn/employees/${id}`).then((r) => r.data),
-  createEmployee: (body: EmployeeUpsert & { email: string; full_name: string }): Promise<EmployeeProfile> =>
-    api.post<EmployeeProfile>('/learn/employees', body).then((r) => r.data),
   /** Ручной прогон staff-sync — кнопка «Обновить из auth» (admin). */
   syncStaff: (): Promise<StaffSyncReport> =>
     api.post<StaffSyncReport>('/learn/employees/sync').then((r) => r.data),

@@ -5,34 +5,12 @@ from __future__ import annotations
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 ORG_ROLE_PATTERN = "^(employee|tu|franchisee_owner|office)$"
 CONTENT_ROLE_PATTERN = "^(none|author|publisher)$"
 # Лёгкая проверка формы email (без email-validator в deps): local@domain.tld
 EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
-
-
-class EmployeeCreate(BaseModel):
-    email: str = Field(pattern=EMAIL_PATTERN, max_length=320)
-    full_name: str = Field(min_length=1, max_length=255)
-    phone: str | None = Field(default=None, max_length=32)
-    position_id: UUID | None = None
-    store_id: UUID | None = None
-    department_id: UUID | None = None
-    franchisee_id: UUID | None = None
-    manager_profile_id: UUID | None = None
-    org_role: str = Field(default="employee", pattern=ORG_ROLE_PATTERN)
-    content_role: str = Field(default="none", pattern=CONTENT_ROLE_PATTERN)
-    hired_at: date | None = None
-
-    @field_validator("full_name")
-    @classmethod
-    def _strip(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("ФИО не может быть пустым")
-        return v
 
 
 class EmployeeUpdate(BaseModel):
@@ -100,7 +78,9 @@ class EmployeeResponse(BaseModel):
     # Кеш из auth (staff-sync, 0052; заполняется в API из shadow_users):
     # hub-роль (admin|member|viewer) и честный статус учётки.
     hub_role: str | None = None
-    auth_state: str | None = None  # no_account|not_linked|not_logged_in|active|blocked|deleted
+    # no_account|invited|not_linked|not_logged_in|active|blocked|deleted;
+    # `invited` (16.09) — почта есть среди непринятых приглашений auth.
+    auth_state: str | None = None
 
 
 class InvitationResponse(BaseModel):
@@ -155,7 +135,9 @@ class UnlinkedLoginResponse(BaseModel):
 
 
 class ImportReport(BaseModel):
-    created: int
+    """Отчёт CSV-импорта (update-only с 16.09): карточки не создаются."""
+
+    updated: int
     skipped: int
     errors: list[str]
     dry_run: bool

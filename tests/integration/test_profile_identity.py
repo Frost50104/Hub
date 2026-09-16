@@ -18,10 +18,10 @@ from signaris_auth.shadow import upsert_shadow_tenant, upsert_shadow_user
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.employees import create_employee, update_employee
+from app.api.employees import update_employee
 from app.models.audit import AuditLog
 from app.models.employee_profile import EmployeeProfile
-from app.schemas.employee import EmployeeCreate, EmployeeUpdate
+from app.schemas.employee import EmployeeUpdate
 from app.services.employee_profiles import ensure_profile_for_principal
 from tests.integration.conftest import make_principal
 
@@ -45,6 +45,17 @@ async def _login(db: AsyncSession, principal) -> EmployeeProfile:
     assert result.profile is not None
     await db.refresh(result.profile)
     return result.profile
+
+
+async def _seed_card(
+    db: AsyncSession, tenant_id: uuid.UUID, *, email: str, full_name: str
+) -> EmployeeProfile:
+    """Непривязанная карточка — так выглядят legacy-карточки, заведённые HR до
+    16.09 (ручное заведение закрыто, ручки создания больше нет)."""
+    card = EmployeeProfile(tenant_id=tenant_id, email=email, full_name=full_name)
+    db.add(card)
+    await db.flush()
+    return card
 
 
 async def test_login_syncs_new_name_into_profile(db: AsyncSession, tenant_id: uuid.UUID):
@@ -154,9 +165,7 @@ async def test_card_without_login_is_still_editable(
     замерзала бы с HR-именем, которое уже некому исправить.
     """
     admin = await _admin(db, tenant_id, "idn5")
-    created = await create_employee(
-        EmployeeCreate(email="future@t.ru", full_name="Будущий Сотрудник"), admin, db
-    )
+    created = await _seed_card(db, tenant_id, email="future@t.ru", full_name="Будущий Сотрудник")
     assert created.last_activity_at is None
 
     updated = await update_employee(
@@ -176,10 +185,8 @@ async def test_first_login_of_a_pre_created_card_takes_the_auth_name(
     Найдено на проде 28.08 (rfedorov1@: карточка «Фёдоров Руслан», в auth
     «Руслан Фёдоров»).
     """
-    admin = await _admin(db, tenant_id, "idn6")
-    created = await create_employee(
-        EmployeeCreate(email="newcomer@t.ru", full_name="Фёдоров Руслан"), admin, db
-    )
+    await _admin(db, tenant_id, "idn6")
+    created = await _seed_card(db, tenant_id, email="newcomer@t.ru", full_name="Фёдоров Руслан")
     await db.commit()
 
     person = make_principal(

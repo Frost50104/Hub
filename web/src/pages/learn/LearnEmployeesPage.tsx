@@ -3,7 +3,6 @@ import {
   ArchiveRestore,
   ExternalLink,
   Link2,
-  Plus,
   RefreshCw,
   Search,
   Upload,
@@ -16,10 +15,13 @@ import {
   AUTH_STATE_LABEL,
   authStateTone,
   HUB_ROLE_LABEL,
+  matchesAuthFilter,
   showAuthStateBadge,
   staffSyncToast,
+  type AuthFilter,
   type AuthState,
 } from '@/lib/authState'
+import { IMPORT_DIALOG_HINT, importReportLine, importToastText } from '@/lib/employeeImport'
 import { employeeListCaption } from '@/lib/employeeList'
 import { filterOptions } from '@/lib/selectOptions'
 
@@ -70,7 +72,7 @@ export function LearnEmployeesPage() {
   const [statusFilter, setStatusFilter] = useState<'active' | 'archived'>('active')
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search, 300)
-  const [cardOpen, setCardOpen] = useState<EmployeeProfile | 'new' | null>(null)
+  const [cardOpen, setCardOpen] = useState<EmployeeProfile | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [unlinkedOpen, setUnlinkedOpen] = useState(false)
 
@@ -80,7 +82,7 @@ export function LearnEmployeesPage() {
     q: debouncedSearch.trim() || undefined,
   })
   // Фильтр по статусу учётки — клиентский: набор и так добирается целиком.
-  const [authFilter, setAuthFilter] = useState<'all' | 'no_account' | 'not_logged_in'>('all')
+  const [authFilter, setAuthFilter] = useState<AuthFilter>('all')
   const [syncing, setSyncing] = useState(false)
   const runSync = async () => {
     setSyncing(true)
@@ -124,9 +126,8 @@ export function LearnEmployeesPage() {
             <Button variant="secondary" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4" /> Импорт CSV
             </Button>
-            <Button onClick={() => setCardOpen('new')}>
-              <Plus className="h-4 w-4" /> Сотрудник
-            </Button>
+            {/* Кнопки «+ Сотрудник» нет с 16.09: карточки заводятся в auth
+                (приглашение с ролью Hub) и приезжают синком. */}
             <a
               href="https://auth.signaris.ru/admin/employees"
               target="_blank"
@@ -232,17 +233,12 @@ export function LearnEmployeesPage() {
             <ul className="divide-y divide-glass-border rounded-xl border border-glass-border bg-glass">
               {employees.data.items.length === 0 && (
                 <li className="p-4 text-sm text-text3">
-                  Никого не нашли. Добавьте сотрудника или загрузите CSV.
+                  Никого не нашли. Сотрудники появляются из auth после синхронизации.
                 </li>
               )}
               {employees.data.items
-                .filter(
-                  (e) =>
-                    authFilter === 'all' ||
-                    e.auth_state === authFilter ||
-                    // До первого синка «без учётки» приходит осторожным not_linked.
-                    (authFilter === 'no_account' && e.auth_state === 'not_linked'),
-                )
+                // Правило фильтра — в `lib/authState.ts` (там же «Приглашён(а)»).
+                .filter((e) => matchesAuthFilter(authFilter, e.auth_state as AuthState | null))
                 .map((e) => (
                 <li key={e.id}>
                   <button
@@ -301,8 +297,8 @@ export function LearnEmployeesPage() {
 
       {cardOpen !== null && org.data && (
         <EmployeeCardDialog
-          key={cardOpen === 'new' ? 'new' : cardOpen.id}
-          profile={cardOpen === 'new' ? null : cardOpen}
+          key={cardOpen.id}
+          profile={cardOpen}
           org={org.data}
           onClose={() => setCardOpen(null)}
         />
@@ -332,11 +328,10 @@ function EmployeeCardDialog({
   org,
   onClose,
 }: {
-  profile: EmployeeProfile | null
+  profile: EmployeeProfile
   org: OrgSnapshot
   onClose: () => void
 }) {
-  const isNew = profile === null
   const [form, setForm] = useState<EmployeeUpsert & { email: string; full_name: string }>({
     email: profile?.email ?? '',
     full_name: profile?.full_name ?? '',
@@ -358,7 +353,7 @@ function EmployeeCardDialog({
   // Признак «уже заходил» — last_activity_at, а не наличие аккаунта: карточку
   // можно привязать вручную (/link, /restore), и до первого входа её ещё
   // осмысленно править (ОС 28.08).
-  const authOwnsIdentity = !isNew && profile.last_activity_at !== null
+  const authOwnsIdentity = profile.last_activity_at !== null
 
   const managers = useEmployees({ status: 'active' })
 
@@ -368,23 +363,22 @@ function EmployeeCardDialog({
     // Поля, которыми владеет auth, из тела ИСКЛЮЧАЮТСЯ, а не шлются как есть:
     // сервер отклоняет отличающееся значение, а форма отправляет объект
     // целиком — иначе сохранение должности или роли ловило бы 422 на ровном
-    // месте. При создании карточки владельца ещё нет, там поля обязательны.
-    const saved = isNew
-      ? await learnApi.createEmployee({ ...rest, ...identity })
-      : await learnApi.updateEmployee(
-          profile.id,
-          authOwnsIdentity ? rest : { ...rest, ...identity },
-        )
+    // месте. У непривязанной legacy-карточки владельца ещё нет — там имя и
+    // почту правит HR (почта — ключ будущей привязки).
+    const saved = await learnApi.updateEmployee(
+      profile.id,
+      authOwnsIdentity ? rest : { ...rest, ...identity },
+    )
     if (form.org_role === 'tu' && tuStores !== null) {
       await learnApi.replaceTuStores(saved.id, [...tuStores])
     }
     return saved
   })
   // Списочная ручка `archived_twin` не заполняет — тянем одиночную.
-  const full = useEmployee(isNew ? null : profile.id)
+  const full = useEmployee(profile.id)
   const twin = full.data?.archived_twin ?? null
-  const archive = useEmployeeMutation(() => learnApi.archiveEmployee(profile!.id))
-  const restore = useEmployeeMutation(() => learnApi.restoreEmployee(profile!.id))
+  const archive = useEmployeeMutation(() => learnApi.archiveEmployee(profile.id))
+  const restore = useEmployeeMutation(() => learnApi.restoreEmployee(profile.id))
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
@@ -394,7 +388,7 @@ function EmployeeCardDialog({
     // требовать их заполненности незачем.
     if (!authOwnsIdentity && (!form.email.trim() || !form.full_name.trim())) return
     await save.mutateAsync(undefined as never)
-    toast.success(isNew ? 'Карточка создана' : 'Сохранено')
+    toast.success('Сохранено')
     onClose()
   }
 
@@ -418,13 +412,7 @@ function EmployeeCardDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>{isNew ? 'Новый сотрудник' : profile.full_name}</DialogTitle>
-            {isNew && (
-              <DialogDescription>
-                Карточка создаётся заранее — при первом входе через SSO она
-                привяжется по email автоматически.
-              </DialogDescription>
-            )}
+            <DialogTitle>{profile.full_name}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -435,7 +423,6 @@ function EmployeeCardDialog({
                   value={form.full_name}
                   disabled={authOwnsIdentity}
                   onChange={(e) => set('full_name', e.target.value)}
-                  autoFocus={isNew}
                 />
               </div>
               {twin && (
@@ -649,7 +636,7 @@ function EmployeeCardDialog({
           </div>
 
           <DialogFooter className="flex-wrap">
-            {!isNew && profile.status === 'active' && (
+            {profile.status === 'active' && (
               <Button
                 type="button"
                 variant="secondary"
@@ -670,7 +657,7 @@ function EmployeeCardDialog({
                 <Archive className="h-4 w-4" /> В архив
               </Button>
             )}
-            {!isNew && profile.status === 'archived' && (
+            {profile.status === 'archived' && (
               <Button
                 type="button"
                 variant="secondary"
@@ -713,7 +700,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
     const result = await learnApi.importEmployees(file, { dryRun })
     setReport(result)
     if (!result.dry_run) {
-      toast.success(`Импорт завершён: создано ${result.created}, пропущено ${result.skipped}`)
+      toast.success(importToastText(result))
     }
   })
 
@@ -722,12 +709,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Импорт сотрудников из CSV</DialogTitle>
-          <DialogDescription>
-            Колонки: email, full_name (обязательные), phone, position, store,
-            department, franchisee, org_role, manager_email, hired_at.
-            Разделитель — «;» или «,». Недостающие должности/точки создадутся
-            автоматически, существующие email пропускаются.
-          </DialogDescription>
+          <DialogDescription>{IMPORT_DIALOG_HINT}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <Input
@@ -740,10 +722,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
           />
           {report && (
             <div className="rounded-lg border border-glass-border bg-surface p-3 text-sm">
-              <p className="text-text">
-                {report.dry_run ? 'Проверка (без сохранения):' : 'Результат:'} создано{' '}
-                <b>{report.created}</b>, пропущено <b>{report.skipped}</b>
-              </p>
+              <p className="text-text">{importReportLine(report)}</p>
               {report.errors.length > 0 && (
                 <ul className="mt-2 max-h-40 space-y-0.5 overflow-y-auto text-xs text-red">
                   {report.errors.map((err, i) => (

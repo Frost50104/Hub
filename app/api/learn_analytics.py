@@ -489,6 +489,7 @@ async def employee_progress_detail(
 
 _AUTH_STATE_LABEL = {
     "no_account": "нет учётки",
+    "invited": "приглашён(а) в auth",
     "not_linked": "не привязана",
     "not_logged_in": "не заходил(а)",
     "blocked": "заблокирована",

@@ -5,21 +5,28 @@ Permissions:
   сотрудников своих магазинов, остальные — только себя;
 - мутации, unlinked-входы, импорт — hub:admin.
 
-CSV-импорт (онбординг UPPETIT, 200+ людей): разделитель `;` или `,`,
-колонки email;full_name;phone;position;store;department;franchisee;org_role;
-manager_email;hired_at (обязательны только email и full_name). Справочники
+Карточки НЕ заводятся здесь (16.09, решение владельца: auth — единственный
+источник штата). Писателей `employee_profiles` два — первый вход человека
+(`ensure_profile_for_principal`) и staff-sync (`ensure_profile_for_staff_row`);
+`POST /learn/employees` оставлен 410-заглушкой на два релиза для старых
+PWA-бандлов.
+
+CSV-импорт — ТОЛЬКО обновление HR-полей существующих карточек по email:
+разделитель `;` или `,`, колонки email;phone;position;store;department;
+franchisee;org_role;manager_email;hired_at (`full_name` допустима, но не
+пишется — имя принадлежит auth). Пустая ячейка поле не трогает. Строка без
+активной карточки — построчная ошибка, ничего не создаётся. Справочники
 матчятся по имени; недостающие должности/отделы/франчайзи создаются, а
 МАГАЗИН — нет: неизвестный магазин — построчная ошибка (create_missing_refs,
 дефолт False с 05.09 — опечатка в названии бесшумно плодила магазины-дубли).
-Существующие active-email пропускаются. suppress_automations зарезервирован
-(Ф5) — bulk не должен триггерить welcome-сценарии ветеранам.
+suppress_automations зарезервирован (Ф5).
 """
 
 from __future__ import annotations
 
 import csv
 import io
-from datetime import UTC, date, datetime
+from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -28,14 +35,13 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.deps import get_db, require_auth
+from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
 from app.models.org import Department, Franchisee, Position, Store
 from app.models.shadow import AuthInvitation, ShadowUser
 from app.schemas.employee import (
     ArchiveBody,
     ArchivedTwin,
-    EmployeeCreate,
     EmployeeListResponse,
     EmployeeResponse,
     EmployeeUpdate,
@@ -48,6 +54,7 @@ from app.schemas.employee import (
 )
 from app.services import audit
 from app.services.audience_resolver import recalc_profile
+from app.services.auth_state import auth_states_for_profiles
 from app.services.employee_profiles import (
     archive_profile,
     find_latest_archived_by_email,
@@ -94,44 +101,8 @@ async def _to_response(db: AsyncSession, profile: EmployeeProfile) -> EmployeeRe
     return resp
 
 
-def staff_snapshot_fresh(
-    last_synced_at: datetime | None, *, now: datetime, interval_sec: float
-) -> bool:
-    """Снимок auth живой = не старше двух интервалов воркера (совет auth).
-
-    «Был хоть один синк» — залипающий флаг: сломайся ключ, экран неделю
-    уверенно писал бы «без учётки» по устаревшему снимку. Протухший снимок
-    откатывает статусы к осторожному «не привязан(а)»."""
-    if last_synced_at is None:
-        return False
-    return (now - last_synced_at).total_seconds() <= 2 * interval_sec
-
-
-def auth_state_for(
-    *,
-    employee_id: UUID | None,
-    last_activity_at: object,
-    shadow_deleted: bool,
-    auth_active: bool | None,
-    staff_synced: bool,
-) -> str:
-    """Честный статус учётки для карточки — ОДНА функция вместо двух
-    рассинхронённых признаков в JSX (бейдж считался по employee_id, заморозка
-    по last_activity_at — восстановленная карточка показывалась «не входил»
-    с замороженными полями).
-
-    До первого staff-sync утверждать «без учётки» нельзя: непривязанная
-    карточка может принадлежать человеку с живой учёткой, который просто не
-    входил, — до синка отдаём осторожное `not_linked`."""
-    if employee_id is None:
-        return "no_account" if staff_synced else "not_linked"
-    if shadow_deleted:
-        return "deleted"
-    if auth_active is False:
-        return "blocked"
-    if last_activity_at is None:
-        return "not_logged_in"
-    return "active"
+# `staff_snapshot_fresh` и `auth_state_for` живут в `services/auth_state.py`
+# (16.09): расчёт статуса один на «Сотрудников», «Прогресс» и CSV-выгрузку.
 
 
 async def _to_responses(
@@ -146,40 +117,16 @@ async def _to_responses(
             )
         ):
             assignments.setdefault(profile_id, []).append(store_id)
-    # Кеш auth одним запросом на страницу (staff-sync, 0052).
-    settings = get_settings()
-    staff_synced = staff_snapshot_fresh(
-        (await db.execute(select(func.max(ShadowUser.staff_synced_at)))).scalar_one_or_none(),
-        now=datetime.now(UTC),
-        interval_sec=settings.staff_sync_interval_sec,
-    )
-    employee_ids = [p.employee_id for p in profiles if p.employee_id is not None]
-    shadows: dict[UUID, tuple[str | None, bool, bool | None]] = {}
-    if employee_ids:
-        for eid, hub_role, deleted_at, auth_active in await db.execute(
-            select(
-                ShadowUser.employee_id,
-                ShadowUser.hub_role,
-                ShadowUser.deleted_at,
-                ShadowUser.auth_active,
-            ).where(ShadowUser.employee_id.in_(employee_ids))
-        ):
-            shadows[eid] = (hub_role, deleted_at is not None, auth_active)
+    # Роль и статус учётки — один расчёт на оба экрана (`services/auth_state.py`,
+    # 16.09): там же появляется «Приглашён(а)» по зеркалу `auth_invitations`.
+    states = await auth_states_for_profiles(db, profiles)
     out = []
     for p in profiles:
         resp = EmployeeResponse.model_validate(p)
         resp.tu_store_ids = assignments.get(p.id, [])
-        hub_role, shadow_deleted, auth_active = shadows.get(
-            p.employee_id, (None, False, None)
-        ) if p.employee_id else (None, False, None)
-        resp.hub_role = hub_role
-        resp.auth_state = auth_state_for(
-            employee_id=p.employee_id,
-            last_activity_at=p.last_activity_at,
-            shadow_deleted=shadow_deleted,
-            auth_active=auth_active,
-            staff_synced=staff_synced,
-        )
+        info = states.get(p.id)
+        resp.hub_role = info.hub_role if info else None
+        resp.auth_state = info.state if info else None
         out.append(resp)
     return out
 
@@ -362,57 +309,16 @@ async def get_employee(
     return resp
 
 
-@router.post("/learn/employees", response_model=EmployeeResponse, status_code=201)
-async def create_employee(
-    body: EmployeeCreate,
-    principal: Principal = Depends(_ADMIN),
-    db: AsyncSession = Depends(get_db),
-) -> EmployeeResponse:
-    email = normalize_email(body.email)
-    dup = (
-        await db.execute(
-            select(EmployeeProfile.id).where(
-                func.lower(EmployeeProfile.email) == email,
-                EmployeeProfile.status == "active",
-            )
-        )
-    ).scalar_one_or_none()
-    if dup is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Активная карточка с этим email уже существует",
-        )
-    profile = EmployeeProfile(
-        tenant_id=principal.tenant_id,
-        email=email,
-        full_name=body.full_name,
-        phone=body.phone,
-        position_id=body.position_id,
-        store_id=body.store_id,
-        department_id=body.department_id,
-        franchisee_id=body.franchisee_id,
-        manager_profile_id=body.manager_profile_id,
-        org_role=body.org_role,
-        content_role=body.content_role,
-        hired_at=body.hired_at,
-        created_by=principal.employee_id,
+@router.post("/learn/employees", status_code=status.HTTP_410_GONE)
+async def create_employee(principal: Principal = Depends(_ADMIN)) -> None:  # noqa: ARG001
+    """Ручное заведение карточек закрыто 16.09 (решение владельца: auth —
+    единственный источник штата). Заглушка, а не снятие маршрута: старый
+    PWA-бандл с кнопкой «+ Сотрудник» получает русский текст вместо
+    «Not Found» из глобального тоста. Снять через два релиза."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Карточки сотрудников заводятся в auth — обновите приложение",
     )
-    db.add(profile)
-    await db.flush()
-    diffs = await recalc_profile(db, profile)
-    await notify_new_audience_members(db, diffs)
-    audit.record(
-        db,
-        tenant_id=principal.tenant_id,
-        actor_id=principal.employee_id,
-        action="create",
-        object_type="employee_profile",
-        object_id=profile.id,
-        object_label=profile.full_name,
-    )
-    await db.commit()
-    await db.refresh(profile)
-    return await _to_response(db, profile)
 
 
 @router.patch("/learn/employees/{profile_id}", response_model=EmployeeResponse)
@@ -621,6 +527,7 @@ _IMPORT_COLUMNS = frozenset(
         "hired_at",
     }
 )
+_ORG_ROLES = ("employee", "tu", "franchisee_owner", "office")
 
 
 @router.post("/learn/employees/import", response_model=ImportReport)
@@ -636,6 +543,21 @@ async def import_employees(
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
 ) -> ImportReport:
+    """Обновить HR-поля СУЩЕСТВУЮЩИХ карточек из CSV (update-only с 16.09).
+
+    Карточек импорт не создаёт: строка без активной карточки — построчная
+    ошибка, и до справочников она не доходит (иначе опечатка в почте плодила
+    бы должности как побочный эффект). Пустая ячейка поле не трогает —
+    частичный файл «email;position» не должен сбрасывать ТУ в линейных и
+    обнулять отделы. Имя и почта из CSV не пишутся: ими владеет auth.
+
+    В конце — `rebuild_tenant` + `notify_new_audience_members`, как и раньше:
+    смена должности или точки меняет аудитории, а новым членам уходят
+    назначения обязательных курсов. Пуши неотзываемы — dry-run обязателен.
+    """
+    await enforce_rate_limit(
+        bucket="employee:import", employee_id=str(principal.employee_id), limit=5, window_sec=60
+    )
     raw = await file.read()
     if len(raw) > 2 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="CSV больше 2 МБ")
@@ -663,20 +585,35 @@ async def import_employees(
     departments = await _ref_map(Department)
     franchisees = await _ref_map(Franchisee)
 
-    existing_emails = {
+    # Карточки по почте — активные обновляем, архивные называем отдельно:
+    # «карточки нет — заводится в auth» про архивную было бы неправдой.
+    profiles_by_email: dict[str, EmployeeProfile] = {
+        normalize_email(p.email): p
+        for p in (
+            await db.execute(
+                select(EmployeeProfile).where(EmployeeProfile.status == "active")
+            )
+        ).scalars()
+    }
+    archived_emails = {
         row[0]
         for row in await db.execute(
             select(func.lower(EmployeeProfile.email)).where(
-                EmployeeProfile.status == "active"
+                EmployeeProfile.status == "archived"
             )
         )
     }
 
-    created = 0
+    changed: set[UUID] = set()
     skipped = 0
     errors: list[str] = []
     pending_managers: list[tuple[EmployeeProfile, str]] = []
-    profiles_by_email: dict[str, EmployeeProfile] = {}
+
+    def _apply(profile: EmployeeProfile, field: str, value: object) -> None:
+        # Считаем людей, а не строки: дубль email в файле — одна карточка.
+        if getattr(profile, field) != value:
+            setattr(profile, field, value)
+            changed.add(profile.id)
 
     def _resolve_ref(  # noqa: ANN202
         kind: str,
@@ -699,23 +636,29 @@ async def import_employees(
         return row
 
     for line_no, row in enumerate(reader, start=2):
-        row = { (k or "").strip().lower(): (v or "").strip() for k, v in row.items() }
+        row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
         unknown = set(row) - _IMPORT_COLUMNS - {""}
         if unknown and line_no == 2:
             errors.append(f"Неизвестные колонки игнорируются: {', '.join(sorted(unknown))}")
         email = normalize_email(row.get("email", ""))
-        full_name = row.get("full_name", "")
         if not email or "@" not in email:
             errors.append(f"Строка {line_no}: пустой или некорректный email")
             continue
-        if not full_name:
-            errors.append(f"Строка {line_no}: пустое full_name")
-            continue
-        if email in existing_emails:
+        profile = profiles_by_email.get(email)
+        if profile is None:
+            if email in archived_emails:
+                errors.append(
+                    f"Строка {line_no}: карточка с email «{email}» в архиве — восстановите её"
+                )
+            else:
+                errors.append(
+                    f"Строка {line_no}: карточки с email «{email}» нет — "
+                    "учётные записи заводятся в auth"
+                )
             skipped += 1
             continue
-        org_role = row.get("org_role") or "employee"
-        if org_role not in ("employee", "tu", "franchisee_owner", "office"):
+        org_role = row.get("org_role") or profile.org_role
+        if org_role not in _ORG_ROLES:
             errors.append(f"Строка {line_no}: неизвестная org_role «{org_role}»")
             continue
         hired_at: date | None = None
@@ -745,27 +688,21 @@ async def import_employees(
             continue
 
         await db.flush()  # id для только что созданных справочников
-        profile = EmployeeProfile(
-            tenant_id=principal.tenant_id,
-            email=email,
-            full_name=full_name,
-            phone=row.get("phone") or None,
-            position_id=position.id if position else None,
-            store_id=store.id if store else None,
-            department_id=department.id if department else None,
-            franchisee_id=franchisee.id if franchisee and org_role == "franchisee_owner" else None,
-            org_role=org_role,
-            hired_at=hired_at,
-            created_by=principal.employee_id,
-        )
-        db.add(profile)
-        existing_emails.add(email)
-        profiles_by_email[email] = profile
+        if row.get("phone"):
+            _apply(profile, "phone", row["phone"])
+        _apply(profile, "org_role", org_role)
+        if hired_at is not None:
+            _apply(profile, "hired_at", hired_at)
+        if position is not None:
+            _apply(profile, "position_id", position.id)
+        if store is not None:
+            _apply(profile, "store_id", store.id)
+        if department is not None:
+            _apply(profile, "department_id", department.id)
+        if franchisee is not None and org_role == "franchisee_owner":
+            _apply(profile, "franchisee_id", franchisee.id)
         if row.get("manager_email"):
             pending_managers.append((profile, normalize_email(row["manager_email"])))
-        created += 1
-
-    await db.flush()
 
     # Руководители — вторым проходом (могут идти ниже по файлу).
     manager_ids: dict[str, UUID] = {
@@ -781,11 +718,16 @@ async def import_employees(
         if manager_id is None:
             errors.append(f"{profile.email}: руководитель {manager_email} не найден")
         else:
-            profile.manager_profile_id = manager_id
+            _apply(profile, "manager_profile_id", manager_id)
 
+    updated = len(changed)
     if dry_run:
         await db.rollback()
-        return ImportReport(created=created, skipped=skipped, errors=errors, dry_run=True)
+        return ImportReport(updated=updated, skipped=skipped, errors=errors, dry_run=True)
+
+    # Сессия autoflush=False: без flush пересчёт аудиторий не увидел бы
+    # присвоенных полей (в том числе руководителей второго прохода).
+    await db.flush()
 
     from app.services.audience_resolver import rebuild_tenant
 
@@ -798,7 +740,7 @@ async def import_employees(
         action="import",
         object_type="employee_profile",
         object_label=file.filename or "import.csv",
-        diff={"created": {"old": None, "new": created}, "skipped": {"old": None, "new": skipped}},
+        diff={"updated": {"old": None, "new": updated}, "skipped": {"old": None, "new": skipped}},
     )
     await db.commit()
-    return ImportReport(created=created, skipped=skipped, errors=errors, dry_run=False)
+    return ImportReport(updated=updated, skipped=skipped, errors=errors, dry_run=False)

@@ -30,7 +30,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import and_, func, select
@@ -43,7 +43,6 @@ from app.models.employee_profile import EmployeeProfile
 from app.models.org import Position, Store
 from app.models.progress import CourseAssignment, CourseProgress
 from app.models.quiz import Quiz, QuizAttempt
-from app.models.shadow import ShadowUser
 from app.services.people_search import match_condition
 
 #: Потолок строк ответа. Совпадает с `_EXPORT_ROW_LIMIT` намеренно: два потолка
@@ -402,39 +401,10 @@ async def _auth_states(
     «без учётки» запрещено, и два экрана про одного человека обязаны говорить
     одно и то же.
     """
-    from app.api.employees import auth_state_for, staff_snapshot_fresh
-    from app.config import get_settings
+    from app.services.auth_state import auth_states_for_profiles
 
-    synced_at = (
-        await db.execute(select(func.max(ShadowUser.staff_synced_at)))
-    ).scalar_one_or_none()
-    staff_synced = staff_snapshot_fresh(
-        synced_at,
-        now=datetime.now(UTC),
-        interval_sec=get_settings().staff_sync_interval_sec,
-    )
-    employee_ids = [p.employee_id for p in profiles if p.employee_id is not None]
-    shadows: dict[UUID, tuple[bool, bool | None]] = {}
-    if employee_ids:
-        for eid, deleted_at, auth_active in await db.execute(
-            select(
-                ShadowUser.employee_id, ShadowUser.deleted_at, ShadowUser.auth_active
-            ).where(ShadowUser.employee_id.in_(employee_ids))
-        ):
-            shadows[eid] = (deleted_at is not None, auth_active)
-    out: dict[UUID, str] = {}
-    for p in profiles:
-        shadow_deleted, auth_active = (
-            shadows.get(p.employee_id, (False, None)) if p.employee_id else (False, None)
-        )
-        out[p.id] = auth_state_for(
-            employee_id=p.employee_id,
-            last_activity_at=p.last_activity_at,
-            shadow_deleted=shadow_deleted,
-            auth_active=auth_active,
-            staff_synced=staff_synced,
-        )
-    return out
+    states = await auth_states_for_profiles(db, profiles)
+    return {pid: info.state for pid, info in states.items()}
 
 
 async def collect_learning_rows(
