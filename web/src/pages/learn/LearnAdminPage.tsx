@@ -10,6 +10,7 @@ import { useMe } from '@/hooks/useMe'
 
 import { AdminEmbedContext } from './adminEmbed'
 import { LearnAnalyticsPage } from './LearnAnalyticsPage'
+import { LearnProgressPage } from './LearnProgressPage'
 import { LearnAuditPage } from './LearnAuditPage'
 import { LearnAutomationsPage } from './LearnAutomationsPage'
 import { LearnEmployeesPage } from './LearnEmployeesPage'
@@ -17,7 +18,7 @@ import { LearnOrgPage } from './LearnOrgPage'
 import { LearnReviewPage } from './LearnReviewPage'
 
 /**
- * «Управление» — один маршрут `/learn/admin?tab=…` с шестью сегментами
+ * «Управление» — один маршрут `/learn/admin?tab=…` с семью сегментами
  * (макет «Урок — редизайн», route admin; решение владельца 20.08:
  * Оргструктура — шестым сегментом). Гейты — ПО СЕГМЕНТАМ, как проверяет
  * бэкенд: Проверка и Аналитика открыты publisher'ам, ТУ/франчайзи/офису и
@@ -31,6 +32,8 @@ import { LearnReviewPage } from './LearnReviewPage'
 const SUBTITLE: Record<AdminSegment, string> = {
   review: 'Очередь попыток с открытыми вопросами — закрытые оценены автоматически.',
   analytics: 'Прохождение курсов, провалы тестов и ознакомления — срез считает сервер.',
+  progress:
+    'Кто и сколько обязательных курсов прошёл — по людям, магазинам и должностям. Считает только курсы: аттестации и ознакомления живут в своих отчётах.',
   employees: 'Учётные карточки сотрудников, роли контента и привязка входов.',
   automations: 'Правила «новичок → курс с дедлайном» и правило неактивности.',
   audit: 'Кто, что и когда менял — только метаполя, без содержимого ответов.',
@@ -40,6 +43,7 @@ const SUBTITLE: Record<AdminSegment, string> = {
 const TAB_COMPONENT: Record<AdminSegment, () => JSX.Element> = {
   review: LearnReviewPage,
   analytics: LearnAnalyticsPage,
+  progress: LearnProgressPage,
   employees: LearnEmployeesPage,
   automations: LearnAutomationsPage,
   audit: LearnAuditPage,

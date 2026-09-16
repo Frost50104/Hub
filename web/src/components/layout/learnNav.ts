@@ -8,6 +8,7 @@ import {
   GraduationCap,
   Handshake,
   Inbox,
+  ListChecks,
   Newspaper,
   ScrollText,
   ShoppingBag,
@@ -90,11 +91,24 @@ export const LEARN_NAV: LearnNavItem[] = [
 /** «Управление» — один маршрут с сегментами (редизайн-2); вход виден всем, у кого ≥1 сегмент. */
 export const ADMIN_NAV: LearnNavItem[] = [{ to: '/learn/admin', label: 'Управление', icon: Users }]
 
-export type AdminSegment = 'review' | 'analytics' | 'employees' | 'automations' | 'audit' | 'org'
+export type AdminSegment =
+  | 'review'
+  | 'analytics'
+  | 'progress'
+  | 'employees'
+  | 'automations'
+  | 'audit'
+  | 'org'
 
 export const ADMIN_SEGMENTS: { key: AdminSegment; label: string; title: string; icon: LucideIcon }[] = [
   { key: 'review', label: 'Проверка', title: 'Проверка тестов', icon: ClipboardList },
   { key: 'analytics', label: 'Аналитика', title: 'Аналитика обучения', icon: BarChart3 },
+  {
+    key: 'progress',
+    label: 'Прогресс сотрудников',
+    title: 'Прогресс обучения по сотрудникам',
+    icon: ListChecks,
+  },
   { key: 'employees', label: 'Сотрудники', title: 'Сотрудники', icon: Users },
   { key: 'automations', label: 'Автосценарии', title: 'Автосценарии', icon: Workflow },
   { key: 'audit', label: 'Журнал', title: 'Журнал действий', icon: ScrollText },
@@ -104,8 +118,9 @@ export const ADMIN_SEGMENTS: { key: AdminSegment; label: string; title: string; 
 /**
  * Гейты — по сегментам, не по экрану, РОВНО как проверяет бэкенд:
  * - Проверка (`quizzes.py` review-queue) — publisher и hub-admin;
- * - Аналитика (`learn_analytics.py`) — publisher, hub-admin и скоуп
- *   магазинов (ТУ, франчайзи);
+ * - Аналитика и Прогресс сотрудников (`learn_analytics.py`, общий гейт
+ *   `_scope_profile_ids`) — publisher, hub-admin и скоуп магазинов
+ *   (ТУ, франчайзи);
  * - Сотрудники/Автосценарии/Журнал/Оргструктура — только hub-admin.
  * Офис без publisher раньше видел обе вкладки и получал 403 (QA-0821 #24).
  */
@@ -119,7 +134,10 @@ export function adminSegmentsFor(me: {
   const storeScope = ['tu', 'franchisee_owner'].includes(me.profile?.org_role ?? '')
   const out: AdminSegment[] = []
   if (isAdmin || publisher) out.push('review')
-  if (isAdmin || publisher || storeScope) out.push('analytics')
+  // `progress` строго ПОСЛЕ `analytics`: `LearnAdminPage` берёт первый
+  // доступный сегмент как вкладку по умолчанию, и перестановка молча увела бы
+  // ТУ с привычного экрана на новый.
+  if (isAdmin || publisher || storeScope) out.push('analytics', 'progress')
   if (isAdmin) out.push('employees', 'automations', 'audit', 'org')
   return out
 }
