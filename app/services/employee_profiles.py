@@ -240,6 +240,8 @@ async def ensure_profile_for_staff_row(
     guard `employee_id IS NULL` и partial-UNIQUE (tenant_id, lower(email))
     WHERE status='active'.
     """
+    from app.services.audience_resolver import recalc_profile
+
     existing = await _find_by_employee_id(db, employee_id)
     if existing is not None:
         # Вид карточки сверяем ДАЖЕ у уже привязанной — иначе признак был бы
@@ -252,6 +254,15 @@ async def ensure_profile_for_staff_row(
                 .where(EmployeeProfile.id == existing.id)
                 .values(account_kind=account_kind)
             )
+            existing.account_kind = account_kind
+            # Членство обязано поехать СРАЗУ за видом, а не ждать кнопки
+            # «Пересчитать доступы». Ровно этот зазор поймали на проде 16.09:
+            # auth пометил две кассы сервисными, синк карточки обновил, а 8
+            # строк членства висели дальше — и узнать об этом было неоткуда,
+            # полного пересчёта по расписанию у нас нет. Пересчёт точечный
+            # (`recalc_profile`), и он срабатывает только при СМЕНЕ вида:
+            # на обычном прогоне, где ничего не поменялось, лишнего lock'а нет.
+            await recalc_profile(db, existing)
             log.info(
                 "staff_sync.account_kind_synced",
                 profile_id=str(existing.id),

@@ -197,6 +197,41 @@ async def test_dimension_counts_ignore_tills(db: AsyncSession, tenant_id: uuid.U
     assert counts["position_ids"][str(position.id)] == 1
 
 
+async def test_sync_reclassification_drops_membership_immediately(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Синк пометил кассу — членство обязано уйти СРАЗУ, без кнопки.
+
+    Поймано на проде 16.09: auth дораз­метил две точки сервисными, staff-sync
+    карточки обновил, а 8 строк членства висели дальше — полного пересчёта по
+    расписанию у нас нет, и узнать о зазоре было неоткуда.
+    """
+    from app.services.employee_profiles import ensure_profile_for_staff_row
+
+    audience = Audience(tenant_id=tenant_id, is_all=True)
+    db.add(audience)
+    await db.flush()
+    till = await _profile(db, tenant_id, name="Каменка 15", email="k15@t.ru")
+    await recalc_profile(db, till)
+    assert await _members(db, [till.id]) == [till.id], "предусловие: членство есть"
+
+    # Прогон синка: auth сообщил, что это касса.
+    outcome = await ensure_profile_for_staff_row(
+        db,
+        tenant_id=tenant_id,
+        employee_id=till.employee_id,
+        email="k15@t.ru",
+        full_name="Каменка 15",
+        link_only=True,
+        account_kind="service",
+    )
+    assert outcome == "already_linked"
+
+    await db.refresh(till)
+    assert till.account_kind == "service"
+    assert await _members(db, [till.id]) == [], "членство не должно ждать пересчёта"
+
+
 # ─── Списки ──────────────────────────────────────────────────────────────────
 
 
