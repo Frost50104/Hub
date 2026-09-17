@@ -1,0 +1,12 @@
+[Unit]
+Description=Run signaris-hub-staging-race-close daily 03:45 Moscow time
+
+[Timer]
+# 00:45 UTC = 03:45 MSK (UTC+3, no DST in RU). 00:00–00:30 UTC занято
+# цепочкой бэкапов (backup, backup-files, backup-secrets, backup-cleanup).
+OnCalendar=*-*-* 00:45:00
+Persistent=true
+Unit=signaris-hub-staging-race-close.service
+
+[Install]
+WantedBy=timers.target

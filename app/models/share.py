@@ -22,7 +22,7 @@ class PublicShareToken(Base):
     __tablename__ = "public_share_tokens"
     __table_args__ = (
         CheckConstraint(
-            "scope IN ('task','project')",
+            "scope IN ('task','project','race')",
             name="ck_public_share_tokens_scope",
         ),
     )

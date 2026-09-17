@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
 import { Button } from '@/components/ui/Button'
@@ -47,6 +48,7 @@ const UPDATE_CHECK_INTERVAL_MS = 30_000
  */
 export function UpdateBanner() {
   const isDesktop = useIsDesktop()
+  const isTvRoute = useLocation().pathname.startsWith('/p/race/')
   // `useRegisterSW` вызывается РАДИ РЕГИСТРАЦИИ: виртуальный модуль плагина —
   // единственное место, где регистрируется наш Service Worker (в собранном
   // `index.html` никакой регистрации нет). Из его состояния мы больше ничего
@@ -120,6 +122,10 @@ export function UpdateBanner() {
     }
   }, [])
 
+  // ТВ-панель гонки: некому нажать «Обновить» — киоск сверяет версию сам
+  // (RaceTvPage). Проверка ПОСЛЕ всех хуков: компонент смонтирован у корня и
+  // не перемонтируется при навигации, ранний return менял бы число хуков.
+  if (isTvRoute) return null
   if (!shouldOfferUpdate(__APP_VERSION__, serverVersion, dismissed)) return null
 
   return (

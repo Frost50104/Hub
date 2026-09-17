@@ -8,7 +8,7 @@ UPPETIT). Tenant-tz в модели нет (см. calendar.py) — когда п
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
@@ -46,3 +46,23 @@ def fmt_range(start: datetime, end: datetime) -> str:
     if s.date() == e.date():
         return f"{s.strftime('%d.%m %H:%M')}–{e.strftime('%H:%M')}"
     return f"{s.strftime('%d.%m %H:%M')}–{e.strftime('%d.%m %H:%M')}"
+
+
+_MONTHS_GEN = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+
+
+def fmt_day(d: date) -> str:
+    """«21 сентября» — для календарной даты без времени (учётный день iiko)."""
+    return f"{d.day} {_MONTHS_GEN[d.month - 1]}"
+
+
+def fmt_day_range(a: date, b: date) -> str:
+    """«21–27 сентября», «28 сентября — 4 октября», один день — «21 сентября»."""
+    if a == b:
+        return fmt_day(a)
+    if a.month == b.month and a.year == b.year:
+        return f"{a.day}–{b.day} {_MONTHS_GEN[b.month - 1]}"
+    return f"{fmt_day(a)} — {fmt_day(b)}"

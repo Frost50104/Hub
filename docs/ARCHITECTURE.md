@@ -268,10 +268,11 @@
 - **AI (0028):** `ai_conversations`, `ai_messages`, `rag_chunks` (pgvector, embedding без typmod + embedding_model).
 - **Биржа смен (0029):** `shift_postings` (open→assigned→done|cancelled), `shift_applications` (UNIQUE posting+profile).
 - **Аттестации (0030):** `assessment_campaigns` (draft|active|closed, audience, окно дат; владеет квизом через `quizzes.campaign_id`).
+- **Гусиная гонка (0057):** `race_contests` (partial-UNIQUE один `active` на тенант), `race_contest_leagues` (снимок «групп точек», без FK), `races`, `race_participants` (снимок `Department.Id`; partial-UNIQUE один живой на подразделение), `race_baselines` (UNIQUE `(contest, store, race_id) NULLS NOT DISTINCT`), `race_daily_stats` (PK tenant×подразделение×день — replace-window выгрузки), `race_snapshots` (ночные снимки, не переписываются), `race_results` (заморожены), `race_sync_state`; `public_share_tokens.scope` += `race` (ТВ-ссылка, `entity_id = tenant_id`).
 
 ### Роутеры и воркеры
 
-Learn-роутеры в `app/api/`: org, employees, audit, library, news, surveys, favorites, courses, media, quizzes (включая рейтинг и review), products, learn_home, learn_search, learn_analytics, automations, ai, shifts, assessments; общие для двух пространств — assistant, reports (iiko). Трекер: env, me, me_tasks, projects, project_folders, sections, **stages**, tasks, **tasks_import**, calendar, custom_fields, labels, dependencies, timeline, share, public, comments, watchers, activity, attachments, search, tenant, push, notifications, stats. Всего 45 роутеров (см. `app/main.py`).
+Learn-роутеры в `app/api/`: org, employees, audit, library, news, surveys, favorites, courses, media, quizzes (включая рейтинг и review), products, learn_home, learn_search, learn_analytics, automations, ai, shifts, assessments; race (0057); общие для двух пространств — assistant, reports (iiko). Трекер: env, me, me_tasks, projects, project_folders, sections, **stages**, tasks, **tasks_import**, calendar, custom_fields, labels, dependencies, timeline, share, public, comments, watchers, activity, attachments, search, tenant, push, notifications, stats. Всего 45 роутеров (см. `app/main.py`).
 
 Фоновая обработка: systemd-таймеры `course-due-soon`, `review-due`, `inactivity`, `automations` (джобы в `app/jobs/`) + long-running воркер `app/workers/extraction.py` (отдельный сервис `signaris-hub[-staging]-extraction.service`: извлечение текста pypdf/docx → search_documents.body_text → RAG-reconcile). Голосовой ввод ассистента — отдельный юнит `signaris-hub[-staging]-stt.service` (`app/stt_service.py`, faster-whisper; включён только на проде).
 
@@ -330,7 +331,7 @@ Learn-роутеры в `app/api/`: org, employees, audit, library, news, survey
 - Роутеры: `ai` (`/api/ai/ask`, RAG), `assistant` (`/api/ai/*` журнал/планы; `/api/learn/ai/*` — алиасы), `reports` (пять отчётов iiko + CSV).
 - Hot-инварианты (порог подтверждения, гейты, слот лицензии, «точки НЕ связаны») — CLAUDE.md §«Ассистент и отчёты iiko (hot)».
 
-## Push-триггеры (task-домен, 6 из 20 kinds)
+## Push-триггеры (task-домен, 6 из 22 kinds)
 
 - `task.assigned_to_me` — мне назначили задачу
 - `task.mentioned` — упомянули в комментарии
@@ -377,3 +378,15 @@ Learn-роутеры в `app/api/`: org, employees, audit, library, news, survey
 - CORS на backend разрешает только `https://hub.signaris.ru` и `https://hub-staging.signaris.ru`.
 - Rate-limit через Redis (с DB-fallback): паттерн скопирован из `CentralAuthService/app/security/rate_limit.py`.
 - Refresh-cookie общий на `.signaris.ru`. Для PWA standalone (iOS) — режим `X-Auth-Mode: api`, refresh-token в IndexedDB.
+
+## «Гусиная гонка» (0057, 2026-09-17)
+
+Заявка UPPETIT: соревнование точек по наполняемости чека (среднее число позиций в чеке) на данных iiko. План — `~/.claude/plans/uppetit-hazy-giraffe.md`, hot-выжимка — CLAUDE.md.
+
+- **Данные.** Один OLAP-вызов на всю сеть за окно ≤ 14 дней: SALES, `group_by [Department.Id, OpenDate.Typed]`, `aggregate [DishAmountInt, UniqOrderId.OrdersCount]`, фильтр `DishType IN (GOODS, DISH)` (модификаторы — не позиции). Спека `RACE_SALES` и парсер `parse_daily_rows` — в `app/services/iiko/reports.py` (имена полей живут только там). Клиент гонки — `race_client()` с таймаутом 120 с. Лок слота лицензии стал fenced (`try_acquire`/`release` с Lua-CAS, TTL 300): безусловный `DELETE` снимал бы чужой лок после истечения TTL.
+- **Позиция считается на чтении** (`services/race/read.py::live_rows`): накопленное с начала заезда против эффективной базы (`baselines.load_baselines`: строка `(store, race_id)` иначе `(store, NULL)`), клетки `clamp(round(100·avg/base), 0, 400)`, без базы — 100 и `needs_baseline`, места точке без базы не даются. Арифметика — `services/race/math.py` под юнит-тестами.
+- **Ночное закрытие** (`engine.close_day`): снимки за все пропущенные дни (`pending_snapshot_days`), рекорд по закрытому дню (не первый день, > 100 и > прежнего максимума), при `ends_on ≤ close_day` — `finish_race` (итоги заморожены, места `math.rank`), следующий заезд через `activate_due`; базу следующего заезда в режиме `race` считает ДЖОБА после commit (`CloseReport.next_race_needing_baseline`) — advisory-лок берётся только вокруг записи, не поверх OLAP.
+- **Уведомления** — только из часовой джобы и не раньше 09:00 MSK; claim меток дедупа + commit, затем `schedule_push_batch`. Получатели — `learning_population_filter()` + привязанный вход + `store_id` среди невыключенных участников (касса точки пуш не получает).
+- **Выключатель.** `services/race/gate.py`: env `race_enabled` И `learning_settings.race_enabled`; `require`-проверки в `app/api/race.py` (пользовательские 404, админские 409, `settings` живёт всегда), публичная `GET /api/public/race/{token}` (token: str → мусор 404), `/api/me.features.race`; джобы пропускают выключенные тенанты; `race_sync_enabled` гейтит КАЖДЫЙ вызов iiko (staging).
+- **Фронт.** `/learn/race` (`LearnRacePage`), ТВ `/p/race/:token` вне Shell (nginx-локация `/p/` уже отдаёт `no-referrer`/`no-store`), админ-вкладка `?tab=race` (lazy, вне precache). Чистые модули под vitest: `lib/raceBoard.ts`, `raceTrack.ts`, `raceChart.ts`, `raceCountdown.ts`, `raceAdmin.ts`. Палитра — скоуп `.race-board` в `web/src/styles/race.css` (плейсхолдер до брендбука UPPETIT), гусь — `GooseIcon.tsx`.
+- **Тесты.** `tests/unit/test_race_*.py`, `tests/integration/test_race_*.py` — под фикстурой `rls_enforced`: от суперюзера `materialize_participants` видел бы магазины соседних тестов (в проде скоупит RLS, ручных `WHERE tenant_id` в коде нет по инварианту).

@@ -24,6 +24,8 @@ export const NOTIFICATION_KINDS = [
   'shift.application',
   'shift.result',
   'assessment.assigned',
+  'race.started',
+  'race.record',
 ] as const
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
@@ -49,25 +51,29 @@ export const NOTIFICATION_KIND_LABEL: Record<NotificationKind, string> = {
   'shift.application': 'Отклик на мою смену (для руководителей)',
   'shift.result': 'Результат по смене (назначили/отменили)',
   'assessment.assigned': 'Назначена аттестация',
+  'race.started': 'Стартовал новый заезд гусиной гонки',
+  'race.record': 'Моя точка поставила рекорд заезда',
 }
 
 /**
  * Разделы страницы уведомлений. Карта ПОЛНАЯ по построению: тип
  * `Record<NotificationKind, ...>` не даст добавить вид без раздела, а тест
- * следит, что все 20 на месте.
+ * следит, что все виды на месте.
  */
-export type NotificationGroup = 'tasks' | 'learn' | 'shifts'
+export type NotificationGroup = 'tasks' | 'learn' | 'shifts' | 'race'
 
 export const NOTIFICATION_GROUP_LABEL: Record<NotificationGroup, string> = {
   tasks: 'Задачи',
   learn: 'Обучение и библиотека',
   shifts: 'Смены и аттестация',
+  race: 'Гусиная гонка',
 }
 
 export const NOTIFICATION_GROUP_ORDER: NotificationGroup[] = [
   'tasks',
   'learn',
   'shifts',
+  'race',
 ]
 
 export const KIND_GROUP: Record<NotificationKind, NotificationGroup> = {
@@ -91,4 +97,6 @@ export const KIND_GROUP: Record<NotificationKind, NotificationGroup> = {
   'shift.application': 'shifts',
   'shift.result': 'shifts',
   'assessment.assigned': 'shifts',
+  'race.started': 'race',
+  'race.record': 'race',
 }

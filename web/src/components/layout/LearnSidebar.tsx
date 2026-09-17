@@ -1,7 +1,7 @@
 import { LogOut, Settings } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 
-import { ADMIN_NAV, adminSegmentsFor, coursesSectionTitle, LEARN_NAV, type LearnNavItem } from './learnNav'
+import { ADMIN_NAV, adminSegmentsFor, coursesSectionTitle, LEARN_NAV, learnNavFor, type LearnNavItem } from './learnNav'
 import { SpaceSwitcher } from './SpaceSwitcher'
 import { Avatar } from '@/components/ui/Avatar'
 import { useMe } from '@/hooks/useMe'
@@ -97,7 +97,7 @@ export function LearnSidebar({ onItemClick }: { onItemClick?: () => void } = {})
        * пределы `h-[calc(100vh-1.5rem)]`. */}
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
         <nav className="flex flex-col gap-0.5">
-          {LEARN_NAV.map((item) => (
+          {learnNavFor(LEARN_NAV, me.data).map((item) => (
             <NavEntry
               key={item.to + item.label}
               // Раздел курсов называется по роли — и в меню, и в заголовке.

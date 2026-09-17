@@ -23,6 +23,7 @@ from sqlalchemy import text as sa_text
 from app import log as log_config
 from app.db import tenant_scoped_session
 from app.models.library import LibraryMaterial
+from app.services.notify_batch import drain
 
 log = structlog.get_logger("jobs.review_due")
 
@@ -93,6 +94,8 @@ async def main() -> int:
             await session.commit()
 
     log.info("review_due.finished", sent=sent)
+    # Фоновые пуш-задачи: без ожидания asyncio.run отменяет хвост рассылки.
+    await drain()
     return 0
 
 

@@ -26,7 +26,7 @@ from app.models.employee_profile import EmployeeProfile
 from app.models.progress import CourseAssignment
 from app.services.audience_resolver import learning_population_filter
 from app.services.learn_notify import _employee_ids
-from app.services.notify_batch import notify_many
+from app.services.notify_batch import drain, notify_many
 
 log = structlog.get_logger("jobs.automations")
 
@@ -170,6 +170,8 @@ async def main() -> int:
         jobs_created=total_created,
         jobs_executed=total_executed,
     )
+    # Фоновые пуш-задачи: без ожидания asyncio.run отменяет хвост рассылки.
+    await drain()
     return 0
 
 

@@ -1,7 +1,7 @@
 import { ChevronRight, User } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
-import { ADMIN_NAV, adminSegmentsFor, LEARN_MENU_ITEMS } from './learnNav'
+import { ADMIN_NAV, adminSegmentsFor, LEARN_MENU_ITEMS, learnNavFor } from './learnNav'
 import { SpaceSwitcher } from './SpaceSwitcher'
 import { BottomSheet, BottomSheetItem } from '@/components/ui/BottomSheet'
 import { useMe } from '@/hooks/useMe'
@@ -57,7 +57,7 @@ export function LearnMenuSheet({
       </div>
       <div className="mx-3 mb-1 h-px bg-hair" />
 
-      {LEARN_MENU_ITEMS.map(({ to, label, icon: Icon, soon }) => (
+      {learnNavFor(LEARN_MENU_ITEMS, me.data).map(({ to, label, icon: Icon, soon }) => (
         <BottomSheetItem
           key={to}
           icon={<Icon className="h-5 w-5" />}

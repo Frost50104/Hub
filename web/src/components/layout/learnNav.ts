@@ -1,6 +1,7 @@
 import {
   BadgeCheck,
   BarChart3,
+  Bird,
   BookOpen,
   Bot,
   Building2,
@@ -33,6 +34,8 @@ export interface LearnNavItem {
   end?: boolean
   badge?: boolean
   soon?: boolean
+  /** Модуль-остров: пункт показывается только при `me.features.<feature>`. */
+  feature?: 'race'
 }
 
 /**
@@ -81,6 +84,10 @@ export const LEARN_NAV: LearnNavItem[] = [
   { to: '/learn/surveys', label: 'Опросы', icon: ClipboardList },
   { to: '/learn/products', label: 'Ассортимент', icon: ShoppingBag },
   { to: '/learn/rating', label: 'Рейтинг', icon: Trophy },
+  // «Гусиная гонка» (0057): пункт живёт только при `me.features.race` —
+  // фильтр в `learnNavFor`, сам массив статичен (из него выводятся
+  // LEARN_MENU_ITEMS и подсветка таб-бара).
+  { to: '/learn/race', label: 'Гонка', icon: Bird, feature: 'race' },
   { to: '/learn/favorites', label: 'Избранное', icon: Star },
   { to: '/assistant', label: 'AI-помощник', icon: Bot },
   { to: '/learn/shifts', label: 'Биржа смен', icon: Handshake },
@@ -99,6 +106,7 @@ export type AdminSegment =
   | 'automations'
   | 'audit'
   | 'org'
+  | 'race'
 
 export const ADMIN_SEGMENTS: { key: AdminSegment; label: string; title: string; icon: LucideIcon }[] = [
   { key: 'review', label: 'Проверка', title: 'Проверка тестов', icon: ClipboardList },
@@ -113,6 +121,7 @@ export const ADMIN_SEGMENTS: { key: AdminSegment; label: string; title: string; 
   { key: 'automations', label: 'Автосценарии', title: 'Автосценарии', icon: Workflow },
   { key: 'audit', label: 'Журнал', title: 'Журнал действий', icon: ScrollText },
   { key: 'org', label: 'Оргструктура', title: 'Оргструктура', icon: Building2 },
+  { key: 'race', label: 'Гонка', title: 'Гусиная гонка', icon: Bird },
 ]
 
 /**
@@ -138,7 +147,9 @@ export function adminSegmentsFor(me: {
   // доступный сегмент как вкладку по умолчанию, и перестановка молча увела бы
   // ТУ с привычного экрана на новый.
   if (isAdmin || publisher || storeScope) out.push('analytics', 'progress')
-  if (isAdmin) out.push('employees', 'automations', 'audit', 'org')
+  // «Гонка» — ПОСЛЕДНИМ и только admin: там живёт тумблер модуля, поэтому
+  // сегмент виден даже при выключенной гонке (иначе включить неоткуда).
+  if (isAdmin) out.push('employees', 'automations', 'audit', 'org', 'race')
   return out
 }
 
@@ -147,3 +158,15 @@ const TAB_BAR_ROUTES = new Set(['/learn', '/learn/courses', '/inbox'])
 
 /** Содержимое мобильного sheet'а «Меню» — всё из LEARN_NAV, чего нет в таб-баре. */
 export const LEARN_MENU_ITEMS = LEARN_NAV.filter((i) => !TAB_BAR_ROUTES.has(i.to))
+
+/**
+ * Пункты навигации с учётом модулей-островов: «Гонка» только при
+ * `features.race`. Фильтр на рендере, а не мутация `LEARN_NAV`: из константы
+ * выводятся `LEARN_MENU_ITEMS` и подсветка таб-бара при загрузке модуля.
+ */
+export function learnNavFor<T extends LearnNavItem>(
+  items: T[],
+  me: { features?: { race?: boolean } } | undefined,
+): T[] {
+  return items.filter((i) => !i.feature || me?.features?.[i.feature] === true)
+}

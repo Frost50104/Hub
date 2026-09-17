@@ -1,0 +1,11 @@
+[Unit]
+Description=Run signaris-hub-race-sync hourly at :40
+
+[Timer]
+# :00 — due-soon, :20 — automations; :40 свободен.
+OnCalendar=*-*-* *:40:00
+Persistent=true
+Unit=signaris-hub-race-sync.service
+
+[Install]
+WantedBy=timers.target

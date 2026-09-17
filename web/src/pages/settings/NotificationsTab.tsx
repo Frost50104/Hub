@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/Button'
 import { Switch } from '@/components/ui/Switch'
+import { hasRace, useMe } from '@/hooks/useMe'
 import { usePush } from '@/hooks/usePush'
 import {
   useNotificationPreferences,
@@ -23,6 +24,8 @@ import {
 } from '@/lib/notifications'
 
 export function NotificationsSettingsTab() {
+  const me = useMe()
+  const raceOn = hasRace(me.data)
   const prefsQuery = useNotificationPreferences()
   const setPrefs = useSetNotificationPreferences()
   const { permission, subscribed, subscribe, unsubscribe } = usePush()
@@ -205,7 +208,7 @@ export function NotificationsSettingsTab() {
           in-app (запись во «Входящие»). По умолчанию оба канала включены.
         </p>
 
-        {NOTIFICATION_GROUP_ORDER.map((group) => {
+        {NOTIFICATION_GROUP_ORDER.filter((group) => group !== 'race' || raceOn).map((group) => {
           const kinds = NOTIFICATION_KINDS.filter((k) => KIND_GROUP[k] === group)
           if (kinds.length === 0) return null
           return (

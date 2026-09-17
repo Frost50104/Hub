@@ -21,6 +21,7 @@ from app.jobs._common import already_notified
 from app.models.project import Project
 from app.models.task import Task
 from app.services.notify import notify_overdue
+from app.services.notify_batch import drain
 from app.services.projects import project_not_archived
 from app.services.task_assignees import collect_recipients
 from app.services.taskdates import start_of_today_utc
@@ -84,6 +85,8 @@ async def main() -> int:
         await session.commit()
 
     log.info("overdue.finished", sent=sent_total)
+    # Фоновые пуш-задачи: без ожидания asyncio.run отменяет хвост рассылки.
+    await drain()
     return 0
 
 

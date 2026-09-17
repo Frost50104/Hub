@@ -29,6 +29,10 @@ const ArchivedProjectsPage = lazy(() =>
 const ProjectPage = lazy(() =>
   import('@/pages/ProjectPage').then((m) => ({ default: m.ProjectPage })),
 )
+const RaceTvPage = lazy(() => import('@/pages/RaceTvPage').then((m) => ({ default: m.RaceTvPage })))
+const LearnRacePage = lazy(() =>
+  import('@/pages/learn/LearnRacePage').then((m) => ({ default: m.LearnRacePage })),
+)
 const PublicViewPage = lazy(() =>
   import('@/pages/PublicViewPage').then((m) => ({ default: m.PublicViewPage })),
 )
@@ -122,6 +126,9 @@ export function App() {
         <Route path="/login" element={<LoginRedirect />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
         {/* /p/:token is rendered OUTSIDE Shell — no auth, anonymous. */}
+        {/* ТВ-панель гонки — тоже вне Shell и без auth; nginx-локация /p/ уже
+            отдаёт no-referrer и no-store. Роутер ранжирует по специфичности. */}
+        <Route path="/p/race/:token" element={<RaceTvPage />} />
         <Route path="/p/:token" element={<PublicViewPage />} />
         <Route element={<Shell />}>
           <Route path="/" element={<HomePage />} />
@@ -148,6 +155,7 @@ export function App() {
           <Route path="/learn/products" element={<LearnProductsPage />} />
           <Route path="/learn/products/:productId" element={<LearnProductPage />} />
           <Route path="/learn/rating" element={<LearnRatingPage />} />
+          <Route path="/learn/race" element={<LearnRacePage />} />
           <Route path="/learn/favorites" element={<LearnFavoritesPage />} />
           {/* Ассистент общий для двух пространств. Старый learn-путь —
               редирект, а не 404: PWA живёт вчерашним бандлом. */}

@@ -228,6 +228,7 @@ def create_app() -> FastAPI:
     from app.api import public as public_api
     from app.api import push as push_api
     from app.api import quizzes as quizzes_api
+    from app.api import race as race_api
     from app.api import reports as reports_api
     from app.api import search as search_api
     from app.api import share as share_api
@@ -294,6 +295,8 @@ def create_app() -> FastAPI:
     app.include_router(shifts_api.router, prefix="/api")
     app.include_router(sites_api.router, prefix="/api")
     app.include_router(assessments_api.router, prefix="/api")
+    # «Гусиная гонка» (0057): выключенный модуль отвечает 404 сам.
+    app.include_router(race_api.router, prefix="/api")
 
     return app
 

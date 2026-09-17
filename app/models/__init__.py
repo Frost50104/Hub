@@ -42,6 +42,17 @@ from app.models.project import Project, ProjectMember
 from app.models.project_folder import ProjectFolder
 from app.models.push_subscription import PushSubscription
 from app.models.quiz import Quiz, QuizAttempt, QuizQuestion
+from app.models.race import (
+    Race,
+    RaceBaseline,
+    RaceContest,
+    RaceContestLeague,
+    RaceDailyStat,
+    RaceParticipant,
+    RaceResult,
+    RaceSnapshot,
+    RaceSyncState,
+)
 from app.models.rate_limit import RateLimit
 from app.models.search_document import SearchDocument, TextExtractionJob
 from app.models.shadow import ShadowTenant, ShadowUser
@@ -106,6 +117,15 @@ __all__ = [
     "ProjectMember",
     "ProjectStage",
     "PublicShareToken",
+    "Race",
+    "RaceBaseline",
+    "RaceContest",
+    "RaceContestLeague",
+    "RaceDailyStat",
+    "RaceParticipant",
+    "RaceResult",
+    "RaceSnapshot",
+    "RaceSyncState",
     "PushSubscription",
     "RateLimit",
     "SearchDocument",

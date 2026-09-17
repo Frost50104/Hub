@@ -22,7 +22,7 @@ from __future__ import annotations
 from collections import Counter
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +32,7 @@ from app.models.attachment import TaskAttachment
 from app.models.project import Project
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskComment
+from app.schemas.race import TvTrackResponse
 from app.schemas.share import (
     PublicAttachmentMeta,
     PublicComment,
@@ -44,6 +45,9 @@ from app.schemas.share import (
 from app.services.mention_parser import normalize_token
 from app.services.people_search import is_token_safe, name_to_token
 from app.services.public_token import initials, load_active_token, mask_mentions
+from app.services.race import read as race_read
+from app.services.race.engine import today_local
+from app.services.race.gate import race_enabled_for
 from app.services.task_assignees import load_assignee_ids
 
 router = APIRouter(tags=["public"])
@@ -80,6 +84,42 @@ async def get_public(token: UUID) -> PublicTaskView | PublicProjectView:
         if scope == "project":
             return await _build_project_view(session, entity_id)
         raise _NOT_FOUND
+
+
+@router.get("/public/race/{token}", response_model=TvTrackResponse)
+async def get_public_race(token: str, response: Response) -> TvTrackResponse:
+    """ТВ-панель «Гусиной гонки» без логина (scope `race`, entity_id = tenant).
+
+    `token: str` с ручным разбором: типизация `UUID` отдавала бы на мусор 422
+    с телом pydantic вместо ровного 404. Выключенный модуль — тот же 404:
+    «как будто её и не было». Полезная нагрузка — только имена/коды точек
+    и числа, ПДн нет по построению (тест `test_race_public`).
+    """
+    settings = get_settings()
+    if not settings.public_links_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Публичные ссылки временно отключены",
+        )
+    try:
+        token_uuid = UUID(token)
+    except ValueError:
+        raise _NOT_FOUND from None
+    async with tenant_scoped_session(None, bypass_rls=True) as session:
+        record = await load_active_token(session, token_uuid)
+        if record is None or record.scope != "race":
+            raise _NOT_FOUND
+        tenant_id = record.tenant_id
+    async with tenant_scoped_session(tenant_id) as session:
+        if not await race_enabled_for(session, tenant_id):
+            raise _NOT_FOUND
+        contest = await race_read.current_contest(session, tenant_id)
+        payload = await race_read.build_track(
+            session, contest, today=today_local(), my_store_id=None, tenant_id=tenant_id
+        )
+    payload.pop("my_store_id", None)
+    response.headers["Cache-Control"] = "no-store"
+    return TvTrackResponse(**payload)
 
 
 # ─── Builders ──────────────────────────────────────────────────────────────

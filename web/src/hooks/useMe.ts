@@ -42,6 +42,13 @@ export interface Me {
    *  поля нет — старый бэкенд, синхронизации нет; null — выбор не сделан,
    *  можно засеять локальный; значение — сервер решил (`lib/themeSync.ts`). */
   theme?: Theme | null
+  /** Включённые для тенанта модули-острова («Гусиная гонка»). Поля нет у
+   *  старого бэкенда — трактуем как «выключено». */
+  features?: { race?: boolean }
+}
+
+export function hasRace(me: Me | undefined): boolean {
+  return me?.features?.race === true
 }
 
 /** Общие опции запроса: их же берёт префетч на экране auth-колбэка, чтобы

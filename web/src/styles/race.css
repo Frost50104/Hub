@@ -1,0 +1,172 @@
+/*
+ * «Гусиная гонка» — скоуп `.race-board`. Импортируется ТОЛЬКО из RaceBoard.tsx,
+ * поэтому уезжает с чанками гонки, а не в глобальный CSS.
+ *
+ * Палитра UPPETIT (оранжевый / белый / тёмно-зелёный, трава и небо) — ПЛЕЙСХОЛДЕР
+ * до брендбука: hex ниже подменяются одной правкой. Глобальные токены
+ * (`brand.css`) не трогаем; кнопки, бейджи и сегменты остаются на амбере —
+ * оранжевый только на треке и гусях, два тёплых оттенка рядом читались бы
+ * как ошибка.
+ */
+.race-board {
+  --race-primary: 255 122 0;
+  --race-accent: 27 94 32;
+  --race-gold: 255 200 60;
+  --race-sky-a: 22 34 56;
+  --race-sky-b: 14 18 34;
+  --race-grass-a: 20 60 34;
+  --race-grass-b: 14 40 26;
+  --race-goose: rgb(var(--text));
+  --race-goose-me: rgb(var(--race-primary));
+  --race-up: rgb(var(--green-deep));
+  --race-flat: rgb(var(--amber));
+  --race-down: rgb(var(--text2));
+  --race-goose-w: 32px;
+  --race-lane-h: 36px;
+  --race-label-w: 200px;
+  --race-move-ms: 800ms;
+  --race-fs: 14px;
+}
+
+[data-theme='light'] .race-board {
+  --race-sky-a: 214 233 255;
+  --race-sky-b: 240 247 255;
+  --race-grass-a: 198 232 184;
+  --race-grass-b: 226 243 214;
+}
+
+.race-board--tv {
+  --race-goose-w: 40px;
+  --race-lane-h: 48px;
+  --race-label-w: 260px;
+  --race-fs: clamp(16px, 1.15vw, 26px);
+}
+
+.race-track {
+  background: linear-gradient(
+    180deg,
+    rgb(var(--race-sky-a)) 0%,
+    rgb(var(--race-sky-b)) 55%,
+    rgb(var(--race-grass-a)) 55%,
+    rgb(var(--race-grass-b)) 100%
+  );
+}
+
+.race-lane {
+  position: absolute;
+  left: 0;
+  right: 0;
+  transform: translateY(var(--race-y, 0px));
+  transition: transform var(--race-move-ms) cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.race-lane__mover {
+  position: absolute;
+  inset: 0 0 0 0;
+  transform: translateX(var(--race-x, 0%));
+  transition: transform var(--race-move-ms) cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.race-goose {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--race-goose);
+  filter: none;
+}
+
+.race-goose[data-me='true'] {
+  color: var(--race-goose-me);
+}
+
+.race-goose[data-moving='true'] {
+  will-change: transform;
+  animation: race-waddle 320ms ease-in-out infinite alternate;
+}
+
+.race-goose[data-glow='gold'],
+.race-goose[data-glow='max'] {
+  animation: race-glow 1.8s ease-in-out infinite alternate;
+}
+
+.race-goose[data-moving='true'][data-glow='gold'],
+.race-goose[data-moving='true'][data-glow='max'] {
+  animation:
+    race-waddle 320ms ease-in-out infinite alternate,
+    race-glow 1.8s ease-in-out infinite alternate;
+}
+
+.race-ribbon {
+  background: repeating-linear-gradient(
+    45deg,
+    rgb(var(--race-primary)) 0 6px,
+    rgb(var(--text) / 0.85) 6px 12px
+  );
+}
+
+.race-confetti span {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 5px;
+  height: 8px;
+  border-radius: 1px;
+  opacity: 0;
+  animation: race-confetti 1.6s ease-out infinite;
+  animation-delay: calc(var(--i, 0) * 120ms);
+}
+
+.race-board--paused .race-confetti span,
+.race-board--paused .race-goose {
+  animation-play-state: paused;
+}
+
+.race-fade {
+  animation: race-fade 400ms ease-out;
+}
+
+@keyframes race-waddle {
+  from {
+    transform: translate(-50%, -50%) rotate(-4deg);
+  }
+  to {
+    transform: translate(-50%, -52%) rotate(4deg);
+  }
+}
+
+@keyframes race-glow {
+  from {
+    filter: drop-shadow(0 0 6px rgb(var(--race-gold) / 0.75));
+  }
+  to {
+    filter: drop-shadow(0 0 14px rgb(var(--race-gold) / 0.95));
+  }
+}
+
+@keyframes race-confetti {
+  0% {
+    transform: translate(-50%, -6px) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(calc(-50% + var(--dx, 0px)), 28px) rotate(260deg);
+    opacity: 0;
+  }
+}
+
+@keyframes race-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .race-board * {
+    transition-duration: 0ms !important;
+    animation: none !important;
+  }
+}

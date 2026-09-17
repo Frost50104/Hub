@@ -18,6 +18,7 @@ import {
   useRevokeShare,
   useTaskShares,
 } from '@/hooks/useShares'
+import { copyToClipboard } from '@/lib/clipboard'
 import { cn } from '@/lib/cn'
 import { type ShareResponse } from '@/lib/share'
 
@@ -182,28 +183,3 @@ function ShareRow({
   )
 }
 
-async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch {
-    /* fall through */
-  }
-  // Fallback for browsers without `navigator.clipboard` (rare; older Safari).
-  try {
-    const el = document.createElement('textarea')
-    el.value = text
-    el.setAttribute('readonly', '')
-    el.style.position = 'absolute'
-    el.style.left = '-9999px'
-    document.body.appendChild(el)
-    el.select()
-    document.execCommand('copy')
-    document.body.removeChild(el)
-    return true
-  } catch {
-    return false
-  }
-}

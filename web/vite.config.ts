@@ -118,6 +118,9 @@ export default defineConfig(({ mode }) => ({
           '**/LearnAnalyticsPage-*.js',
           '**/LearnAutomationsPage-*.js',
           '**/LearnAssessmentsPage-*.js',
+          // «Гусиная гонка»: ТВ-страницу сотрудники не открывают, админ-вкладка — hub-admin.
+          '**/RaceTvPage-*.js',
+          '**/LearnRaceAdminPage-*.js',
         ],
       },
       manifest: {

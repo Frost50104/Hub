@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 
@@ -27,9 +29,22 @@ from app.services.iiko.reports import fetch_report
 
 log = structlog.get_logger("iiko.service")
 
-LOCK_TTL_SEC = 90
+# TTL больше худшего OLAP-вызова (race-клиент ждёт до 120 с): истёкший лок у
+# живого держателя = вторая сессия на общий слот сети.
+LOCK_TTL_SEC = 300
 LOCK_WAIT_SEC = 12.0
 _LOCK_POLL_SEC = 0.5
+# Клиент гонки: `Department.Id × день` — до 63×14 групп на вызов против 63 у
+# отчётов; дефолтных 30 с не хватает.
+RACE_CLIENT_TIMEOUT_SEC = 120.0
+
+# Fenced-лок: значение — токен держателя, снятие — только своим токеном
+# (Lua CAS, как в worker_supervisor). Безусловный DELETE снимал бы ЧУЖОЙ лок,
+# если наш TTL истёк, и на слот лицензии открывались бы параллельные сессии.
+_RELEASE_LUA = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] then "
+    "return redis.call('del', KEYS[1]) else return 0 end"
+)
 
 
 class IikoBusy(RuntimeError):
@@ -41,20 +56,60 @@ def is_configured() -> bool:
     return bool(s.iiko_base_url and s.iiko_login and s.iiko_password)
 
 
-def _client() -> IikoClient:
+def _client(*, timeout: float | None = None) -> IikoClient:
     s = get_settings()
     if not is_configured():
         raise IikoNotConfigured(
-            "Отчёты iiko не подключены: задайте SIGNARIS_HUB_IIKO_BASE_URL, "
-            "_LOGIN и _PASSWORD"
+            "Отчёты iiko не подключены: задайте SIGNARIS_HUB_IIKO_BASE_URL, _LOGIN и _PASSWORD"
         )
     return IikoClient(
         base_url=s.iiko_base_url or "",
         login=s.iiko_login or "",
         password=s.iiko_password or "",
         verify_ssl=s.iiko_verify_ssl,
-        timeout=s.iiko_timeout_sec,
+        timeout=timeout if timeout is not None else s.iiko_timeout_sec,
     )
+
+
+def race_client() -> IikoClient:
+    return _client(timeout=RACE_CLIENT_TIMEOUT_SEC)
+
+
+def lock_key(tenant_id: UUID) -> str:
+    return f"iiko:lock:{tenant_id}"
+
+
+async def try_acquire(redis: Any, tenant_id: UUID, *, ttl_sec: int = LOCK_TTL_SEC) -> str | None:
+    """Взять per-tenant лок; вернуть токен держателя или None."""
+    token = uuid4().hex
+    got = await redis.set(lock_key(tenant_id), token, nx=True, ex=ttl_sec)
+    return token if got else None
+
+
+async def release(redis: Any, tenant_id: UUID, token: str) -> bool:
+    """Снять лок, только если он всё ещё наш."""
+    return bool(await redis.eval(_RELEASE_LUA, 1, lock_key(tenant_id), token))
+
+
+@asynccontextmanager
+async def iiko_session_lock(
+    tenant_id: UUID, *, wait_sec: float = LOCK_WAIT_SEC
+) -> AsyncIterator[None]:
+    """Лок на ОДНУ сессию iiko (один OLAP-вызов): джобы гонки держат его
+    коротко и по очереди, не поверх записи в БД."""
+    redis = get_redis()
+    token = await try_acquire(redis, tenant_id)
+    waited = 0.0
+    while token is None:
+        if waited >= wait_sec:
+            raise IikoBusy("Слот iiko занят другим запросом — повторите через минуту")
+        await asyncio.sleep(_LOCK_POLL_SEC)
+        waited += _LOCK_POLL_SEC
+        token = await try_acquire(redis, tenant_id)
+    try:
+        yield
+    finally:
+        await release(redis, tenant_id, token)
 
 
 def _cache_key(
@@ -84,9 +139,8 @@ async def get_report(
         payload["cached"] = True
         return payload
 
-    lock_key = f"iiko:lock:{tenant_id}"
-    got = await redis.set(lock_key, b"1", nx=True, ex=LOCK_TTL_SEC)
-    if not got:
+    token = await try_acquire(redis, tenant_id)
+    if token is None:
         # Ждём соседа: он, скорее всего, кладёт в кэш ровно то, что нужно нам.
         waited = 0.0
         while waited < LOCK_WAIT_SEC:
@@ -97,14 +151,11 @@ async def get_report(
                 payload = json.loads(cached)
                 payload["cached"] = True
                 return payload
-            if not await redis.exists(lock_key):
-                got = await redis.set(lock_key, b"1", nx=True, ex=LOCK_TTL_SEC)
-                if got:
-                    break
-        if not got:
-            raise IikoBusy(
-                "Отчёт уже собирается по другому запросу — подождите минуту и повторите"
-            )
+            token = await try_acquire(redis, tenant_id)
+            if token is not None:
+                break
+        if token is None:
+            raise IikoBusy("Отчёт уже собирается по другому запросу — подождите минуту и повторите")
 
     try:
         async with _client() as client:
@@ -123,7 +174,7 @@ async def get_report(
     except IikoError:
         raise
     finally:
-        await redis.delete(lock_key)
+        await release(redis, tenant_id, token)
 
 
 def to_csv(payload: dict[str, Any]) -> str:

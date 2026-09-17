@@ -88,6 +88,16 @@ class Settings(BaseSettings):
     sid_sync_enabled: bool = Field(default=True)
     sid_sync_poll_sec: float = Field(default=30.0)
 
+    # «Гусиная гонка» (0057). Два рубильника:
+    # - race_enabled — модуль существует вообще (второй, тенантный, — ключ
+    #   `race_enabled` в learning_settings, дефолт false); выключено = ручки
+    #   404, меню и маршруты спрятаны, джобы выходят, данные остаются;
+    # - race_sync_enabled — любые обращения к iiko из модуля и пуши гонки.
+    #   На staging ВСЕГДА false: креды iiko общие с продом, а Redis-DB разные —
+    #   лок слота лицензии с staging проду не виден; VAPID тоже общий.
+    race_enabled: bool = Field(default=True)
+    race_sync_enabled: bool = Field(default=True)
+
     # CORS — staging + prod fronts
     cors_origins: list[str] = Field(
         default_factory=lambda: [

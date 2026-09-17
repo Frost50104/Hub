@@ -24,7 +24,7 @@ from app.models.employee_profile import EmployeeProfile
 from app.services.employee_profiles import archive_profile
 from app.services.learn_notify import _employee_ids
 from app.services.learn_settings import get_settings_dict
-from app.services.notify_batch import notify_many
+from app.services.notify_batch import drain, notify_many
 
 log = structlog.get_logger("jobs.inactivity")
 
@@ -130,6 +130,8 @@ async def main() -> int:
                 totals[key] += value
 
     log.info("inactivity.finished", tenants=len(tenant_ids), **totals)
+    # Фоновые пуш-задачи: без ожидания asyncio.run отменяет хвост рассылки.
+    await drain()
     return 0
 
 

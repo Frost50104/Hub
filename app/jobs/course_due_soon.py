@@ -25,6 +25,7 @@ from app.db import tenant_scoped_session
 from app.models.course import Course
 from app.models.employee_profile import EmployeeProfile
 from app.models.progress import CourseAssignment, CourseProgress
+from app.services.notify_batch import drain
 from app.services.timefmt import fmt_date
 
 log = structlog.get_logger("jobs.course_due_soon")
@@ -112,6 +113,8 @@ async def main() -> int:
             await session.commit()
 
     log.info("course_due_soon.finished", sent=sent)
+    # Фоновые пуш-задачи: без ожидания asyncio.run отменяет хвост рассылки.
+    await drain()
     return 0
 
 

@@ -22,6 +22,7 @@ from app.services.employee_profiles import ensure_profile_for_principal
 from app.services.guides import GuideLink, guides_for_role
 from app.services.personal_projects import ensure_personal_project
 from app.services.project_access import can_create_project
+from app.services.race.gate import race_enabled_for
 from app.services.user_prefs import get_theme, set_theme
 
 router = APIRouter(tags=["me"])
@@ -35,6 +36,13 @@ class MeProfile(BaseModel):
     position_id: UUID | None
     store_id: UUID | None
     status_text: str | None
+
+
+class MeFeatures(BaseModel):
+    """Включённые для тенанта модули-острова; отсутствие поля (старый бэкенд)
+    фронт трактует как «выключено»."""
+
+    race: bool = False
 
 
 class MeResponse(BaseModel):
@@ -71,6 +79,10 @@ class MeResponse(BaseModel):
     # ОТСУТСТВИЕ поля целиком (старый бэкенд в окне деплоя) он трактует как
     # «синхронизации нет» и работает по-старому, per-device.
     theme: Literal["light", "dark"] | None = None
+    # «Гусиная гонка» и будущие модули-острова: env-флаг И тенантный тумблер
+    # (`services/race/gate.py`). Пункт меню, маршрут и группа пушей на фронте
+    # живут только при `features.race`.
+    features: MeFeatures = MeFeatures()
 
 
 @router.get("/me", response_model=MeResponse)
@@ -113,6 +125,7 @@ async def get_me(
     # После коммитов выше: селект не должен попадать внутрь транзакции,
     # которую ensure_* могли откатить до SAVEPOINT.
     theme = await get_theme(db, principal.employee_id)
+    race_on = await race_enabled_for(db, principal.tenant_id) if hub_role is not None else False
     return MeResponse(
         employee_id=principal.employee_id,
         email=principal.email,
@@ -127,6 +140,7 @@ async def get_me(
         personal_project_id=personal_project_id,
         guides=guides_for_role(hub_role),
         theme=theme,
+        features=MeFeatures(race=race_on),
     )
 
 

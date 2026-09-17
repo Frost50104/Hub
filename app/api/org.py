@@ -215,7 +215,7 @@ async def _delete_ref(
     if in_use:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="На запись ссылаются сотрудники — архивируйте её вместо удаления",
+            detail="На запись ссылаются сотрудники или конкурсы — архивируйте её вместо удаления",
         )
     audit.record(
         db,
@@ -400,6 +400,16 @@ async def delete_store(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     in_use = await _profiles_use(db, EmployeeProfile.store_id, ref_id)
+    # Таблицы гонки ссылаются на stores с RESTRICT — без проверки удаление
+    # падало бы IntegrityError'ом в 500.
+    from app.models.race import RaceParticipant, RaceResult, RaceSnapshot
+
+    for model in (RaceParticipant, RaceSnapshot, RaceResult):
+        if in_use:
+            break
+        in_use = (
+            await db.execute(select(model.store_id).where(model.store_id == ref_id).limit(1))
+        ).scalar_one_or_none() is not None
     await _delete_ref(db, principal, Store, ref_id, "store", in_use=in_use)
 
 

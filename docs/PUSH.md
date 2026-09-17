@@ -35,7 +35,7 @@
 | `task.due_soon` | `status != 'done'` и `due_at` в течение 24ч | assignee + watchers |
 | `task.overdue` | `status != 'done'` и `due_at < NOW()` | assignee + watchers |
 
-## Триггеры: learn-домен (14 kinds)
+## Триггеры: learn-домен (16 kinds)
 
 Источник истины полного списка — `app/services/notification_prefs.py::NOTIFICATION_KINDS` (фронт-словарь `web/src/lib/notificationKinds.ts`, реэкспорт через `notifications.ts`, синхронен — менять парой).
 
@@ -55,6 +55,8 @@
 | `shift.application` | новый отклик на смену | менеджеру смены |
 | `shift.result` | назначение/отмена по смене | участникам |
 | `assessment.assigned` | запуск кампании аттестации (батч) | аудитории кампании |
+| `race.started` | «Гусиная гонка»: заезд стартовал (часовая джоба, не раньше 09:00 MSK; дедуп `races.started_notified_at`) | людям (не кассам) включённых точек |
+| `race.record` | закрытый день дал новый максимум заезда у точки (оценивается ночным закрытием, шлётся часовой джобой по одному дню на точку; дедуп `race_snapshots.record_notified_at`) | людям этой точки |
 
 ## Пользовательские настройки
 
@@ -68,6 +70,9 @@
 - `signaris-hub[-staging]-review-due.timer` — daily 06:30 UTC, `app.jobs.review_due`.
 - `signaris-hub[-staging]-inactivity.timer` — daily 07:00 UTC, `app.jobs.inactivity`.
 - `signaris-hub[-staging]-automations.timer` — hourly :20, `app.jobs.automations_run`.
+- `signaris-hub[-staging]-race-sync.timer` — hourly :40, `app.jobs.race_sync` (дотяжка iiko + пуши гонки); `race-close.timer` — 00:45 UTC, `app.jobs.race_close` (без пушей).
+
+**Пуши из джоб и commit.** `notify_many` планирует push ДО commit'а вызывающего; там, где в той же транзакции ставятся метки дедупа (гонка), порядок другой — `queue_many` → commit → `schedule_push_batch`, иначе откат вернул бы метки и через час рассылка повторилась бы. Каждая джоба в конце зовёт `notify_batch.drain(timeout_sec=120)`: без него `asyncio.run` отменяет незавершённые фоновые задачи и хвост рассылки теряется молча; параллельность отправки — `PUSH_CONCURRENCY=4` сессии.
 
 Анти-дубль: каждый запуск `due_soon` проверяет `NOT EXISTS (SELECT 1 FROM notifications WHERE kind='task.due_soon' AND payload->>'task_id' = tasks.id::text AND created_at > NOW() - INTERVAL '23 hours')`. Воркеры крутят `tenant_scoped_session(None, bypass_rls=True)` (системные).
 

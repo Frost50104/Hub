@@ -187,17 +187,26 @@ async def revoke_share(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    # Таблица без RLS — предикат tenant_id ОБЯЗАТЕЛЕН (CLAUDE.md): без него
+    # admin одного тенанта отзывал бы ссылки другого.
     record = (
         await db.execute(
-            select(PublicShareToken).where(PublicShareToken.token == token)
+            select(PublicShareToken).where(
+                PublicShareToken.token == token,
+                PublicShareToken.tenant_id == principal.tenant_id,
+            )
         )
     ).scalar_one_or_none()
     if record is None or record.revoked_at is not None:
         # Idempotent — already revoked / never existed → no-op 204.
         return
 
+    if record.scope == "race":
+        # ТВ-ссылка гонки: только hub-admin (project-owner у неё нет).
+        if not is_hub_admin(principal):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет доступа")
     # creator OR project-owner OR hub:admin can revoke.
-    if record.created_by != principal.employee_id and not is_hub_admin(principal):
+    elif record.created_by != principal.employee_id and not is_hub_admin(principal):
         # Need owner-role on the associated project. For task-scope:
         # fetch the task to find project_id.
         project_id: UUID

@@ -115,7 +115,7 @@
 |---|---|---|
 | `signaris-hub[-staging]-extraction.service` | long-running воркер `app/workers/extraction.py` (извлечение текста + RAG-reconcile) | оба env |
 | `signaris-hub-stt.service` | faster-whisper `small` для голосового ввода ассистента (`app/stt_service.py`), `MemoryHigh=800M`+`MemoryMax=1100M`, выгрузка модели по 5 мин | **только прод** — одна STT-машина на хост, staging-юнит disable-нут |
-| `signaris-hub[-staging]-{due-soon,overdue,course-due-soon,review-due,inactivity,automations}.timer` | cron-джобы `app/jobs/*` (расписание — `docs/PUSH.md`) | оба env |
+| `signaris-hub[-staging]-{due-soon,overdue,course-due-soon,review-due,inactivity,automations,race-sync,race-close}.timer` | cron-джобы `app/jobs/*` (расписание — `docs/PUSH.md`); `race-*` на staging стоят, но выходят по `RACE_SYNC_ENABLED=false` | оба env |
 | `signaris-hub-backup.timer` / `backup-cleanup.timer` / `backup-files.timer` / `healthcheck.timer` | общие для двух env | прод-хост |
 
 Staging-копии юнитов генерируются `ops/systemd/make-staging-unit.py` — не копировать руками.
@@ -141,6 +141,8 @@ Staging-копии юнитов генерируются `ops/systemd/make-stagi
 - `signaris-hub-healthcheck.timer` — `OnUnitActiveSec=5min`, state-files в `/var/lib/signaris-hub/health.<url>.state`, edge-trigger email через `mail(1)` на 2 consecutive failures (`/etc/default/signaris-hub-healthcheck::HEALTHCHECK_ALERT_EMAIL`).
 - `signaris-hub-backup-files.timer` — 00:15 UTC daily, root, rsync --link-dest снапшоты attachments обоих env в `backups/files/<env>/<date>` (retention 14д в backup-cleanup).
 - `signaris-hub[-staging]-review-due.timer` — 06:30 UTC daily, напоминания владельцам материалов (`app/jobs/review_due.py`); включён на обоих env.
+- `signaris-hub[-staging]-race-sync.timer` — hourly :40 (`:00` — due-soon, `:20` — automations), «Гусиная гонка» (0057): дотяжка чеков iiko за [вчера, сегодня] одним OLAP-вызовом под fenced-локом слота + пуши не раньше 09:00 MSK (`app/jobs/race_sync.py`). Гейты: `RACE_ENABLED`, `RACE_SYNC_ENABLED` (staging=false), `IIKO_*`, тенантный тумблер.
+- `signaris-hub[-staging]-race-close.timer` — 00:45 UTC = 03:45 MSK (учётный день iiko + чеки после полуночи; 00:00–00:30 UTC занято цепочкой бэкапов), ночное закрытие дня: снимки, итоги заезда по `ends_on`, следующий заезд, база в режиме `race` (`app/jobs/race_close.py`). Пушей нет. **Установка на живом хосте** (bootstrap ставит все юниты разом; на уже поднятом — руками): `cp ops/systemd/signaris-hub{,-staging}-race-{sync,close}.{service,timer} /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now signaris-hub-race-sync.timer signaris-hub-race-close.timer signaris-hub-staging-race-sync.timer signaris-hub-staging-race-close.timer`.
 
 ## nginx-инварианты
 
@@ -290,6 +292,8 @@ INTEGRATED_PRODUCTS: frozenset[str] = frozenset({"net", "sonar", "hub"})
 | `STAFF_SYNC_ENABLED` / `STAFF_SYNC_INTERVAL_SEC` | pull-воркер штата (0052), 15 мин; **staging=false навсегда** — VAPID общий с прод, bootstrap-залп по staging-копии подписок ушёл бы на реальные устройства |
 | `SITES_SYNC_ENABLED` | зеркало реестра объектов (0053): планировщика НЕТ, флаг гейтит живой прогон ручного `POST /api/learn/sites/sync` (false = форс dry-run) |
 | `SITES_SNAPSHOT_FRESH_DAYS` | свежесть снимка зеркала, фиксированные сутки (14): протухло → карточки магазинов показывают локальные поля с меткой |
+| `RACE_ENABLED` | глобальный рубильник «Гусиной гонки» (0057), default true; второй рубильник — тенантный ключ `learning_settings.race_enabled` (default false, тумблер в «Управление → Гонка»). Выключено = ручки 404, пункт меню/маршрут спрятаны, джобы выходят, данные остаются |
+| `RACE_SYNC_ENABLED` | обращения к iiko и пуши гонки (default true). **Staging=false навсегда**: креды iiko общие с продом, а Redis-DB разные — лок слота лицензии с staging проду не виден; VAPID тоже общий. На staging гонку смотрят на синтетике `scripts/race_seed_demo.py` |
 | `ATTACHMENTS_ROOT` / `ATTACHMENT_MAX_BYTES` | корень файлов (вложения задач + learn-медиа), лимит вложений задач |
 | `ATTACHMENT_VIDEO_MAX_BYTES` | отдельный потолок видео во вложениях (default 1 ГБ). Меняется ВМЕСТЕ с `client_max_body_size` у `location = /api/attachments` и с зеркалом `web/src/lib/attachmentTypes.ts` |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY_PATH` / `VAPID_SUBJECT` | Web Push |

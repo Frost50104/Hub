@@ -43,6 +43,9 @@ DEFAULTS: dict[str, Any] = {
     "video_max_bytes": 300 * 1024 * 1024,
     "image_max_bytes": 10 * 1024 * 1024,
     "document_max_bytes": 50 * 1024 * 1024,
+    # «Гусиная гонка» (0057): тенантный рубильник модуля. Дефолт false —
+    # гонка появляется только там, где её включил hub-admin.
+    "race_enabled": False,
 }
 
 _ALLOWED_KEYS = frozenset(DEFAULTS)

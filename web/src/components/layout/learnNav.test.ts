@@ -19,6 +19,7 @@ describe('adminSegmentsFor', () => {
       'automations',
       'audit',
       'org',
+      'race',
     ])
   })
 
@@ -86,4 +87,26 @@ describe('canManageCourses', () => {
     }
   })
 
+})
+
+// «Гонка» (0057): сегмент только у hub-admin и строго последним — в нём живёт
+// тумблер модуля, поэтому он виден и при выключенной гонке. Пункт меню, наоборот,
+// показывается только при `features.race`.
+import { LEARN_NAV, learnNavFor } from './learnNav'
+
+describe('гусиная гонка в навигации', () => {
+  it('сегмент race — только админу и последним', () => {
+    const admin = adminSegmentsFor({ hub_role: 'admin', profile: null })
+    expect(admin[admin.length - 1]).toBe('race')
+    expect(adminSegmentsFor({ hub_role: 'member', profile: { content_role: 'publisher', org_role: 'office' } })).not.toContain('race')
+  })
+
+  it('пункт «Гонка» скрыт без features.race и виден с ним', () => {
+    const off = learnNavFor(LEARN_NAV, { features: { race: false } })
+    expect(off.some((i) => i.to === '/learn/race')).toBe(false)
+    expect(learnNavFor(LEARN_NAV, undefined).some((i) => i.to === '/learn/race')).toBe(false)
+    const on = learnNavFor(LEARN_NAV, { features: { race: true } })
+    expect(on.some((i) => i.to === '/learn/race')).toBe(true)
+    expect(on.length).toBe(LEARN_NAV.length)
+  })
 })

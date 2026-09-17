@@ -42,6 +42,9 @@ NOTIFICATION_KINDS: tuple[str, ...] = (
     "shift.application",
     "shift.result",
     "assessment.assigned",
+    # «Гусиная гонка» (0057): заезд стартовал / рекорд моей точки.
+    "race.started",
+    "race.record",
 )
 
 

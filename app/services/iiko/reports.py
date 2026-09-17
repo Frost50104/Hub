@@ -38,6 +38,9 @@ F_TX_PRODUCT_CAT = "Product.Category"  # «Категория номенклат
 F_TX_SUM = "Sum.Outgoing"
 F_TX_DATE = "DateTime.Typed"
 F_DISH_TYPE = "DishType"  # «Тип товара»: GOODS | DISH | MODIFIER
+# «ID подразделения», ID_STRING: группируется и фильтруется. Проверено живьём
+# 05.09 (docs/handoffs/uppetit_sites_iiko_export.py, 63 подразделения с выручкой).
+F_DEPARTMENT_ID = "Department.Id"
 
 # «Продажи по позициям меню» — про то, что человек выбирает, а не про
 # добавки к этому. Модификаторы («Обычное молоко», «Горячий») продаются
@@ -56,7 +59,7 @@ VERIFIED: frozenset[str] = frozenset(
     {
         F_DEPARTMENT, F_OPEN_TIME, F_ORDER_NUM, F_AMOUNT, F_DATE_FILTER,
         F_DATE, F_DISH, F_QTY, F_ORDERS, F_HOUR, F_DISH_TYPE,
-        F_TX_TYPE, F_TX_PRODUCT_CAT, F_TX_SUM, F_TX_DATE,
+        F_TX_TYPE, F_TX_PRODUCT_CAT, F_TX_SUM, F_TX_DATE, F_DEPARTMENT_ID,
     }
 )
 
@@ -138,6 +141,74 @@ SPECS: dict[str, ReportSpec] = {
 }
 
 REPORT_ORDER: list[str] = ["revenue", "avg", "items", "peak", "writeoff"]
+
+
+# ─── «Гусиная гонка» ────────────────────────────────────────────────────────
+# Один OLAP-вызов на всю сеть за период: чеки и позиции по подразделению и
+# учётному дню. НЕ входит в SPECS/REPORT_ORDER — те кормят экран ассистента.
+# Модификаторы («обычное молоко») позициями не считаются — тот же фильтр,
+# что у «Позиций меню»; `UniqOrderId.OrdersCount` считает заказы среди
+# оставшихся строк, поэтому число чеков может быть чуть меньше, чем в
+# «Выручке» (чеки из одних немениюшных строк). Сумма позиций обязана сходиться
+# с «Позициями меню» за тот же период — это и есть приёмочная сверка.
+RACE_SALES = ReportSpec(
+    key="race_sales",
+    title="Гусиная гонка: чеки и позиции по точкам",
+    chart="bars",
+    report_type="SALES",
+    group_by=[F_DEPARTMENT_ID, F_DATE],
+    aggregate=[F_QTY, F_ORDERS],
+    extra_filters={F_DISH_TYPE: {"filterType": "IncludeValues", "values": MENU_DISH_TYPES}},
+)
+
+
+@dataclass(frozen=True)
+class DailyRow:
+    """Чеки и позиции подразделения за учётный день (строка `race_daily_stats`)."""
+
+    department_id: str
+    day: date
+    receipts: int
+    items: float
+
+
+def parse_daily_rows(rows: list[dict[str, Any]]) -> list[DailyRow]:
+    """Строки OLAP → DailyRow; строки без подразделения или даты пропускаются,
+    дубли по (подразделение, день) суммируются — iiko их не обещает, но
+    defensively дешевле, чем PK-конфликт в replace-window."""
+    acc: dict[tuple[str, date], list[float]] = {}
+    for row in rows:
+        dept = row.get(F_DEPARTMENT_ID)
+        raw_day = str(row.get(F_DATE) or "")[:10]
+        if dept in (None, ""):
+            continue
+        try:
+            day = date.fromisoformat(raw_day)
+        except ValueError:
+            continue
+        cell = acc.setdefault((str(dept).strip(), day), [0.0, 0.0])
+        cell[0] += _num(row, F_ORDERS)
+        cell[1] += _num(row, F_QTY)
+    return [
+        DailyRow(department_id=dept, day=day, receipts=int(round(r)), items=round(i, 3))
+        for (dept, day), (r, i) in sorted(acc.items(), key=lambda kv: (kv[0][1], kv[0][0]))
+    ]
+
+
+async def fetch_race_daily(
+    client: IikoClient, *, date_from: date, date_to: date
+) -> list[DailyRow]:
+    """Чеки и позиции по подразделениям за период включительно (одна сессия)."""
+    rows = await client.olap(
+        report_type=RACE_SALES.report_type,
+        date_from=date_from,
+        date_to=date_to,
+        group_by=RACE_SALES.group_by,
+        aggregate=RACE_SALES.aggregate,
+        date_field=RACE_SALES.date_field,
+        extra_filters=RACE_SALES.extra_filters,
+    )
+    return parse_daily_rows(rows)
 
 
 # ─── Форматирование (единое место, чтобы клиент только рисовал) ─────────────

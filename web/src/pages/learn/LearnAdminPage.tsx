@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { lazy, Suspense, useEffect, useMemo, type ComponentType } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import { ADMIN_SEGMENTS, adminSegmentsFor, type AdminSegment } from '@/components/layout/learnNav'
@@ -16,6 +16,13 @@ import { LearnAutomationsPage } from './LearnAutomationsPage'
 import { LearnEmployeesPage } from './LearnEmployeesPage'
 import { LearnOrgPage } from './LearnOrgPage'
 import { LearnReviewPage } from './LearnReviewPage'
+
+// Вкладка гонки — lazy: чанк реально существует и исключён из precache
+// (vite.config globIgnores); локальный Suspense ниже, иначе ближайшая
+// граница — в App.tsx над Shell, и загрузка вкладки гасила бы весь хром.
+const LearnRaceAdminPage = lazy(() =>
+  import('./LearnRaceAdminPage').then((m) => ({ default: m.LearnRaceAdminPage })),
+)
 
 /**
  * «Управление» — один маршрут `/learn/admin?tab=…` с семью сегментами
@@ -38,9 +45,10 @@ const SUBTITLE: Record<AdminSegment, string> = {
   automations: 'Правила «новичок → курс с дедлайном» и правило неактивности.',
   audit: 'Кто, что и когда менял — только метаполя, без содержимого ответов.',
   org: 'Должности, точки, франчайзи, отделы, группы и доступ.',
+  race: 'Соревнование точек по среднему числу позиций в чеке: заезды, участники, база и ссылка для ТВ.',
 }
 
-const TAB_COMPONENT: Record<AdminSegment, () => JSX.Element> = {
+const TAB_COMPONENT: Record<AdminSegment, ComponentType> = {
   review: LearnReviewPage,
   analytics: LearnAnalyticsPage,
   progress: LearnProgressPage,
@@ -48,6 +56,7 @@ const TAB_COMPONENT: Record<AdminSegment, () => JSX.Element> = {
   automations: LearnAutomationsPage,
   audit: LearnAuditPage,
   org: LearnOrgPage,
+  race: LearnRaceAdminPage,
 }
 
 export function LearnAdminPage() {
@@ -115,7 +124,9 @@ export function LearnAdminPage() {
         )}
         {Tab && (
           <AdminEmbedContext.Provider value>
-            <Tab key={active} />
+            <Suspense fallback={<SkeletonRows rows={5} />}>
+              <Tab key={active} />
+            </Suspense>
           </AdminEmbedContext.Provider>
         )}
       </div>
