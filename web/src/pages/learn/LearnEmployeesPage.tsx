@@ -8,21 +8,25 @@ import {
   Upload,
   UserX,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import {
   AUTH_STATE_LABEL,
   authStateTone,
   HUB_ROLE_LABEL,
-  matchesAuthFilter,
   showAuthStateBadge,
   staffSyncToast,
   type AuthFilter,
   type AuthState,
 } from '@/lib/authState'
 import { IMPORT_DIALOG_HINT, importReportLine, importToastText } from '@/lib/employeeImport'
-import { employeeListCaption } from '@/lib/employeeList'
+import {
+  employeeRowsCaption,
+  invitedCount,
+  matchesRowFilter,
+  mergeEmployeeRows,
+} from '@/lib/employeeRows'
 import { filterOptions } from '@/lib/selectOptions'
 
 import { EmployeeListNote } from '@/components/learn/EmployeeListNote'
@@ -83,6 +87,18 @@ export function LearnEmployeesPage() {
   })
   // Фильтр по статусу учётки — клиентский: набор и так добирается целиком.
   const [authFilter, setAuthFilter] = useState<AuthFilter>('all')
+  // Карточки и приглашения — ОДИН список. Отдельный блок «Приглашены в auth»
+  // стоял первым и не слушался ни поиска, ни чипов (ОС 17.09); вдобавок 62 из
+  // 69 его строк дублировали список под собой. Правила — `lib/employeeRows.ts`.
+  const allRows = useMemo(
+    () => mergeEmployeeRows(employees.data?.items ?? [], employees.data?.invitations ?? []),
+    [employees.data],
+  )
+  const visibleRows = useMemo(
+    () => allRows.filter((row) => matchesRowFilter(authFilter, row)),
+    [allRows, authFilter],
+  )
+  const invitedTotal = useMemo(() => invitedCount(allRows), [allRows])
   const [syncing, setSyncing] = useState(false)
   const runSync = async () => {
     setSyncing(true)
@@ -98,6 +114,63 @@ export function LearnEmployeesPage() {
       setSyncing(false)
     }
   }
+
+
+  /**
+   * Строка сотрудника. Вынесена из JSX-перебора, потому что список теперь
+   * разнородный: карточки соседствуют с приглашениями, у которых карточки нет.
+   */
+  const renderProfileRow = (e: EmployeeProfile) => (
+    <li key={e.id}>
+                <button
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                  onClick={() => setCardOpen(e)}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className={cn('truncate text-sm font-medium', e.status === 'archived' ? 'text-text3' : 'text-text')}>
+                      {e.full_name}
+                    </p>
+                    <p className="truncate text-xs text-text3">
+                      {[positionName(e.position_id), storeName(e.store_id), e.email]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                  </div>
+                  {e.hub_role && (
+                    <Badge variant="outline" className="text-text2">
+                      {HUB_ROLE_LABEL[e.hub_role] ?? e.hub_role}
+                    </Badge>
+                  )}
+                  {e.org_role !== 'employee' && (
+                    <Badge variant="outline">{ORG_ROLE_LABEL[e.org_role]}</Badge>
+                  )}
+                  {/* Честный статус учётки — одна серверная функция вместо
+                      двух рассинхронённых признаков (staff-sync, 0052).
+                      Фолбэк для протухшего кэша без auth_state — старое
+                      правило по employee_id. */}
+                  {e.status === 'active' && showAuthStateBadge(e.auth_state as AuthState | null) && (
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        authStateTone(e.auth_state as AuthState) === 'red' ? 'text-red' : 'text-amber',
+                      )}
+                    >
+                      {AUTH_STATE_LABEL[e.auth_state as AuthState]}
+                    </Badge>
+                  )}
+                  {e.status === 'active' && e.auth_state == null && e.employee_id === null && (
+                    <Badge variant="outline" className="text-amber">
+                      ещё не входил
+                    </Badge>
+                  )}
+                  {e.status === 'archived' && (
+                    <Badge variant="outline" className="text-text3">
+                      архив
+                    </Badge>
+                  )}
+                </button>
+      </li>
+  )
 
   const positionName = (id: string | null) =>
     org.data?.positions.find((p) => p.id === id)?.name
@@ -199,6 +272,22 @@ export function LearnEmployeesPage() {
                 >
                   Не входили
                 </button>
+                {/* Заменил блок «Приглашены в auth, ещё не приняли», который
+                    стоял первым и не слушался ни поиска, ни чипов (ОС 17.09).
+                    Число то же, что показывал блок: карточки с бейджем
+                    «Приглашён(а)» плюс приглашённые, у которых карточки нет. */}
+                {invitedTotal > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setAuthFilter('invited')}
+                    className={cn(
+                      'rounded-full border px-2.5 py-0.5 text-xs',
+                      authFilter === 'invited' ? 'border-amber text-text' : 'border-glass-border text-text3',
+                    )}
+                  >
+                    Приглашены ({invitedTotal})
+                  </button>
+                )}
               </div>
             ) : (
               <p className="rounded-lg border border-amber/30 bg-amber/5 px-3 py-2 text-xs text-text2">
@@ -206,90 +295,46 @@ export function LearnEmployeesPage() {
                 входам сотрудников. Кнопка «Обновить из auth» заработает после выката.
               </p>
             )}
-            {(employees.data.invitations?.length ?? 0) > 0 && (
-              <div className="rounded-xl border border-glass-border bg-glass">
-                <p className="border-b border-glass-border px-4 py-2 text-xs font-bold uppercase tracking-wide text-text2">
-                  Приглашены в auth, ещё не приняли ({employees.data.invitations!.length})
-                </p>
-                {employees.data.invitations!.map((inv) => (
-                  <div key={inv.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
-                    <span className="min-w-0 truncate text-text">
-                      {inv.full_name || inv.email}
-                      <span className="ml-2 text-xs text-text3">{inv.email}</span>
-                    </span>
-                    <span className="shrink-0 text-xs text-text3">
-                      {HUB_ROLE_LABEL[inv.role] ?? inv.role}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
             {/* Раньше здесь стояло «Всего: N» над обрезанным до сотни списком —
                 экран противоречил сам себе. Правило одно на все четыре места,
                 где сотрудников выбирают: `lib/employeeList.ts`. */}
             <p className="text-xs text-text3">
-              {employeeListCaption(employees.data.items.length, employees.data.total)}
+              {employeeRowsCaption(visibleRows.length, allRows.length, {
+                filtered: authFilter !== 'all',
+              })}
             </p>
             <ul className="divide-y divide-glass-border rounded-xl border border-glass-border bg-glass">
-              {employees.data.items.length === 0 && (
+              {visibleRows.length === 0 && (
                 <li className="p-4 text-sm text-text3">
                   Никого не нашли. Сотрудники появляются из auth после синхронизации.
                 </li>
               )}
-              {employees.data.items
-                // Правило фильтра — в `lib/authState.ts` (там же «Приглашён(а)»).
-                .filter((e) => matchesAuthFilter(authFilter, e.auth_state as AuthState | null))
-                .map((e) => (
-                <li key={e.id}>
-                  <button
-                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
-                    onClick={() => setCardOpen(e)}
+              {visibleRows.map((row) =>
+                row.kind === 'invitation' ? (
+                  /* Приглашение без карточки: строка НЕ кликабельна — открывать
+                     нечего, карточки в базе ещё нет. Раньше такие семь строк
+                     терялись в блоке из 69 над списком. */
+                  <li
+                    key={row.id}
+                    className="flex items-center gap-3 px-4 py-2.5"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className={cn('truncate text-sm font-medium', e.status === 'archived' ? 'text-text3' : 'text-text')}>
-                        {e.full_name}
-                      </p>
-                      <p className="truncate text-xs text-text3">
-                        {[positionName(e.position_id), storeName(e.store_id), e.email]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </p>
+                      <p className="truncate text-sm font-medium text-text">{row.name}</p>
+                      <p className="truncate text-xs text-text3">{row.invitation.email}</p>
                     </div>
-                    {e.hub_role && (
+                    {row.invitation.role && (
                       <Badge variant="outline" className="text-text2">
-                        {HUB_ROLE_LABEL[e.hub_role] ?? e.hub_role}
+                        {HUB_ROLE_LABEL[row.invitation.role] ?? row.invitation.role}
                       </Badge>
                     )}
-                    {e.org_role !== 'employee' && (
-                      <Badge variant="outline">{ORG_ROLE_LABEL[e.org_role]}</Badge>
-                    )}
-                    {/* Честный статус учётки — одна серверная функция вместо
-                        двух рассинхронённых признаков (staff-sync, 0052).
-                        Фолбэк для протухшего кэша без auth_state — старое
-                        правило по employee_id. */}
-                    {e.status === 'active' && showAuthStateBadge(e.auth_state as AuthState | null) && (
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          authStateTone(e.auth_state as AuthState) === 'red' ? 'text-red' : 'text-amber',
-                        )}
-                      >
-                        {AUTH_STATE_LABEL[e.auth_state as AuthState]}
-                      </Badge>
-                    )}
-                    {e.status === 'active' && e.auth_state == null && e.employee_id === null && (
-                      <Badge variant="outline" className="text-amber">
-                        ещё не входил
-                      </Badge>
-                    )}
-                    {e.status === 'archived' && (
-                      <Badge variant="outline" className="text-text3">
-                        архив
-                      </Badge>
-                    )}
-                  </button>
-                </li>
-              ))}
+                    <Badge variant="outline" className="text-amber">
+                      Приглашён(а), карточки нет
+                    </Badge>
+                  </li>
+                ) : (
+                  renderProfileRow(row.profile)
+                ),
+              )}
             </ul>
           </>
         )}

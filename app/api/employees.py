@@ -31,7 +31,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from signaris_auth import Principal
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -198,14 +198,31 @@ async def list_employees(
     synced_at = (
         await db.execute(select(func.max(ShadowUser.staff_synced_at)))
     ).scalar_one_or_none()
+    # Приглашения отдаём ТОЛЬКО те, у кого ещё нет активной карточки (16.09).
+    # Раньше сюда шло зеркало целиком, и экран начинался со стены из 69 строк,
+    # 62 из которых дублировали список под собой: у этих людей карточка есть и
+    # стоит ниже с бейджем «Приглашён(а)» (`auth_state = invited` как раз и
+    # значит «непривязанная карточка, почта в приглашениях»). Уникальны были
+    # семь — те, у кого карточки нет вовсе, и именно они терялись в стене.
+    #
+    # Поиск применяем ТЕМ ЖЕ предикатом, что к карточкам: строка, которая не
+    # слушается поиска, ведёт себя как приклеенная — ОС владельца 17.09
+    # («фильтры влияют только на показ после этого блока»).
     invitations: list[AuthInvitation] = []
     if scope.kind == "all":
-        invitations = list(
-            (
-                await db.execute(
-                    select(AuthInvitation).order_by(AuthInvitation.email)
+        inv_stmt = select(AuthInvitation).where(
+            ~exists(
+                select(EmployeeProfile.id).where(
+                    func.lower(EmployeeProfile.email) == func.lower(AuthInvitation.email),
+                    EmployeeProfile.status == "active",
                 )
-            ).scalars()
+            )
+        )
+        inv_match = match_condition(AuthInvitation.full_name, AuthInvitation.email, q)
+        if inv_match is not None:
+            inv_stmt = inv_stmt.where(inv_match)
+        invitations = list(
+            (await db.execute(inv_stmt.order_by(AuthInvitation.email))).scalars()
         )
     return EmployeeListResponse(
         items=await _to_responses(db, list(rows)),

@@ -115,3 +115,90 @@ async def test_linked_card_ignores_a_stale_invitation(
 
     page = await _list(admin, db, "Инв2")
     assert page.items[0].auth_state == "not_logged_in"
+
+
+# --- приглашения в выдаче списка (ОС владельца 17.09) ------------------------
+#
+# «"Приглашены в auth, ещё не приняли" всегда и на первом месте, а доступные
+# фильтры влияют только на показ после этого блока». Обе причины были здесь, в
+# ручке: зеркало приглашений отдавалось целиком и мимо поиска.
+
+
+async def test_invitation_with_card_is_not_returned_twice(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """Приглашение, у которого есть активная карточка, в `invitations` не едет.
+
+    Иначе экран показывает человека дважды: строкой блока сверху и карточкой
+    с бейджем «Приглашён(а)» ниже. На проде так дублировались 62 строки из 69.
+    """
+    admin = await _admin_with_fresh_snapshot(db, tenant_id, "inv-dup")
+    card = EmployeeProfile(
+        tenant_id=tenant_id, email="dup.one@t.ru", full_name="Дубль Инвдуп"
+    )
+    db.add(card)
+    db.add(
+        AuthInvitation(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            email="Dup.One@t.ru",  # регистр как прислал auth — сверка по lower()
+            full_name="Дубль Инвдуп",
+            role="member",
+            expires_at=None,
+        )
+    )
+    await db.flush()
+
+    page = await _list(admin, db, "Инвдуп")
+    assert [r.email.lower() for r in page.items] == ["dup.one@t.ru"]
+    assert [i.email.lower() for i in page.invitations] == []
+
+
+async def test_invitation_without_card_is_returned(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """А вот у кого карточки нет — единственный, кого показать больше негде."""
+    admin = await _admin_with_fresh_snapshot(db, tenant_id, "inv-solo")
+    db.add(
+        AuthInvitation(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            email="solo.inv@t.ru",
+            full_name="Одиночка Инвсоло",
+            role="member",
+            expires_at=None,
+        )
+    )
+    await db.flush()
+
+    page = await _list(admin, db, "Инвсоло")
+    assert [i.email for i in page.invitations] == ["solo.inv@t.ru"]
+
+
+async def test_invitations_obey_search(db: AsyncSession, tenant_id: uuid.UUID):
+    """Строка, не слушающаяся поиска, ведёт себя как приклеенная — ровно то,
+    что владелец и увидел."""
+    admin = await _admin_with_fresh_snapshot(db, tenant_id, "inv-q")
+    for email, name in (
+        ("match.inv@t.ru", "Нужный Инвкью"),
+        ("other.inv@t.ru", "Посторонний Инвкью2"),
+    ):
+        db.add(
+            AuthInvitation(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                email=email,
+                full_name=name,
+                role="member",
+                expires_at=None,
+            )
+        )
+    await db.flush()
+
+    assert [i.email for i in (await _list(admin, db, "Нужный")).invitations] == [
+        "match.inv@t.ru"
+    ]
+    # Поиск по почте тоже: `match_condition` смотрит оба поля.
+    assert [i.email for i in (await _list(admin, db, "other.inv")).invitations] == [
+        "other.inv@t.ru"
+    ]

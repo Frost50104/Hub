@@ -50,7 +50,7 @@ export function showAuthStateBadge(state: AuthState | null | undefined): state i
 }
 
 /** Чипы фильтра на экране «Сотрудники». */
-export type AuthFilter = 'all' | 'no_account' | 'not_logged_in'
+export type AuthFilter = 'all' | 'no_account' | 'not_logged_in' | 'invited'
 
 /**
  * «Без учётки» — всё, у чего учётки ещё нет: `no_account`, осторожное
