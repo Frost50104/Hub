@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 import { RaceBoard } from '@/components/race/RaceBoard'
@@ -7,16 +7,20 @@ import { RaceTrack } from '@/components/race/RaceTrack'
 import { TvFooter } from '@/components/race/tv/TvFooter'
 import { TvHeader } from '@/components/race/tv/TvHeader'
 import { TvRail } from '@/components/race/tv/TvRail'
+import { useElementSize } from '@/hooks/useElementSize'
 import { usePublicRace } from '@/hooks/usePublicRace'
 import { shouldOfferUpdate } from '@/lib/appVersion'
 import { boardState, inView, leagueOptions, tvPages, tvPageSize } from '@/lib/raceBoard'
 import { laneOrder } from '@/lib/raceTrack'
 
 const PAGE_MS = 15_000
-const LANE_H = 52
-// Шапка 148 + футер 72 + отступы 96 + промежутки 64 + шапка тиков 40.
-const CHROME_H = 420
+const TICKS_H = 40
 const VERSION_CHECK_MS = 60 * 60_000
+
+/** Высота дорожки от высоты слота: на 1080p — 52px, на низких экранах — 44. */
+function laneHeightFor(slotH: number): number {
+  return slotH >= 640 ? 52 : 44
+}
 
 /**
  * `/p/race/:token` — ТВ-панель вне Shell, без логина, тёмная тема принудительно
@@ -67,7 +71,13 @@ export function RaceTvPage() {
   const data = board.data
   const participants = useMemo(() => data?.participants ?? [], [data])
   const options = useMemo(() => leagueOptions(data?.contest ?? null, participants), [data, participants])
-  const pageSize = tvPageSize(viewportH, LANE_H, CHROME_H)
+  // Всё обязано влезать в один экран без прокрутки: число дорожек и строк
+  // лидеров считается от ИЗМЕРЕННОЙ высоты слотов, а не от констант.
+  const trackSlot = useRef<HTMLDivElement>(null)
+  const trackSize = useElementSize(trackSlot)
+  const slotH = trackSize.height || Math.max(300, viewportH - 400)
+  const laneH = laneHeightFor(slotH)
+  const pageSize = tvPageSize(slotH, laneH, TICKS_H)
   // Общий забег — все страницы, лиги — только первая (лидеры лиги): иначе с
   // 63 точками и четырьмя видами цикл ротации растягивался бы на минуты.
   const pages = useMemo(() => {
@@ -127,17 +137,26 @@ export function RaceTvPage() {
   const pageLabel = options.length > 1 ? page.label : null
 
   return (
-    <RaceBoard tv className="min-h-screen bg-bg text-text">
-      <div className="grid min-h-screen grid-rows-[auto_minmax(0,1fr)_auto] gap-8 p-12" style={{ paddingTop: 'calc(var(--safe-top, 0px) + 48px)' }}>
+    <RaceBoard tv className="h-screen overflow-hidden bg-bg text-text">
+      <div
+        className="grid h-full grid-rows-[auto_minmax(0,1fr)_auto]"
+        style={{
+          padding: 'clamp(16px, 2.2vh, 40px) clamp(24px, 2.5vw, 48px)',
+          paddingTop: 'calc(var(--safe-top, 0px) + clamp(16px, 2.2vh, 40px))',
+          rowGap: 'clamp(12px, 2vh, 28px)',
+        }}
+      >
         <TvHeader contest={data.contest} race={data.race} state={state} pageLabel={pageLabel} />
         {state.kind === 'no-contest' ? (
           <div className="flex items-center justify-center">
             <p className="text-[32px] text-text2">Гонка ещё не объявлена</p>
           </div>
         ) : (
-          <div className="grid min-h-0 gap-10" style={{ gridTemplateColumns: 'minmax(0,1fr) clamp(400px, 31vw, 600px)' }}>
-            <div key={`${page.view}-${safeIdx}`} className="race-fade relative min-h-0">
-              <RaceTrack rows={page.rows} view={page.view} myStoreId={null} selectedId={null} onSelect={() => undefined} tv compactTicks={viewportW < 1600} />
+          <div className="grid min-h-0" style={{ gridTemplateColumns: 'minmax(0,1fr) clamp(380px, 31vw, 600px)', columnGap: 'clamp(16px, 2vw, 40px)' }}>
+            <div ref={trackSlot} className="relative min-h-0">
+              <div key={`${page.view}-${safeIdx}`} className="race-fade">
+                <RaceTrack rows={page.rows} view={page.view} myStoreId={null} selectedId={null} onSelect={() => undefined} tv compactTicks={viewportW < 1600} laneHeight={laneH} />
+              </div>
               {waiting && data.race && (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <div className="glass-solid rounded-2xl border border-hair px-10 py-8 text-center shadow-glass">
@@ -150,7 +169,9 @@ export function RaceTvPage() {
                 </div>
               )}
             </div>
-            <TvRail participants={participants} view={page.view} />
+            <div className="min-h-0 overflow-hidden">
+              <TvRail participants={participants} view={page.view} />
+            </div>
           </div>
         )}
         <TvFooter asOf={data.as_of} nextAt={data.next_refresh_at} pageIdx={safeIdx} pages={pages.length} pageMs={PAGE_MS} offlineSince={offlineSince} />

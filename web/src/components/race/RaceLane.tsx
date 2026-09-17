@@ -132,7 +132,7 @@ export function RaceLane({ p, view, y, mounted, isMe, selected, onToggle, stacke
                 onPointerLeave={() => setHover(false)}
               >
                 <span className="relative block">
-                  <GooseIcon size={tv ? 40 : 32} pose={moving ? 'run' : 'idle'} />
+                  <GooseIcon size={tv ? 44 : 32} pose={moving ? 'run' : 'idle'} />
                   {glow === 'max' && <RaceConfetti />}
                 </span>
               </button>

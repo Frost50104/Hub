@@ -21,6 +21,8 @@ interface RaceTrackProps {
   scrollInside?: boolean
   /** Подписи тиков только у старта и максимума (узкий трек, узкий ТВ). */
   compactTicks?: boolean
+  /** Высота дорожки (ТВ считает её от высоты экрана). */
+  laneHeight?: number
   className?: string
 }
 
@@ -30,7 +32,7 @@ interface RaceTrackProps {
  * стартовый выезд через `mounted` — только на первом кадре, рефетч и смена
  * лиги его не повторяют.
  */
-export function RaceTrack({ rows, view, myStoreId, selectedId, onSelect, tv = false, scrollInside = false, compactTicks = false, className }: RaceTrackProps) {
+export function RaceTrack({ rows, view, myStoreId, selectedId, onSelect, tv = false, scrollInside = false, compactTicks = false, laneHeight, className }: RaceTrackProps) {
   const isDesktop = useIsDesktop()
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const stacked = !isDesktop && !tv
@@ -48,7 +50,7 @@ export function RaceTrack({ rows, view, myStoreId, selectedId, onSelect, tv = fa
     const sorted = laneOrder(rows)
     return stacked ? pinMyLane(sorted, myStoreId) : sorted
   }, [rows, stacked, myStoreId])
-  const laneH = tv ? 48 : stacked ? 56 : 36
+  const laneH = laneHeight ?? (tv ? 52 : stacked ? 56 : 36)
   const positions = useMemo(() => lanePositions(ordered, laneH), [ordered, laneH])
   const selected = selectedId ? rows.find((r) => r.store_id === selectedId) ?? null : null
   const ticksLeft = stacked ? '0px' : 'var(--race-label-w)'
