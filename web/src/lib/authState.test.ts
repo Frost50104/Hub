@@ -28,7 +28,11 @@ describe('authState', () => {
 
   it('фильтр «Без учётки» держит приглашённых и осторожное not_linked', () => {
     expect(matchesAuthFilter('no_account', 'no_account')).toBe(true)
-    expect(matchesAuthFilter('no_account', 'invited')).toBe(true)
+    // «Без учётки» и «Приглашены» намеренно НЕ пересекаются (17.09): иначе на
+    // проде оба чипа давали одну и ту же выдачу из 70 строк.
+    expect(matchesAuthFilter('no_account', 'invited')).toBe(false)
+    expect(matchesAuthFilter('invited', 'invited')).toBe(true)
+    expect(matchesAuthFilter('invited', 'no_account')).toBe(false)
     expect(matchesAuthFilter('no_account', 'not_linked')).toBe(true)
     expect(matchesAuthFilter('no_account', 'active')).toBe(false)
     expect(matchesAuthFilter('not_logged_in', 'not_logged_in')).toBe(true)

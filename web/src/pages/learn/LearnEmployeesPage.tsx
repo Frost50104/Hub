@@ -23,9 +23,9 @@ import {
 import { IMPORT_DIALOG_HINT, importReportLine, importToastText } from '@/lib/employeeImport'
 import {
   employeeRowsCaption,
-  invitedCount,
   matchesRowFilter,
   mergeEmployeeRows,
+  rowFilterCounts,
 } from '@/lib/employeeRows'
 import { filterOptions } from '@/lib/selectOptions'
 
@@ -70,6 +70,13 @@ import {
 
 import { useAdminEmbedded } from './adminEmbed'
 
+/** Порядок чипов: сначала «кто-то должен что-то сделать», потом «ждём». */
+const CHIPS: ReadonlyArray<[Exclude<AuthFilter, 'all'>, string]> = [
+  ['no_account', 'Без учётки'],
+  ['not_logged_in', 'Не входили'],
+  ['invited', 'Приглашены'],
+]
+
 export function LearnEmployeesPage() {
   const isDesktop = useIsDesktop()
   const embedded = useAdminEmbedded()
@@ -98,7 +105,7 @@ export function LearnEmployeesPage() {
     () => allRows.filter((row) => matchesRowFilter(authFilter, row)),
     [allRows, authFilter],
   )
-  const invitedTotal = useMemo(() => invitedCount(allRows), [allRows])
+  const chipCounts = useMemo(() => rowFilterCounts(allRows), [allRows])
   const [syncing, setSyncing] = useState(false)
   const runSync = async () => {
     setSyncing(true)
@@ -252,41 +259,27 @@ export function LearnEmployeesPage() {
                 >
                   Все
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setAuthFilter('no_account')}
-                  className={cn(
-                    'rounded-full border px-2.5 py-0.5 text-xs',
-                    authFilter === 'no_account' ? 'border-amber text-text' : 'border-glass-border text-text3',
-                  )}
-                >
-                  Без учётки
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAuthFilter('not_logged_in')}
-                  className={cn(
-                    'rounded-full border px-2.5 py-0.5 text-xs',
-                    authFilter === 'not_logged_in' ? 'border-amber text-text' : 'border-glass-border text-text3',
-                  )}
-                >
-                  Не входили
-                </button>
-                {/* Заменил блок «Приглашены в auth, ещё не приняли», который
-                    стоял первым и не слушался ни поиска, ни чипов (ОС 17.09).
-                    Число то же, что показывал блок: карточки с бейджем
-                    «Приглашён(а)» плюс приглашённые, у которых карточки нет. */}
-                {invitedTotal > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setAuthFilter('invited')}
-                    className={cn(
-                      'rounded-full border px-2.5 py-0.5 text-xs',
-                      authFilter === 'invited' ? 'border-amber text-text' : 'border-glass-border text-text3',
-                    )}
-                  >
-                    Приглашены ({invitedTotal})
-                  </button>
+                {/* Чипы рисуются ТОЛЬКО непустые. Пустой чип выглядит как
+                    работающий фильтр, а даёт пустой список — читается как
+                    поломка экрана. Наборы непересекающиеся: «Без учётки» —
+                    никто не позвал, «Приглашены» — позвали и ждём (ОС 17.09,
+                    до правки оба чипа давали одну и ту же выдачу). */}
+                {CHIPS.map(([key, label]) =>
+                  chipCounts[key] > 0 ? (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setAuthFilter(key)}
+                      className={cn(
+                        'rounded-full border px-2.5 py-0.5 text-xs',
+                        authFilter === key
+                          ? 'border-amber text-text'
+                          : 'border-glass-border text-text3',
+                      )}
+                    >
+                      {label} ({chipCounts[key]})
+                    </button>
+                  ) : null,
                 )}
               </div>
             ) : (

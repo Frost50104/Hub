@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest'
 import type { AuthInvitation, EmployeeProfile } from './learn'
 import {
   employeeRowsCaption,
-  invitedCount,
   matchesRowFilter,
   mergeEmployeeRows,
+  rowFilterCounts,
 } from './employeeRows'
 
 const person = (id: string, name: string, auth_state: string | null): EmployeeProfile =>
@@ -58,16 +58,29 @@ describe('matchesRowFilter', () => {
     expect(rows.filter((r) => matchesRowFilter('all', r))).toHaveLength(4)
   })
 
-  it('приглашение без карточки считается и «без учётки»', () => {
-    const names = rows.filter((r) => matchesRowFilter('no_account', r)).map((r) => r.name)
-    expect(names).toContain('Безкарточки Анна')
-    expect(names).toContain('Приглашённый Иван')
+  it('«Без учётки» и «Приглашены» НЕ пересекаются', () => {
+    // Главная проверка этой правки. До неё оба чипа давали на проде одну и ту
+    // же выдачу из 70 строк: 16.09 auth разослал приглашения всем карточкам
+    // без привязки, и бакет `no_account` опустел целиком.
+    const noAccount = rows.filter((r) => matchesRowFilter('no_account', r)).map((r) => r.name)
+    const invited = rows.filter((r) => matchesRowFilter('invited', r)).map((r) => r.name)
+    expect(noAccount.filter((n) => invited.includes(n))).toEqual([])
+    expect(invited).toEqual(['Безкарточки Анна', 'Приглашённый Иван'])
+    expect(noAccount).toEqual([])
   })
 
-  it('чип «Приглашены» собирает оба вида строк', () => {
-    // 62 карточки с бейджем «Приглашён(а)» + 7 приглашений без карточки — на
-    // проде это ровно те 69, что показывал прежний блок.
-    expect(invitedCount(rows)).toBe(2)
+  it('«Без учётки» ловит того, кого никто не позвал', () => {
+    const lonely = mergeEmployeeRows([person('9', 'Забытый Пётр', 'no_account')], [])
+    expect(lonely.filter((r) => matchesRowFilter('no_account', r))).toHaveLength(1)
+    expect(lonely.filter((r) => matchesRowFilter('invited', r))).toHaveLength(0)
+  })
+
+  it('числа для чипов считаются разом и позволяют скрыть пустые', () => {
+    expect(rowFilterCounts(rows)).toEqual({
+      no_account: 0,
+      not_logged_in: 1,
+      invited: 2,
+    })
   })
 
   it('«Не входили» приглашения НЕ подхватывает: человек ещё и учётку не завёл', () => {

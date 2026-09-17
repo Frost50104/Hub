@@ -67,22 +67,36 @@ export function mergeEmployeeRows(
 /**
  * Фильтр по статусу учётки, общий для обоих видов строк.
  *
- * Приглашение — это и «приглашён(а)», и «без учётки»: карточки у человека нет,
- * поэтому под чип «Без учётки» он обязан попадать, иначе чип начнёт врать в ту
- * же сторону, что и прежний блок.
+ * Чипы «Без учётки» и «Приглашены» НЕ пересекаются (17.09, ОС владельца: «под
+ * чипом "Без учётки" и "Приглашены" одно и то же?» — так и было). Они отвечают
+ * на разные вопросы: «никто не позвал» — работа для HR, «позвали, ждём» —
+ * делать нечего. Строка-приглашение по определению второе.
  */
 export function matchesRowFilter(filter: AuthFilter, row: EmployeeRow): boolean {
   if (row.kind === 'invitation') {
-    return filter === 'all' || filter === 'no_account' || filter === 'invited'
+    // Строка-приглашение — это «позвали, ждём», а НЕ «никто не позвал».
+    // Поэтому под «Без учётки» она не попадает: чипы не пересекаются.
+    return filter === 'all' || filter === 'invited'
   }
-  const state = (row.profile.auth_state ?? null) as AuthState | null
-  if (filter === 'invited') return state === 'invited'
-  return matchesAuthFilter(filter, state)
+  return matchesAuthFilter(filter, (row.profile.auth_state ?? null) as AuthState | null)
 }
 
-/** Сколько строк ждут принятия приглашения — число для чипа «Приглашены». */
-export function invitedCount(rows: readonly EmployeeRow[]): number {
-  return rows.filter((r) => matchesRowFilter('invited', r)).length
+/**
+ * Числа для всех чипов разом.
+ *
+ * Нужны не ради украшения: пустой чип показывать нельзя. Он выглядит как
+ * работающий фильтр, а даёт пустой список — человек решает, что экран сломан.
+ * Сегодня на проде пуст `no_account` (всех позвали), через неделю опустеет
+ * `invited` (приглашения протухнут), и оба раза лишний чип будет врать.
+ */
+export function rowFilterCounts(
+  rows: readonly EmployeeRow[],
+): Record<Exclude<AuthFilter, 'all'>, number> {
+  return {
+    no_account: rows.filter((r) => matchesRowFilter('no_account', r)).length,
+    not_logged_in: rows.filter((r) => matchesRowFilter('not_logged_in', r)).length,
+    invited: rows.filter((r) => matchesRowFilter('invited', r)).length,
+  }
 }
 
 /**
