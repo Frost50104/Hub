@@ -36,10 +36,31 @@
 }
 
 .race-board--tv {
-  --race-goose-w: 40px;
-  --race-lane-h: 48px;
-  --race-label-w: 260px;
-  --race-fs: clamp(16px, 1.15vw, 26px);
+  --race-goose-w: 44px;
+  --race-lane-h: 52px;
+  --race-label-w: 300px;
+  --race-fs: clamp(18px, 1.15vw, 30px);
+  --race-page-ms: 15000ms;
+}
+
+/* Полоса ротации страниц в футере ТВ: заполняется за время показа страницы. */
+.race-tv-progress {
+  animation: race-page-progress var(--race-page-ms) linear forwards;
+}
+
+@keyframes race-page-progress {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+.race-tv-gold {
+  box-shadow:
+    0 0 0 1px rgb(var(--race-gold) / 0.65),
+    0 0 36px rgb(var(--race-gold) / 0.18);
 }
 
 .race-track {

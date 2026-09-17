@@ -19,6 +19,8 @@ interface RaceTrackProps {
   tv?: boolean
   /** Свой скролл внутри карточки при большом числе дорожек (десктоп). */
   scrollInside?: boolean
+  /** Подписи тиков только у старта и максимума (узкий трек, узкий ТВ). */
+  compactTicks?: boolean
   className?: string
 }
 
@@ -28,7 +30,7 @@ interface RaceTrackProps {
  * стартовый выезд через `mounted` — только на первом кадре, рефетч и смена
  * лиги его не повторяют.
  */
-export function RaceTrack({ rows, view, myStoreId, selectedId, onSelect, tv = false, scrollInside = false, className }: RaceTrackProps) {
+export function RaceTrack({ rows, view, myStoreId, selectedId, onSelect, tv = false, scrollInside = false, compactTicks = false, className }: RaceTrackProps) {
   const isDesktop = useIsDesktop()
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const stacked = !isDesktop && !tv
@@ -62,7 +64,7 @@ export function RaceTrack({ rows, view, myStoreId, selectedId, onSelect, tv = fa
       >
         <div className="sticky top-0 z-10 h-7 bg-bg-alt/85 backdrop-blur-sm" style={{ paddingLeft: ticksLeft }}>
           <div className="relative h-full">
-            <RaceTrackTicks labels compact={stacked} />
+            <RaceTrackTicks labels compact={stacked || compactTicks} />
           </div>
         </div>
         <div className="relative" style={{ height: positions.height }} role="list" aria-label="Дорожки">

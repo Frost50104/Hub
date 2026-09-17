@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 
 import { cn } from '@/lib/cn'
 import type { RaceParticipant } from '@/lib/race'
-import { formatPct, laneAria, type RaceView } from '@/lib/raceBoard'
+import { displayPlace, formatPct, laneAria, type RaceView } from '@/lib/raceBoard'
 import { cellsToPercent, glowLevel, moveDurationMs } from '@/lib/raceTrack'
 
 import { GooseIcon } from './GooseIcon'
@@ -56,6 +56,7 @@ export function RaceLane({ p, view, y, mounted, isMe, selected, onToggle, stacke
   }, [targetX, mounted])
 
   const glow = glowLevel(p.cells)
+  const place = displayPlace(p, view)
   const showFloating = !stacked && (selected || hover)
   const flipLeft = targetX > 60
 
@@ -74,7 +75,17 @@ export function RaceLane({ p, view, y, mounted, isMe, selected, onToggle, stacke
           )}
           style={{ fontSize: stacked ? undefined : 'var(--race-fs)' }}
         >
-          <span className={cn('flex min-w-0 items-center gap-1.5', stacked && 'rounded-md bg-bg/60 px-1 backdrop-blur-[2px]')}>
+          <span className={cn('flex min-w-0 items-center gap-1.5', stacked && 'rounded-md bg-bg/60 px-1 backdrop-blur-[2px]', tv && 'gap-3')}>
+            {tv && (
+              <span
+                className={cn(
+                  'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[18px] font-bold tabular-nums',
+                  place !== null && place <= 3 ? 'bg-amber text-on-amber' : 'bg-surface text-text2',
+                )}
+              >
+                {place ?? '—'}
+              </span>
+            )}
             {p.code && (
               <span
                 className={cn(
