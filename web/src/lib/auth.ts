@@ -5,6 +5,8 @@ import {
   type TokenStore,
 } from '@signaris/auth-client/browser'
 
+import { queryClient } from './queryClient'
+
 const DB_NAME = 'signaris-hub-auth'
 const DB_VERSION = 1
 const STORE_NAME = 'tokens'
@@ -83,4 +85,26 @@ export const authClient: SsoAuthClient = createSsoAuthClient({
   redirectUri: `${window.location.origin}/auth/callback`,
   store: indexedDBTokenStore,
   logoutReturnTo: `${window.location.origin}/login`,
+  /**
+   * Отложенный вход отменён: страницу показали, а другая вкладка за это время
+   * уже вошла — токен лежит в общем IndexedDB-сторе, идти на auth не нужно.
+   *
+   * Desk на это место ставит `window.location.reload()`, нам он запрещён: у нас
+   * инвариант «приложение НЕ перезагружает страницу само» (ОС 16.09 «работа не
+   * сохраняется, даже если не нажимали кнопку обновить»), и именно
+   * самопроизвольная перезагрузка размножила один сожжённый код в 310 отказов
+   * 03.09. Хватает рефетча — сессия-то живая.
+   *
+   * Осознанное ограничение: `invalidateQueries` поднимает только запросы с
+   * активными подписчиками. На `/login` их нет вовсе, поэтому эта страница
+   * доезжает сама — см. `pages/LoginRedirect.tsx`.
+   */
+  onSessionRestored: () => {
+    void queryClient.invalidateQueries({ queryKey: ['me'] })
+  },
+  // Вызывающий уже получил resolve (промис отложенного входа резолвится сразу),
+  // поэтому иначе ошибка утонула бы совсем.
+  onLoginError: (e) => {
+    console.error('[auth] deferred login failed', e)
+  },
 })

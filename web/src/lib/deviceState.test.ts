@@ -32,4 +32,12 @@ describe('чистка устройства при выходе', () => {
     expect(all).not.toContain('sso_return_path')
     expect(all).not.toContain('hub:preload-reload-at')
   })
+
+  // С либы 0.12 запись попытки входа живёт под `sso_pkce:<state>` и в
+  // `localStorage` тоже — чтобы callback в другой вкладке мог завершить обмен.
+  // Ключ переменный, поэтому «не содержит» его не поймает: сторожим префикс.
+  it('НЕ трогает запись попытки входа sso_pkce:<state> (либа 0.12)', () => {
+    const all: readonly string[] = [...PER_USER_LOCAL_KEYS, ...PER_USER_SESSION_KEYS]
+    expect(all.filter((k) => k.startsWith('sso_pkce'))).toEqual([])
+  })
 })

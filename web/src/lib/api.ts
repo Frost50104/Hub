@@ -14,4 +14,23 @@ export const api = axios.create({
   },
 })
 
-attachAxiosAuth(api, authClient)
+/**
+ * Куда вернуть человека после входа, начатого не им, а перехватчиком.
+ *
+ * `attachAxiosAuth` зовёт `startLogin()` БЕЗ аргумента, а отдельного гейта,
+ * который уводил бы на `/login` с сохранением адреса, у Hub нет: `/login`
+ * достижим только логаутом и ссылкой с экрана ошибки. Поэтому протухшая
+ * посреди работы сессия возвращала на `/` — открытая задача, доска и фильтры
+ * терялись. Отдаём текущий адрес сами; путь всё равно проходит через
+ * `sanitizeReturnPath` внутри либы, так что `/login` и `/auth/*` в returnPath
+ * не попадут и петли login→callback→login не будет.
+ */
+function currentPath(): string {
+  return `${window.location.pathname}${window.location.search}`
+}
+
+attachAxiosAuth(api, {
+  ...authClient,
+  startLogin: (returnPath, opts) =>
+    authClient.startLogin(returnPath ?? currentPath(), opts),
+})
