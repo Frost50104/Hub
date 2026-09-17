@@ -31,8 +31,15 @@ export const PER_USER_SESSION_KEYS = ['hub:push-prompt-dismissed'] as const
  *   привязка endpoint'а к человеку снимается ниже, на сервере.
  * - `hub:preload-reload-at` — гард от цикла перезагрузок при выкате нового
  *   бандла (lib/preloadRecovery.ts), к пользователю отношения не имеет.
- * - `sso_pkce_verifier` / `sso_return_path` — служебные ключи auth-клиента;
- *   снести их значит сломать сам редирект логаута и следующий вход.
+ * - `sso_pkce_verifier` / `sso_return_path` и `sso_pkce:<state>` — служебные
+ *   ключи auth-клиента; снести их значит сломать сам редирект логаута и
+ *   следующий вход. С либы 0.12 их стало больше и они лежат в ДВУХ
+ *   хранилищах: запись попытки `sso_pkce:<state>` пишется и в `sessionStorage`,
+ *   и в `localStorage` — чтобы callback, открывшийся в другой вкладке, мог
+ *   завершить обмен (в `sessionStorage` исходной вкладки он не заглянет). Срок
+ *   у записи свой — сутки, и чистится она самим клиентом после обмена.
+ *   Поэтому список остаётся ЯВНЫМ и поимённым: префиксная зачистка
+ *   `sso_pkce*` или `localStorage.clear()` снесла бы живую попытку входа.
  * - токены — IndexedDB, их чистит `store.clear()` внутри `authClient.logout()`.
  */
 export function clearDeviceState(): void {
