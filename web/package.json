@@ -21,7 +21,7 @@
     "@radix-ui/react-switch": "^1.1.1",
     "@radix-ui/react-tabs": "^1.1.1",
     "@sentry/react": "^8.30.0",
-    "@signaris/auth-client": "https://auth.signaris.ru/npm/@signaris/auth-client/signaris-auth-client-0.12.0.tgz",
+    "@signaris/auth-client": "https://auth.signaris.ru/npm/@signaris/auth-client/signaris-auth-client-0.13.0.tgz",
     "@tanstack/react-query": "^5.51.0",
     "@tiptap/extension-color": "^3.28.0",
     "@tiptap/extension-highlight": "^3.28.0",
