@@ -96,5 +96,5 @@ filterwarnings = [
     "ignore::DeprecationWarning:passlib.*",
 ]
 markers = [
-    "integration: tests that require Postgres+Redis (testcontainers). Skipped in CI; run locally.",
+    "integration: требуют Postgres (testcontainers, образ pgvector). CI их не гоняет — гоняет pre-push, см. ops/git-hooks/pre-push.",
 ]

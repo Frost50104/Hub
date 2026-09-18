@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+#
+# pre-push: гоняет то, чего НЕ гоняет CI.
+#
+# `.github/workflows/ci.yml` запускает `pytest -x -m "not integration"` — 695
+# тестов, — а 602 интеграционных исключены маркером с пометкой «run locally».
+# Этого «locally» никто не делал, и 18.09.2026 выяснилось, что 101 из них месяц
+# падал `AttributeError` на setup'е: фикстуры патчили приватное имя, которое
+# переименовали в релизе «Гусиной гонки». Поломка была ГРОМКОЙ — её просто никто
+# не видел. Этот хук закрывает именно тот зазор.
+#
+# Фронт здесь не гоняется сознательно: CI покрывает его целиком (lint +
+# typecheck + test + build), дублировать значит платить ~15 секунд впустую.
+#
+# Обходы (оба намеренно шумные — тихого пропуска нет нигде):
+#   HUB_SKIP_INTEGRATION=1 git push   # без Docker: только ruff и юниты
+#   git push --no-verify              # аварийный, выключает хук целиком
+#
+# Активация: git config core.hooksPath ops/git-hooks
+# ВНИМАНИЕ: core.hooksPath отключает .git/hooks целиком — хуки, положенные туда,
+# молча перестанут работать.
+
+set -euo pipefail
+
+# stdin читаем ПЕРВЫМ делом и целиком, до любых ветвлений: git пишет сюда строки
+# «<local-ref> <local-oid> <remote-ref> <remote-oid>», и выход без чтения даёт
+# EPIPE вместо чистого пропуска.
+REFS="$(cat || true)"
+
+cd "$(git rev-parse --show-toplevel)"
+
+PY=".venv/bin/python"
+ZERO="0000000000000000000000000000000000000000"
+
+say()  { printf '\033[1m[pre-push]\033[0m %s\n' "$*" >&2; }
+fail() { printf '\033[1;31m[pre-push] %s\033[0m\n' "$*" >&2; }
+
+# Удаление ветки (`git push --delete`): гонять тесты незачем.
+if [[ -n "$REFS" ]]; then
+  only_deletions=1
+  while read -r _local_ref local_oid _remote_ref _remote_oid; do
+    [[ -z "${local_oid:-}" ]] && continue
+    [[ "$local_oid" == "$ZERO" ]] || only_deletions=0
+  done <<< "$REFS"
+  if [[ "$only_deletions" == "1" ]]; then
+    say "push удаляет ветку — тесты не нужны, пропускаю."
+    exit 0
+  fi
+fi
+
+if [[ ! -x "$PY" ]]; then
+  fail "нет $PY — создайте venv и поставьте зависимости:"
+  fail "    python3.12 -m venv .venv && .venv/bin/pip install -e '.[dev]' \\"
+  fail "      --extra-index-url https://auth.signaris.ru/pypi/simple/"
+  exit 1
+fi
+
+say "ruff…"
+"$PY" -m ruff check app tests
+
+SKIP_INTEGRATION="${HUB_SKIP_INTEGRATION:-}"
+
+if [[ -z "$SKIP_INTEGRATION" ]]; then
+  if ! docker info >/dev/null 2>&1; then
+    fail "Docker не отвечает, а интеграционные тесты поднимают Postgres через"
+    fail "testcontainers. Запустите Docker — или, если его тут нет:"
+    fail "    HUB_SKIP_INTEGRATION=1 git push"
+    fail "Молча пропустить их нельзя: ровно так 101 тест месяц никто не гонял."
+    exit 1
+  fi
+fi
+
+if [[ -n "$SKIP_INTEGRATION" ]]; then
+  say "HUB_SKIP_INTEGRATION=1 — интеграционные ПРОПУЩЕНЫ, гоню только юниты."
+  say "CI их тоже не гоняет, так что этот push уходит без них совсем."
+  "$PY" -m pytest -x -m "not integration" -q
+else
+  say "pytest целиком (юниты + интеграционные)."
+  say "Первый запуск на новой машине может качать образ pgvector/pgvector:pg16"
+  say "(~640 МБ) — это не зависание."
+  "$PY" -m pytest -x -q
+fi
+
+say "готово, push продолжается."
