@@ -48,7 +48,7 @@ def _no_redis_no_push(monkeypatch):
 
     monkeypatch.setattr(quizzes_api, "enforce_rate_limit", _noop_rate_limit)
     monkeypatch.setattr(courses_api, "enforce_rate_limit", _noop_rate_limit)
-    monkeypatch.setattr(notify_batch, "_schedule_push_batch", lambda **kw: None)
+    monkeypatch.setattr(notify_batch, "schedule_push_batch", lambda batch: None)
 
 
 async def _mk_publisher(db: AsyncSession, tenant_id: uuid.UUID):

@@ -61,7 +61,7 @@ def _no_push(monkeypatch):
         return None
 
     monkeypatch.setattr(quizzes_api, "enforce_rate_limit", _noop_rate_limit)
-    monkeypatch.setattr(notify_batch, "_schedule_push_batch", lambda **kw: None)
+    monkeypatch.setattr(notify_batch, "schedule_push_batch", lambda batch: None)
 
 
 async def _mk_campaign(db, hr, *, title="Аттестация бариста", **kw):

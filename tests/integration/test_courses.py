@@ -46,7 +46,7 @@ def _no_redis_no_push(monkeypatch):
     from app.services import notify_batch
 
     monkeypatch.setattr(courses_api, "enforce_rate_limit", _noop_rate_limit)
-    monkeypatch.setattr(notify_batch, "_schedule_push_batch", lambda **kw: None)
+    monkeypatch.setattr(notify_batch, "schedule_push_batch", lambda batch: None)
 
 
 async def _mk_member(

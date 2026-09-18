@@ -47,7 +47,7 @@ class FakeProvider:
 def _no_push(monkeypatch):
     from app.services import notify_batch
 
-    monkeypatch.setattr(notify_batch, "_schedule_push_batch", lambda **kw: None)
+    monkeypatch.setattr(notify_batch, "schedule_push_batch", lambda batch: None)
 
 
 async def _index_doc(

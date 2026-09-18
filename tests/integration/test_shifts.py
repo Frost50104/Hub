@@ -41,7 +41,7 @@ def _no_push(monkeypatch):
         return None
 
     monkeypatch.setattr(shifts_api, "enforce_rate_limit", _noop_rate_limit)
-    monkeypatch.setattr(notify_batch, "_schedule_push_batch", lambda **kw: None)
+    monkeypatch.setattr(notify_batch, "schedule_push_batch", lambda batch: None)
 
 
 async def _setup(db: AsyncSession, tenant_id: uuid.UUID, *, email_prefix: str):
