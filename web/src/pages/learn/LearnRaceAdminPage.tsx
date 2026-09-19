@@ -523,7 +523,7 @@ function ParticipantsCard({ rows, unlinked, editable, pending, onToggle, onRefre
       </div>
       {unlinked.length > 0 && (
         <p className="mt-2 text-[13px] text-text2">
-          Не привязаны к реестру объектов и не участвуют: {unlinked.map((s) => s.name).join(', ')}.
+          Без подразделения iiko в реестре объектов — не участвуют: {unlinked.map((s) => s.name).join(', ')}.
         </p>
       )}
     </Card>
