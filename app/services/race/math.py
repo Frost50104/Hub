@@ -20,7 +20,7 @@ from __future__ import annotations
 import math as _math
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 TRACK_MAX = 400
@@ -287,3 +287,38 @@ def chunk_period(date_from: date, date_to: date, max_days: int = 14) -> list[tup
         out.append((cursor, end))
         cursor = end + timedelta(days=1)
     return out
+
+
+# ─── ранний старт заезда ────────────────────────────────────────────────────
+
+
+def early_start_day(today: date, prev_ends_on: date, scheduled_starts_on: date) -> date | None:
+    """День, с которого заезд можно начать раньше расписания, или None.
+
+    День атомарен: два заезда не могут делить один день (оба посчитали бы одни
+    и те же чеки), поэтому раньше `prev_ends_on + 1` старт невозможен — в день
+    досрочного закрытия предыдущего это «завтра». Если расписание и так
+    начинает заезд не позже этого дня — начинать раньше нечего.
+    """
+    day = max(today, prev_ends_on + timedelta(days=1))
+    return day if day < scheduled_starts_on else None
+
+
+def early_start_candidate(races: list[Any], today: date) -> tuple[Any, date] | None:
+    """Единственный заезд, которому положена кнопка «Начать раньше», и его день.
+
+    Активного заезда нет → первый запланированный по `seq` → его предшественник
+    существует и завершён → `early_start_day`. Duck-typing (`seq`, `status`,
+    `starts_on`, `ends_on`) — ради юнит-теста без ORM.
+    """
+    if any(r.status == "active" for r in races):
+        return None
+    scheduled = sorted((r for r in races if r.status == "scheduled"), key=lambda r: r.seq)
+    if not scheduled:
+        return None
+    race = scheduled[0]
+    prev = next((r for r in races if r.seq == race.seq - 1), None)
+    if prev is None or prev.status != "finished":
+        return None
+    day = early_start_day(today, prev.ends_on, race.starts_on)
+    return (race, day) if day is not None else None

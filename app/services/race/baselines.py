@@ -126,3 +126,15 @@ async def upsert_baseline(
     row.set_at = datetime.now(UTC)
     await session.flush()
     return row
+
+
+async def has_iiko_baseline(session: AsyncSession, race_id: UUID) -> bool:
+    """Считалась ли база заезда из iiko. Именно `iiko`, а не «любая строка»:
+    ручная база одной точки, введённая до старта, не должна отменять расчёт
+    для остальных (`compute_baselines` ручные и так бережёт)."""
+    row = await session.execute(
+        select(RaceBaseline.store_id)
+        .where(RaceBaseline.race_id == race_id, RaceBaseline.source == "iiko")
+        .limit(1)
+    )
+    return row.first() is not None

@@ -5,8 +5,11 @@ import {
   canCreateContest,
   contestEndsOn,
   defaultDraft,
+  earlyStartLabel,
+  earlyStartText,
   leagueOverlaps,
   parseBaselineInput,
+  raceLengthNote,
   racesPreview,
   setRaceAdminParams,
   validateContestDraft,
@@ -75,5 +78,37 @@ describe('черновик конкурса', () => {
     expect(next.get('tab')).toBe('race')
     expect(next.get('contest')).toBeNull()
     expect(next.get('brace')).toBe('r2')
+  })
+})
+
+describe('ранний старт заезда', () => {
+  const today = '2026-09-23'
+  const race = { seq: 2, starts_on: '2026-09-28', ends_on: '2026-10-04' }
+  const contest = { race_length_days: 7, baseline_mode: 'contest' as const, baseline_days: 28 }
+
+  it('подпись кнопки: сегодня / завтра / дата', () => {
+    expect(earlyStartLabel('2026-09-23', today)).toBe('Начать сегодня')
+    expect(earlyStartLabel('2026-09-24', today)).toBe('Начать завтра')
+    expect(earlyStartLabel('2026-09-26', today)).toBe('Начать 26.09.2026')
+  })
+
+  it('текст подтверждения: новая дата, окончание прежнее, длина против плана', () => {
+    const text = earlyStartText(race, '2026-09-24', contest, today)
+    expect(text).toContain('Заезд № 2 стартует завтра вместо 28.09.2026.')
+    expect(text).toContain('Окончание не меняется — 04.10.2026')
+    expect(text).toContain('11\u00a0дней вместо 7')
+    expect(text).not.toContain('iiko')
+  })
+
+  it('режим «база на заезд»: про iiko — только при старте сегодня', () => {
+    const raceMode = { ...contest, baseline_mode: 'race' as const }
+    expect(earlyStartText(race, today, raceMode, today)).toContain('База пересчитается из iiko за 28\u00a0дней')
+    expect(earlyStartText(race, '2026-09-24', raceMode, today)).not.toContain('iiko')
+  })
+
+  it('подпись длины: только когда заезд длиннее плана', () => {
+    expect(raceLengthNote(race, 7)).toBeNull()
+    expect(raceLengthNote({ starts_on: '2026-09-24', ends_on: '2026-10-04' }, 7)).toBe('· 11\u00a0дней вместо 7')
+    expect(raceLengthNote({ starts_on: '2026-10-03', ends_on: '2026-10-04' }, 7)).toBe('· 2\u00a0дня вместо 7')
   })
 })

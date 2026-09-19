@@ -39,10 +39,12 @@ from app.schemas.race import (
     HistoryResponse,
     ParticipantToggle,
     ParticipantToggleOut,
+    RaceRefOut,
     RaceResultsResponse,
     RaceSettingsOut,
     RaceSettingsPut,
     ScheduleOut,
+    StartOut,
     StoreRefOut,
     SyncReportOut,
     SyncRequest,
@@ -55,6 +57,7 @@ from app.services.iiko.client import IikoError, IikoNotConfigured
 from app.services.iiko.service import IikoBusy
 from app.services.org_scope import get_profile
 from app.services.race import engine, gate, iiko_pull, read, tv_token
+from app.services.race import math as race_math
 from app.services.race.baselines import load_baselines
 
 router = APIRouter(tags=["race"])
@@ -238,12 +241,19 @@ async def put_settings(
 # ─── админ: конкурсы ────────────────────────────────────────────────────────
 
 
-async def _contest_out(db: AsyncSession, contest: RaceContest) -> ContestOut:
-    return ContestOut(
-        **read.contest_dict(
-            contest, await read.load_leagues(db, contest), await read.load_races(db, contest)
-        )
-    )
+async def _contest_out(
+    db: AsyncSession, contest: RaceContest, *, admin: bool = False
+) -> ContestOut:
+    races = await read.load_races(db, contest)
+    out = ContestOut(**read.contest_dict(contest, await read.load_leagues(db, contest), races))
+    if admin and contest.status == "active":
+        candidate = race_math.early_start_candidate(races, engine.today_local())
+        if candidate is not None:
+            race, day = candidate
+            for r in out.races:
+                if r.id == race.id:
+                    r.early_start_on = day
+    return out
 
 
 async def _admin_participants(
@@ -289,7 +299,7 @@ async def _admin_detail(db: AsyncSession, contest: RaceContest) -> ContestAdminO
     participants, unlinked = await _admin_participants(db, contest)
     state = await db.get(RaceSyncState, contest.tenant_id)
     return ContestAdminOut(
-        contest=await _contest_out(db, contest),
+        contest=await _contest_out(db, contest, admin=True),
         participants=participants,
         unlinked_stores=unlinked,
         sync=SyncStateOut.model_validate(state, from_attributes=True)
@@ -414,7 +424,7 @@ async def schedule_contest(
         raise _http(e) from None
     await db.commit()
     return ScheduleOut(
-        contest=await _contest_out(db, contest),
+        contest=await _contest_out(db, contest, admin=True),
         races=report.races,
         needs_baseline_store_ids=report.needs_baseline_store_ids,
         baselines_computed=report.baselines_computed,
@@ -463,6 +473,43 @@ async def finish_race(
     await db.commit()
     view = await read.race_results_view(db, contest, race, today=engine.today_local())
     return FinishOut(race=view["race"], results=view["results"], pull_ok=pull_ok)
+
+
+@router.post("/learn/race/admin/races/{race_id}/start", response_model=StartOut)
+async def start_race(
+    race_id: UUID,
+    principal: Principal = Depends(_ADMIN),
+    db: AsyncSession = Depends(get_db),
+) -> StartOut:
+    """Начать запланированный заезд раньше расписания (сегодня или завтра)."""
+    await _require_admin_access(db, principal)
+    contest, race = await _load_race(db, race_id)
+    await _lock_timeout(db)
+    try:
+        report = await engine.start_early(
+            db,
+            contest,
+            race,
+            today=engine.today_local(),
+            actor_id=principal.employee_id,
+            compute_baselines=iiko_pull.compute_baselines if gate.sync_enabled() else None,
+        )
+    except (
+        engine.RaceValidationError,
+        engine.RaceConflictError,
+        iiko_pull.RaceSyncDisabled,
+        IikoNotConfigured,
+        IikoBusy,
+        IikoError,
+    ) as e:
+        raise _http(e) from None
+    await db.commit()
+    return StartOut(
+        race=RaceRefOut(**read.race_dict(race)),
+        activated=report.activated,
+        baselines_computed=report.baselines_computed,
+        needs_baseline_store_ids=report.needs_baseline_store_ids,
+    )
 
 
 # ─── админ: участники и база ────────────────────────────────────────────────

@@ -34,9 +34,14 @@ from app.services.audience_resolver import learning_population_filter
 from app.services.notify_batch import PushBatch, queue_many, schedule_push_batch
 from app.services.race import gate, read
 from app.services.race import math as m
-from app.services.race.baselines import get_baseline_row, load_baselines, upsert_baseline
+from app.services.race.baselines import (
+    get_baseline_row,
+    has_iiko_baseline,
+    load_baselines,
+    upsert_baseline,
+)
 from app.services.race.iiko_pull import lock_tenant
-from app.services.timefmt import display_tz, fmt_day_range
+from app.services.timefmt import display_tz, fmt_day, fmt_day_range
 
 log = structlog.get_logger("race.engine")
 
@@ -651,9 +656,9 @@ class CloseReport:
     finished_race_ids: list[UUID] = field(default_factory=list)
     activated_race_ids: list[UUID] = field(default_factory=list)
     contest_finished: bool = False
-    # Заезд, которому нужна база (режим `race`) — считает ВЫЗЫВАЮЩИЙ после
+    # Заезды, которым нужна база (режим `race`) — считает ВЫЗЫВАЮЩИЙ после
     # commit'а, вне advisory-лока: расчёт ходит в iiko.
-    next_race_needing_baseline: UUID | None = None
+    races_needing_baseline: list[UUID] = field(default_factory=list)
 
 
 async def close_day(session: AsyncSession, contest: RaceContest, *, close_day: date) -> CloseReport:
@@ -675,14 +680,23 @@ async def close_day(session: AsyncSession, contest: RaceContest, *, close_day: d
         if race.ends_on <= close_day:
             await finish_race(session, contest, race, through_day=race.ends_on, reason="schedule")
             report.finished_race_ids.append(race.id)
-            nxt = next((r for r in races if r.seq == race.seq + 1), None)
-            if nxt is None:
+            if not any(r.seq > race.seq for r in races):
                 contest.status = "finished"
                 contest.finished_at = _now()
                 report.contest_finished = True
-            elif contest.baseline_mode == "race":
-                report.next_race_needing_baseline = nxt.id
     await session.flush()
+    if contest.baseline_mode == "race":
+        # База следующего заезда — ОБЩИМ правилом по датам, а не веткой
+        # завершения: одно условие покрывает смену заездов по расписанию,
+        # пробел после досрочного завершения (`force_finish` базу не
+        # считает) и старт «завтра» из `start_early`. Ночь, когда iiko был
+        # занят, догоняется следующей — условие остаётся истинным.
+        due_by = close_day + timedelta(days=1)
+        for r in races:
+            if r.status == "finished" or r.starts_on > due_by:
+                continue
+            if not await has_iiko_baseline(session, r.id):
+                report.races_needing_baseline.append(r.id)
     before = {r.id for r in races if r.status == "active"}
     await activate_due(session, contest.tenant_id, today=close_day + timedelta(days=1))
     after = {r.id for r in await read.load_races(session, contest) if r.status == "active"}
@@ -746,6 +760,101 @@ async def force_finish(
         contest.finished_at = _now()
     await activate_due(session, contest.tenant_id, today=today)
     return results, pull_ok
+
+
+@dataclass
+class StartReport:
+    race_id: UUID
+    starts_on: date
+    activated: bool
+    baselines_computed: bool
+    needs_baseline_store_ids: list[UUID]
+
+
+async def start_early(
+    session: AsyncSession,
+    contest: RaceContest,
+    race: Race,
+    *,
+    today: date,
+    actor_id: UUID,
+    compute_baselines: Any | None = None,
+) -> StartReport:
+    """Начать запланированный заезд раньше расписания — сегодня или завтра.
+
+    Правила (решение владельца 19.09): день атомарен — не раньше дня после
+    `ends_on` предыдущего заезда (`m.early_start_day`); `ends_on` не двигается —
+    даты объявлены, заезд просто становится длиннее; в режиме `race` при старте
+    «сегодня» база считается здесь же из iiko, при «завтра» — ночной джобой по
+    общему правилу `close_day`. Дата ставится ДО расчёта: `compute_baselines`
+    берёт якорь ретро-окна из `race.starts_on`. Лок — после похода в iiko.
+    """
+    if contest.status != "active":
+        raise RaceConflictError("Конкурс не активен")
+    if race.status != "scheduled":
+        raise RaceConflictError("Заезд уже стартовал")
+    races = await read.load_races(session, contest)
+    candidate = m.early_start_candidate(races, today)
+    if candidate is None or candidate[0].id != race.id:
+        if any(r.status == "active" for r in races):
+            raise RaceConflictError("Сначала завершите текущий заезд")
+        raise RaceConflictError(f"Заезд и так стартует {fmt_day(race.starts_on)}")
+    day = candidate[1]
+    old_start = race.starts_on
+    race.starts_on = day
+    await session.flush()
+    computed = False
+    if (
+        day == today
+        and contest.baseline_mode == "race"
+        and compute_baselines is not None
+        and not await has_iiko_baseline(session, race.id)
+    ):
+        await compute_baselines(session, contest=contest, race=race, set_by=actor_id)
+        computed = True
+    await lock_tenant(session, contest.tenant_id)
+    # Два админа одновременно: второй дожидается лока и видит уже активный заезд.
+    await session.refresh(race)
+    if race.status != "scheduled":
+        raise RaceConflictError("Заезд уже стартовал")
+    audit.record(
+        session,
+        tenant_id=contest.tenant_id,
+        actor_id=actor_id,
+        action="update",
+        object_type="race",
+        object_id=race.id,
+        object_label=f"{contest.title} · заезд {race.seq}",
+        diff={"starts_on": {"old": old_start.isoformat(), "new": day.isoformat()}},
+    )
+    await session.flush()
+    await activate_due(session, contest.tenant_id, today=today)
+    await session.refresh(race)
+    missing: list[UUID] = []
+    if contest.baseline_mode == "race" and day == today:
+        participants = await read.load_participants(session, contest)
+        baselines = await load_baselines(session, contest, race.id)
+        missing = [
+            p.store_id
+            for p in participants
+            if p.store_id not in baselines or baselines[p.store_id].value is None
+        ]
+    log.info(
+        "race.started_early",
+        contest_id=str(contest.id),
+        race_id=str(race.id),
+        seq=race.seq,
+        starts_on=str(day),
+        activated=race.status == "active",
+        baselines_computed=computed,
+    )
+    return StartReport(
+        race_id=race.id,
+        starts_on=day,
+        activated=race.status == "active",
+        baselines_computed=computed,
+        needs_baseline_store_ids=missing,
+    )
 
 
 async def cancel_contest(

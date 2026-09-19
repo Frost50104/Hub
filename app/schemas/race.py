@@ -26,6 +26,10 @@ class RaceRefOut(BaseModel):
     starts_at: datetime
     ends_at: datetime
     finish_reason: str | None = None
+    # День, с которого заезд можно начать раньше расписания (сегодня или
+    # завтра). Заполняется ТОЛЬКО в админских ответах и только у одного
+    # заезда — правило считает сервер (`math.early_start_candidate`).
+    early_start_on: date | None = None
 
 
 class ContestOut(BaseModel):
@@ -283,6 +287,13 @@ class FinishOut(BaseModel):
     race: RaceRefOut
     results: list[ParticipantOut]
     pull_ok: bool
+
+
+class StartOut(BaseModel):
+    race: RaceRefOut
+    activated: bool
+    baselines_computed: bool
+    needs_baseline_store_ids: list[UUID]
 
 
 class RaceSettingsOut(BaseModel):

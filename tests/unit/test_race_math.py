@@ -7,7 +7,8 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -20,8 +21,13 @@ L2 = UUID("00000000-0000-0000-0000-00000000000b")
 
 def _row(name: str, cells: int, pct: float | None = None, *, avg=None, league=None, nb=False):
     return m.RankRow(
-        store_id=uuid4(), name=name, cells=cells, pct=pct, avg=avg,
-        needs_baseline=nb, league_id=league,
+        store_id=uuid4(),
+        name=name,
+        cells=cells,
+        pct=pct,
+        avg=avg,
+        needs_baseline=nb,
+        league_id=league,
     )
 
 
@@ -212,7 +218,9 @@ def test_pending_snapshot_days_catches_up_and_stops_at_race_end():
     assert m.pending_snapshot_days(start, end, None, date(2026, 9, 21)) == [date(2026, 9, 21)]
     # две пропущенные ночи
     assert m.pending_snapshot_days(start, end, date(2026, 9, 22), date(2026, 9, 25)) == [
-        date(2026, 9, 23), date(2026, 9, 24), date(2026, 9, 25),
+        date(2026, 9, 23),
+        date(2026, 9, 24),
+        date(2026, 9, 25),
     ]
     # закрытие после конца гонки не выходит за ends_on
     assert m.pending_snapshot_days(start, end, date(2026, 9, 26), date(2026, 9, 30)) == [
@@ -232,3 +240,45 @@ def test_chunk_period_windows_of_fourteen_days():
     one = (date(2026, 9, 1), date(2026, 9, 1))
     assert m.chunk_period(*one) == [one]
     assert m.chunk_period(date(2026, 9, 2), date(2026, 9, 1)) == []
+
+
+# ─── ранний старт заезда ────────────────────────────────────────────────────
+
+
+def test_early_start_day_not_before_the_day_after_previous_end():
+    d = date(2026, 9, 21)
+    sched = d + timedelta(days=5)
+    # в день досрочного закрытия предыдущего — только «завтра»
+    assert m.early_start_day(d, d, sched) == d + timedelta(days=1)
+    # позже — «сегодня»
+    assert m.early_start_day(d + timedelta(days=2), d, sched) == d + timedelta(days=2)
+    # расписание и так начинает не позже — начинать раньше нечего
+    assert m.early_start_day(sched, d, sched) is None
+    assert m.early_start_day(d, d, d + timedelta(days=1)) is None
+
+
+def test_early_start_candidate_needs_no_active_race_and_finished_predecessor():
+    d = date(2026, 9, 21)
+    r1 = SimpleNamespace(id=1, seq=1, status="finished", starts_on=d - timedelta(days=6), ends_on=d)
+    r2 = SimpleNamespace(
+        id=2,
+        seq=2,
+        status="scheduled",
+        starts_on=d + timedelta(days=5),
+        ends_on=d + timedelta(days=11),
+    )
+    r3 = SimpleNamespace(
+        id=3,
+        seq=3,
+        status="scheduled",
+        starts_on=d + timedelta(days=12),
+        ends_on=d + timedelta(days=18),
+    )
+    assert m.early_start_candidate([r3, r2, r1], d) == (r2, d + timedelta(days=1))
+    assert m.early_start_candidate([r1, r2, r3], d + timedelta(days=5)) is None, "и так стартует"
+    r1_active = SimpleNamespace(**{**vars(r1), "status": "active"})
+    assert m.early_start_candidate([r1_active, r2, r3], d) is None, "активный есть"
+    assert m.early_start_candidate([r2, r3], d) is None, "предшественника нет"
+    r1_sched = SimpleNamespace(**{**vars(r1), "status": "scheduled"})
+    assert m.early_start_candidate([r1_sched, r2], d) is None, "предшественник не завершён"
+    assert m.early_start_candidate([r1], d) is None

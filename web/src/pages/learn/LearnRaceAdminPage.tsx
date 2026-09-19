@@ -26,7 +26,10 @@ import {
   canCreateContest,
   defaultDraft,
   draftFromContest,
+  earlyStartLabel,
+  earlyStartText,
   parseBaselineInput,
+  raceLengthNote,
   resolveRaceAdminParams,
   setRaceAdminParams,
   type ContestFormDraft,
@@ -142,7 +145,7 @@ export function LearnRaceAdminPage() {
   const detail = useAdminContest(enabled ? contestId : null)
 
   const [formOpen, setFormOpen] = useState<'create' | 'edit' | null>(null)
-  const [confirm, setConfirm] = useState<null | { kind: 'schedule' } | { kind: 'cancel' } | { kind: 'finish'; race: RaceRef } | { kind: 'recompute' } | { kind: 'revoke'; token: string }>(null)
+  const [confirm, setConfirm] = useState<null | { kind: 'schedule' } | { kind: 'cancel' } | { kind: 'finish'; race: RaceRef } | { kind: 'start'; race: RaceRef; day: string } | { kind: 'recompute' } | { kind: 'revoke'; token: string }>(null)
 
   const toggle = useRaceAdminMutation((v: boolean) => raceApi.setEnabled(v), 'Не удалось переключить модуль', (r) =>
     toast.success(r.enabled ? 'Гонка включена' : 'Гонка выключена'),
@@ -176,6 +179,10 @@ export function LearnRaceAdminPage() {
   const finish = useRaceAdminMutation((raceId: string) => raceApi.finishRace(raceId), 'Не удалось завершить заезд', (r) => {
     setConfirm(null)
     toast.success(r.pull_ok ? 'Заезд завершён, итоги зафиксированы' : 'Заезд завершён по последним данным (iiko не ответил)')
+  })
+  const start = useRaceAdminMutation((raceId: string) => raceApi.startRace(raceId), 'Не удалось начать заезд', (r) => {
+    setConfirm(null)
+    toast.success(r.activated ? `Заезд № ${r.race.seq} стартовал` : `Заезд № ${r.race.seq} стартует завтра`)
   })
   const toggleParticipant = useRaceAdminMutation(
     (a: { storeId: string; included: boolean }) => raceApi.toggleParticipant(contestId!, a.storeId, a.included),
@@ -310,12 +317,20 @@ export function LearnRaceAdminPage() {
                           <span className="block text-[12px] text-text2">
                             {RACE_STATUS_LABEL[r.status]}
                             {r.finish_reason === 'forced' && ' · досрочно'}
+                            {raceLengthNote(r, c.race_length_days) && ` ${raceLengthNote(r, c.race_length_days)}`}
                           </span>
                         </span>
                         {r.status === 'active' ? (
                           <Button size="sm" variant="ghost" onClick={() => setConfirm({ kind: 'finish', race: r })}>
                             Завершить досрочно
                           </Button>
+                        ) : r.status === 'scheduled' && r.early_start_on ? (
+                          <span className="flex items-center gap-2">
+                            <Button size="sm" variant="ghost" onClick={() => setConfirm({ kind: 'start', race: r, day: r.early_start_on! })}>
+                              {earlyStartLabel(r.early_start_on, todayKey())}
+                            </Button>
+                            <Badge variant="secondary">{RACE_STATUS_LABEL[r.status]}</Badge>
+                          </span>
                         ) : (
                           <Badge variant={r.status === 'finished' ? 'outline' : 'secondary'}>{RACE_STATUS_LABEL[r.status]}</Badge>
                         )}
@@ -425,6 +440,15 @@ export function LearnRaceAdminPage() {
         confirmLabel="Завершить"
         pending={finish.isPending}
         onConfirm={() => confirm?.kind === 'finish' && finish.mutate(confirm.race.id)}
+      />
+      <Confirm
+        open={confirm?.kind === 'start'}
+        onOpenChange={(v) => !v && setConfirm(null)}
+        title={confirm?.kind === 'start' ? `Начать заезд № ${confirm.race.seq} раньше?` : ''}
+        text={confirm?.kind === 'start' && c ? earlyStartText(confirm.race, confirm.day, c, todayKey()) : ''}
+        confirmLabel={confirm?.kind === 'start' ? earlyStartLabel(confirm.day, todayKey()) : 'Начать'}
+        pending={start.isPending}
+        onConfirm={() => confirm?.kind === 'start' && start.mutate(confirm.race.id)}
       />
       <Confirm
         open={confirm?.kind === 'recompute'}

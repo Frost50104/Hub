@@ -4,8 +4,9 @@
  * URL-параметры вкладки. Чистый модуль под vitest.
  */
 import type { OrgGroup, OrgStore } from '@/lib/learn'
-import type { BaselineMode, RaceContest } from '@/lib/race'
-import { addDaysKey } from '@/lib/taskDates'
+import type { BaselineMode, RaceContest, RaceRef } from '@/lib/race'
+import { addDaysKey, humanDate } from '@/lib/taskDates'
+import { plural } from '@/lib/typography'
 
 export interface ContestFormDraft {
   title: string
@@ -153,4 +154,50 @@ export function setRaceAdminParams(params: URLSearchParams, patch: Partial<RaceA
     else next.delete(key)
   }
   return next
+}
+
+// ─── ранний старт заезда ─────────────────────────────────────────────────────
+
+/** Подпись кнопки: сервер уже решил, что заезд можно начать раньше и с какого дня. */
+export function earlyStartLabel(earlyStartOn: string, todayKey: string): string {
+  if (earlyStartOn === todayKey) return 'Начать сегодня'
+  if (earlyStartOn === addDaysKey(todayKey, 1)) return 'Начать завтра'
+  return `Начать ${humanDate(earlyStartOn)}`
+}
+
+function raceDays(startsOn: string, endsOn: string): number {
+  const a = new Date(`${startsOn}T00:00:00Z`).getTime()
+  const b = new Date(`${endsOn}T00:00:00Z`).getTime()
+  return Math.round((b - a) / 86_400_000) + 1
+}
+
+/**
+ * Текст подтверждения раннего старта: новая дата, неизменное окончание,
+ * длина заезда против плановой; в режиме «база на каждый заезд» при старте
+ * «сегодня» — предупреждение о походе в iiko (при «завтра» базу посчитает
+ * ночная джоба, человеку об этом знать не нужно).
+ */
+export function earlyStartText(
+  race: Pick<RaceRef, 'seq' | 'starts_on' | 'ends_on'>,
+  earlyStartOn: string,
+  contest: Pick<RaceContest, 'race_length_days' | 'baseline_mode' | 'baseline_days'>,
+  todayKey: string,
+): string {
+  const when = earlyStartOn === todayKey ? 'сегодня' : earlyStartOn === addDaysKey(todayKey, 1) ? 'завтра' : humanDate(earlyStartOn)
+  const days = raceDays(earlyStartOn, race.ends_on)
+  const parts = [
+    `Заезд № ${race.seq} стартует ${when} вместо ${humanDate(race.starts_on)}.`,
+    `Окончание не меняется — ${humanDate(race.ends_on)}: заезд продлится ${plural(days, 'день', 'дня', 'дней')} вместо ${contest.race_length_days}.`,
+  ]
+  if (contest.baseline_mode === 'race' && earlyStartOn === todayKey) {
+    parts.push(`База пересчитается из iiko за ${plural(contest.baseline_days, 'день', 'дня', 'дней')} до старта.`)
+  }
+  return parts.join(' ')
+}
+
+/** «· 10 дней вместо 7» — заезд длиннее плана (стартовал раньше); иначе null. */
+export function raceLengthNote(race: Pick<RaceRef, 'starts_on' | 'ends_on'>, raceLengthDays: number): string | null {
+  const days = raceDays(race.starts_on, race.ends_on)
+  if (days === raceLengthDays) return null
+  return `· ${plural(days, 'день', 'дня', 'дней')} вместо ${raceLengthDays}`
 }

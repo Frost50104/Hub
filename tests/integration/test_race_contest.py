@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -21,6 +21,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(autouse=True)
 def _rls(rls_enforced):  # noqa: ARG001 — фикстура нужна побочным эффектом
     yield
+
 
 D0 = date(2026, 6, 1)
 
@@ -156,3 +157,28 @@ async def test_store_with_race_rows_cannot_be_deleted(db: AsyncSession, tenant_i
     with pytest.raises(HTTPException) as e:
         await delete_store(net.A.id, net.admin, db)
     assert e.value.status_code == 409
+
+
+async def test_start_race_handler_marks_candidate_and_starts_tomorrow(db: AsyncSession, tenant_id):
+    from app.api.race import get_contest_admin, start_race
+
+    net = await seed_network(db, tenant_id)
+    today = engine.today_local()
+    contest = await _contest(db, net, starts_on=today)
+    await engine.schedule(db, contest, today=today, actor_id=net.admin.employee_id)
+    races = await read.load_races(db, contest)
+    detail = await get_contest_admin(contest.id, net.admin, db)
+    assert all(r.early_start_on is None for r in detail.contest.races), "активный заезд есть"
+
+    await engine.force_finish(
+        db, contest, races[0], today=today, actor_id=net.admin.employee_id, pull=None
+    )
+    detail = await get_contest_admin(contest.id, net.admin, db)
+    marked = [r for r in detail.contest.races if r.early_start_on is not None]
+    assert [r.seq for r in marked] == [2] and marked[0].early_start_on == today + timedelta(days=1)
+
+    out = await start_race(races[1].id, net.admin, db)
+    assert out.activated is False and out.race.starts_on == today + timedelta(days=1)
+    with pytest.raises(HTTPException) as e:
+        await start_race(races[1].id, net.admin, db)
+    assert e.value.status_code == 409 and "стартует" in e.value.detail

@@ -27,6 +27,8 @@ export interface RaceRef {
   starts_at: string
   ends_at: string
   finish_reason?: 'schedule' | 'forced' | null
+  /** День раннего старта — только в админских ответах и только у одного заезда; правило считает сервер. */
+  early_start_on?: string | null
 }
 
 export interface RaceContest {
@@ -211,6 +213,13 @@ export interface ScheduleReport {
   baselines_computed: boolean
 }
 
+export interface StartReport {
+  race: RaceRef
+  activated: boolean
+  baselines_computed: boolean
+  needs_baseline_store_ids: string[]
+}
+
 export interface BaselineReport {
   period_from: string
   period_to: string
@@ -274,6 +283,8 @@ export const raceApi = {
     api
       .post<RaceResults & { pull_ok: boolean }>(`/learn/race/admin/races/${raceId}/finish`)
       .then((r) => r.data),
+  startRace: (raceId: string): Promise<StartReport> =>
+    api.post<StartReport>(`/learn/race/admin/races/${raceId}/start`).then((r) => r.data),
   toggleParticipant: (
     contestId: string,
     storeId: string,

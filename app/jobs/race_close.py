@@ -90,8 +90,8 @@ async def _tenant_close(tenant_id, *, close_day, today) -> None:
                 contest_finished=report.contest_finished,
                 pulled=pulled,
             )
-            if report.next_race_needing_baseline is not None:
-                needing_baseline.append((contest.id, report.next_race_needing_baseline))
+            for race_id in report.races_needing_baseline:
+                needing_baseline.append((contest.id, race_id))
         for contest_id, race_id in needing_baseline:
             contest = await session.get(RaceContest, contest_id)
             race = await session.get(Race, race_id)

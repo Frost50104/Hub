@@ -8,8 +8,10 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.audit import AuditLog
 from app.models.race import RaceDailyStat, RaceResult, RaceSnapshot
 from app.services.race import engine, read
+from app.services.race.baselines import upsert_baseline
 from tests.integration._race_seed import seed_network
 
 pytestmark = pytest.mark.integration
@@ -21,6 +23,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(autouse=True)
 def _rls(rls_enforced):  # noqa: ARG001 — фикстура нужна побочным эффектом
     yield
+
 
 D0 = date(2026, 6, 1)
 
@@ -141,7 +144,7 @@ async def test_next_race_activates_and_race_mode_requests_baseline(db: AsyncSess
     assert len(races) == 2
     report = await engine.close_day(db, contest, close_day=_day(6))
     assert report.finished_race_ids == [races[0].id]
-    assert report.next_race_needing_baseline == races[1].id
+    assert report.races_needing_baseline == [races[1].id]
     await db.refresh(races[1])
     assert races[1].status == "active", "стартует днём после закрытия первого"
     assert contest.status == "active"
@@ -165,3 +168,116 @@ async def test_force_finish_freezes_today_and_keeps_later_dates(db: AsyncSession
         await engine.force_finish(
             db, contest, races[0], today=_day(2), actor_id=net.admin.employee_id, pull=None
         )
+
+
+# ─── ранний старт заезда ────────────────────────────────────────────────────
+
+
+async def _force_finish_first(db, net, contest, *, today):
+    races = await read.load_races(db, contest)
+    await engine.force_finish(
+        db, contest, races[0], today=today, actor_id=net.admin.employee_id, pull=None
+    )
+    return races
+
+
+async def test_start_early_today_after_forced_finish_keeps_end_and_audits(
+    db: AsyncSession, tenant_id
+):
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net)
+    races = await _force_finish_first(db, net, contest, today=_day(2))
+    report = await engine.start_early(
+        db, contest, races[1], today=_day(3), actor_id=net.admin.employee_id
+    )
+    await db.refresh(races[1])
+    assert report.activated is True and races[1].status == "active"
+    assert races[1].starts_on == _day(3) and races[1].ends_on == _day(13), "конец не двигается"
+    assert races[1].started_notified_at is None, "пуш «стартовал» уйдёт часовой джобой"
+    assert report.baselines_computed is False and report.needs_baseline_store_ids == []
+    entry = (
+        await db.execute(
+            select(AuditLog).where(
+                AuditLog.object_type == "race", AuditLog.object_id == races[1].id
+            )
+        )
+    ).scalar_one()
+    assert entry.diff == {"starts_on": {"old": str(_day(7)), "new": str(_day(3))}}
+    from app.services.race import math as m
+
+    assert m.early_start_candidate(await read.load_races(db, contest), _day(3)) is None
+
+
+async def test_start_early_on_finish_day_means_tomorrow_and_night_activates(
+    db: AsyncSession, tenant_id
+):
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net, baseline_mode="race")
+    races = await _force_finish_first(db, net, contest, today=_day(2))
+    report = await engine.start_early(
+        db, contest, races[1], today=_day(2), actor_id=net.admin.employee_id
+    )
+    await db.refresh(races[1])
+    assert report.activated is False and report.starts_on == _day(3)
+    assert races[1].status == "scheduled" and races[1].starts_on == _day(3), "день атомарен"
+    close = await engine.close_day(db, contest, close_day=_day(2))
+    await db.refresh(races[1])
+    assert races[1].status == "active" and close.activated_race_ids == [races[1].id]
+    assert close.races_needing_baseline == [races[1].id], "база — ночной джобой по общему правилу"
+
+
+async def test_start_early_conflicts(db: AsyncSession, tenant_id):
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net)
+    races = await read.load_races(db, contest)
+    with pytest.raises(engine.RaceConflictError, match="Сначала завершите"):
+        await engine.start_early(
+            db, contest, races[1], today=_day(2), actor_id=net.admin.employee_id
+        )
+    await _force_finish_first(db, net, contest, today=_day(6))
+    with pytest.raises(engine.RaceConflictError, match="и так стартует"):
+        await engine.start_early(
+            db, contest, races[1], today=_day(6), actor_id=net.admin.employee_id
+        )
+    with pytest.raises(engine.RaceConflictError, match="и так стартует"):
+        await engine.start_early(
+            db, contest, races[2], today=_day(6), actor_id=net.admin.employee_id
+        )
+    with pytest.raises(engine.RaceConflictError, match="уже стартовал"):
+        await engine.start_early(
+            db, contest, races[0], today=_day(6), actor_id=net.admin.employee_id
+        )
+
+
+async def test_close_day_requests_next_baseline_after_forced_finish(db: AsyncSession, tenant_id):
+    """Регресс пробела: `force_finish` базу следующего заезда не считает, и
+    ветка завершения в `close_day` до него не доходила — теперь правило общее."""
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net, baseline_mode="race")
+    races = await _force_finish_first(db, net, contest, today=_day(2))
+    assert (await engine.close_day(db, contest, close_day=_day(5))).races_needing_baseline == []
+    assert (await engine.close_day(db, contest, close_day=_day(6))).races_needing_baseline == [
+        races[1].id
+    ]
+    await upsert_baseline(
+        db, contest=contest, store_id=net.A.id, race_id=races[1].id, value=2.1, source="iiko"
+    )
+    assert (await engine.close_day(db, contest, close_day=_day(6))).races_needing_baseline == []
+
+
+async def test_start_early_sets_date_before_computing_baseline(db: AsyncSession, tenant_id):
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net, baseline_mode="race")
+    races = await _force_finish_first(db, net, contest, today=_day(2))
+    seen: list[date] = []
+
+    async def stub(session, *, contest, race, set_by=None):  # noqa: ARG001
+        seen.append(race.starts_on)
+
+    report = await engine.start_early(
+        db, contest, races[1], today=_day(3), actor_id=net.admin.employee_id, compute_baselines=stub
+    )
+    assert seen == [_day(3)], "якорь ретро-окна — новая дата старта"
+    assert report.baselines_computed is True and report.activated is True
+    # строки базы уровня конкурса (race_id NULL) — фолбэк для заезда, поэтому «без базы» нет
+    assert report.needs_baseline_store_ids == []
