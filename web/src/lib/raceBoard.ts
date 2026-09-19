@@ -54,18 +54,29 @@ export interface LeaderRow {
   place: number | null
 }
 
-/** Строки лидеров вида: ранжированные по месту, без базы — отдельным хвостом. */
+/**
+ * Строки лидеров вида: ранжированные по месту, без базы — отдельным хвостом.
+ * Хвост — ТОЛЬКО по признаку базы: у ещё не начавшегося заезда места нет ни
+ * у кого, и точки с базой без места остаются в основном списке (по имени),
+ * иначе подпись «Без базы · N» врала бы про весь состав до старта.
+ */
 export function leaderboardRows(participants: RaceParticipant[], view: RaceView): {
   ranked: LeaderRow[]
   unranked: RaceParticipant[]
 } {
   const rows = participants.filter((p) => inView(p, view))
   const ranked = rows
-    .filter((p) => !p.needs_baseline && displayPlace(p, view) !== null)
+    .filter((p) => !p.needs_baseline)
     .map((p) => ({ p, place: displayPlace(p, view) }))
-    .sort((a, b) => (a.place ?? 0) - (b.place ?? 0))
+    .sort((a, b) => {
+      if (a.place === null || b.place === null) {
+        if (a.place !== b.place) return a.place === null ? 1 : -1
+        return a.p.name.localeCompare(b.p.name, 'ru')
+      }
+      return a.place - b.place
+    })
   const unranked = rows
-    .filter((p) => p.needs_baseline || displayPlace(p, view) === null)
+    .filter((p) => p.needs_baseline)
     .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
   return { ranked, unranked }
 }

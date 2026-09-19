@@ -112,6 +112,13 @@ describe('вид доски', () => {
     expect(leaderboardRows(parts, 'none').ranked.map((r) => r.p.name)).toEqual(['Г'])
   })
 
+  it('до старта заезда мест нет ни у кого: точки с базой остаются в списке, в хвосте — только без базы', () => {
+    const waiting = parts.map((p) => ({ ...p, place: null, place_in_league: null, pct: null, cells: 100 }))
+    const rows = leaderboardRows(waiting, 'all')
+    expect(rows.ranked.map((r) => [r.p.name, r.place])).toEqual([['А', null], ['Б', null], ['В', null], ['Г', null]])
+    expect(rows.unranked.map((r) => r.name)).toEqual(['Д'])
+  })
+
   it('моя дорожка закрепляется первой', () => {
     expect(pinMyLane(parts, 'В').map((r) => r.name)).toEqual(['В', 'А', 'Б', 'Г', 'Д'])
     expect(pinMyLane(parts, 'А').map((r) => r.name)[0]).toBe('А')
