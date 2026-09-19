@@ -125,3 +125,59 @@ async def test_manual_link_validation(db: AsyncSession, tenant_id):
     assert out.site_id is None
     created = await create_store(StoreCreate(name="Ещё одна", site_id=free.site_id), net.admin, db)
     assert created.site_id == free.site_id
+
+
+async def test_refresh_follows_registry_for_born_cards_and_only_fills_legacy_address(
+    db: AsyncSession, tenant_id
+):
+    net = await seed_network(db, tenant_id)
+    born_site = _site(tenant_id, "Коменданский пр., д.17,", code=None, iiko="dep-7")
+    db.add(born_site)
+    # бэкфилленная C: имя Hub короткое, в реестре — адресная строка
+    site_c = await db.get(ShadowSite, net.C.site_id)
+    site_c.name, site_c.address = "Проспект Ветеранов, дом 185", "СПб, Ветеранов 185"
+    await db.flush()
+    rep = await apply_registry(db, tenant_id)
+    born = await db.get(Store, rep.created[0])
+    assert (born.registry_name, born.registry_code) == ("Коменданский пр., д.17,", None)
+    await db.refresh(net.C)
+    assert rep.refreshed == [net.C.id], "у бэкфилленной заполнился только адрес"
+    assert (net.C.name, net.C.address) == ("Ветеранов", "СПб, Ветеранов 185")
+    assert net.C.registry_name == "Проспект Ветеранов, дом 185"
+    # реестр поправил имя и дал код рождённой карточке; C снова переименовали
+    born_site.name, born_site.code = "Комендантский пр., д. 17", "К17"
+    site_c.name = "пр. Ветеранов, 185"
+    await db.flush()
+    rep = await apply_registry(db, tenant_id)
+    assert rep.refreshed == [born.id] and rep.conflicts == 0
+    await db.refresh(born)
+    await db.refresh(net.C)
+    assert (born.name, born.code, born.registry_code) == ("Комендантский пр., д. 17", "К17", "К17")
+    assert net.C.name == "Ветеранов", "имя бэкфилленной карточки не трогаем"
+    # ручная правка имени в Hub — реестр больше не переименовывает
+    born.name = "Комендантский 17"
+    born_site.name = "Комендантский проспект, 17"
+    await db.flush()
+    await apply_registry(db, tenant_id)
+    await db.refresh(born)
+    assert born.name == "Комендантский 17"
+    assert not (await apply_registry(db, tenant_id)).refreshed, "идемпотентно"
+
+
+async def test_refresh_name_conflict_is_isolated_by_savepoint(db: AsyncSession, tenant_id):
+    net = await seed_network(db, tenant_id)
+    born_site = _site(tenant_id, "Новая", code="Н1", iiko="dep-7")
+    db.add(born_site)
+    await db.flush()
+    rep = await apply_registry(db, tenant_id)
+    born = await db.get(Store, rep.created[0])
+    # реестр переименовал объект в имя ЖИВОЙ карточки D → uq_stores_active_name;
+    # одновременно объект C закрывается — архив должен пройти несмотря на конфликт
+    born_site.name = net.D.name
+    site_c = await db.get(ShadowSite, net.C.site_id)
+    site_c.archived_at = datetime.now(UTC)
+    await db.flush()
+    rep = await apply_registry(db, tenant_id)
+    assert rep.conflicts == 1 and rep.archived == [net.C.id] and not rep.refreshed
+    await db.refresh(born)
+    assert born.name == "Новая"

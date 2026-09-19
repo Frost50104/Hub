@@ -149,6 +149,12 @@ class Store(Base):
     # (карточка, созданная из объекта реестра). Синк зеркала stores не
     # трогает по-прежнему — запись живёт в отдельном модуле.
     site_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
+    # Последнее значение реестра, применённое Hub (0059): поле карточки следует
+    # за реестром, пока равно ему (или пусто) — то есть пока его не правили
+    # руками. NULL у бэкфилленных карточек: их имена не переименовываются.
+    registry_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    registry_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    registry_address: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class StoreGroup(Base):
@@ -164,9 +170,7 @@ class StoreGroup(Base):
 
 class StoreGroupMember(Base):
     __tablename__ = "store_group_members"
-    __table_args__ = (
-        UniqueConstraint("group_id", "store_id", name="uq_store_group_members"),
-    )
+    __table_args__ = (UniqueConstraint("group_id", "store_id", name="uq_store_group_members"),)
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
@@ -219,9 +223,7 @@ class UserGroup(Base):
 
 class UserGroupMember(Base):
     __tablename__ = "user_group_members"
-    __table_args__ = (
-        UniqueConstraint("group_id", "profile_id", name="uq_user_group_members"),
-    )
+    __table_args__ = (UniqueConstraint("group_id", "profile_id", name="uq_user_group_members"),)
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)

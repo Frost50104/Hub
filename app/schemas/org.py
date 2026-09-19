@@ -209,3 +209,27 @@ class DimensionCountsResponse(BaseModel):
     """
 
     counts: dict[str, dict[str, int]]
+
+
+class MergeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    into: UUID
+
+
+class MergePreviewResponse(BaseModel):
+    """Что перейдёт при слиянии карточек одного объекта реестра (19.09).
+
+    `counts` — по местам из `services/store_merge.py`; `recommended_winner_id`
+    считает сервер по данным (люди → участие в гонке → возраст)."""
+
+    loser_id: UUID
+    winner_id: UUID
+    recommended_winner_id: UUID
+    counts: dict[str, int]
+
+
+class MergeResultResponse(BaseModel):
+    loser_id: UUID
+    winner_id: UUID
+    counts: dict[str, int]

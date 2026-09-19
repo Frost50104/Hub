@@ -10,8 +10,10 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from app.services.registry_apply import (
+    FieldChange,
     SiteRow,
     StoreRow,
+    field_changes,
     iiko_ref,
     norm_name,
     plan_apply,
@@ -31,9 +33,14 @@ def _site(name="Витебский 101", *, code="В101", iiko="dep-1", archived
     )
 
 
-def _store(name, *, code=None, site_id=None, archived=False):
+def _store(name, *, code=None, site_id=None, archived=False, **registry):
     return StoreRow(
-        id=uuid4(), name=name, code=code, site_id=site_id, archived_at=NOW if archived else None
+        id=uuid4(),
+        name=name,
+        code=code,
+        site_id=site_id,
+        archived_at=NOW if archived else None,
+        **registry,
     )
 
 
@@ -67,13 +74,17 @@ def test_stop_rule_by_code_and_by_name_names_the_candidate():
     }
 
 
-def test_stop_rule_ignores_linked_and_archived_stores():
+def test_stop_rule_ignores_archived_stores_but_not_linked_live_names():
     other_site = uuid4()
-    linked = _store("Витебский 101", code="В101", site_id=other_site)
     archived = _store("Витебский 101", code="В101", archived=True)
     site = _site()
-    plan = plan_apply([site, _site("Чужой", site_id=other_site)], [linked, archived])
-    assert plan.create == [site], "занятая и архивная карточки дубль не образуют"
+    assert plan_apply([site], [archived]).create == [site], "архивная карточка не мешает"
+    # живая карточка с тем же именем, пусть и привязанная к другому объекту, —
+    # uq_stores_active_name уронил бы INSERT: ждём человека, кандидата нет
+    linked = _store("Витебский 101", code="В102", site_id=other_site)
+    plan = plan_apply([site, _site("Чужой", site_id=other_site)], [linked])
+    assert not plan.create
+    assert [(p.reason, p.candidate_store_id) for p in plan.pending] == [("name_collision", None)]
 
 
 def test_archived_site_archives_live_store_only_once_and_never_restores():
@@ -111,3 +122,57 @@ def test_norm_name_and_iiko_ref():
         == "d"
     )
     assert iiko_ref([]) is None and iiko_ref(None) is None
+
+
+# ─── зеркало полей (0059) ───────────────────────────────────────────────────
+
+
+def test_registry_born_card_follows_registry_until_edited_by_hand():
+    site_id = uuid4()
+    site = _site("Комендантский пр., д. 17", code="К17", site_id=site_id)
+    born = _store(
+        "Коменданский пр., д.17,",
+        code=None,
+        site_id=site_id,
+        registry_name="Коменданский пр., д.17,",
+        registry_code=None,
+    )
+    assert {(c.field, c.new) for c in field_changes(born, site)} == {
+        ("name", "Комендантский пр., д. 17"),
+        ("code", "К17"),
+        ("address", "СПб"),
+    }
+    # имя поправили руками в Hub — за реестром больше не идёт; пустые код и адрес — идут
+    edited = _store("Комендантский 17", site_id=site_id, registry_name="Коменданский пр., д.17,")
+    assert {(c.field, c.new) for c in field_changes(edited, site)} == {
+        ("code", "К17"),
+        ("address", "СПб"),
+    }
+
+
+def test_backfilled_card_keeps_its_name_but_gets_empty_address_filled():
+    site_id = uuid4()
+    site = SiteRow(site_id, "П14", "Приморская ул., д. 14, лит. А", "СПб, Приморская 14", None, "d")
+    legacy = _store("Приморская 14", code="П14", site_id=site_id)  # registry_* NULL
+    changes = field_changes(legacy, site)
+    assert [(c.field, c.old, c.new) for c in changes] == [("address", None, "СПб, Приморская 14")]
+    plan = plan_apply([site], [legacy])
+    assert plan.refresh == changes and not plan.create and not plan.pending
+    # архивная карточка и архивный объект — зеркала нет
+    assert not plan_apply([site], [_store("Приморская 14", site_id=site_id, archived=True)]).refresh
+    closed = SiteRow(site_id, "П14", "Приморская", "СПб", NOW, "d")
+    assert not plan_apply([closed], [legacy]).refresh
+
+
+def test_stop_rule_sees_linked_live_cards_by_name_without_candidate():
+    other_site = uuid4()
+    linked = _store("Витебский 101", code="В101", site_id=other_site)
+    plan = plan_apply(
+        [_site("Витебский 101", code="В102"), _site("Чужой", site_id=other_site)], [linked]
+    )
+    assert not plan.create
+    assert [(p.reason, p.candidate_store_id) for p in plan.pending] == [("name_collision", None)]
+
+
+def test_field_change_is_plain_data():
+    assert FieldChange(uuid4(), "name", "a", "b").field == "name"

@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from signaris_auth import Principal
 from sqlalchemy import delete, func, select
+from sqlalchemy import text as sa_text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,6 +54,9 @@ from app.schemas.org import (
     DryRunProfile,
     GroupMembersReplace,
     GroupResponse,
+    MergeBody,
+    MergePreviewResponse,
+    MergeResultResponse,
     OrgSnapshotResponse,
     RefCreate,
     RefResponse,
@@ -61,7 +65,7 @@ from app.schemas.org import (
     StoreResponse,
     StoreUpdate,
 )
-from app.services import audit
+from app.services import audit, store_merge
 from app.services.audience_resolver import (
     dimension_counts,
     dry_run,
@@ -394,6 +398,17 @@ async def update_store(
             setattr(store, name, value)
             if name == "franchisee_id":
                 franchisee_changed = True
+    # Имя — ДО flush: после неудачного flush сессия откатывается и экземпляр
+    # протухает, обращение к store.name дало бы PendingRollbackError.
+    wanted_name = fields.get("name") or store.name
+    try:
+        await db.flush()
+    except IntegrityError:
+        # uq_stores_active_name: переименование в имя живой карточки — 409,
+        # а не 500 (первое требование перед слиянием дублей, auth 05.09).
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=f"«{wanted_name}» уже существует"
+        ) from None
     audit.record(
         db,
         tenant_id=principal.tenant_id,
@@ -423,14 +438,56 @@ async def delete_store(
     # Таблицы гонки ссылаются на stores с RESTRICT — без проверки удаление
     # падало бы IntegrityError'ом в 500.
     from app.models.race import RaceParticipant, RaceResult, RaceSnapshot
+    from app.models.shift import ShiftPosting
 
-    for model in (RaceParticipant, RaceSnapshot, RaceResult):
+    # Смены — под CASCADE: без проверки удаление карточки унесло бы их молча.
+    for model in (RaceParticipant, RaceSnapshot, RaceResult, ShiftPosting):
         if in_use:
             break
         in_use = (
             await db.execute(select(model.store_id).where(model.store_id == ref_id).limit(1))
         ).scalar_one_or_none() is not None
     await _delete_ref(db, principal, Store, ref_id, "store", in_use=in_use)
+
+
+@router.get("/learn/org/stores/{ref_id}/merge-preview", response_model=MergePreviewResponse)
+async def merge_store_preview(
+    ref_id: UUID,
+    into: UUID,
+    principal: Principal = Depends(_ADMIN),
+    db: AsyncSession = Depends(get_db),
+) -> MergePreviewResponse:
+    """Что перейдёт от карточки `ref_id` к `into` при слиянии (только чтение)."""
+    try:
+        plan = await store_merge.plan_merge(db, loser_id=ref_id, winner_id=into)
+    except store_merge.MergeError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from None
+    return MergePreviewResponse(
+        loser_id=plan.loser.id,
+        winner_id=plan.winner.id,
+        recommended_winner_id=plan.recommended_winner_id,
+        counts=plan.counts.as_dict(),
+    )
+
+
+@router.post("/learn/org/stores/{ref_id}/merge", response_model=MergeResultResponse)
+async def merge_store(
+    ref_id: UUID,
+    body: MergeBody,
+    principal: Principal = Depends(_ADMIN),
+    db: AsyncSession = Depends(get_db),
+) -> MergeResultResponse:
+    """Слить карточку `ref_id` в `body.into`: данные переезжают, `ref_id` — в архив."""
+    await db.execute(sa_text("SET LOCAL lock_timeout = '5s'"))
+    try:
+        plan = await store_merge.plan_merge(db, loser_id=ref_id, winner_id=body.into)
+        counts = await store_merge.apply_merge(db, plan, actor_id=principal.employee_id)
+    except store_merge.MergeError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from None
+    await db.commit()
+    return MergeResultResponse(
+        loser_id=plan.loser.id, winner_id=plan.winner.id, counts=counts.as_dict()
+    )
 
 
 class PointAccountResponse(BaseModel):

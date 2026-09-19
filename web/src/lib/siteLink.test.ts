@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { OrgStore, SiteMirror } from './learn'
-import { duplicateGroups, pendingHint, siteDisplay, sitePickerOptions } from './siteLink'
+import { duplicateGroups, mergeSummary, pendingHint, siteDisplay, sitePickerOptions } from './siteLink'
 
 const store = (over: Partial<OrgStore> = {}): OrgStore => ({
   id: 's1',
@@ -77,5 +77,21 @@ describe('привязка к объекту реестра (19.09)', () => {
     expect(pendingHint({ ...base, reason: 'no_iiko_ref' })).toContain('нет подразделения iiko')
     expect(pendingHint({ ...base, reason: 'code_collision', candidate_store_name: 'Смоленка' })).toContain('«Смоленка»')
     expect(pendingHint({ ...base, reason: 'name_collision' })).toContain('карточкой без реестра')
+  })
+})
+
+describe('слияние дублей (19.09)', () => {
+  it('архивная карточка с тем же site_id пару не образует', () => {
+    const live = store({ id: 'a', site_id: 'x1' })
+    const gone = store({ id: 'b', site_id: 'x1', archived_at: '2026-09-19T00:00:00Z' })
+    expect(duplicateGroups([live, gone])).toEqual([])
+    expect(duplicateGroups([live, store({ id: 'c', site_id: 'x1' })])).toHaveLength(1)
+  })
+
+  it('сводка перечисляет только ненулевое и сворачивает удаляемые дубли', () => {
+    expect(mergeSummary({ profiles: 2, shifts: 0, race_participants_dropped: 1, group_members_dropped: 1 })).toBe(
+      '2 сотрудников, 2 дублирующих строк удалится',
+    )
+    expect(mergeSummary({})).toBe('ничего — у проигравшей карточки нет данных')
   })
 })

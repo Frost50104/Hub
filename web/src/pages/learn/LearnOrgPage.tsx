@@ -28,8 +28,8 @@ import { optionMatches, queryTokens } from '@/lib/selectOptions'
 import { AUTH_STATE_LABEL, showAuthStateBadge } from '@/lib/authState'
 import type { PointAccount } from '@/lib/learn'
 import { shortDate } from '@/lib/taskDates'
-import { learnApi, type GroupKind, type OrgDepartment, type OrgGroup, type OrgRef, type OrgSnapshot, type OrgStore, type SiteMirror, type SitePending } from '@/lib/learn'
-import { duplicateGroups, pendingHint, siteDisplay, sitePickerOptions, type SiteLinkState } from '@/lib/siteLink'
+import { learnApi, type GroupKind, type MergePreview, type OrgDepartment, type OrgGroup, type OrgRef, type OrgSnapshot, type OrgStore, type SiteMirror, type SitePending } from '@/lib/learn'
+import { duplicateGroups, mergeSummary, pendingHint, siteDisplay, sitePickerOptions, type SiteLinkState } from '@/lib/siteLink'
 
 import { useAdminEmbedded } from './adminEmbed'
 
@@ -238,6 +238,40 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
     await update.mutateAsync({ id: p.candidate_store_id, body: { site_id: p.site_id } })
     invalidatePending()
   }
+  // Слияние пары дублей (19.09): предпросмотр считает сервер, победителя
+  // предлагает по данным, админ может поменять местами.
+  const [merging, setMerging] = useState<null | { stores: OrgStore[]; winnerId: string; preview: MergePreview | null; loading: boolean }>(null)
+  const openMerge = async (group: OrgStore[]) => {
+    const [a, b] = group
+    if (!a || !b) return
+    setMerging({ stores: group, winnerId: a.id, preview: null, loading: true })
+    try {
+      const preview = await learnApi.mergeStorePreview(b.id, a.id)
+      setMerging({ stores: group, winnerId: preview.recommended_winner_id, preview, loading: false })
+    } catch (err) {
+      toast.error('Не удалось подготовить слияние', { description: (err as Error).message })
+      setMerging(null)
+    }
+  }
+  const pickWinner = async (winnerId: string) => {
+    if (!merging) return
+    const loser = merging.stores.find((s) => s.id !== winnerId)
+    if (!loser) return
+    setMerging({ ...merging, winnerId, loading: true })
+    const preview = await learnApi.mergeStorePreview(loser.id, winnerId)
+    setMerging({ ...merging, winnerId, preview, loading: false })
+  }
+  const merge = useOrgMutation(async (args: { loserId: string; winnerId: string }) => learnApi.mergeStore(args.loserId, args.winnerId))
+  const confirmMerge = async () => {
+    if (!merging) return
+    const loser = merging.stores.find((s) => s.id !== merging.winnerId)
+    const winner = merging.stores.find((s) => s.id === merging.winnerId)
+    if (!loser || !winner) return
+    const r = await merge.mutateAsync({ loserId: loser.id, winnerId: winner.id })
+    invalidatePending()
+    setMerging(null)
+    toast.success(`«${loser.name}» слита в «${winner.name}»`, { description: mergeSummary(r.counts) })
+  }
 
   const franchiseeName = (id: string | null) =>
     org.franchisees.find((f) => f.id === id)?.name ?? null
@@ -325,22 +359,63 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
       {dupes.length > 0 && (
         <div className="rounded-xl border border-amber/40 bg-amber/5 p-3">
           <p className="text-sm font-semibold text-amber">
-            Точки с общим объектом реестра — сливать нельзя
+            Точки с общим объектом реестра · {dupes.length}
           </p>
           <p className="mt-0.5 text-xs text-text3">
-            Каждая пара указывает на одну физическую точку. Слияние или архивация
-            дубля теряет данные (правила аудиторий, смены, закрепления) — это
-            отдельная задача, не действие в этом списке.
+            Каждая пара указывает на одну физическую точку. «Слить» переносит
+            сотрудников, группы, закрепления, смены, правила аудиторий и участие в
+            гонке на оставшуюся карточку, вторая уходит в архив. Отменить нельзя.
           </p>
-          <ul className="mt-2 space-y-1">
+          <ul className="mt-2 space-y-1.5">
             {dupes.map((g) => (
-              <li key={g.site_id} className="text-xs text-text2">
-                {g.stores.map((x) => x.name).join('  ·  ')}
+              <li key={g.site_id} className="flex flex-wrap items-center gap-2 text-xs text-text2">
+                <span className="min-w-0 flex-1">{g.stores.map((x) => x.name).join('  ·  ')}</span>
+                {g.stores.length === 2 && (
+                  <Button size="sm" variant="secondary" onClick={() => void openMerge(g.stores)}>
+                    Слить…
+                  </Button>
+                )}
               </li>
             ))}
           </ul>
         </div>
       )}
+      <Dialog open={merging !== null} onOpenChange={(v) => !v && !merge.isPending && setMerging(null)}>
+        <DialogContent>
+          {merging && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Слить карточки</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm text-text2">Какая карточка остаётся? Сервер предлагает по данным — людей больше, участвует в гонке, старше.</p>
+                <div className="space-y-1.5">
+                  {merging.stores.map((s) => (
+                    <label key={s.id} className={cn('flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2', merging.winnerId === s.id ? 'border-amber bg-amber/5' : 'border-glass-border')}>
+                      <input type="radio" name="merge-winner" checked={merging.winnerId === s.id} onChange={() => void pickWinner(s.id)} disabled={merging.loading || merge.isPending} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm text-text">{s.name}</span>
+                        <span className="block text-xs text-text3">{s.code ?? 'без кода'}{merging.preview?.recommended_winner_id === s.id && ' · рекомендуется'}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-text2">
+                  {merging.loading ? 'Считаем…' : merging.preview ? `К оставшейся карточке перейдёт: ${mergeSummary(merging.preview.counts)}.` : ''}
+                </p>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="secondary" onClick={() => setMerging(null)} disabled={merge.isPending}>
+                  Отмена
+                </Button>
+                <Button type="button" onClick={() => void confirmMerge()} disabled={merging.loading || merge.isPending || !merging.preview}>
+                  {merge.isPending ? 'Сливаем…' : 'Слить'}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
       <ul className="divide-y divide-glass-border rounded-xl border border-glass-border bg-glass">
         {org.stores.length === 0 && (
           <li className="p-4 text-sm text-text3">Пока пусто — добавьте первую точку.</li>
@@ -568,7 +643,21 @@ function StoreEditForm({
         </div>
         {siteState.kind !== 'none' && (
           <div className="space-y-1.5">
-            <Label>Реестр объектов</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label>Реестр объектов</Label>
+              {siteState.kind === 'live' && (
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-amber hover:underline"
+                  onClick={() => {
+                    setName(siteState.site.name)
+                    if (siteState.site.code) setCode(siteState.site.code)
+                  }}
+                >
+                  Заполнить из реестра
+                </button>
+              )}
+            </div>
             {siteState.kind === 'live' ? (
               <SiteCard site={siteState.site} />
             ) : (

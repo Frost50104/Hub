@@ -27,13 +27,14 @@ export interface DuplicateGroup {
   stores: OrgStore[]
 }
 
-/** Магазины, указывающие на ОДИН объект — артефакт, ради которого реестр
- *  и заводился: дубль перестаёт быть догадкой. Сливать нельзя (пять путей
- *  потери данных — задача auth перечисляет их дословно). */
+/** ЖИВЫЕ магазины, указывающие на ОДИН объект — артефакт, ради которого
+ *  реестр и заводился: дубль перестаёт быть догадкой. С 19.09 пара сливается
+ *  кнопкой; проигравшая карточка уходит в архив, но `site_id` у неё остаётся
+ *  (провенанс для auth) — поэтому архивные здесь не считаются. */
 export function duplicateGroups(stores: OrgStore[]): DuplicateGroup[] {
   const bySite = new Map<string, OrgStore[]>()
   for (const s of stores) {
-    if (!s.site_id) continue
+    if (!s.site_id || s.archived_at) continue
     const list = bySite.get(s.site_id)
     if (list) list.push(s)
     else bySite.set(s.site_id, [s])
@@ -83,4 +84,25 @@ export function pendingHint(p: SitePending): string {
     case 'name_collision':
       return `название совпадает с «${p.candidate_store_name ?? 'карточкой без реестра'}» — похоже на неё, привяжите`
   }
+}
+
+const MERGE_COUNT_LABELS: Array<[string, string]> = [
+  ['profiles', 'сотрудников'],
+  ['profiles_archived', 'архивных карточек сотрудников'],
+  ['group_members', 'членств в группах'],
+  ['tu', 'закреплений ТУ'],
+  ['shifts', 'смен'],
+  ['rules', 'правил аудиторий'],
+  ['surveys', 'ответов опросов'],
+  ['race_participants_moved', 'участий в гонке'],
+]
+
+/** Что перейдёт при слиянии — по-русски, только ненулевые; пусто → «ничего». */
+export function mergeSummary(counts: Record<string, number>): string {
+  const parts = MERGE_COUNT_LABELS.filter(([k]) => (counts[k] ?? 0) > 0).map(
+    ([k, label]) => `${counts[k]} ${label}`,
+  )
+  const dropped = (counts.race_participants_dropped ?? 0) + (counts.group_members_dropped ?? 0) + (counts.tu_dropped ?? 0)
+  if (dropped > 0) parts.push(`${dropped} дублирующих строк удалится`)
+  return parts.length > 0 ? parts.join(', ') : 'ничего — у проигравшей карточки нет данных'
 }

@@ -52,6 +52,20 @@ export interface SitePending {
   candidate_store_name: string | null
 }
 
+/** Слияние карточек одного объекта реестра (19.09): что перейдёт от проигравшей. */
+export interface MergePreview {
+  loser_id: string
+  winner_id: string
+  recommended_winner_id: string
+  counts: Record<string, number>
+}
+
+export interface MergeResult {
+  loser_id: string
+  winner_id: string
+  counts: Record<string, number>
+}
+
 export interface SitesResponse {
   items: SiteMirror[]
   snapshot_fresh: boolean
@@ -1280,6 +1294,12 @@ export const learnApi = {
     api.get<SitesResponse>('/learn/sites').then((r) => r.data),
   sitesPending: (): Promise<{ items: SitePending[] }> =>
     api.get<{ items: SitePending[] }>('/learn/sites/pending').then((r) => r.data),
+  mergeStorePreview: (loserId: string, winnerId: string): Promise<MergePreview> =>
+    api
+      .get<MergePreview>(`/learn/org/stores/${loserId}/merge-preview`, { params: { into: winnerId } })
+      .then((r) => r.data),
+  mergeStore: (loserId: string, winnerId: string): Promise<MergeResult> =>
+    api.post<MergeResult>(`/learn/org/stores/${loserId}/merge`, { into: winnerId }).then((r) => r.data),
 
   createRef: (
     kind: 'positions' | 'franchisees',
