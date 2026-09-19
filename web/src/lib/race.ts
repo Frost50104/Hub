@@ -80,6 +80,8 @@ export interface RaceStanding {
   missed_races: number
   place_in_league: number | null
   points_in_league: number | null
+  /** Точка вошла в конкурс после старта — с какого заезда (пропущенные — штраф). */
+  joined_race_seq?: number | null
 }
 
 export interface FinishedRace extends RaceRef {
@@ -157,8 +159,9 @@ export interface AdminParticipant {
   department_id: string
   league_id: string | null
   included: boolean
-  exclude_reason: 'duplicate' | 'manual' | null
+  exclude_reason: 'duplicate' | 'manual' | 'closed' | null
   department_shared_with: string[]
+  joined_race_seq?: number | null
 }
 
 export interface StoreRef {

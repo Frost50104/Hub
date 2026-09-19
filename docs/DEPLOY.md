@@ -115,7 +115,7 @@
 |---|---|---|
 | `signaris-hub[-staging]-extraction.service` | long-running воркер `app/workers/extraction.py` (извлечение текста + RAG-reconcile) | оба env |
 | `signaris-hub-stt.service` | faster-whisper `small` для голосового ввода ассистента (`app/stt_service.py`), `MemoryHigh=800M`+`MemoryMax=1100M`, выгрузка модели по 5 мин | **только прод** — одна STT-машина на хост, staging-юнит disable-нут |
-| `signaris-hub[-staging]-{due-soon,overdue,course-due-soon,review-due,inactivity,automations,race-sync,race-close}.timer` | cron-джобы `app/jobs/*` (расписание — `docs/PUSH.md`); `race-*` на staging стоят, но выходят по `RACE_SYNC_ENABLED=false` | оба env |
+| `signaris-hub[-staging]-{due-soon,overdue,course-due-soon,review-due,inactivity,automations,race-sync,race-close,sites-sync}.timer` | cron-джобы `app/jobs/*` (расписание — `docs/PUSH.md`); `race-*` на staging стоят, но выходят по `RACE_SYNC_ENABLED=false`; `sites-sync` на staging — dry-run по `SITES_SYNC_ENABLED=false` | оба env |
 | `signaris-hub-backup.timer` / `backup-cleanup.timer` / `backup-files.timer` / `healthcheck.timer` | общие для двух env | прод-хост |
 
 Staging-копии юнитов генерируются `ops/systemd/make-staging-unit.py` — не копировать руками.
@@ -143,6 +143,7 @@ Staging-копии юнитов генерируются `ops/systemd/make-stagi
 - `signaris-hub[-staging]-review-due.timer` — 06:30 UTC daily, напоминания владельцам материалов (`app/jobs/review_due.py`); включён на обоих env.
 - `signaris-hub[-staging]-race-sync.timer` — hourly :40 (`:00` — due-soon, `:20` — automations), «Гусиная гонка» (0057): дотяжка чеков iiko за [вчера, сегодня] одним OLAP-вызовом под fenced-локом слота + пуши не раньше 09:00 MSK (`app/jobs/race_sync.py`). Гейты: `RACE_ENABLED`, `RACE_SYNC_ENABLED` (staging=false), `IIKO_*`, тенантный тумблер.
 - `signaris-hub[-staging]-race-close.timer` — 00:45 UTC = 03:45 MSK (учётный день iiko + чеки после полуночи; 00:00–00:30 UTC занято цепочкой бэкапов), ночное закрытие дня: снимки, итоги заезда по `ends_on`, следующий заезд, база в режиме `race` (`app/jobs/race_close.py`). Пушей нет. **Установка на живом хосте** (bootstrap ставит все юниты разом; на уже поднятом — руками): `cp ops/systemd/signaris-hub{,-staging}-race-{sync,close}.{service,timer} /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now signaris-hub-race-sync.timer signaris-hub-race-close.timer signaris-hub-staging-race-sync.timer signaris-hub-staging-race-close.timer`.
+- `signaris-hub[-staging]-sites-sync.timer` — hourly :10 (`:40` — race-sync, подхватывает новые карточки в тот же час), снимок реестра объектов auth + применение к `stores` (`app/jobs/sites_sync.py` → `sync_sites()` → `registry_apply.apply_registry` по тенантам снимка, кроме занятых try-локом). На staging `SITES_SYNC_ENABLED=false` → только dry-run. Установка на живом хосте: `cp ops/systemd/signaris-hub{,-staging}-sites-sync.{service,timer} /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now signaris-hub-sites-sync.timer signaris-hub-staging-sites-sync.timer`.
 
 ## nginx-инварианты
 

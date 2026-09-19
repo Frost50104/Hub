@@ -260,6 +260,7 @@ async def _admin_participants(
     db: AsyncSession, contest: RaceContest
 ) -> tuple[list[AdminParticipantOut], list[StoreRefOut]]:
     rows = await read.load_participants(db, contest, include_excluded=True)
+    joined = read.joined_seq_by_store(await read.load_races(db, contest), rows)
     by_dept: dict[str, list[UUID]] = {}
     for p in rows:
         by_dept.setdefault(p.department_id, []).append(p.store_id)
@@ -273,6 +274,7 @@ async def _admin_participants(
             included=p.excluded_at is None,
             exclude_reason=p.exclude_reason,
             department_shared_with=[s for s in by_dept[p.department_id] if s != p.store_id],
+            joined_race_seq=joined.get(p.store_id),
         )
         for p in rows
     ]
@@ -556,7 +558,7 @@ async def refresh_participants(
     contest = await _load_contest(db, contest_id)
     if contest.status in ("finished", "cancelled"):
         raise HTTPException(status_code=409, detail="Конкурс завершён — состав изменить нельзя")
-    await engine.materialize_participants(db, contest, actor_id=principal.employee_id)
+    await engine.reconcile_participants(db, contest, actor_id=principal.employee_id)
     await db.commit()
     return await _admin_detail(db, contest)
 

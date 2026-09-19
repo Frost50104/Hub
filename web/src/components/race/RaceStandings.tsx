@@ -43,6 +43,9 @@ export function RaceStandings({ standings, myStoreId, className }: { standings: 
                   <span className="block truncate text-[15px] font-semibold text-text">
                     {s.name}
                     {me && <span className="ml-1.5 text-[13px] font-normal text-text2">— это вы</span>}
+                    {s.joined_race_seq != null && (
+                      <span className="ml-1.5 text-[13px] font-normal text-text2">с заезда №{s.joined_race_seq}</span>
+                    )}
                   </span>
                   <span className="block text-[12px] text-text2 lg:hidden">
                     {plural(s.races_counted, 'заезд', 'заезда', 'заездов')}

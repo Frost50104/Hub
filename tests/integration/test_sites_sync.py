@@ -72,9 +72,7 @@ async def test_replace_snapshot_and_archived_rows_survive(
     report = await sync_sites()
     assert report.sites == 1 and report.archived_sites == 1
 
-    rows = (
-        (await db.execute(select(ShadowSite))).scalars().all()
-    )
+    rows = (await db.execute(select(ShadowSite))).scalars().all()
     assert len(rows) == 1
     assert rows[0].site_id == keep and rows[0].archived_at is not None
     assert rows[0].refs and rows[0].refs[0]["system"] == "hub"
@@ -93,13 +91,11 @@ async def test_total_mismatch_leaves_mirror_untouched(
     report = await sync_sites()
     assert report.total_mismatch is True and report.sites == 0
 
-    rows = ((await db.execute(select(ShadowSite))).scalars().all())
+    rows = (await db.execute(select(ShadowSite))).scalars().all()
     assert len(rows) == 1 and rows[0].name == "Живая строка"
 
 
-async def test_dry_run_counts_without_writes(
-    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
-):
+async def test_dry_run_counts_without_writes(db: AsyncSession, tenant_id: uuid.UUID, monkeypatch):
     marker = uuid.uuid4()
     _mock_fetch(monkeypatch, [_site(tenant_id, site_id=marker)])
     await db.commit()
@@ -166,3 +162,43 @@ async def test_fetch_bare_404_is_none_too(monkeypatch):
     """Голый 404 (в т.ч. с не-JSON телом nginx) → None; отличие — в логе URL."""
     _mock_transport(monkeypatch, lambda r: httpx.Response(404, text="<html>nope</html>"))
     assert await sites_sync._fetch_sites() is None
+
+
+async def test_trigger_applies_registry_to_own_tenant_and_pending_endpoint(
+    rls_enforced,  # noqa: ARG001 — ДО db: сессия обязана жить на app-роли (иначе RLS обойдён)
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    monkeypatch,
+):
+    """Кнопка = джоба: живой прогон создаёт карточку по объекту с iiko-ссылкой,
+    объект без ссылки уходит в «ожидающие»."""
+    from app.api.sites import list_pending_sites, trigger_sites_sync
+    from app.models.org import Store
+    from tests.integration.conftest import make_principal
+    from tests.integration.test_project_access import _register
+
+    admin = make_principal(tenant_id, email="admin-sites@t.ru", role="admin", tenant_slug="s")
+    await _register(db, admin)
+    await db.commit()
+    with_iiko = _site(
+        tenant_id,
+        name="Витебский 101",
+        code="В101",
+        refs=[{"system": "iiko", "external_id": "dep-7"}],
+    )
+    without = _site(tenant_id, name="Смоленка 35", code="С35", refs=[])
+    _mock_fetch(monkeypatch, [with_iiko, without])
+    monkeypatch.setattr(
+        "app.api.sites.get_settings",
+        lambda: SimpleNamespace(sites_sync_enabled=True, sites_snapshot_fresh_days=14),
+    )
+    out = await trigger_sites_sync(False, admin, db)
+    pending = await list_pending_sites(admin, db)
+    assert [(p.name, p.reason) for p in pending.items] == [("Смоленка 35", "no_iiko_ref")]
+    assert out["applied"] == {"created": 1, "archived": 0, "pending": 1}
+    store = (
+        await db.execute(select(Store).where(Store.site_id == uuid.UUID(with_iiko["site_id"])))
+    ).scalar_one()
+    assert store.name == "Витебский 101" and store.code == "В101"
+    pending = await list_pending_sites(admin, db)
+    assert [(p.name, p.reason) for p in pending.items] == [("Смоленка 35", "no_iiko_ref")]

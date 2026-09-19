@@ -81,6 +81,8 @@ class StandingOut(BaseModel):
     missed_races: int
     place_in_league: int | None = None
     points_in_league: int | None = None
+    # Точка вошла в конкурс после старта — с какого заезда (чип в зачёте).
+    joined_race_seq: int | None = None
 
 
 class FinishedRaceOut(RaceRefOut):
@@ -180,8 +182,9 @@ class AdminParticipantOut(StoreRefOut):
     department_id: str
     league_id: UUID | None = None
     included: bool
-    exclude_reason: str | None = None
+    exclude_reason: str | None = None  # duplicate | manual | closed
     department_shared_with: list[UUID] = []
+    joined_race_seq: int | None = None
 
 
 class BaselineOut(StoreRefOut):

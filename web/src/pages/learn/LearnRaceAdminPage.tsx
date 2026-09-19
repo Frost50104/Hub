@@ -504,6 +504,12 @@ function ParticipantsCard({ rows, unlinked, editable, pending, onToggle, onRefre
                   </Badge>
                 )}
                 {!p.included && p.exclude_reason === 'manual' && <Badge variant="secondary">исключена</Badge>}
+                {!p.included && p.exclude_reason === 'closed' && <Badge variant="secondary">закрыта</Badge>}
+                {p.joined_race_seq != null && (
+                  <Chip variant="outline" size="sm">
+                    с заезда №{p.joined_race_seq}
+                  </Chip>
+                )}
               </div>
               <p className="text-[12px] text-text2">
                 iiko {p.department_id.slice(0, 8)}…{p.department_shared_with.length > 0 && ' · делит подразделение с другой точкой — чеки считаются одной'}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { OrgStore, SiteMirror } from './learn'
-import { duplicateGroups, siteDisplay } from './siteLink'
+import { duplicateGroups, pendingHint, siteDisplay, sitePickerOptions } from './siteLink'
 
 const store = (over: Partial<OrgStore> = {}): OrgStore => ({
   id: 's1',
@@ -54,5 +54,28 @@ describe('duplicateGroups', () => {
     expect(groups).toHaveLength(1)
     expect(groups[0]?.site_id).toBe('dup')
     expect(groups[0]?.stores.map((s) => s.id).sort()).toEqual(['a', 'b'])
+  })
+})
+
+describe('привязка к объекту реестра (19.09)', () => {
+  const s1 = { ...site, site_id: 'x1', name: 'Арсенальная', code: 'А1' }
+  const s2 = { ...site, site_id: 'x2', name: 'Витебский 101', code: 'В101' }
+  const s3 = { ...site, site_id: 'x3', name: 'Закрытая', archived_at: '2026-09-19T00:00:00Z' }
+
+  it('занятые живой карточкой и архивные объекты не предлагаются, текущий — всегда', () => {
+    const stores = [
+      store({ id: 'a', site_id: 'x1' }),
+      store({ id: 'b', site_id: 'x2', archived_at: '2026-09-01T00:00:00Z' }),
+    ]
+    expect(sitePickerOptions([s1, s2, s3], stores, { storeId: 'c', siteId: null }).map((o) => o.value)).toEqual(['x2'])
+    expect(sitePickerOptions([s1, s2, s3], stores, { storeId: 'a', siteId: 'x1' }).map((o) => o.value)).toEqual(['x1', 'x2'])
+    expect(sitePickerOptions([s1], stores, { storeId: 'a', siteId: 'x1' })[0]).toMatchObject({ label: 'А1 · Арсенальная', meta: 'СПб, Приморская 14' })
+  })
+
+  it('подсказка называет кандидата', () => {
+    const base = { site_id: 'x', code: null, name: 'Смоленка 35', address: null, iiko_ref: null, candidate_store_id: null, candidate_store_name: null }
+    expect(pendingHint({ ...base, reason: 'no_iiko_ref' })).toContain('нет подразделения iiko')
+    expect(pendingHint({ ...base, reason: 'code_collision', candidate_store_name: 'Смоленка' })).toContain('«Смоленка»')
+    expect(pendingHint({ ...base, reason: 'name_collision' })).toContain('карточкой без реестра')
   })
 })

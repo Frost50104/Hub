@@ -56,6 +56,9 @@ class SitesSyncReport:
     archived_sites: int = 0
     busy_tenants: int = 0
     tenants: set[str] = field(default_factory=set)
+    # Занятые try-локом тенанты — применение реестра по ним пропускается
+    # (план по старому зеркалу был бы планом по прошлому).
+    busy: set[str] = field(default_factory=set)
 
 
 async def _fetch_sites() -> tuple[list[dict[str, Any]], int] | None:
@@ -146,6 +149,7 @@ async def sync_sites(*, dry_run: bool = False) -> SitesSyncReport:
                 if not got:
                     log.info("sites_sync.tenant_busy", tenant_id=tenant_id)
                     report.busy_tenants += 1
+                    report.busy.add(tenant_id)
                     continue
                 # Тенант скоупит RLS сессии — ручной WHERE tenant_id запрещён.
                 await db.execute(delete(ShadowSite))

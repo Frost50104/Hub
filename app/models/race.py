@@ -170,7 +170,7 @@ class RaceParticipant(Base):
     __table_args__ = (
         UniqueConstraint("contest_id", "store_id", name="uq_race_participants_store"),
         CheckConstraint(
-            "exclude_reason IS NULL OR exclude_reason IN ('duplicate','manual')",
+            "exclude_reason IS NULL OR exclude_reason IN ('duplicate','manual','closed')",
             name="ck_race_participants_exclude_reason",
         ),
         # Один живой участник на подразделение iiko.

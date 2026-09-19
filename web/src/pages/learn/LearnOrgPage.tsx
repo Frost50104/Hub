@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, ArchiveRestore, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
@@ -21,15 +21,15 @@ import { Label } from '@/components/ui/Label'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
-import { useEmployees, useOrgMutation, useOrgSnapshot, useSites } from '@/hooks/useLearn'
+import { useEmployees, useOrgMutation, useOrgSnapshot, useSites, useSitesPending } from '@/hooks/useLearn'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/cn'
 import { optionMatches, queryTokens } from '@/lib/selectOptions'
 import { AUTH_STATE_LABEL, showAuthStateBadge } from '@/lib/authState'
 import type { PointAccount } from '@/lib/learn'
 import { shortDate } from '@/lib/taskDates'
-import { learnApi, type GroupKind, type OrgDepartment, type OrgGroup, type OrgRef, type OrgSnapshot, type OrgStore, type SiteMirror } from '@/lib/learn'
-import { duplicateGroups, siteDisplay, type SiteLinkState } from '@/lib/siteLink'
+import { learnApi, type GroupKind, type OrgDepartment, type OrgGroup, type OrgRef, type OrgSnapshot, type OrgStore, type SiteMirror, type SitePending } from '@/lib/learn'
+import { duplicateGroups, pendingHint, siteDisplay, sitePickerOptions, type SiteLinkState } from '@/lib/siteLink'
 
 import { useAdminEmbedded } from './adminEmbed'
 
@@ -189,6 +189,12 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
   )
   const snapshotFresh = sites.data?.snapshot_fresh ?? false
   const dupes = useMemo(() => duplicateGroups(org.stores), [org.stores])
+  // Объекты реестра, которые автоматика (19.09) не завела карточкой сама —
+  // решает человек: создать или привязать к похожей карточке.
+  const qc = useQueryClient()
+  const pendingSites = useSitesPending()
+  const pendingItems = pendingSites.data?.items ?? []
+  const invalidatePending = () => void qc.invalidateQueries({ queryKey: ['learn-sites-pending'] })
   // Учётки касс. С 16.09 карточки касс не показываются в «Сотрудниках», и
   // этот раздел — единственное место, где их видно: и привязанные к точке, и
   // осиротевшие (на проде такая одна — auth про неё не знает).
@@ -208,16 +214,30 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
   )
 
   const create = useOrgMutation(
-    (body: { name: string; code?: string; franchisee_id?: string | null }) =>
+    (body: { name: string; code?: string; address?: string; franchisee_id?: string | null; site_id?: string | null }) =>
       learnApi.createStore(body),
   )
   const update = useOrgMutation(
     (args: {
       id: string
-      body: Partial<{ name: string; code: string | null; franchisee_id: string | null; archived: boolean }>
+      body: Partial<{ name: string; code: string | null; franchisee_id: string | null; archived: boolean; site_id: string | null }>
     }) => learnApi.updateStore(args.id, args.body),
   )
   const remove = useOrgMutation((id: string) => learnApi.deleteStore(id))
+  const createFromSite = async (p: SitePending) => {
+    await create.mutateAsync({
+      name: p.name,
+      code: p.code ?? undefined,
+      address: p.address ?? undefined,
+      site_id: p.site_id,
+    })
+    invalidatePending()
+  }
+  const linkPending = async (p: SitePending) => {
+    if (!p.candidate_store_id) return
+    await update.mutateAsync({ id: p.candidate_store_id, body: { site_id: p.site_id } })
+    invalidatePending()
+  }
 
   const franchiseeName = (id: string | null) =>
     org.franchisees.find((f) => f.id === id)?.name ?? null
@@ -270,6 +290,38 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
           <Plus className="h-4 w-4" /> Добавить
         </Button>
       </form>
+      {pendingItems.length > 0 && (
+        <div className="rounded-xl border border-glass-border bg-glass p-3">
+          <p className="text-sm font-semibold text-text">
+            Объекты реестра без карточки · {pendingItems.length}
+          </p>
+          <p className="mt-0.5 text-xs text-text3">
+            Торгующие точки реестр заводит карточками сам; эти автоматика оставила человеку.
+          </p>
+          <ul className="mt-2 space-y-2">
+            {pendingItems.map((p) => (
+              <li key={p.site_id} className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm text-text">
+                    {[p.code, p.name].filter(Boolean).join(' · ')}
+                  </span>
+                  <span className="block text-xs text-text3">
+                    {[p.address, pendingHint(p)].filter(Boolean).join(' — ')}
+                  </span>
+                </span>
+                {p.candidate_store_id && (
+                  <Button size="sm" variant="secondary" disabled={update.isPending} onClick={() => void linkPending(p)}>
+                    Привязать к «{p.candidate_store_name}»
+                  </Button>
+                )}
+                <Button size="sm" variant="secondary" disabled={create.isPending} onClick={() => void createFromSite(p)}>
+                  Создать карточку
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {dupes.length > 0 && (
         <div className="rounded-xl border border-amber/40 bg-amber/5 p-3">
           <p className="text-sm font-semibold text-amber">
@@ -349,10 +401,13 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
             <StoreEditForm
               store={editing}
               siteState={siteDisplay(editing, siteById.get(editing.site_id ?? ''), snapshotFresh)}
+              sites={sites.data?.items ?? []}
+              stores={org.stores}
               franchisees={org.franchisees}
               pending={update.isPending}
               onSave={async (body) => {
                 await update.mutateAsync({ id: editing.id, body })
+                invalidatePending()
                 setEditing(null)
               }}
               onCancel={() => setEditing(null)}
@@ -431,6 +486,8 @@ function SiteLine({ state }: { state: SiteLinkState }) {
 function StoreEditForm({
   store,
   siteState,
+  sites,
+  stores,
   franchisees,
   pending,
   onSave,
@@ -438,18 +495,28 @@ function StoreEditForm({
 }: {
   store: OrgStore
   siteState: SiteLinkState
+  sites: SiteMirror[]
+  stores: OrgStore[]
   franchisees: OrgRef[]
   pending: boolean
   onSave: (body: {
     name: string
     code: string | null
     franchisee_id: string | null
+    site_id: string | null
   }) => Promise<void>
   onCancel: () => void
 }) {
   const [name, setName] = useState(store.name)
   const [code, setCode] = useState(store.code ?? '')
   const [franchiseeId, setFranchiseeId] = useState(store.franchisee_id ?? '')
+  const [siteId, setSiteId] = useState(store.site_id ?? '')
+  // Живые объекты, не занятые другой живой карточкой (+ текущий) — сервер
+  // повторяет проверку (422/409), здесь только удобный список.
+  const siteOptions = useMemo(
+    () => sitePickerOptions(sites, stores, { storeId: store.id, siteId: store.site_id }),
+    [sites, stores, store.id, store.site_id],
+  )
   return (
     <form
       onSubmit={(e) => {
@@ -459,6 +526,7 @@ function StoreEditForm({
           name: name.trim(),
           code: code.trim() || null,
           franchisee_id: franchiseeId || null,
+          site_id: siteId || null,
         })
       }}
     >
@@ -484,6 +552,18 @@ function StoreEditForm({
             value={franchiseeId || null}
             onChange={(v) => setFranchiseeId(v ?? '')}
             options={franchisees.map((f) => ({ value: f.id, label: f.name }))}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="store-site">Объект реестра</Label>
+          <SearchableSelect
+            id="store-site"
+            sheetTitle="Объект реестра"
+            placeholder="Не привязан"
+            clearLabel="Не привязан"
+            value={siteId || null}
+            onChange={(v) => setSiteId(v ?? '')}
+            options={siteOptions}
           />
         </div>
         {siteState.kind !== 'none' && (

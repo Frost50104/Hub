@@ -46,6 +46,9 @@ class StoreCreate(BaseModel):
     code: str | None = Field(default=None, max_length=32)
     address: str | None = Field(default=None, max_length=2000)
     franchisee_id: UUID | None = None
+    # Объект реестра auth (0053): проверяется в ручке — есть в зеркале,
+    # не архивен, не привязан к другой живой карточке.
+    site_id: UUID | None = None
 
     @field_validator("name")
     @classmethod
@@ -59,6 +62,8 @@ class StoreUpdate(BaseModel):
     address: str | None = Field(default=None, max_length=2000)
     franchisee_id: UUID | None = None
     archived: bool | None = None
+    # `null` = отвязать; проверки те же, что у StoreCreate.
+    site_id: UUID | None = None
     model_config = ConfigDict(extra="forbid")
 
     @field_validator("name")
@@ -110,8 +115,7 @@ class StoreResponse(BaseModel):
     address: str | None
     franchisee_id: UUID | None
     archived_at: datetime | None
-    # Ссылка на объект реестра auth (0053). В StoreUpdate её НЕТ намеренно:
-    # пишется только разовым бэкфиллом, extra="forbid" отвечает 422.
+    # Ссылка на объект реестра auth (0053); с 19.09 пишется и через API.
     site_id: UUID | None = None
 
 

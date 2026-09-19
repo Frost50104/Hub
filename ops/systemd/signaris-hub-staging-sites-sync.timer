@@ -1,0 +1,11 @@
+[Unit]
+Description=Run signaris-hub-staging-sites-sync hourly at :10
+
+[Timer]
+# На staging SITES_SYNC_ENABLED=false — джоба делает dry-run и выходит.
+OnCalendar=*-*-* *:10:00
+Persistent=true
+Unit=signaris-hub-staging-sites-sync.service
+
+[Install]
+WantedBy=timers.target

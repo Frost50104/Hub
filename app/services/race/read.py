@@ -93,6 +93,7 @@ class ParticipantInfo:
     league_id: UUID | None
     excluded_at: datetime | None
     exclude_reason: str | None
+    created_at: datetime | None = None
 
 
 async def load_participants(
@@ -115,9 +116,26 @@ async def load_participants(
             league_id=p.league_id,
             excluded_at=p.excluded_at,
             exclude_reason=p.exclude_reason,
+            created_at=p.created_at,
         )
         for p, name, code in (await session.execute(stmt)).all()
     ]
+
+
+def local_date(dt: datetime) -> date:
+    """Календарный день display tz для мгновения из БД (UTC)."""
+    return dt.astimezone(display_tz()).date()
+
+
+def joined_seq_by_store(
+    races: list[Race], participants: list[ParticipantInfo]
+) -> dict[UUID, int | None]:
+    return {
+        p.store_id: (
+            m.joined_race_seq(races, local_date(p.created_at)) if p.created_at is not None else None
+        )
+        for p in participants
+    }
 
 
 async def load_leagues(session: AsyncSession, contest: RaceContest) -> list[RaceContestLeague]:
@@ -437,6 +455,7 @@ async def standings_payload(
         per_race,
         [m.ParticipantRow(p.store_id, p.name, p.league_id) for p in participants],
     )
+    joined = joined_seq_by_store(races, participants)
     return [
         {
             "store_id": s.store_id,
@@ -449,6 +468,7 @@ async def standings_payload(
             "missed_races": s.missed_races,
             "place_in_league": s.place_in_league,
             "points_in_league": s.points_in_league,
+            "joined_race_seq": joined.get(s.store_id),
         }
         for s in rows
     ]

@@ -143,9 +143,11 @@ class Store(Base):
         DateTime(timezone=True), server_default=text("now()"), nullable=False
     )
     # Ссылка на объект реестра auth (0053, shadow_sites.site_id) — БЕЗ FK
-    # (межбазовая). Пишется ТОЛЬКО разовым бэкфиллом из файла связей (не API:
-    # StoreUpdate её не знает, extra="forbid" отвечает 422; не синком —
-    # синхронизация зеркала stores не трогает ни в одной ветке).
+    # (межбазовая). Писатели с 19.09: разовый бэкфилл, админ через
+    # StoreCreate/StoreUpdate.site_id (проверка: объект есть в зеркале, не
+    # архивен, не привязан к другой живой карточке) и `registry_apply`
+    # (карточка, созданная из объекта реестра). Синк зеркала stores не
+    # трогает по-прежнему — запись живёт в отдельном модуле.
     site_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
 
 

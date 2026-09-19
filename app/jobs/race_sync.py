@@ -48,6 +48,10 @@ async def _tenant_tick(tenant_id, *, today) -> None:
         active = await read.current_contest(session, tenant_id)
         if active is None or active.status != "active":
             return
+        # Состав против Оргструктуры ДО выгрузки: при занятом iiko новая точка
+        # и закрытая всё равно обновляются в этот час.
+        await engine.reconcile_participants(session, active)
+        await session.commit()
         try:
             report = await iiko_pull.pull_days(
                 session,

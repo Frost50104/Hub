@@ -322,3 +322,16 @@ def early_start_candidate(races: list[Any], today: date) -> tuple[Any, date] | N
         return None
     day = early_start_day(today, prev.ends_on, race.starts_on)
     return (race, day) if day is not None else None
+
+
+def joined_race_seq(races: list[Any], joined_on: date) -> int | None:
+    """Заезд, с которого точка в конкурсе, если она вошла ПОСЛЕ старта; None —
+    была с самого начала. Чип «с заезда №N» в зачёте: пропущенные заезды
+    там стоят штрафом `n + 1`, и человек должен видеть почему."""
+    ordered = sorted(races, key=lambda r: r.seq)
+    if not ordered or joined_on <= ordered[0].starts_on:
+        return None
+    for r in ordered:
+        if r.ends_on >= joined_on:
+            return r.seq
+    return None

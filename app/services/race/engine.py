@@ -163,6 +163,65 @@ async def materialize_participants(
     return report
 
 
+@dataclass
+class ReconcileReport:
+    added: list[UUID] = field(default_factory=list)
+    closed: list[UUID] = field(default_factory=list)
+
+
+async def reconcile_participants(
+    session: AsyncSession, contest: RaceContest, *, actor_id: UUID | None = None
+) -> ReconcileReport:
+    """Состав против Оргструктуры (решение владельца 19.09): новые привязанные
+    точки входят сами, точки с архивной карточкой выводятся с `closed`.
+    Зовут часовая джоба и кнопка «Обновить из реестра». Возврат в состав —
+    только руками (`set_participant`): `manual` не переписывается, а
+    разархивированная карточка сама не возвращается."""
+    report = ReconcileReport()
+    if contest.status in ("finished", "cancelled"):
+        return report
+    added = await materialize_participants(session, contest, actor_id=actor_id)
+    report.added = list(added.included)
+    rows = (
+        await session.execute(
+            select(RaceParticipant, Store.name)
+            .join(Store, Store.id == RaceParticipant.store_id)
+            .where(
+                RaceParticipant.contest_id == contest.id,
+                RaceParticipant.excluded_at.is_(None),
+                Store.archived_at.is_not(None),
+            )
+        )
+    ).all()
+    for p, name in rows:
+        p.excluded_at = _now()
+        p.excluded_by = actor_id
+        p.exclude_reason = "closed"
+        audit.record(
+            session,
+            tenant_id=contest.tenant_id,
+            actor_id=actor_id,
+            action="update",
+            object_type="race_participant",
+            object_id=p.store_id,
+            object_label=f"{contest.title} · {name}",
+            diff={
+                "included": {"old": True, "new": False},
+                "reason": {"old": None, "new": "closed"},
+            },
+        )
+        report.closed.append(p.store_id)
+    await session.flush()
+    if report.added or report.closed:
+        log.info(
+            "race.reconciled",
+            contest_id=str(contest.id),
+            added=len(report.added),
+            closed=len(report.closed),
+        )
+    return report
+
+
 async def apply_leagues(
     session: AsyncSession, contest: RaceContest, store_group_ids: list[UUID]
 ) -> None:

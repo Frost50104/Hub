@@ -41,7 +41,7 @@ from app.models.org import (
     UserGroup,
     UserGroupMember,
 )
-from app.models.shadow import ShadowUser
+from app.models.shadow import ShadowSite, ShadowUser
 from app.schemas.org import (
     AudienceDryRunBody,
     AudienceDryRunResponse,
@@ -107,17 +107,11 @@ async def org_snapshot(
 ) -> OrgSnapshotResponse:
     positions = (await db.execute(select(Position).order_by(Position.name))).scalars().all()
     stores = (await db.execute(select(Store).order_by(Store.name))).scalars().all()
-    franchisees = (
-        (await db.execute(select(Franchisee).order_by(Franchisee.name))).scalars().all()
-    )
-    departments = (
-        (await db.execute(select(Department).order_by(Department.name))).scalars().all()
-    )
+    franchisees = (await db.execute(select(Franchisee).order_by(Franchisee.name))).scalars().all()
+    departments = (await db.execute(select(Department).order_by(Department.name))).scalars().all()
     return OrgSnapshotResponse(
         positions=[RefResponse.model_validate(x) for x in positions],
-        position_groups=await _load_groups(
-            db, PositionGroup, PositionGroupMember, "position_id"
-        ),
+        position_groups=await _load_groups(db, PositionGroup, PositionGroupMember, "position_id"),
         stores=[StoreResponse.model_validate(x) for x in stores],
         store_groups=await _load_groups(db, StoreGroup, StoreGroupMember, "store_id"),
         franchisees=[RefResponse.model_validate(x) for x in franchisees],
@@ -244,9 +238,7 @@ async def create_position(
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
 ) -> RefResponse:
-    return RefResponse.model_validate(
-        await _create_ref(db, principal, Position, body, "position")
-    )
+    return RefResponse.model_validate(await _create_ref(db, principal, Position, body, "position"))
 
 
 @router.patch("/learn/org/positions/{ref_id}", response_model=RefResponse)
@@ -314,18 +306,44 @@ async def delete_franchisee(
 # --- Магазины ----------------------------------------------------------------
 
 
+async def _validate_site_link(
+    db: AsyncSession, site_id: UUID, *, exclude_store_id: UUID | None
+) -> None:
+    """Привязка магазина к объекту реестра (19.09): объект есть в зеркале
+    тенанта, не архивен и не привязан к другой ЖИВОЙ карточке — новых дублей
+    не заводим (четыре существующие пары проверкой не задеты)."""
+    site = await db.get(ShadowSite, site_id)
+    if site is None:
+        raise HTTPException(
+            status_code=422, detail="Объект реестра не найден — обновите зеркало реестра"
+        )
+    if site.archived_at is not None:
+        raise HTTPException(status_code=422, detail="Объект закрыт в реестре — привязать нельзя")
+    stmt = select(Store.name).where(Store.site_id == site_id, Store.archived_at.is_(None))
+    if exclude_store_id is not None:
+        stmt = stmt.where(Store.id != exclude_store_id)
+    other = (await db.execute(stmt.limit(1))).scalar_one_or_none()
+    if other is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=f"Объект уже привязан к «{other}»"
+        )
+
+
 @router.post("/learn/org/stores", response_model=StoreResponse, status_code=201)
 async def create_store(
     body: StoreCreate,
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
 ) -> StoreResponse:
+    if body.site_id is not None:
+        await _validate_site_link(db, body.site_id, exclude_store_id=None)
     store = Store(
         tenant_id=principal.tenant_id,
         name=body.name,
         code=body.code,
         address=body.address,
         franchisee_id=body.franchisee_id,
+        site_id=body.site_id,
     )
     db.add(store)
     try:
@@ -359,6 +377,8 @@ async def update_store(
     if store is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Магазин не найден")
     fields = body.model_dump(exclude_unset=True)
+    if fields.get("site_id") is not None:
+        await _validate_site_link(db, fields["site_id"], exclude_store_id=store.id)
     diff = {}
     franchisee_changed = False
     for name, value in fields.items():
@@ -463,9 +483,9 @@ async def point_accounts(
     employee_ids = [p.employee_id for p in rows if p.employee_id is not None]
     if employee_ids:
         for eid, deleted_at, auth_active in await db.execute(
-            select(
-                ShadowUser.employee_id, ShadowUser.deleted_at, ShadowUser.auth_active
-            ).where(ShadowUser.employee_id.in_(employee_ids))
+            select(ShadowUser.employee_id, ShadowUser.deleted_at, ShadowUser.auth_active).where(
+                ShadowUser.employee_id.in_(employee_ids)
+            )
         ):
             shadows[eid] = (deleted_at is not None, auth_active)
     out = []
@@ -652,9 +672,7 @@ async def rename_group(
     member_ids = [
         r[0]
         for r in await db.execute(
-            select(getattr(member_model, member_field)).where(
-                member_model.group_id == group_id
-            )
+            select(getattr(member_model, member_field)).where(member_model.group_id == group_id)
         )
     ]
     return GroupResponse(
@@ -742,8 +760,6 @@ async def delete_group(
 # --- Audience dry-run + пересчёт ----------------------------------------------
 
 
-
-
 @router.post("/learn/audiences/dry-run", response_model=AudienceDryRunResponse)
 async def audience_dry_run(
     body: AudienceDryRunBody,
@@ -756,9 +772,7 @@ async def audience_dry_run(
     try:
         specs = [r.to_spec() for r in body.rules]
         validate_rules(specs)
-        count, sample_ids = await dry_run(
-            db, is_all=body.is_all, rules=specs, is_none=body.is_none
-        )
+        count, sample_ids = await dry_run(db, is_all=body.is_all, rules=specs, is_none=body.is_none)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
@@ -773,9 +787,7 @@ async def audience_dry_run(
     }
     return AudienceDryRunResponse(
         count=count,
-        sample=[
-            DryRunProfile(id=pid, full_name=names.get(pid, "?")) for pid in sample_ids
-        ],
+        sample=[DryRunProfile(id=pid, full_name=names.get(pid, "?")) for pid in sample_ids],
     )
 
 
@@ -840,9 +852,7 @@ async def get_audience_rules(
                 )
             )
         }
-    return AudienceRulesResponse(
-        is_all=is_all, is_none=is_none, rules=rules, profile_labels=labels
-    )
+    return AudienceRulesResponse(is_all=is_all, is_none=is_none, rules=rules, profile_labels=labels)
 
 
 @router.post("/learn/audiences/rebuild")

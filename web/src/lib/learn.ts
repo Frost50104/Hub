@@ -22,7 +22,7 @@ export interface OrgStore {
   address: string | null
   franchisee_id: string | null
   archived_at: string | null
-  // Ссылка на объект реестра auth (0053); через PATCH не пишется.
+  // Ссылка на объект реестра auth (0053); с 19.09 пишется через POST/PATCH.
   site_id: string | null
 }
 
@@ -38,6 +38,18 @@ export interface SiteMirror {
   phone: string | null
   archived_at: string | null
   synced_at: string
+}
+
+/** Объект реестра без карточки, который автоматика не завела сама (19.09). */
+export interface SitePending {
+  site_id: string
+  code: string | null
+  name: string
+  address: string | null
+  iiko_ref: string | null
+  reason: 'no_iiko_ref' | 'code_collision' | 'name_collision'
+  candidate_store_id: string | null
+  candidate_store_name: string | null
 }
 
 export interface SitesResponse {
@@ -1266,6 +1278,8 @@ export const learnApi = {
     api.get<OrgSnapshot>('/learn/org').then((r) => r.data),
   sites: (): Promise<SitesResponse> =>
     api.get<SitesResponse>('/learn/sites').then((r) => r.data),
+  sitesPending: (): Promise<{ items: SitePending[] }> =>
+    api.get<{ items: SitePending[] }>('/learn/sites/pending').then((r) => r.data),
 
   createRef: (
     kind: 'positions' | 'franchisees',
@@ -1285,6 +1299,7 @@ export const learnApi = {
     code?: string
     address?: string
     franchisee_id?: string | null
+    site_id?: string | null
   }): Promise<OrgStore> => api.post<OrgStore>('/learn/org/stores', body).then((r) => r.data),
   updateStore: (
     id: string,
@@ -1294,6 +1309,7 @@ export const learnApi = {
       address: string | null
       franchisee_id: string | null
       archived: boolean
+      site_id: string | null
     }>,
   ): Promise<OrgStore> =>
     api.patch<OrgStore>(`/learn/org/stores/${id}`, body).then((r) => r.data),

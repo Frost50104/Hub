@@ -6,34 +6,35 @@ import {
 } from '@tanstack/react-query'
 
 import {
-  type BlockedQuizItem,
-  learnApi,
   type AudienceDimensionCounts,
   type AudienceDryRun,
   type AudiencePayload,
   type AudienceRules,
   type AuditList,
+  type BlockedQuizItem,
   type CertificateInfo,
   type CourseDetail,
   type CourseList,
   type EmployeeList,
   type EmployeeProfile,
   type FavoriteItem,
+  type HomeData,
+  type LearnProfile,
   type LessonContent,
   type LessonTemplate,
   type LibraryData,
   type NewsList,
-  type HomeData,
-  type LearnProfile,
   type OrgSnapshot,
   type ProductListData,
   type QuizConsumer,
   type QuizManage,
   type RatingData,
   type ReviewQueueItem,
+  type SitePending,
   type SitesResponse,
   type SurveyListData,
   type UnlinkedLogin,
+  learnApi,
 } from '@/lib/learn'
 import { collectEmployees } from '@/lib/employeeList'
 import { toggleFavoriteKey } from '@/lib/favorites'
@@ -54,6 +55,15 @@ export function useSites(): UseQueryResult<SitesResponse> {
   return useQuery({
     queryKey: ['learn-sites'],
     queryFn: learnApi.sites,
+    staleTime: 60_000,
+  })
+}
+
+/** Объекты реестра без карточки (19.09) — блок «создать / привязать» в «Точках». */
+export function useSitesPending(): UseQueryResult<{ items: SitePending[] }> {
+  return useQuery({
+    queryKey: ['learn-sites-pending'],
+    queryFn: learnApi.sitesPending,
     staleTime: 60_000,
   })
 }

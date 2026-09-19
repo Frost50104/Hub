@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -9,7 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
-from app.models.race import RaceDailyStat, RaceResult, RaceSnapshot
+from app.models.org import Store
+from app.models.race import RaceDailyStat, RaceParticipant, RaceResult, RaceSnapshot
+from app.models.shadow import ShadowSite
 from app.services.race import engine, read
 from app.services.race.baselines import upsert_baseline
 from tests.integration._race_seed import seed_network
@@ -281,3 +284,95 @@ async def test_start_early_sets_date_before_computing_baseline(db: AsyncSession,
     assert report.baselines_computed is True and report.activated is True
     # строки базы уровня конкурса (race_id NULL) — фолбэк для заезда, поэтому «без базы» нет
     assert report.needs_baseline_store_ids == []
+
+
+# ─── состав против Оргструктуры ─────────────────────────────────────────────
+
+
+async def _participant(db, contest, store_id):
+    return (
+        await db.execute(
+            select(RaceParticipant).where(
+                RaceParticipant.contest_id == contest.id, RaceParticipant.store_id == store_id
+            )
+        )
+    ).scalar_one()
+
+
+async def test_reconcile_closes_archived_store_and_adds_new_linked_store(
+    db: AsyncSession, tenant_id
+):
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net)
+    # точка A исключена руками — причина не переписывается
+    await engine.set_participant(
+        db, contest, store_id=net.A.id, included=False, actor_id=net.admin.employee_id
+    )
+    net.C.archived_at = datetime.now(UTC)
+    site_new = uuid.uuid4()
+    new_store = Store(tenant_id=tenant_id, name="Новая точка", code="Н9", site_id=site_new)
+    db.add(new_store)
+    db.add(
+        ShadowSite(
+            site_id=site_new,
+            tenant_id=tenant_id,
+            name="Новая точка",
+            refs=[{"system": "iiko", "external_id": "dep-9"}],
+            synced_at=datetime.now(UTC),
+        )
+    )
+    await db.flush()
+
+    report = await engine.reconcile_participants(db, contest)
+    assert report.closed == [net.C.id] and report.added == [new_store.id]
+    closed = await _participant(db, contest, net.C.id)
+    assert closed.exclude_reason == "closed" and closed.excluded_by is None
+    assert (await _participant(db, contest, net.A.id)).exclude_reason == "manual"
+    added = await _participant(db, contest, new_store.id)
+    assert added.excluded_at is None and added.department_id == "dep-9"
+    entry = (
+        await db.execute(
+            select(AuditLog).where(
+                AuditLog.object_type == "race_participant", AuditLog.object_id == net.C.id
+            )
+        )
+    ).scalar_one()
+    assert entry.diff["reason"]["new"] == "closed" and entry.actor_id is None
+
+    again = await engine.reconcile_participants(db, contest)
+    assert not again.closed and not again.added, "идемпотентно"
+    # разархивированная карточка сама не возвращается
+    net.C.archived_at = None
+    await db.flush()
+    assert not (await engine.reconcile_participants(db, contest)).added
+    assert (await _participant(db, contest, net.C.id)).exclude_reason == "closed"
+
+
+async def test_late_joiner_gets_joined_race_seq_in_standings_and_admin(db: AsyncSession, tenant_id):
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net)
+    races = await read.load_races(db, contest)
+    await engine.close_day(db, contest, close_day=_day(6))  # заезд 1 завершён
+    site_new = uuid.uuid4()
+    late = Store(tenant_id=tenant_id, name="Поздняя", code="П9", site_id=site_new)
+    db.add(late)
+    db.add(
+        ShadowSite(
+            site_id=site_new,
+            tenant_id=tenant_id,
+            name="Поздняя",
+            refs=[{"system": "iiko", "external_id": "dep-late"}],
+            synced_at=datetime.now(UTC),
+        )
+    )
+    await db.flush()
+    await engine.reconcile_participants(db, contest)
+    row = await _participant(db, contest, late.id)
+    # вошла в день 9 — второй заезд
+    row.created_at = datetime(2026, 6, 10, 9, tzinfo=UTC)
+    await db.flush()
+    participants = await read.load_participants(db, contest)
+    standings = await read.standings_payload(db, contest, races, participants)
+    by_id = {s["store_id"]: s for s in standings}
+    assert by_id[late.id]["joined_race_seq"] == 2 and by_id[late.id]["missed_races"] == 1
+    assert by_id[net.A.id]["joined_race_seq"] is None

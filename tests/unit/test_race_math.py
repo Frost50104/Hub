@@ -282,3 +282,18 @@ def test_early_start_candidate_needs_no_active_race_and_finished_predecessor():
     r1_sched = SimpleNamespace(**{**vars(r1), "status": "scheduled"})
     assert m.early_start_candidate([r1_sched, r2], d) is None, "предшественник не завершён"
     assert m.early_start_candidate([r1], d) is None
+
+
+def test_joined_race_seq_only_for_late_joiners():
+    d = date(2026, 9, 18)
+    races = [
+        SimpleNamespace(seq=2, starts_on=d + timedelta(days=7), ends_on=d + timedelta(days=13)),
+        SimpleNamespace(seq=1, starts_on=d, ends_on=d + timedelta(days=6)),
+        SimpleNamespace(seq=3, starts_on=d + timedelta(days=14), ends_on=d + timedelta(days=20)),
+    ]
+    assert m.joined_race_seq(races, d - timedelta(days=3)) is None, "была с самого начала"
+    assert m.joined_race_seq(races, d) is None, "день старта — тоже с начала"
+    assert m.joined_race_seq(races, d + timedelta(days=2)) == 1
+    assert m.joined_race_seq(races, d + timedelta(days=9)) == 2
+    assert m.joined_race_seq(races, d + timedelta(days=30)) is None, "после конкурса"
+    assert m.joined_race_seq([], d) is None
