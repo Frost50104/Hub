@@ -4,6 +4,7 @@
  * формулы позиций и мест считает сервер, здесь только раскладка.
  */
 import type { Dynamics, RaceBoard, RaceContest, RaceParticipant, RaceRef } from '@/lib/race'
+import { laneOrder } from '@/lib/raceTrack'
 import { NBSP, plural } from '@/lib/typography'
 
 export const VIEW_ALL = 'all'
@@ -15,12 +16,25 @@ export interface ViewOption {
   label: string
 }
 
-/** «Общий забег» + лиги + «Вне лиг» (если такие точки есть при наличии лиг). */
+/**
+ * «Общий забег» + лиги + «Вне лиг».
+ *
+ * Вид без единой точки не показывается (20.09): лига — снимок группы точек, и
+ * пустая группа давала пустой сегмент на экране и пустую страницу в ротации ТВ
+ * («Дорожка 8 из 9» без единого гуся на проде). «Вне лиг» требует СМЕШАННОГО
+ * состава: если лига заведена, но ни одна точка к ней не привязана, «вне лиг»
+ * — это все точки, и вид дословно повторял общий забег.
+ */
 export function leagueOptions(contest: RaceContest | null, participants: RaceParticipant[]): ViewOption[] {
   const out: ViewOption[] = [{ value: VIEW_ALL, label: 'Общий забег' }]
   if (!contest || contest.leagues.length === 0) return out
-  for (const lg of contest.leagues) out.push({ value: lg.id, label: lg.name })
-  if (participants.some((p) => p.league_id === null)) out.push({ value: VIEW_NONE, label: 'Вне лиг' })
+  for (const lg of contest.leagues) {
+    if (participants.some((p) => p.league_id === lg.id)) out.push({ value: lg.id, label: lg.name })
+  }
+  const hasLeague = participants.some((p) => p.league_id !== null)
+  if (hasLeague && participants.some((p) => p.league_id === null)) {
+    out.push({ value: VIEW_NONE, label: 'Вне лиг' })
+  }
   return out
 }
 
@@ -184,6 +198,37 @@ export function tvPages<T>(rows: T[], pageSize: number): T[][] {
   if (rows.length === 0) return [[]]
   const out: T[][] = []
   for (let i = 0; i < rows.length; i += size) out.push(rows.slice(i, i + size))
+  return out
+}
+
+export interface TvPage {
+  view: RaceView
+  label: string
+  rows: RaceParticipant[]
+}
+
+/**
+ * Страницы ротации ТВ: общий забег — все страницы, лига — только первая
+ * (лидеры лиги), иначе с 63 точками и четырьмя видами цикл растягивался бы на
+ * минуты. Страницы без дорожек пропускаются: `tvPages` на пустом входе отдаёт
+ * `[[]]`, и вид без участников занимал 15 секунд пустым экраном. Когда
+ * состава нет вовсе, остаётся ровно одна пустая страница — иначе `pages.length`
+ * ноль, индекс страницы уходит в −1, а футер сообщает «Дорожка 1 из 0».
+ */
+export function tvRotation(
+  options: ViewOption[],
+  participants: RaceParticipant[],
+  pageSize: number,
+): TvPage[] {
+  const out: TvPage[] = []
+  for (const o of options) {
+    const rows = laneOrder(participants.filter((p) => inView(p, o.value)))
+    const chunks = tvPages(rows, pageSize)
+    for (const chunk of o.value === VIEW_ALL ? chunks : chunks.slice(0, 1)) {
+      if (chunk.length > 0) out.push({ view: o.value, label: o.label, rows: chunk })
+    }
+  }
+  if (out.length === 0) return [{ view: VIEW_ALL, label: 'Общий забег', rows: [] }]
   return out
 }
 

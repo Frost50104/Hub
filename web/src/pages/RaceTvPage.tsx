@@ -10,8 +10,7 @@ import { TvRail } from '@/components/race/tv/TvRail'
 import { useElementSize } from '@/hooks/useElementSize'
 import { usePublicRace } from '@/hooks/usePublicRace'
 import { shouldOfferUpdate } from '@/lib/appVersion'
-import { boardState, inView, leagueOptions, tvPages, tvPageSize } from '@/lib/raceBoard'
-import { laneOrder } from '@/lib/raceTrack'
+import { boardState, leagueOptions, tvPageSize, tvRotation } from '@/lib/raceBoard'
 
 const PAGE_MS = 15_000
 const TICKS_H = 40
@@ -78,19 +77,10 @@ export function RaceTvPage() {
   const slotH = trackSize.height || Math.max(300, viewportH - 400)
   const laneH = laneHeightFor(slotH)
   const pageSize = tvPageSize(slotH, laneH, TICKS_H)
-  // Общий забег — все страницы, лиги — только первая (лидеры лиги): иначе с
-  // 63 точками и четырьмя видами цикл ротации растягивался бы на минуты.
-  const pages = useMemo(() => {
-    const out: { view: string; label: string; rows: typeof participants }[] = []
-    for (const o of options) {
-      const rows = laneOrder(participants.filter((p) => inView(p, o.value)))
-      const chunks = tvPages(rows, pageSize)
-      for (const chunk of o.value === 'all' ? chunks : chunks.slice(0, 1)) {
-        out.push({ view: o.value, label: o.label, rows: chunk })
-      }
-    }
-    return out
-  }, [options, participants, pageSize])
+  // Правила страниц — в чистой `tvRotation` (общий забег целиком, лига — первая
+  // страница, виды без дорожек пропускаются): их проверяет vitest, здесь только
+  // подстановка измеренного размера страницы.
+  const pages = useMemo(() => tvRotation(options, participants, pageSize), [options, participants, pageSize])
   const [viewportW, setViewportW] = useState(() => (typeof window === 'undefined' ? 1920 : window.innerWidth))
   useEffect(() => {
     const onResize = () => setViewportW(window.innerWidth)

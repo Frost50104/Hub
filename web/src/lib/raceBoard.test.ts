@@ -15,6 +15,7 @@ import {
   setRaceParams,
   tvPages,
   tvPageSize,
+  tvRotation,
 } from './raceBoard'
 import { NBSP } from './typography'
 
@@ -94,6 +95,17 @@ describe('вид доски', () => {
     expect(leagueOptions(contest(), parts).map((o) => o.value)).toEqual(['all', 'L1', 'L2', 'none'])
     expect(leagueOptions(contest({ leagues: [] }), parts).map((o) => o.value)).toEqual(['all'])
     expect(leagueOptions(contest(), parts.filter((x) => x.league_id)).map((o) => o.value)).toEqual(['all', 'L1', 'L2'])
+  })
+
+  it('вид без единой точки не показывается, «Вне лиг» — только при смешанном составе', () => {
+    // Случай прода 20.09: лига «Территория ИВАН» — снимок пустой группы точек,
+    // все 61 участник без лиги. Пустая лига давала пустую страницу ротации ТВ,
+    // а «Вне лиг» дословно повторял общий забег.
+    const noneLinked = parts.map((x) => p({ ...x, league_id: null }))
+    expect(leagueOptions(contest(), noneLinked).map((o) => o.value)).toEqual(['all'])
+    // Одна из двух лиг пуста — в видах остаётся только заполненная.
+    const onlyL1 = parts.filter((x) => x.league_id === 'L1')
+    expect(leagueOptions(contest(), onlyL1).map((o) => o.value)).toEqual(['all', 'L1'])
   })
 
   it('вид по умолчанию — лига моей точки, неизвестный параметр — общий забег', () => {
@@ -181,6 +193,37 @@ describe('ТВ и URL', () => {
     expect(tvPages([], 17)).toEqual([[]])
     expect(tvPages([1, 2], 0).length).toBe(2)
     expect(tvPageSize(1080, 48, 300)).toBe(16)
+  })
+
+  it('ротация ТВ: пустых страниц нет, лига — одна страница, без состава — одна пустая', () => {
+    const many = Array.from({ length: 61 }, (_, i) =>
+      p({ name: `Т${i}`, store_id: `s${i}`, place: i + 1, cells: 400 - i }),
+    )
+    // Прод: пустая лига + все точки без лиги → только страницы общего забега.
+    const prodViews = leagueOptions(contest({ leagues: [{ id: 'L1', name: 'Территория ИВАН' }] }), many)
+    const prod = tvRotation(prodViews, many, 9)
+    expect(prod.length).toBe(7)
+    expect(prod.every((pg) => pg.rows.length > 0)).toBe(true)
+    expect(prod.every((pg) => pg.view === 'all')).toBe(true)
+    expect(prod.at(-1)?.rows.length).toBe(61 - 9 * 6)
+
+    // Непустая лига добавляет ровно одну страницу, «Вне лиг» — тоже одну.
+    const mix = [
+      p({ name: 'А', store_id: 'a', league_id: 'L1', place: 1, place_in_league: 1 }),
+      p({ name: 'Б', store_id: 'b', league_id: 'L1', place: 2, place_in_league: 2 }),
+      p({ name: 'В', store_id: 'c', league_id: 'L1', place: 3, place_in_league: 3 }),
+      p({ name: 'Г', store_id: 'd', league_id: 'L2', place: 4, place_in_league: 1 }),
+      p({ name: 'Д', store_id: 'e', league_id: null, place: 5 }),
+    ]
+    const mixed = tvRotation(leagueOptions(contest(), mix), mix, 2)
+    expect(mixed.filter((pg) => pg.view === 'L1').length).toBe(1)
+    expect(mixed.filter((pg) => pg.view === 'L2').length).toBe(1)
+    expect(mixed.filter((pg) => pg.view === 'none').length).toBe(1)
+
+    // Состава нет вовсе — ровно одна пустая страница, иначе футер «Дорожка 1 из 0».
+    const empty = tvRotation(leagueOptions(contest(), []), [], 9)
+    expect(empty.length).toBe(1)
+    expect(empty[0]?.rows).toEqual([])
   })
 
   it('setRaceParams не трогает чужие ключи и убирает дефолты', () => {
