@@ -83,9 +83,11 @@ export function useAppUpdate(): {
 
         if (!waiting) {
           // Воркер молчит — спрашиваем сервер напрямую. Если там сборка новее,
-          // обычной перезагрузки достаточно: `index.html` отдаётся с
-          // `no-store`, свежий бандл приедет и без Service Worker. Ровно этот
-          // путь спасает в Safari, где SW не отвечает.
+          // обычной перезагрузки достаточно, потому что HTML в прекеш воркера
+          // не кладётся (`vite.config.ts`, 21.09): навигация идёт в сеть, а
+          // `index.html` отдаётся с `no-store`. Пока HTML лежал в прекеше, эта
+          // ветка под старым воркером возвращала на `/` старую оболочку. Ровно
+          // этот путь спасает в Safari, где SW не отвечает.
           const server = await fetchServerVersion()
           if (shouldOfferUpdate(__APP_VERSION__, server)) {
             window.location.reload()

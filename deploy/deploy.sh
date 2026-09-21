@@ -196,11 +196,23 @@ deploy_frontend() {
     cd "$PROJECT_DIR/web" && \
     npm install --no-audit --no-fund && \
     $BUILD_CMD && \
-    test -f dist/index.html
+    test -f dist/index.html && \
+    test -f dist/sw.js
   ) || {
     echo "ERROR: локальная сборка фронта не удалась — на сервере остался ПРЕЖНИЙ dist." >&2
     exit 1
   }
+
+  # HTML в прекеше воркера = сломанный баннер обновления (ОС 21.09): воркер
+  # отвечает на навигацию к `/` своей копией index.html, и «Обновить» под ним
+  # перезагружает ту же старую оболочку по кругу. Проверяем ИТОГОВЫЙ sw.js, а
+  # не конфиг: так ловится и чужая правка globPatterns, и смена плагина.
+  # Ищем ключ манифеста (`"url":"index.html"` или `url:"index.html"`), а не
+  # голую строку — `directoryIndex:"index.html"` сидит в рантайме Workbox всегда.
+  if grep -Eq '"?url"?:"index\.html"' "$PROJECT_DIR/web/dist/sw.js"; then
+    echo "ERROR: index.html попал в прекеш воркера (web/dist/sw.js) — баннер обновления перестанет уходить. См. globPatterns в web/vite.config.ts." >&2
+    exit 1
+  fi
 
   echo "==> Uploading dist to $ENV..."
   # БЕЗ --delete, и это не оплошность (ОС 16.09: «работа не сохраняется, даже

@@ -20,7 +20,7 @@
 
 - **React 18 + TS strict** + Vite + `vite-plugin-pwa` (`registerType: 'prompt'`, `strategies: 'injectManifest'`).
 - **Auth:** `createSsoAuthClient({...})` из `@signaris/auth-client/browser` + `attachAxiosAuth(api, authClient)`. Refresh-token — в IndexedDB (PWA standalone), access-token — в памяти через zustand.
-- **Service Worker:** `web/src/sw.ts` — precache + push handler + notificationclick + SKIP_WAITING-message.
+- **Service Worker:** `web/src/sw.ts` — precache + push handler + notificationclick + SKIP_WAITING-message. **HTML в прекеш не входит** (`vite.config.ts::globPatterns`, с 21.09): прекеш отвечал на навигацию к `/` своей копией `index.html` мимо `no-store`, и баннер «Доступно обновление» под старым воркером не уходил на «Главной». Любая навигация идёт в сеть за оболочкой (~1 КБ), чанки — из прекеша. Сторож — `deploy.sh`: выкат падает, если в `dist/sw.js` есть ключ манифеста `url:"index.html"`.
 - **Update mechanism:** `UpdateBanner.tsx` проверяет SW каждые 60с + на `visibilitychange` — лечит iOS PWA-freeze таймеров в фоне.
 
 ## Сущности

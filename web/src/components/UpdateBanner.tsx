@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
 import { Button } from '@/components/ui/Button'
+import { useAppUpdate } from '@/hooks/useAppUpdate'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { shouldOfferUpdate } from '@/lib/appVersion'
 
@@ -34,9 +35,17 @@ const UPDATE_CHECK_INTERVAL_MS = 30_000
  * через минуту потерять несохранённое. Нажавшего «Позже» спасал cleanup,
  * всех остальных — нет.
  *
- * Подстраховка «iOS проигнорировал reload» осталась там, где ей и место, — в
- * обработчике кнопки: `updateServiceWorker(true)` плюс собственный
- * `setTimeout` на 1500 мс. Путей перезагрузки после клика по-прежнему два.
+ * Кнопка «Обновить» идёт через `useAppUpdate` — тот же путь, что «Обновить
+ * приложение» в настройках (21.09). Прежний обработчик (`updateServiceWorker(true)`
+ * + `reload` через 1,5 с) не ждал установки нового воркера: пока тот качал
+ * прекеш, `SKIP_WAITING` уходил в пустоту (у `workbox-window` без `waiting`
+ * вызов пустой), и перезагрузка шла под СТАРЫМ воркером. На «Главной» он
+ * отдавал из прекеша старую `index.html`, и баннер возвращался после каждого
+ * нажатия (ОС владельца, iPhone). `useAppUpdate` ждёт установку до `waiting`,
+ * активирует её и перезагружает гарантированно — по `controllerchange` или
+ * силой через 3 с (iOS PWA этого события иногда не шлёт). HTML с той же
+ * правки в прекеш не кладётся (`vite.config.ts`), так что и запасная обычная
+ * перезагрузка приносит свежую оболочку.
  *
  * ПОКАЗЫВАТЬ ли баннер, решает сравнение версий, а не состояние воркера
  * (16.09). Прежний признак — событие `needRefresh` от плагина — в Safari
@@ -55,7 +64,9 @@ export function UpdateBanner() {
   // не берём: `needRefresh` поднимается на любой смене воркера, в том числе
   // когда бандл у человека уже свежий, — замер на staging 16.09 показал ровно
   // это, баннер висел при совпадающих версиях.
-  const { updateServiceWorker } = useRegisterSW()
+  useRegisterSW()
+  const { status, checkForUpdate } = useAppUpdate()
+  const busy = status !== 'idle'
   // Версия на сервере. `null` — узнать не удалось (офлайн, дев-стенд без
   // version.json): тогда молчим, см. `shouldOfferUpdate`.
   const [serverVersion, setServerVersion] = useState<string | null>(null)
@@ -154,18 +165,15 @@ export function UpdateBanner() {
         <Button
           variant="ghost"
           size="sm"
+          // Пока идёт обновление, «Позже» не нажать: процесс уже запущен и
+          // перезагрузит страницу, а спрятанный баннер обещал бы обратное.
+          disabled={busy}
           onClick={() => setDismissed(serverVersion)}
         >
           Позже
         </Button>
-        <Button
-          size="sm"
-          onClick={() => {
-            void updateServiceWorker(true)
-            window.setTimeout(() => window.location.reload(), 1500)
-          }}
-        >
-          Обновить
+        <Button size="sm" onClick={checkForUpdate} disabled={busy}>
+          {busy ? 'Обновляем…' : 'Обновить'}
         </Button>
       </div>
     </div>
