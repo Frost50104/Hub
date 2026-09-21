@@ -134,28 +134,51 @@ def _uses_template_dependency(route: APIRoute) -> bool:
 
 
 @pytest.fixture(scope="module")
-def routes() -> list[APIRoute]:
-    from app.main import app
+def routes() -> list[tuple[str, APIRoute]]:
+    """(полный путь, ручка) из роутеров модулей `app/api`, а не из `app.routes`.
 
-    return [r for r in app.routes if isinstance(r, APIRoute)]
+    С FastAPI 0.140+ `include_router` больше не разворачивает ручки в
+    `app.routes` (там лежат обёртки `_IncludedRouter`), и тест, читавший их,
+    молча видел ноль ручек — в CI (свежий FastAPI) он падал, локально (0.136)
+    проходил. `router.routes` модуля — публичный и одинаковый в обеих версиях;
+    все роутеры подключены в `app/main.py` с префиксом `/api`.
+    """
+    import importlib
+    import pkgutil
+
+    from fastapi import APIRouter
+
+    import app.api as api_pkg
+
+    out: list[tuple[str, APIRoute]] = []
+    for info in pkgutil.iter_modules(api_pkg.__path__):
+        router = getattr(importlib.import_module(f"app.api.{info.name}"), "router", None)
+        if not isinstance(router, APIRouter):
+            continue
+        out += [("/api" + r.path, r) for r in router.routes if isinstance(r, APIRoute)]
+    return out
 
 
 def test_template_dependency_registry(routes):
+    # Страховка от повторения той же ошибки: пустой обход проходил бы тест
+    # «запрещённые ручки шаблон не открывают» просто потому, что ручек нет.
+    assert len(routes) > 100
     actual = {
-        (m, r.path) for r in routes if _uses_template_dependency(r) for m in r.methods
+        (m, path) for path, r in routes if _uses_template_dependency(r) for m in r.methods
     }
     assert actual == EXPECTED
 
 
 def test_forbidden_routes_do_not_open_templates(routes):
-    for r in routes:
+    assert len(routes) > 100
+    for path, r in routes:
         if not _uses_template_dependency(r):
             continue
-        tail = r.path.split("{project_id}")[-1].split("{task_id}")[-1]
+        tail = path.split("{project_id}")[-1].split("{task_id}")[-1]
         # Архив задачи (не проекта) — легальная правка задачи шаблона.
-        if r.path.startswith("/api/tasks/"):
+        if path.startswith("/api/tasks/"):
             continue
-        assert not any(f in tail for f in FORBIDDEN_FRAGMENTS), r.path
+        assert not any(f in tail for f in FORBIDDEN_FRAGMENTS), path
 
 
 async def test_notify_is_silent_for_template_tasks(monkeypatch):
