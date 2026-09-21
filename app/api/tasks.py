@@ -16,7 +16,7 @@ from sqlalchemy import case, delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import enforce_rate_limit, get_db, require_auth
+from app.deps import enforce_rate_limit, get_db, get_db_template_page, require_auth
 from app.models.attachment import TaskAttachment
 from app.models.notification import Notification
 from app.models.project import Project
@@ -123,7 +123,11 @@ async def _serialize_one(
     data.recurrence = recurrence_info(rules.get(task.id), today=display_today())
     if rights_for is not None:
         role, principal = rights_for
-        data.can_complete = can_complete(role, principal.employee_id, assignees)
+        # Задача шаблона не выполняется никем (0060): `false`, а не `None`, —
+        # фронт по `=== false` прячет галочку в строке, на доске и в карточке.
+        data.can_complete = (
+            False if task.is_template else can_complete(role, principal.employee_id, assignees)
+        )
     return data
 
 
@@ -146,7 +150,7 @@ async def list_tasks(
     sort: TaskSortField = Query(default="position"),
     order: Literal["asc", "desc"] = Query(default="asc"),
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
     # keyword-only и последним: тесты зовут list_tasks позиционными kwargs.
     stage_id: UUID | None = Query(default=None),
 ) -> list[TaskResponse]:
@@ -221,7 +225,9 @@ async def list_tasks(
         assignees = by_task.get(t.id, [])
         item = _serialize(t, assignees)
         item.recurrence = recurrence_info(rules.get(t.id), today=today)
-        item.can_complete = can_complete(my_role, principal.employee_id, assignees)
+        item.can_complete = (
+            False if t.is_template else can_complete(my_role, principal.employee_id, assignees)
+        )
         c = counts.get(t.id)
         if c is not None:
             item.comment_count = c.comments
@@ -240,7 +246,7 @@ async def create_task(
     project_id: UUID,
     body: TaskCreate,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> TaskResponse:
     await enforce_rate_limit(
         bucket="task:write",
@@ -286,7 +292,7 @@ async def _fetch_task_visible(
 async def get_task(
     task_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> TaskResponse:
     task, role = await _fetch_task_with_role(db, task_id, principal)
     return await _serialize_one(db, task, rights_for=(role, principal))
@@ -297,7 +303,7 @@ async def update_task(
     task_id: UUID,
     body: TaskUpdate,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> TaskResponse:
     await enforce_rate_limit(
         bucket="task:write",
@@ -326,6 +332,15 @@ async def update_task(
     ):
         allow = ("owner", "editor", "viewer")
     await require_task_access(db, task, principal, allow=allow)
+    if task.is_template and body.done is not None:
+        # Шаблон — план работ, а не работа: выполненной задача становится
+        # только в проекте из шаблона (копия всегда невыполненная). Клиент
+        # галочку в шаблоне не рисует (`can_complete=false`), это для старых
+        # бандлов.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="В шаблоне задачи не отмечаются выполненными",
+        )
 
     changes: dict[str, Any] = {}
 
@@ -623,7 +638,7 @@ async def set_task_recurrence(
     task_id: UUID,
     body: TaskRecurrenceBody,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> TaskResponse:
     """Включить или сменить повтор задачи.
 
@@ -695,7 +710,7 @@ async def set_task_recurrence(
 async def clear_task_recurrence(
     task_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> TaskResponse:
     """Выключить повтор. Идемпотентно: правила не было — не ошибка."""
     task = await _task_for_edit(db, task_id, principal)
@@ -720,7 +735,7 @@ async def add_task_assignee(
     task_id: UUID,
     body: TaskAssigneeAdd,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> TaskResponse:
     """Добавить одного исполнителя. Идемпотентно (повтор — не ошибка)."""
     await enforce_rate_limit(
@@ -752,7 +767,7 @@ async def remove_task_assignee(
     task_id: UUID,
     employee_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> TaskResponse:
     """Снять одного исполнителя. Идемпотентно.
 
@@ -786,7 +801,7 @@ async def remove_task_assignee(
 async def archive_task(
     task_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> TaskResponse:
     task = await db.get(Task, task_id)
     if task is None:
@@ -812,7 +827,7 @@ async def archive_task(
 async def unarchive_task(
     task_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> TaskResponse:
     task = await db.get(Task, task_id)
     if task is None:
@@ -838,7 +853,7 @@ async def unarchive_task(
 async def delete_task(
     task_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     """Жёсткое удаление задачи. Корзины нет — это решение владельца.
 

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import tenant_scoped_session
-from app.deps import enforce_rate_limit, get_db, require_auth
+from app.deps import enforce_rate_limit, get_db, get_db_template_page, require_auth
 from app.models.attachment import TaskAttachment
 from app.models.notification import Notification
 from app.models.project import Project, ProjectMember
@@ -33,6 +33,7 @@ from app.schemas.project import (
     ProjectMemberUpdate,
     ProjectResponse,
     ProjectUpdate,
+    TemplateRef,
 )
 from app.services import audit
 from app.services.attachments import (
@@ -58,6 +59,7 @@ from app.services.project_access import (
     fetch_project_or_404,
     is_hub_admin,
     require_project_role,
+    template_role,
 )
 from app.services.project_badge import (
     BADGE_MAX_BYTES,
@@ -117,6 +119,12 @@ def _project_to_response(
     (`personal_display_name`), чтобы гость не прочитал «Мои задачи» как свои.
     Заполняет только `get_project` — в списки личные проекты не попадают вовсе.
     """
+    if project.is_template:
+        # Роль в шаблоне — синтезированная (автор/admin/видящий), ростер тут
+        # ни при чём; иначе ответы мутаций приходили бы автору с
+        # can_edit=false — автора в составе шаблона нет. Избранного у шаблона нет.
+        my_role = template_role(principal, project)
+        is_favorite = False
     can_edit, can_manage = capabilities(principal, my_role)  # type: ignore[arg-type]
     return ProjectResponse(
         id=project.id,
@@ -139,6 +147,16 @@ def _project_to_response(
         can_manage=can_manage,
         task_count=counts[0] if counts else None,
         done_count=counts[1] if counts else None,
+        is_template=project.is_template,
+        template_anchor_on=project.template_anchor_on,
+        created_from_template=(
+            TemplateRef(
+                id=project.created_from_template_id,
+                name=project.created_from_template_name,
+            )
+            if project.created_from_template_id is not None
+            else None
+        ),
     )
 
 
@@ -266,7 +284,7 @@ async def create_project(
 async def get_project(
     project_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> ProjectResponse:
     project, my_role = await require_project_role(db, project_id, principal)
     member_role, is_favorite = await _my_membership(
@@ -370,7 +388,7 @@ async def update_project(
     project_id: UUID,
     body: ProjectUpdate,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> ProjectResponse:
     project, _ = await require_project_role(
         db, project_id, principal, allow=EDIT_ROLES
@@ -469,7 +487,7 @@ async def delete_project(
     project_id: UUID,
     key: str = Query(..., max_length=32, description="Ключ проекта — подтверждение"),
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     """Удалить проект НАВСЕГДА, вместе со всем содержимым.
 
@@ -587,7 +605,7 @@ async def set_project_badge(
     project_id: UUID,
     body: ProjectBadgeUpdate,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> ProjectResponse:
     """Поставить эмодзи или снять бейдж совсем (`emoji: null` → буквы).
 
@@ -631,7 +649,7 @@ async def upload_project_badge(
     project_id: UUID,
     file: UploadFile = File(...),
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> ProjectResponse:
     """Загрузить картинку бейджа. Ставит её и снимает эмодзи."""
     await enforce_rate_limit(
@@ -730,7 +748,9 @@ async def serve_project_badge(project_id: UUID, s: str = Query(..., max_length=6
     Нет проекта / нет бейджа / подпись не сходится — 404 во всех трёх случаях:
     зонд не должен различать «не существует» и «не та подпись».
     """
-    async with tenant_scoped_session(None, bypass_rls=True) as scan:
+    # Область 'all': бейдж шаблона (0060) рисуется в библиотеке и на его
+    # странице. Авторизует подпись, как и для живого проекта.
+    async with tenant_scoped_session(None, bypass_rls=True, template_scope="all") as scan:
         project = await scan.get(Project, project_id)
         if project is None or not project.badge_storage_key or not project.badge_mime:
             raise HTTPException(status_code=404, detail="Не найдено")
@@ -803,7 +823,7 @@ async def _list_members(
 async def list_members(
     project_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> list[ProjectMemberResponse]:
     project, _role = await require_project_role(db, project_id, principal)
     # Приглашённому в ЧУЖОЕ личное — 403: состав участников личного
@@ -824,7 +844,7 @@ async def add_member(
     project_id: UUID,
     body: ProjectMemberAdd,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> ProjectMemberResponse:
     await require_project_role(db, project_id, principal, allow=("owner",))
     # Target employee must exist in shadow_users for this tenant (must have
@@ -886,7 +906,7 @@ async def update_member(
     member_id: UUID,
     body: ProjectMemberUpdate,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> ProjectMemberResponse:
     project, _ = await require_project_role(
         db, project_id, principal, allow=("owner",)
@@ -895,8 +915,10 @@ async def update_member(
     if member is None or member.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Участник не найден")
     _assert_not_personal_owner(project, member, action="понизить в роли")
-    # Last-owner protection.
-    if member.role == "owner" and body.role != "owner":
+    # Last-owner protection. У шаблона (0060) владельцев в составе может не
+    # быть вовсе: состав — это будущие участники проектов, а правит шаблон
+    # его автор независимо от состава.
+    if member.role == "owner" and body.role != "owner" and not project.is_template:
         count = await db.execute(
             select(ProjectMember.id).where(
                 ProjectMember.project_id == project_id, ProjectMember.role == "owner"
@@ -927,7 +949,7 @@ async def remove_member(
     project_id: UUID,
     member_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     project, _ = await require_project_role(
         db, project_id, principal, allow=("owner",)
@@ -936,7 +958,7 @@ async def remove_member(
     if member is None or member.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Участник не найден")
     _assert_not_personal_owner(project, member, action="удалить из проекта")
-    if member.role == "owner":
+    if member.role == "owner" and not project.is_template:
         count = await db.execute(
             select(ProjectMember.id).where(
                 ProjectMember.project_id == project_id, ProjectMember.role == "owner"

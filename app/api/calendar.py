@@ -23,7 +23,7 @@ from signaris_auth import Principal
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_db, require_auth
+from app.deps import get_db_template_page, require_auth
 from app.models.task import Task
 from app.schemas.task import TaskPriority, TaskResponse
 from app.services.personal_projects import assert_full_project_access
@@ -65,7 +65,7 @@ async def list_calendar_tasks(
     assignee_id: UUID | None = Query(default=None, alias="assignee"),
     priority: TaskPriority | None = Query(default=None),
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> list[TaskResponse]:
     reject_legacy_status(status_)
     project, _ = await require_project_role(db, project_id, principal)

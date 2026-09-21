@@ -64,6 +64,22 @@ def due_day(due_at: datetime) -> date:
     return _now(due_at).astimezone(display_tz()).date()
 
 
+def shift_days(moment: datetime, days: int) -> datetime:
+    """Сдвинуть мгновение на `days` КАЛЕНДАРНЫХ дней с тем же часом в display tz.
+
+    Для копирования шаблона (0060): начало задачи «в 10:00» остаётся «в 10:00»
+    через границу перехода на летнее время, чего `timedelta(days=...)` в UTC
+    не гарантирует. Срок сдвигается отдельно — через `due_noon_utc`.
+    """
+    if days == 0:
+        return moment
+    local = _now(moment).astimezone(display_tz())
+    shifted = datetime.combine(
+        local.date() + timedelta(days=days), local.timetz().replace(tzinfo=None)
+    ).replace(tzinfo=display_tz())
+    return shifted.astimezone(UTC)
+
+
 def overdue_days(due_at: datetime, now: datetime | None = None) -> int:
     """Сколько ПОЛНЫХ календарных дней прошло после дня срока (0 — срок сегодня
     или в будущем)."""

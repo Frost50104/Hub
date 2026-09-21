@@ -57,13 +57,47 @@ async def allocate_task_seq(db: AsyncSession, project_id: UUID) -> int:
 
 
 
-async def assert_parent_one_level(db: AsyncSession, parent_task_id: UUID | None) -> None:
+async def allocate_task_seq_block(db: AsyncSession, project_id: UUID, n: int) -> int:
+    """Выдать `n` номеров подряд одним UPDATE; вернуть первый.
+
+    Для копирования проекта по шаблону: `allocate_task_seq` в цикле — это `n`
+    обращений к базе на единственном воркере. Лок строки проекта тот же, так
+    что правило «номера выдаёт только этот модуль» сохраняется.
+    """
+    if n <= 0:
+        raise ValueError("n must be positive")
+    row = await db.execute(
+        update(Project)
+        .where(Project.id == project_id)
+        .values(next_task_seq=Project.next_task_seq + n)
+        .returning(Project.next_task_seq - n)
+    )
+    first = row.scalar_one_or_none()
+    if first is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Проект не найден"
+        )
+    return first
+
+
+async def assert_parent_one_level(
+    db: AsyncSession, parent_task_id: UUID | None, *, project_id: UUID | None = None
+) -> None:
     if parent_task_id is None:
         return
     parent = await db.get(Task, parent_task_id)
     if parent is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Родительская задача не найдена"
+        )
+    # Родитель — из ЭТОГО проекта. До 21.09 проверки не было, и подзадачу
+    # можно было повесить на задачу любого видимого проекта; с шаблонами
+    # (0060) это ещё и пересекло бы замок — на странице шаблона живые задачи
+    # видны. Триггер чётности в БД — вторая линия.
+    if project_id is not None and parent.project_id != project_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Родительская задача из другого проекта",
         )
     if parent.parent_task_id is not None:
         raise HTTPException(
@@ -86,6 +120,13 @@ async def create_task_record(
     (обратная связь): подписка автора на задачу, которую он не может открыть,
     привела бы его по пушу в 403. Дефолт `True` менять нельзя — на нём держится
     то, что автор узнаёт о комментариях и переносах СВОЕЙ задачи.
+
+    Шаблон (0060) решается ЗДЕСЬ, а не у вызывающих (ручка, импорт CSV,
+    обратная связь, поручение): флаг задачи берётся из проекта — иначе
+    триггер `tasks_template_guard` отклонит вставку, — и автор НЕ
+    подписывается. Иначе автор шаблона стал бы наблюдателем каждой задачи
+    каждого проекта из шаблона (на проде наблюдателей `creator` 599 против 62
+    ручных).
 
     Порядок обязателен: все валидации — до `allocate_task_seq` (он держит
     row-lock проекта до конца транзакции; 404 на третьем исполнителе не должен
@@ -121,7 +162,7 @@ async def create_task_record(
         resolved = [principal.employee_id]
     assignee_ids = resolved or []
     assignee_names = await assert_assignees_in_tenant(db, assignee_ids)
-    await assert_parent_one_level(db, body.parent_task_id)
+    await assert_parent_one_level(db, body.parent_task_id, project_id=project_id)
     # Колонка: явная — всегда, без явной — первая по позиции, а если колонок в
     # проекте нет — никакой (это штатно, см. `default_stage_for`). Личное
     # пространство — исключение: это список дел, а не доска, и задача заводится
@@ -143,6 +184,7 @@ async def create_task_record(
         created_by=principal.employee_id,
         start_at=body.start_at,
         due_at=body.due_at,
+        is_template=project.is_template,
         # Сначала seq (row-lock проекта до конца транзакции), ПОТОМ позиция:
         # иначе два параллельных create (быстрый ввод Enter-Enter) считают
         # max(position)+1 до лока и получают одинаковую позицию.
@@ -159,7 +201,7 @@ async def create_task_record(
     await db.flush()
     # Auto-watchers per INTEGRATION.md §14: creator + assignee subscribe on
     # task creation. Reason is the *first* edge they joined through.
-    if watch_creator:
+    if watch_creator and not project.is_template:
         await ensure_watcher(
             db,
             task_id=task.id,

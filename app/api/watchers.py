@@ -16,7 +16,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import enforce_rate_limit, get_db, require_auth
+from app.deps import enforce_rate_limit, get_db_template_page, require_auth
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskWatcher
 from app.schemas.watcher import WatcherAddBody, WatcherResponse
@@ -41,7 +41,7 @@ async def _fetch_task_visible(
 async def list_watchers(
     task_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> list[WatcherResponse]:
     await _fetch_task_visible(db, task_id, principal)
     rows = await db.execute(
@@ -81,7 +81,7 @@ async def list_watchers(
 async def join_watching(
     task_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> WatcherResponse:
     task = await _fetch_task_visible(db, task_id, principal)
     result = await db.execute(
@@ -138,7 +138,7 @@ async def join_watching(
 async def leave_watching(
     task_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     task = await _fetch_task_visible(db, task_id, principal)
     result = await db.execute(
@@ -167,7 +167,7 @@ async def add_watcher(
     task_id: UUID,
     body: WatcherAddBody,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> WatcherResponse:
     """Редактор подписывает ДРУГОГО человека (02.09) — зеркало assignee-ручки.
 
@@ -256,7 +256,7 @@ async def remove_watcher(
     task_id: UUID,
     employee_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     """Редактор снимает наблюдателя. Членство НЕ отзывается (как у исполнителей)."""
     task = await db.get(Task, task_id)

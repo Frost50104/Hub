@@ -19,7 +19,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import enforce_rate_limit, get_db, require_auth
+from app.deps import enforce_rate_limit, get_db_template_page, require_auth
 from app.models.dependency import TaskDependency
 from app.models.task import Task
 from app.schemas.dependency import TaskDependencyResponse
@@ -49,7 +49,7 @@ class TaskDependenciesResponse(BaseModel):
 async def list_dependencies(
     task_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> TaskDependenciesResponse:
     task = await db.get(Task, task_id)
     if task is None:
@@ -105,7 +105,7 @@ async def add_dependency(
     successor_id: UUID,
     predecessor_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> TaskDependencyResponse:
     await enforce_rate_limit(
         bucket="task:write",
@@ -171,7 +171,7 @@ async def remove_dependency(
     successor_id: UUID,
     predecessor_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     successor = await db.get(Task, successor_id)
     if successor is None:

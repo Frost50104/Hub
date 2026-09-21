@@ -98,6 +98,12 @@ class Settings(BaseSettings):
     race_enabled: bool = Field(default=True)
     race_sync_enabled: bool = Field(default=True)
 
+    # Шаблоны проектов (0060) — модуль существует вообще; второй, тенантный,
+    # рубильник — ключ `project_templates_enabled` в learning_settings
+    # (дефолт false). Выключено = ручки библиотеки/копирования 404, страница
+    # шаблона 404, меню спрятано; шаблоны остаются в БД и невидимы.
+    project_templates_enabled: bool = Field(default=True)
+
     # CORS — staging + prod fronts
     cors_origins: list[str] = Field(
         default_factory=lambda: [

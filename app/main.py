@@ -224,6 +224,7 @@ def create_app() -> FastAPI:
     from app.api import org as org_api
     from app.api import products as products_api
     from app.api import project_folders as project_folders_api
+    from app.api import project_templates as project_templates_api
     from app.api import projects as projects_api
     from app.api import public as public_api
     from app.api import push as push_api
@@ -250,6 +251,7 @@ def create_app() -> FastAPI:
     app.include_router(me_tasks_api.router, prefix="/api")
     app.include_router(me_delegate_api.router, prefix="/api")
     app.include_router(projects_api.router, prefix="/api")
+    app.include_router(project_templates_api.router, prefix="/api")
     app.include_router(project_folders_api.router, prefix="/api")
     app.include_router(stages_api.router, prefix="/api")
     app.include_router(tasks_api.router, prefix="/api")

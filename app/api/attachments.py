@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import tenant_scoped_session
-from app.deps import enforce_rate_limit, get_db, require_auth
+from app.deps import enforce_rate_limit, get_db_template_page, require_auth
 from app.models.attachment import TaskAttachment
 from app.models.shadow import ShadowUser
 from app.models.task import Task
@@ -35,7 +35,7 @@ from app.services.attachments import (
 )
 from app.services.learn_media import check_free_space, issue_token, verify_token
 from app.services.personal_projects import require_task_access
-from app.services.project_access import is_hub_admin
+from app.services.project_access import is_hub_admin, open_template_if_hidden
 
 router = APIRouter(tags=["attachments"])
 
@@ -114,7 +114,7 @@ async def _list_enriched(db: AsyncSession, task_id: UUID) -> list[AttachmentResp
 async def list_attachments(
     task_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> list[AttachmentResponse]:
     await _fetch_task_visible(db, task_id, principal)
     return await _list_enriched(db, task_id)
@@ -155,6 +155,9 @@ async def _accept_upload(
         limit=30,
         window_sec=60,
     )
+    # Фиксированный адрес `POST /attachments` несёт `task_id` полем формы, а
+    # не в пути — область шаблона (0060) открываем явно.
+    await open_template_if_hidden(db, principal, task_id=task_id, mode="edit")
     task = await _fetch_task_visible(db, task_id, principal)
     # Edit-permission required — uploading mutates a task.
     await require_task_access(
@@ -202,7 +205,7 @@ async def upload_attachment(
     task_id: UUID = Form(...),
     file: UploadFile = File(...),
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> AttachmentResponse:
     """Загрузка вложения. Путь ФИКСИРОВАН, и это требование nginx, а не вкус.
 
@@ -227,7 +230,7 @@ async def upload_attachment_legacy(
     task_id: UUID,
     file: UploadFile = File(...),
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> AttachmentResponse:
     """Прежний адрес — для бандлов, выданных до этой правки.
 
@@ -305,12 +308,13 @@ async def serve_attachment(
 async def download_attachment(
     attachment_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> FileResponse:
     attachment = await db.get(TaskAttachment, attachment_id)
     if attachment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
     # Reuse task-visibility guard.
+    await open_template_if_hidden(db, principal, task_id=attachment.task_id, mode="view")
     task = await db.get(Task, attachment.task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
@@ -336,11 +340,12 @@ async def download_attachment(
 async def delete_attachment(
     attachment_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     attachment = await db.get(TaskAttachment, attachment_id)
     if attachment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
+    await open_template_if_hidden(db, principal, task_id=attachment.task_id, mode="edit")
     task = await db.get(Task, attachment.task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")

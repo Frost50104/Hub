@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
@@ -78,24 +79,37 @@ async def create_project_record(
     key: str,
     description: str | None = None,
     personal_owner_id: UUID | None = None,
+    project_id: UUID | None = None,
+    is_template: bool = False,
+    template_anchor_on: date | None = None,
 ) -> Project:
     """Проект + этапы + owner-членство БЕЗ commit'а и БЕЗ проверки прав.
 
     `personal_owner_id` — только для личного пространства; значение обязано
     приходить из `principal.employee_id`, никогда из тела запроса (см.
     инвариант в `app/models/project.py`).
+
+    Шаблон (0060): вызывающий заранее открывает область `'<project_id>'`
+    (`app/db.py::set_template_scope`) — иначе INSERT не пройдёт политику RLS,
+    — поэтому id передаётся снаружи. Автор в состав шаблона НЕ входит: состав
+    шаблона — это будущие участники проектов из него, а правит шаблон автор
+    по праву авторства (решение владельца «автор — только если добавлен явно»).
     """
     project = Project(
-        id=uuid4(),
+        id=project_id or uuid4(),
         tenant_id=tenant_id,
         key=key,
         name=name,
         description=description,
         created_by=created_by,
         personal_owner_id=personal_owner_id,
+        is_template=is_template,
+        template_anchor_on=template_anchor_on,
     )
     db.add(project)
     await db.flush()
+    if is_template:
+        return project
     # Колонок у нового проекта НЕТ. Четыре стартовые («К выполнению», «В
     # работе», «На проверке», «Готово») выглядели готовой раскладкой, которую
     # никто не выбирал; теперь доска пуста, пока человек не создаст первую

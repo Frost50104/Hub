@@ -9,7 +9,7 @@ from signaris_auth import Principal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_db, require_auth
+from app.deps import get_db_template_page, require_auth
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskActivity
 from app.schemas.activity import ActivityResponse
@@ -23,7 +23,7 @@ async def list_activity(
     task_id: UUID,
     limit: int = Query(default=100, ge=1, le=500),
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> list[ActivityResponse]:
     task = await db.get(Task, task_id)
     if task is None:

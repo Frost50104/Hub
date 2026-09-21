@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import enforce_rate_limit, get_db, require_auth
+from app.deps import enforce_rate_limit, get_db_template_page, require_auth
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskComment, TaskWatcher  # noqa: F401 — used below
 from app.schemas.comment import CommentCreate, CommentResponse, CommentUpdate
@@ -154,7 +154,7 @@ async def _list_with_authors(
 async def list_comments(
     task_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> list[CommentResponse]:
     task = await _fetch_task_visible(db, task_id, principal)
     return await _list_with_authors(db, task_id, task.tenant_id)
@@ -169,7 +169,7 @@ async def create_comment(
     task_id: UUID,
     body: CommentCreate,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> CommentResponse:
     await enforce_rate_limit(
         bucket="comment:write",
@@ -178,6 +178,13 @@ async def create_comment(
         window_sec=60,
     )
     task = await _fetch_task_visible(db, task_id, principal)
+    if task.is_template:
+        # Комментарии в шаблоне не ведутся (0060): в проект они не копируются,
+        # а упоминание вписывало бы людей в состав будущих проектов.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="В шаблоне комментарии не ведутся — они не переносятся в проекты",
+        )
 
     mentioned_ids = await resolve_mentions(
         db, text=body.body, tenant_id=task.tenant_id
@@ -283,7 +290,7 @@ async def update_comment(
     comment_id: UUID,
     body: CommentUpdate,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> CommentResponse:
     comment = await db.get(TaskComment, comment_id)
     if comment is None or comment.deleted_at is not None:
@@ -326,7 +333,7 @@ async def update_comment(
 async def delete_comment(
     comment_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     comment = await db.get(TaskComment, comment_id)
     if comment is None or comment.deleted_at is not None:

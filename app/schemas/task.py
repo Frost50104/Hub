@@ -245,6 +245,8 @@ class TaskResponse(BaseModel):
     # useUpdateTask кладёт в кэш свой патч, а не ответ (web/src/hooks/useTasks.ts);
     # ответ с None затёр бы флаг и погасил контрол сразу после успешного клика.
     can_complete: bool | None = None
+    # Задача шаблона проекта (0060): клиент гасит просрочку и галочку.
+    is_template: bool = False
 
 
 def resolve_assignee_ids(body: TaskCreate | TaskUpdate) -> list[UUID] | None:

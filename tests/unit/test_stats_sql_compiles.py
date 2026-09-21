@@ -73,3 +73,10 @@ def test_windows_are_bounded_on_both_sides():
         sql = _sql(stmt)
         assert sql.count(">=") >= 2
         assert sql.count("<") >= 2
+
+
+def test_my_created_excludes_template_copies():
+    # Проект по шаблону на 1 745 задач не должен давать «+1 745 создано» (0060).
+    sql = _sql(my_created_stmt(EMPLOYEE, NOW))
+    assert "tasks.template_copy IS false" in sql
+    assert "tasks.recurrence_parent_id IS NULL" in sql

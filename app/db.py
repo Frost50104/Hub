@@ -35,6 +35,14 @@ _log = structlog.get_logger("db")
 # листенер игнорирует — для них GUC не ставятся вовсе (RLS fail-closed).
 _RLS_INFO_KEY = "rls_scope"
 
+# Область шаблонов проектов (0060) — ОТДЕЛЬНЫЙ ключ, а не третий элемент пары
+# `_RLS_INFO_KEY`: пару `(tenant_id, bypass)` распаковывают и чужие фабрики
+# (deletion-sync из lib), и расширение кортежа уронило бы их. Значения:
+# '' — шаблоны закрыты (по умолчанию), 'all' — библиотека, '<uuid>' — один
+# шаблон. Политики `projects_rls`/`tasks_rls` читают `app.template_scope`.
+_TEMPLATE_SCOPE_KEY = "template_scope"
+TEMPLATE_SCOPE_ALL = "all"
+
 
 class Base(DeclarativeBase):
     """Base for all ORM models."""
@@ -74,15 +82,21 @@ def _apply_rls_on_begin(session: Session, transaction, connection) -> None:  # n
     if scope is None:
         return
     tenant_id, bypass_rls = scope
-    if bypass_rls:
-        connection.execute(text("SELECT set_config('app.bypass_rls', 'on', true)"))
-        connection.execute(text("SELECT set_config('app.tenant_id', '', true)"))
-    else:
-        connection.execute(text("SELECT set_config('app.bypass_rls', '', true)"))
-        connection.execute(
-            text("SELECT set_config('app.tenant_id', :tid, true)"),
-            {"tid": str(tenant_id) if tenant_id else ""},
-        )
+    # Три GUC одним запросом. Область шаблонов ставится ВСЕГДА, в том числе
+    # пустой: иначе соединение из пула с оставшимся 'all' открыло бы шаблоны
+    # чужому запросу (тот же класс ошибки, что утечка тенанта 01.08).
+    connection.execute(
+        text(
+            "SELECT set_config('app.bypass_rls', :bypass, true), "
+            "set_config('app.tenant_id', :tid, true), "
+            "set_config('app.template_scope', :tpl, true)"
+        ),
+        {
+            "bypass": "on" if bypass_rls else "",
+            "tid": "" if bypass_rls or not tenant_id else str(tenant_id),
+            "tpl": session.info.get(_TEMPLATE_SCOPE_KEY, ""),
+        },
+    )
 
 
 _engine: AsyncEngine | None = None
@@ -145,17 +159,54 @@ def bypass_session_factory() -> Callable[[], AsyncSession]:
     return _make
 
 
+async def set_template_scope(session: AsyncSession, value: str) -> None:
+    """Открыть область шаблонов проектов в этой сессии: `'all'` или `'<uuid>'`.
+
+    Пишет `session.info` (для следующих транзакций — ручки коммитят посреди
+    запроса и потом делают refresh) и сразу ставит GUC в текущей.
+
+    Сменить область на ДРУГУЮ нельзя: в identity map могли остаться объекты,
+    загруженные под прежней, а сужение сделало бы их «видимыми вопреки RLS».
+    Внутри SAVEPOINT тоже нельзя: его откат снял бы `SET LOCAL`, а `info`
+    осталось бы открытым — сессия разошлась бы сама с собой.
+    """
+    if not value:
+        raise ValueError("пустая область шаблона — это закрытие, оно не поддерживается")
+    current = session.info.get(_TEMPLATE_SCOPE_KEY, "")
+    if current == value:
+        return
+    if current:
+        raise RuntimeError("область шаблона уже открыта для другого объекта")
+    if session.in_nested_transaction():
+        raise RuntimeError("нельзя открывать область шаблона внутри SAVEPOINT")
+    # Порядок важен: если транзакция ещё не начата, execute запустит
+    # autobegin, и листенер уже прочтёт новое значение из info.
+    session.info[_TEMPLATE_SCOPE_KEY] = value
+    await session.execute(
+        text("SELECT set_config('app.template_scope', :v, true)"), {"v": value}
+    )
+
+
+def template_scope_of(session: AsyncSession) -> str:
+    """Текущая область шаблонов сессии ('' — закрыта)."""
+    return session.info.get(_TEMPLATE_SCOPE_KEY, "")
+
+
 @asynccontextmanager
 async def tenant_scoped_session(
     tenant_id: UUID | None,
     *,
     bypass_rls: bool = False,
+    template_scope: str = "",
 ) -> AsyncIterator[AsyncSession]:
     """Open a session bound to a tenant via Postgres session vars.
 
     - tenant_id=None + bypass_rls=True: system worker, RLS off.
     - tenant_id=UUID  + bypass_rls=False: normal tenant scope, RLS enforced.
     - tenant_id=None  + bypass_rls=False: rejected.
+
+    `template_scope` — область шаблонов проектов (0060); по умолчанию закрыта,
+    и шаблоны не видны даже под bypass.
     """
     if tenant_id is None and not bypass_rls:
         raise ValueError("tenant_id required unless bypass_rls=True")
@@ -168,6 +219,8 @@ async def tenant_scoped_session(
         # этого session-level set_config терялся после первого commit'а, и RLS
         # подставлял чужой tenant). Здесь только фиксируем желаемый скоуп.
         session.info[_RLS_INFO_KEY] = (tenant_id, bypass_rls)
+        if template_scope:
+            session.info[_TEMPLATE_SCOPE_KEY] = template_scope
 
         if get_settings().debug_rls:
             row = (

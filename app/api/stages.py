@@ -21,12 +21,12 @@ from signaris_auth import Principal
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import enforce_rate_limit, get_db, require_auth
+from app.deps import enforce_rate_limit, get_db_template_page, require_auth
 from app.models.stage import ProjectStage
 from app.models.task import Task
 from app.schemas.stage import StageCreate, StageResponse, StageUpdate
 from app.services.personal_projects import is_foreign_personal
-from app.services.project_access import require_project_role
+from app.services.project_access import open_template_if_hidden, require_project_role
 from app.services.stages import get_stage_in_project, list_stages
 
 router = APIRouter(tags=["stages"])
@@ -38,7 +38,7 @@ _DEFER = text("SET CONSTRAINTS uq_project_stages_project_position DEFERRED")
 async def list_project_stages(
     project_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> list[StageResponse]:
     project, _role = await require_project_role(db, project_id, principal)
     # Гостю ЧУЖОГО личного — пусто: в ответе ещё и счётчики задач по колонкам,
@@ -73,7 +73,7 @@ async def create_stage(
     project_id: UUID,
     body: StageCreate,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> StageResponse:
     await enforce_rate_limit(
         bucket="task:write", employee_id=str(principal.employee_id), limit=120, window_sec=60
@@ -113,7 +113,7 @@ async def update_stage(
     stage_id: UUID,
     body: StageUpdate,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> StageResponse:
     await enforce_rate_limit(
         bucket="task:write", employee_id=str(principal.employee_id), limit=120, window_sec=60
@@ -121,6 +121,8 @@ async def update_stage(
     stage = await db.get(ProjectStage, stage_id)
     if stage is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Этап не найден")
+    # Колонка — дочерний объект: id шаблона в пути нет, открываем явно.
+    await open_template_if_hidden(db, principal, project_id=stage.project_id, mode="edit")
     await require_project_role(db, stage.project_id, principal, allow=("owner", "editor"))
 
     if body.name is not None:
@@ -176,7 +178,7 @@ async def delete_stage(
         description="Оставить задачи колонки без колонки вместо переноса",
     ),
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     await enforce_rate_limit(
         bucket="task:write", employee_id=str(principal.employee_id), limit=120, window_sec=60
@@ -184,6 +186,8 @@ async def delete_stage(
     stage = await db.get(ProjectStage, stage_id)
     if stage is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Этап не найден")
+    # Колонка — дочерний объект: id шаблона в пути нет, открываем явно.
+    await open_template_if_hidden(db, principal, project_id=stage.project_id, mode="edit")
     await require_project_role(db, stage.project_id, principal, allow=("owner", "editor"))
     # Проверки «это последняя колонка» здесь больше нет: проект без колонок —
     # штатное состояние, и создав первую колонку по ошибке, из него надо уметь

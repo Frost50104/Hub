@@ -32,10 +32,14 @@ for SRC in /opt/signaris-hub/attachments; do
   DEST="$BACKUP_ROOT/$ENV_NAME/$STAMP"
   LATEST="$BACKUP_ROOT/$ENV_NAME/latest"
   mkdir -p "$DEST"
+  # -H (21.09): шаблоны проектов (0060) копируют вложения ЖЁСТКОЙ ССЫЛКОЙ —
+  # два пути на один inode. Без -H снимок получал бы на каждую копию отдельный
+  # файл, и проект по шаблону с видео на гигабайт стоил бы гигабайт в каждом
+  # новом снимке. `--link-dest` с -H совместим.
   if [[ -d "$LATEST" ]]; then
-    rsync -a --delete --link-dest="$(readlink -f "$LATEST")" "$SRC/" "$DEST/"
+    rsync -aH --delete --link-dest="$(readlink -f "$LATEST")" "$SRC/" "$DEST/"
   else
-    rsync -a "$SRC/" "$DEST/"
+    rsync -aH "$SRC/" "$DEST/"
   fi
   ln -sfn "$DEST" "$LATEST"
   echo "files backup ok: $DEST ($(du -sh "$DEST" | cut -f1))"

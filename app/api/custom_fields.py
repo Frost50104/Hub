@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import enforce_rate_limit, get_db, require_auth
+from app.deps import enforce_rate_limit, get_db_template_page, require_auth
 from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
 from app.models.shadow import ShadowUser
 from app.models.task import Task
@@ -67,7 +67,7 @@ async def _next_position(db: AsyncSession, project_id: UUID) -> Decimal:
 async def list_custom_fields(
     project_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> list[CustomFieldDefinitionResponse]:
     project, _role = await require_project_role(db, project_id, principal)
     # Гостю ЧУЖОГО личного — пусто: определения полей принадлежат проекту
@@ -93,7 +93,7 @@ async def create_custom_field(
     project_id: UUID,
     body: CustomFieldDefinitionCreate,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> CustomFieldDefinitionResponse:
     await require_project_role(db, project_id, principal, allow=("owner",))
 
@@ -141,7 +141,7 @@ async def update_custom_field(
     field_id: UUID,
     body: CustomFieldDefinitionUpdate,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> CustomFieldDefinitionResponse:
     await require_project_role(db, project_id, principal, allow=("owner",))
 
@@ -190,7 +190,7 @@ async def delete_custom_field(
     project_id: UUID,
     field_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     await require_project_role(db, project_id, principal, allow=("owner",))
     definition = await db.get(CustomFieldDefinition, field_id)
@@ -225,7 +225,7 @@ async def _fetch_task_visible(
 async def list_task_custom_values(
     task_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> list[CustomFieldValueResponse]:
     await _fetch_task_visible(db, task_id, principal)
     rows = await db.execute(
@@ -241,7 +241,7 @@ async def list_task_custom_values(
 async def list_project_custom_values(
     project_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> list[CustomFieldValueResponse]:
     """Batch endpoint — every value for every task in this project.
 
@@ -274,7 +274,7 @@ async def set_task_custom_value(
     field_id: UUID,
     body: CustomFieldValueSet,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> CustomFieldValueResponse:
     await enforce_rate_limit(
         bucket="task:write",
@@ -343,7 +343,7 @@ async def clear_task_custom_value(
     task_id: UUID,
     field_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     task = await _fetch_task_visible(db, task_id, principal)
     await require_task_access(

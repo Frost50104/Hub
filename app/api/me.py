@@ -21,7 +21,8 @@ from app.deps import get_db, require_auth, require_auth_any
 from app.services.employee_profiles import ensure_profile_for_principal
 from app.services.guides import GuideLink, guides_for_role
 from app.services.personal_projects import ensure_personal_project
-from app.services.project_access import can_create_project
+from app.services.project_access import can_create_project, is_hub_admin
+from app.services.project_templates import gate as templates_gate
 from app.services.race.gate import race_enabled_for
 from app.services.user_prefs import get_theme, set_theme
 
@@ -43,6 +44,11 @@ class MeFeatures(BaseModel):
     фронт трактует как «выключено»."""
 
     race: bool = False
+    # Шаблоны проектов (0060): модуль включён для тенанта. `_admin` — env-флаг
+    # включён и человек hub-admin: ему пункт «Шаблоны» виден ВСЕГДА, потому
+    # что тумблер модуля живёт на экране библиотеки.
+    project_templates: bool = False
+    project_templates_admin: bool = False
 
 
 class MeResponse(BaseModel):
@@ -126,6 +132,11 @@ async def get_me(
     # которую ensure_* могли откатить до SAVEPOINT.
     theme = await get_theme(db, principal.employee_id)
     race_on = await race_enabled_for(db, principal.tenant_id) if hub_role is not None else False
+    templates_on = (
+        await templates_gate.templates_enabled_for(db, principal.tenant_id)
+        if hub_role is not None
+        else False
+    )
     return MeResponse(
         employee_id=principal.employee_id,
         email=principal.email,
@@ -140,7 +151,11 @@ async def get_me(
         personal_project_id=personal_project_id,
         guides=guides_for_role(hub_role),
         theme=theme,
-        features=MeFeatures(race=race_on),
+        features=MeFeatures(
+            race=race_on,
+            project_templates=templates_on,
+            project_templates_admin=templates_gate.env_enabled() and is_hub_admin(principal),
+        ),
     )
 
 

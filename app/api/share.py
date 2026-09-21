@@ -61,6 +61,16 @@ def _to_response(row: PublicShareToken) -> ShareResponse:
     )
 
 
+def _assert_not_template(is_template: bool) -> None:
+    """Шаблон (0060) наружу не публикуется. Шаринг область шаблона не
+    открывает — сюда дойдёт разве что будущая правка, забывшая об этом."""
+    if is_template:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Шаблон нельзя опубликовать ссылкой",
+        )
+
+
 # ─── Create ────────────────────────────────────────────────────────────────
 
 
@@ -83,6 +93,7 @@ async def create_project_share(
     # (api/public.py::_build_project_view) — для личного это выгрузка личных
     # заметок наружу. Шеринг одной задачи остаётся: это явный акт над ней.
     assert_not_personal(project, action="публиковать ссылкой")
+    _assert_not_template(project.is_template)
     record = PublicShareToken(
         tenant_id=principal.tenant_id,
         scope="project",
@@ -116,6 +127,7 @@ async def create_task_share(
     await require_task_access(
         db, task, principal, allow=("owner", "editor")
     )
+    _assert_not_template(task.is_template)
     record = PublicShareToken(
         tenant_id=principal.tenant_id,
         scope="task",

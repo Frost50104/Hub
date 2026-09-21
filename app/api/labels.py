@@ -19,7 +19,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import enforce_rate_limit, get_db, require_auth
+from app.deps import enforce_rate_limit, get_db_template_page, require_auth
 from app.models.task import Task, TaskLabel, TaskLabelAssignment
 from app.schemas.label import (
     LabelAssignmentResponse,
@@ -56,7 +56,7 @@ async def _assert_unique_name(
 async def list_labels(
     project_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> list[LabelResponse]:
     project, _role = await require_project_role(db, project_id, principal)
     # Гостю ЧУЖОГО личного — пусто: метки принадлежат всему проекту, урезать их
@@ -81,7 +81,7 @@ async def create_label(
     project_id: UUID,
     body: LabelCreate,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> LabelResponse:
     await require_project_role(db, project_id, principal, allow=("owner",))
     await _assert_unique_name(db, project_id, body.name)
@@ -107,7 +107,7 @@ async def update_label(
     label_id: UUID,
     body: LabelUpdate,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> LabelResponse:
     await require_project_role(db, project_id, principal, allow=("owner",))
 
@@ -134,7 +134,7 @@ async def delete_label(
     project_id: UUID,
     label_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     await require_project_role(db, project_id, principal, allow=("owner",))
 
@@ -158,7 +158,7 @@ async def delete_label(
 async def list_label_assignments(
     project_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> list[LabelAssignmentResponse]:
     await require_project_role(db, project_id, principal)
     rows = await db.execute(
@@ -207,7 +207,7 @@ async def assign_label(
     task_id: UUID,
     label_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     await enforce_rate_limit(
         bucket="task:write",
@@ -243,7 +243,7 @@ async def unassign_label(
     task_id: UUID,
     label_id: UUID,
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
     await enforce_rate_limit(
         bucket="task:write",

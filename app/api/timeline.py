@@ -23,7 +23,7 @@ from signaris_auth import Principal
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_db, require_auth
+from app.deps import get_db_template_page, require_auth
 from app.models.dependency import TaskDependency
 from app.models.task import Task
 from app.schemas.dependency import TaskDependencyResponse
@@ -62,7 +62,7 @@ async def get_timeline(
     to: str = Query(...),
     include_undated: bool = Query(False),
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> TimelineResponse:
     project, _ = await require_project_role(db, project_id, principal)
     assert_full_project_access(project, principal)

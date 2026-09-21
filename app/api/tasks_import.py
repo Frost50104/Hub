@@ -31,7 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import enforce_rate_limit, get_db, require_auth
+from app.deps import enforce_rate_limit, get_db_template_page, require_auth
 from app.models.shadow import ShadowUser
 from app.models.stage import ProjectStage
 from app.models.task import TaskLabel, TaskLabelAssignment
@@ -89,7 +89,7 @@ async def import_tasks(
     file: UploadFile = File(...),
     dry_run: bool = Query(default=False),
     principal: Principal = Depends(require_auth()),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_template_page),
 ) -> TaskImportReport:
     await enforce_rate_limit(
         bucket="task:import", employee_id=str(principal.employee_id), limit=5, window_sec=60

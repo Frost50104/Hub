@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -78,6 +78,11 @@ class ProjectUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=DESCRIPTION_MAX)
 
 
+class TemplateRef(BaseModel):
+    id: UUID
+    name: str | None
+
+
 class ProjectResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -117,6 +122,13 @@ class ProjectResponse(BaseModel):
     # платить за лишний запрос на каждое переименование незачем.
     task_count: int | None = None
     done_count: int | None = None
+    # Шаблоны проектов (0060). `is_template` — клиент прячет шаринг, архив,
+    # звезду, галочки и просрочку; `template_anchor_on` — точка отсчёта дат
+    # шаблона; `created_from_template` — откуда создан живой проект (имя —
+    # снимком: под замком живой проект шаблон не видит).
+    is_template: bool = False
+    template_anchor_on: date | None = None
+    created_from_template: TemplateRef | None = None
 
 
 class ProjectFavoriteUpdate(BaseModel):

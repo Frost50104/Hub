@@ -616,6 +616,9 @@ def my_created_stmt(employee_id: UUID, now: datetime):
             # задача добавляет автору +365 в год и график перестаёт что-либо
             # значить.
             Task.recurrence_parent_id.is_(None),
+            # То же для копий шаблона (0060): проект по шаблону на 1 745 задач
+            # иначе дал бы создавшему «+1 745 создано за неделю».
+            Task.template_copy.is_(False),
         )
     )
 

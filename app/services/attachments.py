@@ -10,9 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
+import os
 import re
+import shutil
 import unicodedata
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
@@ -310,6 +314,40 @@ def absolute_path(storage_key: str) -> Path:
     if not str(candidate).startswith(str(root) + "/") and candidate != root:
         raise ValueError(f"storage_key escapes attachments root: {storage_key}")
     return candidate
+
+
+CloneOutcome = Literal["linked", "copied", "missing"]
+
+
+def clone_blob(src_key: str, dst_key: str) -> CloneOutcome:
+    """Второй путь к тем же байтам: жёсткая ссылка, иначе полная копия. СИНХРОННАЯ.
+
+    Для копирования проекта по шаблону (0060). Делить один `storage_key` между
+    двумя строками нельзя — `purge_blobs` удаляет ПО ПУТИ, и удаление шаблона
+    унесло бы файл у живого проекта (ровно поэтому повтор задач вложения не
+    копирует). Разные пути на один inode безопасны: `unlink` снимает только
+    свою ссылку. Опасна лишь запись ПОВЕРХ существующего пути — её делают
+    только разовые импорты (`storage_key_for(..., unique=…)`), живые загрузки
+    всегда пишут в свежий uuid-путь.
+
+    Звать через `asyncio.to_thread`: прод крутится на одном воркере.
+    Нет исходного файла — `missing`: вложение пропускается, отчёт его называет.
+    """
+    src = absolute_path(src_key)
+    dst = absolute_path(dst_key)
+    if not src.is_file():
+        return "missing"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(src, dst)
+        return "linked"
+    except OSError as exc:
+        # EXDEV — другой раздел, EMLINK — потолок ссылок, EPERM — ФС без
+        # жёстких ссылок. Всё остальное — настоящая ошибка.
+        if exc.errno not in (errno.EXDEV, errno.EMLINK, errno.EPERM, errno.ENOTSUP):
+            raise
+    shutil.copyfile(src, dst)
+    return "copied"
 
 
 def purge_blobs(keys: list[str]) -> None:

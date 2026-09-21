@@ -71,9 +71,14 @@ async def generate_unique_key(
     db: AsyncSession, *, name: str, tenant_id: UUID, max_len: int = _MAX_LEN
 ) -> str:
     base = _candidate(name, max_len=max_len)
+    # Только ЖИВЫЕ проекты: ключи шаблонов (0060) вне пространства ключей
+    # (частичный UNIQUE `WHERE NOT is_template`). При открытой области шаблон
+    # был бы виден, и проект из шаблона «OTK» получал бы «OTK2» зря.
     rows = await db.execute(
         select(Project.key).where(
-            Project.tenant_id == tenant_id, Project.key.like(f"{base}%")
+            Project.tenant_id == tenant_id,
+            Project.key.like(f"{base}%"),
+            Project.is_template.is_(False),
         )
     )
     used = {row[0] for row in rows.all()}
