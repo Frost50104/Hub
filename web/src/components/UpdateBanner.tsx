@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { useAppUpdate } from '@/hooks/useAppUpdate'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { shouldOfferUpdate } from '@/lib/appVersion'
+import { purgePrecachedShell } from '@/lib/precacheShell'
 
 // 30 с, а не 60: деплоев в день много, а с 16.09 баннер сам ничего не
 // перезагружает — значит узнать об обновлении раньше стало дёшево, и человек
@@ -73,6 +74,16 @@ export function UpdateBanner() {
   // Версия, отложенная кнопкой «Позже»: откладывается КОНКРЕТНАЯ версия, и
   // следующая новая покажется снова.
   const [dismissed, setDismissed] = useState<string | null>(null)
+
+  // Самолечение воркера, собранного до 21.09 (ОС 22.09, Safari): он держит
+  // `index.html` в прекеше и отдаёт на `/` старую оболочку со старым бандлом,
+  // а сам не заменяется. Удаляем запись — и `/` у него уходит в сеть. У
+  // нынешнего воркера HTML в прекеше нет, для него это пустой проход. Страницу
+  // НЕ перезагружаем: свежая оболочка приедет со следующей навигацией.
+  // Подробности — `lib/precacheShell.ts`.
+  useEffect(() => {
+    void purgePrecachedShell()
+  }, [])
 
   // Опрос версии живёт ОТДЕЛЬНО от опроса воркера и не зависит от него:
   // в Safari `serviceWorker.ready` и `update()` подводят, а этот путь — нет.

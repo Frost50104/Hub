@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { shouldOfferUpdate } from '@/lib/appVersion'
+import { purgePrecachedShell } from '@/lib/precacheShell'
 import { TIMEOUT, withTimeout } from '@/lib/withTimeout'
 
 /** Сколько ждём, пока найденное обновление доустановится до `waiting`. */
@@ -19,6 +20,11 @@ const CONTROLLER_TIMEOUT_MS = 3_000
  * отрабатывает за 1,6 с.
  */
 const UPDATE_TIMEOUT_MS = 8_000
+/**
+ * Потолок чистки прекеша перед перезагрузкой. Кнопка не должна повиснуть на
+ * хранилище: в Safari уже был промис, который не резолвится вовсе (`update()`).
+ */
+const PURGE_TIMEOUT_MS = 2_000
 
 export type AppUpdateStatus = 'idle' | 'checking' | 'applying'
 
@@ -67,7 +73,7 @@ export function useAppUpdate(): {
         // просто перезагрузка: index.html отдаётся с no-cache, поэтому свежий
         // бандл приедет.
         if (!registration) {
-          window.location.reload()
+          await reloadFresh()
           return
         }
 
@@ -88,9 +94,13 @@ export function useAppUpdate(): {
           // `index.html` отдаётся с `no-store`. Пока HTML лежал в прекеше, эта
           // ветка под старым воркером возвращала на `/` старую оболочку. Ровно
           // этот путь спасает в Safari, где SW не отвечает.
+          //
+          // Для воркера, собранного ДО 21.09, «HTML не в прекеше» неверно: он
+          // держит `index.html` у себя и в Safari не заменяется (ОС 22.09) —
+          // поэтому перед перезагрузкой запись удаляется (`reloadFresh`).
           const server = await fetchServerVersion()
           if (shouldOfferUpdate(__APP_VERSION__, server)) {
-            window.location.reload()
+            await reloadFresh()
             return
           }
           if (!alive.current) return
@@ -112,7 +122,9 @@ export function useAppUpdate(): {
         if (alive.current) setStatus('applying')
         waiting.postMessage({ type: 'SKIP_WAITING' })
         await waitForController(CONTROLLER_TIMEOUT_MS)
-        window.location.reload()
+        // Если `controllerchange` не пришёл, перезагрузка идёт под старым
+        // воркером — чистка и здесь.
+        await reloadFresh()
       } catch {
         // Чаще всего — офлайн: registration.update() бросает на сетевой ошибке.
         if (!alive.current) return
@@ -125,6 +137,16 @@ export function useAppUpdate(): {
   }, [status])
 
   return { status, checkForUpdate }
+}
+
+/**
+ * Перезагрузка, после которой `/` точно придёт из сети: сначала HTML-оболочка
+ * удаляется из прекеша (старый воркер иначе отдал бы её копию), потом reload.
+ * Чистка ограничена по времени и не бросает — перезагрузка будет в любом случае.
+ */
+async function reloadFresh(): Promise<void> {
+  await withTimeout(purgePrecachedShell(), PURGE_TIMEOUT_MS)
+  window.location.reload()
 }
 
 /** Версия на сервере; `null` — узнать не удалось. */
