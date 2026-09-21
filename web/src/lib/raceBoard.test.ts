@@ -226,12 +226,31 @@ describe('ТВ и URL', () => {
     expect(empty[0]?.rows).toEqual([])
   })
 
-  it('setRaceParams не трогает чужие ключи и убирает дефолты', () => {
-    const params = new URLSearchParams('tab=race&league=L1')
-    const next = setRaceParams(params, { league: 'all', store: 'S' })
+  it('setRaceParams не трогает чужие ключи, пустые значения убирает, «Общий забег» хранит', () => {
+    const params = new URLSearchParams('tab=race&league=L1&race=r1')
+    const next = setRaceParams(params, { league: 'all', store: 'S', race: null })
     expect(next.get('tab')).toBe('race')
-    expect(next.get('league')).toBeNull()
+    // `all` — явный выбор: по умолчанию экран открывает лигу моей точки.
+    expect(next.get('league')).toBe('all')
+    expect(next.get('race')).toBeNull()
     expect(next.get('store')).toBe('S')
-    expect(resolveRaceParams(next)).toEqual({ league: null, race: null, store: 'S' })
+    expect(resolveRaceParams(next)).toEqual({ league: 'all', race: null, store: 'S' })
+    expect(setRaceParams(next, { league: '' }).get('league')).toBeNull()
+  })
+
+  it('участник лиги может переключиться на «Общий забег» и вернуться в лигу', () => {
+    // Баг 21.09: `all` стирался из адреса, и `resolveView` без параметра
+    // возвращал лигу моей точки — кнопка «Общий забег» не срабатывала.
+    const parts = [
+      p({ name: 'А', league_id: 'L1', place: 1 }),
+      p({ name: 'Б', league_id: 'L2', place: 2 }),
+    ]
+    const viewAfter = (league: string | null) => {
+      const url = setRaceParams(new URLSearchParams('tab=race'), { league })
+      return resolveView(resolveRaceParams(url).league, contest(), parts, 'Б')
+    }
+    expect(viewAfter(null)).toBe('L2')
+    expect(viewAfter('all')).toBe('all')
+    expect(viewAfter('L1')).toBe('L1')
   })
 })

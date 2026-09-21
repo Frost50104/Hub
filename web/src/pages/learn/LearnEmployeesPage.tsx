@@ -130,10 +130,16 @@ export function LearnEmployeesPage() {
   const renderProfileRow = (e: EmployeeProfile) => (
     <li key={e.id}>
                 <button
-                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
+                  className="flex w-full flex-wrap items-center gap-3 gap-y-1.5 px-4 py-2.5 text-left hover:bg-surface/50 md:flex-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
                   onClick={() => setCardOpen(e)}
                 >
-                  <div className="min-w-0 flex-1">
+                  {/* На телефоне имени гарантированы 160 px, а бейджи одной
+                      группой уезжают на вторую строку, если не помещаются
+                      рядом (ОС 21.09: у 13 строк — ТУ, приглашённые, офис —
+                      ФИО сжималось в 0, а экран ездил вбок до 519 px). У
+                      `Badge` базовый `shrink-0`, поэтому сжимать некому, кроме
+                      имени. С md — прежняя однострочная раскладка. */}
+                  <div className="min-w-0 grow basis-40 md:basis-0">
                     <p className={cn('truncate text-sm font-medium', e.status === 'archived' ? 'text-text3' : 'text-text')}>
                       {e.full_name}
                     </p>
@@ -143,38 +149,40 @@ export function LearnEmployeesPage() {
                         .join(' · ')}
                     </p>
                   </div>
-                  {e.hub_role && (
-                    <Badge variant="outline" className="text-text2">
-                      {HUB_ROLE_LABEL[e.hub_role] ?? e.hub_role}
-                    </Badge>
-                  )}
-                  {e.org_role !== 'employee' && (
-                    <Badge variant="outline">{ORG_ROLE_LABEL[e.org_role]}</Badge>
-                  )}
-                  {/* Честный статус учётки — одна серверная функция вместо
-                      двух рассинхронённых признаков (staff-sync, 0052).
-                      Фолбэк для протухшего кэша без auth_state — старое
-                      правило по employee_id. */}
-                  {e.status === 'active' && showAuthStateBadge(e.auth_state as AuthState | null) && (
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        authStateTone(e.auth_state as AuthState) === 'red' ? 'text-red' : 'text-amber',
-                      )}
-                    >
-                      {AUTH_STATE_LABEL[e.auth_state as AuthState]}
-                    </Badge>
-                  )}
-                  {e.status === 'active' && e.auth_state == null && e.employee_id === null && (
-                    <Badge variant="outline" className="text-amber">
-                      ещё не входил
-                    </Badge>
-                  )}
-                  {e.status === 'archived' && (
-                    <Badge variant="outline" className="text-text3">
-                      архив
-                    </Badge>
-                  )}
+                  <span className="flex flex-wrap items-center gap-1.5 md:shrink-0 md:flex-nowrap md:gap-3">
+                    {e.hub_role && (
+                      <Badge variant="outline" className="text-text2">
+                        {HUB_ROLE_LABEL[e.hub_role] ?? e.hub_role}
+                      </Badge>
+                    )}
+                    {e.org_role !== 'employee' && (
+                      <Badge variant="outline">{ORG_ROLE_LABEL[e.org_role]}</Badge>
+                    )}
+                    {/* Честный статус учётки — одна серверная функция вместо
+                        двух рассинхронённых признаков (staff-sync, 0052).
+                        Фолбэк для протухшего кэша без auth_state — старое
+                        правило по employee_id. */}
+                    {e.status === 'active' && showAuthStateBadge(e.auth_state as AuthState | null) && (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          authStateTone(e.auth_state as AuthState) === 'red' ? 'text-red' : 'text-amber',
+                        )}
+                      >
+                        {AUTH_STATE_LABEL[e.auth_state as AuthState]}
+                      </Badge>
+                    )}
+                    {e.status === 'active' && e.auth_state == null && e.employee_id === null && (
+                      <Badge variant="outline" className="text-amber">
+                        ещё не входил
+                      </Badge>
+                    )}
+                    {e.status === 'archived' && (
+                      <Badge variant="outline" className="text-text3">
+                        архив
+                      </Badge>
+                    )}
+                  </span>
                 </button>
       </li>
   )
@@ -309,20 +317,22 @@ export function LearnEmployeesPage() {
                      терялись в блоке из 69 над списком. */
                   <li
                     key={row.id}
-                    className="flex items-center gap-3 px-4 py-2.5"
+                    className="flex flex-wrap items-center gap-3 gap-y-1.5 px-4 py-2.5 md:flex-nowrap"
                   >
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 grow basis-40 md:basis-0">
                       <p className="truncate text-sm font-medium text-text">{row.name}</p>
                       <p className="truncate text-xs text-text3">{row.invitation.email}</p>
                     </div>
-                    {row.invitation.role && (
-                      <Badge variant="outline" className="text-text2">
-                        {HUB_ROLE_LABEL[row.invitation.role] ?? row.invitation.role}
+                    <span className="flex flex-wrap items-center gap-1.5 md:shrink-0 md:flex-nowrap md:gap-3">
+                      {row.invitation.role && (
+                        <Badge variant="outline" className="text-text2">
+                          {HUB_ROLE_LABEL[row.invitation.role] ?? row.invitation.role}
+                        </Badge>
+                      )}
+                      <Badge variant="outline" className="text-amber">
+                        Приглашён(а), карточки нет
                       </Badge>
-                    )}
-                    <Badge variant="outline" className="text-amber">
-                      Приглашён(а), карточки нет
-                    </Badge>
+                    </span>
                   </li>
                 ) : (
                   renderProfileRow(row.profile)

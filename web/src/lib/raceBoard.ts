@@ -245,12 +245,18 @@ export function resolveRaceParams(params: URLSearchParams): RaceParams {
 }
 
 /** Меняет только свои ключи — `tab` и чужие параметры не трогает. */
+/**
+ * Правка параметров экрана гонки. `league=all` НЕ выбрасывается (21.09): вид
+ * по умолчанию — лига МОЕЙ точки (`resolveView`), поэтому «Общий забег» —
+ * явный выбор, а не умолчание. Пока `all` считался дефолтом и стирался из
+ * адреса, участник лиги нажимал «Общий забег» и тут же возвращался в свою лигу.
+ */
 export function setRaceParams(params: URLSearchParams, patch: Partial<RaceParams>): URLSearchParams {
   const next = new URLSearchParams(params)
   for (const key of ['league', 'race', 'store'] as const) {
     if (!(key in patch)) continue
     const value = patch[key]
-    if (value === null || value === undefined || value === '' || (key === 'league' && value === VIEW_ALL)) {
+    if (value === null || value === undefined || value === '') {
       next.delete(key)
     } else {
       next.set(key, value)
