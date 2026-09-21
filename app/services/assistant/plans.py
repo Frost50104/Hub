@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ai import AiPlan
+from app.schemas.comment import COMMENT_MAX_LENGTH
 from app.services.assistant.context import ToolContext
 from app.services.audit import record as audit_record
 
@@ -250,7 +251,9 @@ class PlanPatch(BaseModel):
     due_at: str | None = None
     priority: Literal["low", "medium", "high", "urgent"] | None = None
     assignees: list[str] | None = Field(default=None, max_length=10)
-    text: str | None = Field(default=None, min_length=1, max_length=4000)
+    # Тот же потолок, что у CommentCreate.body: правка текста в плане не
+    # должна пропускать то, что исполнение потом отвергнет.
+    text: str | None = Field(default=None, min_length=1, max_length=COMMENT_MAX_LENGTH)
     # Явная очистка срока: отличаем «не трогали» от «убрать».
     clear_due: bool = False
 

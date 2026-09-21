@@ -29,6 +29,7 @@ from sqlalchemy import func, select
 from app.models.project import Project, ProjectMember
 from app.models.shadow import ShadowUser
 from app.models.task import Task
+from app.schemas.comment import COMMENT_MAX_LENGTH
 from app.services.assistant.context import (
     NotFound,
     ToolContext,
@@ -175,9 +176,9 @@ class IikoReportArgs(BaseModel):
 
 class CommentArgs(BaseModel):
     task: str
-    # Потолок зеркалит CommentCreate.body: расходиться им нельзя, иначе
-    # план соберётся, а исполнение упадёт валидацией.
-    text: str = Field(min_length=1, max_length=4000)
+    # Потолок — ТОТ ЖЕ, что у CommentCreate.body (импорт, а не копия):
+    # разойдутся — план соберётся, а исполнение упадёт валидацией.
+    text: str = Field(min_length=1, max_length=COMMENT_MAX_LENGTH)
 
 
 # ─── Общие помощники ────────────────────────────────────────────────────────

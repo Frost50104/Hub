@@ -7,13 +7,20 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Потолок тела комментария задачи — тот же, что у описания задачи (20 000):
+# один лимит на «длинный текст в задаче». Был 4 000 с MVP, и отчёт на 9 279
+# символов не уходил вовсе (ОС 21.09). Зеркала: ассистент импортирует эту
+# константу (`assistant/tools.py::CommentArgs`, `assistant/plans.py::PlanPatch`),
+# клиент держит копию `web/src/lib/commentDraft.ts::COMMENT_MAX_LENGTH`.
+COMMENT_MAX_LENGTH = 20_000
+
 
 class CommentCreate(BaseModel):
-    body: str = Field(min_length=1, max_length=4000)
+    body: str = Field(min_length=1, max_length=COMMENT_MAX_LENGTH)
 
 
 class CommentUpdate(BaseModel):
-    body: str = Field(min_length=1, max_length=4000)
+    body: str = Field(min_length=1, max_length=COMMENT_MAX_LENGTH)
 
 
 class CommentResponse(BaseModel):

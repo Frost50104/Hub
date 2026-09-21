@@ -14,6 +14,7 @@ import {
 } from '@/hooks/useThreads'
 import { DrawerSection } from '@/components/task/DrawerSection'
 import { cn } from '@/lib/cn'
+import { commentLengthHint } from '@/lib/commentDraft'
 import { renderActivity } from '@/lib/taskActivity'
 import { type Comment } from '@/lib/threads'
 
@@ -102,11 +103,14 @@ export function TaskThread({ taskId }: TaskThreadProps) {
   const [historyOpen, setHistoryOpen] = useState(false)
 
   const visibleActivity = (activity.data ?? []).filter((a) => a.kind !== 'commented')
+  // Сверх лимита отправка закрыта здесь же, а не только кнопкой: Ctrl+Enter
+  // идёт мимо неё. Текст в поле остаётся целиком — `maxLength` не ставим.
+  const lengthHint = commentLengthHint(draft)
 
   const submit = async (e?: React.FormEvent) => {
     e?.preventDefault()
     const trimmed = draft.trim()
-    if (!trimmed) return
+    if (!trimmed || lengthHint.over) return
     try {
       await create.mutateAsync(trimmed)
       setDraft('')
@@ -148,6 +152,8 @@ export function TaskThread({ taskId }: TaskThreadProps) {
             value={draft}
             onValueChange={setDraft}
             placeholder="Комментарий… Наберите @ для упоминания"
+            aria-invalid={lengthHint.over || undefined}
+            aria-describedby={lengthHint.over ? 'task-thread-composer-length' : undefined}
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                 e.preventDefault()
@@ -155,13 +161,23 @@ export function TaskThread({ taskId }: TaskThreadProps) {
               }
             }}
           />
-          <div className="flex items-center justify-between">
+          {lengthHint.over && (
+            <p id="task-thread-composer-length" role="alert" className="text-[12px] text-red">
+              {lengthHint.text}
+            </p>
+          )}
+          <div className="flex items-center justify-between gap-3">
             <span className="text-[12px] text-text2">
               ⌘/Ctrl + Enter — отправить · @имя — упоминание
             </span>
-            <Button type="submit" size="sm" disabled={create.isPending || !draft.trim()}>
-              Отправить
-            </Button>
+            <div className="flex shrink-0 items-center gap-3">
+              {lengthHint.show && !lengthHint.over && (
+                <span className="text-[12px] tabular-nums text-amber">{lengthHint.text}</span>
+              )}
+              <Button type="submit" size="sm" disabled={create.isPending || !draft.trim() || lengthHint.over}>
+                Отправить
+              </Button>
+            </div>
           </div>
         </form>
       </DrawerSection>
