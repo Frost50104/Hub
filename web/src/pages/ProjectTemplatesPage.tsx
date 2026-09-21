@@ -41,7 +41,11 @@ export function ProjectTemplatesPage() {
   const me = useMe().data
   const enabled = templatesEnabled(me)
   const isAdmin = me?.features?.project_templates_admin === true
-  const templates = useTemplates(enabled)
+  // Видят библиотеку только те, кто создаёт проекты (сервер отвечает 403
+  // остальным). Без этого наблюдатель по прямой ссылке получал «Не удалось
+  // загрузить шаблоны» с кнопкой «Повторить», которая не поможет никогда.
+  const canView = enabled && me?.can_create_projects === true
+  const templates = useTemplates(canView)
   const settings = useTemplateSettings(isAdmin)
   const setEnabled = useSetTemplatesEnabled()
   const [query, setQuery] = useState('')
@@ -98,6 +102,15 @@ export function ProjectTemplatesPage() {
             ? 'Включите их тумблером выше — библиотека появится у всех, кто создаёт проекты.'
             : 'Администратор Hub ещё не включил шаблоны проектов для компании.'
         }
+      />
+    )
+  } else if (!canView) {
+    body = (
+      <EmptyState
+        layout="card"
+        icon={<Layers className="h-6 w-6" />}
+        title="Шаблоны доступны не всем"
+        text="Библиотеку шаблонов видят те, кто создаёт проекты: администраторы Hub, офис, ТУ и франчайзи."
       />
     )
   } else if (templates.isLoading) {
