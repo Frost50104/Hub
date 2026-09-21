@@ -170,3 +170,20 @@ describe('createdTaskLocation', () => {
     expect(to.search).toContain('task=T1')
   })
 })
+
+describe('createTaskTargets: текущий проект вне списка (шаблон, 0060)', () => {
+  it('шаблон со страницы попадает в цели и выбирается сам', () => {
+    const tpl = project({ id: 'tpl', name: 'Открытие точки', can_edit: true, is_template: true })
+    const targets = createTaskTargets([project()], tpl)
+    expect(targets[0]).toEqual({ value: 'tpl', label: 'Открытие точки (шаблон)' })
+    // Иначе FAB/сайдбар на странице шаблона молча клали задачу в личное.
+    expect(initialTarget(targets, 'tpl')).toBe('tpl')
+  })
+
+  it('без прав — не добавляется; уже в списке — не дублируется', () => {
+    const ro = project({ id: 'tpl', can_edit: false, is_template: true })
+    expect(createTaskTargets([project()], ro).some((t) => t.value === 'tpl')).toBe(false)
+    const p1 = project()
+    expect(createTaskTargets([p1], p1)).toHaveLength(1)
+  })
+})

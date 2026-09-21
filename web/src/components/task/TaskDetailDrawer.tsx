@@ -74,7 +74,7 @@ import {
 import { taskAssignees } from '@/lib/taskAssignees'
 import { locationWithoutTask, projectLocation, taskLocation } from '@/lib/taskLinks'
 import { MobileDateCell } from '@/components/ui/MobileDateCell'
-import { dayKey, dueDayToIso, isOverdue, overdueDays } from '@/lib/taskDates'
+import { dayKey, dueDayToIso, overdueDays, taskOverdue } from '@/lib/taskDates'
 import { describeTaskDeletion } from '@/lib/taskDeletion'
 import { PRIORITY_LABEL, taskKey, type TaskPriority } from '@/lib/tasks'
 import { plural } from '@/lib/typography'
@@ -176,6 +176,11 @@ export function TaskDetailDrawer({
   // фолбэк для ручек, которые поле не заполняют (календарь, хронология,
   // оптимистичные объекты в кэше).
   const canStatus = task?.can_complete ?? !readOnly
+  // Шаблон (0060): задача не выполняется (сервер отдаёт can_complete=false), но
+  // колонку автор меняет как обычно. `canStatus` здесь решал обе вещи сразу —
+  // для шаблона их пришлось развести, иначе автор терял смену колонки.
+  const isTemplate = task?.is_template === true || project.data?.is_template === true
+  const canStage = isTemplate ? !readOnly : canStatus
   // Наблюдателю мало сказать «нельзя» — надо назвать, кого просить.
   // `GET /projects/{id}/members` открыт любой роли в проекте (включая
   // viewer), поэтому имя владельца доступно и ему.
@@ -273,7 +278,7 @@ export function TaskDetailDrawer({
   }
 
   const key = taskKey(project.data?.key, task?.seq)
-  const overdue = task ? isOverdue(task.due_at, task.done) : false
+  const overdue = task ? taskOverdue(task) : false
 
   return (
     // Десктоп — НЕмодальная панель (макет «Задача · десктоп»): список под ней
@@ -329,7 +334,7 @@ export function TaskDetailDrawer({
               <span className="font-mono text-[13px] tracking-[0.02em] text-text2">
                 {key ?? 'Задача'}
               </span>
-              {task && (
+              {task && !isTemplate && (
                 <button
                   type="button"
                   onClick={() => setShareOpen(true)}
@@ -341,7 +346,7 @@ export function TaskDetailDrawer({
                 </button>
               )}
               <span className="ml-auto flex items-center gap-1">
-                {task && <WatchControl taskId={task.id} />}
+                {task && !isTemplate && <WatchControl taskId={task.id} />}
                 {task && !readOnly && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -477,14 +482,16 @@ export function TaskDetailDrawer({
             {readOnly && rightsKnown && task && (
               <p className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-[10px] border border-glass-border bg-tint px-[11px] py-[9px] text-[14px] leading-[1.45] text-text2">
                 <span>
-                  {canStatus
-                    ? 'Вы наблюдатель проекта: можно только отметить статус своей задачи.'
-                    : 'Вы наблюдатель проекта: поля доступны только для чтения.'}
+                  {isTemplate
+                    ? 'Это шаблон: править его могут автор и администраторы Hub.'
+                    : canStatus
+                      ? 'Вы наблюдатель проекта: можно только отметить статус своей задачи.'
+                      : 'Вы наблюдатель проекта: поля доступны только для чтения.'}
                 </span>
                 {/* Владельца может не быть вовсе — его могли разжаловать или
                     убрать из проекта. Тогда строку про доступ не показываем:
                     «обратитесь к undefined» хуже молчания. */}
-                {owner?.full_name && (
+                {owner?.full_name && !isTemplate && (
                   <span>
                     Запросить доступ — у владельца,{' '}
                     <span className="text-text">{owner.full_name}</span>.
@@ -530,7 +537,7 @@ export function TaskDetailDrawer({
                       >
                         <span className="min-w-0 truncate">{project.data.name}</span>
                       </Link>
-                      {!readOnly && (
+                      {!readOnly && !isTemplate && (
                         <button
                           type="button"
                           onClick={() => setMoveOpen(true)}
@@ -554,7 +561,7 @@ export function TaskDetailDrawer({
                       aria-label="Колонка"
                       variant="bare"
                       value={task.stage_id ?? null}
-                      disabled={!canStatus}
+                      disabled={!canStage}
                       onChange={(v) => update.mutate({ id: task.id, stage_id: v })}
                       className={cn(MOBILE_CONTROL, 'justify-end')}
                       options={stages.data.map((s) => ({ value: s.id, label: s.name }))}
@@ -642,7 +649,7 @@ export function TaskDetailDrawer({
                             >
                               <span className="min-w-0 truncate">{project.data.name}</span>
                             </Link>
-                            {!readOnly && (
+                            {!readOnly && !isTemplate && (
                               <button
                                 type="button"
                                 onClick={() => setMoveOpen(true)}
@@ -670,7 +677,7 @@ export function TaskDetailDrawer({
                             sheetTitle="Колонка"
                             aria-label="Колонка"
                             value={task.stage_id ?? null}
-                            disabled={!canStatus}
+                            disabled={!canStage}
                             onChange={(v) => update.mutate({ id: task.id, stage_id: v })}
                             className={STAGE_SELECT}
                             options={stages.data.map((s) => ({ value: s.id, label: s.name }))}
@@ -903,7 +910,13 @@ export function TaskDetailDrawer({
 
                 <TaskAttachments taskId={task.id} canEdit={!readOnly} />
 
-                <TaskThread taskId={task.id} />
+                {isTemplate ? (
+                  <p className="rounded-[10px] border border-glass-border bg-tint px-[11px] py-[9px] text-[14px] leading-[1.45] text-text2">
+                    Комментариев в шаблоне нет: в проекты они не переносятся.
+                  </p>
+                ) : (
+                  <TaskThread taskId={task.id} />
+                )}
               </>
             )}
           </div>

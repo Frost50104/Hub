@@ -129,6 +129,18 @@ export function humanDate(value: string): string {
  * не считаются просроченными никогда — иначе закрытая с опозданием задача
  * навсегда осталась бы красной.
  */
+/**
+ * Просрочка задачи с учётом шаблона (0060): сроки шаблона отсчитаны от точки
+ * отсчёта и часто лежат в прошлом, но это не опоздание — задача шаблона не
+ * краснеет никогда. Все строки, карточки и календарь трекера зовут ЭТУ функцию.
+ */
+export function taskOverdue(
+  task: { due_at: string | null; done: boolean; is_template?: boolean },
+  now: number = Date.now(),
+): boolean {
+  return task.is_template !== true && isOverdue(task.due_at, task.done, now)
+}
+
 export function isOverdue(
   due: string | null,
   done: boolean,

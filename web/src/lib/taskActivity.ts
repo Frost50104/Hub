@@ -30,7 +30,10 @@ export function renderActivity(a: ActivityLike): string | null {
   const p = (a.payload ?? {}) as Record<string, unknown>
   switch (a.kind) {
     case 'created':
-      return `${actor} создал задачу`
+      // Копия из шаблона (0060) несёт имя шаблона в payload.
+      return p['template_name']
+        ? `${actor} создал задачу по шаблону «${String(p['template_name'])}»`
+        : `${actor} создал задачу`
     case 'updated':
       return `${actor} обновил задачу`
     case 'done_changed':

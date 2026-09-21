@@ -26,11 +26,13 @@ import { LabelsManager } from '@/components/project/LabelsManager'
 import { MembersTab } from '@/components/project/MembersTab'
 import { MobileFilterSheet } from '@/components/project/MobileFilterSheet'
 import { summarizeProjectDescription } from '@/lib/projectAbout'
+import { templatePageGate, type TemplatePageGate } from '@/lib/projectTemplates'
 import { AboutTab } from '@/components/project/AboutTab'
 import { ProjectKeyChip } from '@/components/project/ProjectKeyChip'
 import { TaskFilterBar } from '@/components/project/TaskFilterBar'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ShareDialog } from '@/components/share/ShareDialog'
+import { TemplateBanner } from '@/components/project/TemplateBanner'
 import { MobileTaskRow } from '@/components/task/MobileTaskRow'
 import { TaskDetailDrawer } from '@/components/task/TaskDetailDrawer'
 import { TaskListHeader } from '@/components/task/TaskListHeader'
@@ -107,6 +109,7 @@ const TABS: { key: TabKey; label: string }[] = [
 
 function ProjectHeader({
   project,
+  gate,
   onOpenFields,
   onOpenLabels,
   onOpenShare,
@@ -116,6 +119,7 @@ function ProjectHeader({
   mobileFilters,
 }: {
   project: Project
+  gate: TemplatePageGate
   onOpenFields: () => void
   onOpenLabels: () => void
   onOpenShare: () => void
@@ -132,7 +136,7 @@ function ProjectHeader({
   // создать метку вовсе (ОС 2026-08).
   const [actionsOpen, setActionsOpen] = useState(false)
   const mobileActions: { label: string; icon: ReactNode; onClick: () => void }[] = []
-  if (project.can_edit)
+  if (project.can_edit && gate.showShare)
     mobileActions.push({
       label: 'Поделиться',
       icon: <LinkIcon className="h-5 w-5" />,
@@ -152,7 +156,7 @@ function ProjectHeader({
     project.task_count != null ? plural(project.task_count, 'задача', 'задачи', 'задач') : null,
   ].filter((c): c is string => Boolean(c))
 
-  const favoriteButton = project.my_role && (
+  const favoriteButton = project.my_role && gate.showFavorite && (
     <button
       type="button"
       onClick={() => setFavorite.mutate(!project.is_favorite)}
@@ -213,10 +217,12 @@ function ProjectHeader({
           </h1>
           {favoriteButton}
         </div>
-        {(isArchived || project.my_role) && (
+        {(isArchived || project.my_role || gate.isTemplate) && (
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {gate.isTemplate && <Badge variant="secondary">шаблон</Badge>}
             {isArchived && <Badge variant="secondary">архив</Badge>}
-            {project.my_role && (
+            {/* Роль в шаблоне синтезирована сервером — бейдж роли там врал бы. */}
+            {project.my_role && !gate.isTemplate && (
               <Badge variant="secondary">{PROJECT_ROLE_LABEL[project.my_role]}</Badge>
             )}
           </div>
@@ -238,8 +244,9 @@ function ProjectHeader({
               <Badge variant="outline" className="font-mono tracking-[0.04em]">
                 {project.key}
               </Badge>
+              {gate.isTemplate && <Badge variant="secondary">шаблон</Badge>}
               {isArchived && <Badge variant="secondary">архив</Badge>}
-              {project.my_role && (
+              {project.my_role && !gate.isTemplate && (
                 <Badge variant="secondary">{PROJECT_ROLE_LABEL[project.my_role]}</Badge>
               )}
             </div>
@@ -267,7 +274,7 @@ function ProjectHeader({
         </div>
         {(project.can_edit || project.can_manage) && (
           <div className="hidden shrink-0 items-center gap-2 pt-1.5 lg:flex">
-            {project.can_edit && (
+            {project.can_edit && gate.showShare && (
               <Button variant="secondary" size="sm" onClick={onOpenShare}>
                 <LinkIcon className="h-[15px] w-[15px]" />
                 Поделиться
@@ -296,12 +303,22 @@ function ProjectHeader({
           </div>
         )}
       </div>
-      <ViewTabs tab={tab} onTab={onTab} />
+      <ViewTabs tab={tab} onTab={onTab} showDashboard={gate.showDashboard} />
     </header>
   )
 }
 
-function ViewTabs({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
+function ViewTabs({
+  tab,
+  onTab,
+  showDashboard,
+}: {
+  tab: TabKey
+  onTab: (t: TabKey) => void
+  /** Шаблон (0060): статистики у заготовки нет — вкладку не рисуем. */
+  showDashboard: boolean
+}) {
+  const tabs = showDashboard ? TABS : TABS.filter((t) => t.key !== 'dashboard')
   return (
     <>
       {/* overflow-x-auto — не перестраховка, а замер: шесть вкладок
@@ -309,7 +326,7 @@ function ViewTabs({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
           полосе достаётся 680px (минус сайдбар 260, зазоры оболочки и
           отступы шапки). Без прокрутки обрезалась бы «О проекте». */}
       <nav className="mt-3.5 hidden gap-0.5 overflow-x-auto [scrollbar-width:none] lg:flex [&::-webkit-scrollbar]:hidden">
-        {TABS.map(({ key, label }) => (
+        {tabs.map(({ key, label }) => (
           <button
             key={key}
             type="button"
@@ -330,7 +347,7 @@ function ViewTabs({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }) {
           таб-баром (MobileViewControlBar), а не кнопка в шапке: стоит на всех
           представлениях, из календаря/Ганта/дашборда можно вернуться. */}
       <MobileViewControlBar
-        options={TABS.map(({ key, label }) => ({ key, label }))}
+        options={tabs.map(({ key, label }) => ({ key, label }))}
         value={tab}
         onChange={onTab}
       />
@@ -733,16 +750,23 @@ export function ProjectPage() {
 
   const p = project.data
   const isArchived = !!p.archived_at
+  const gate = templatePageGate(p)
+  // Дашборд по ссылке `?view=dashboard` у шаблона — просто список.
+  const shownTab: TabKey = tab === 'dashboard' && !gate.showDashboard ? 'list' : tab
   // «Правки закрыты» здесь стояло неправдой: сервер правку существующих задач
   // в архиве разрешает сознательно (тест
   // `test_editing_an_existing_task_in_archive_still_works`), закрыто только
   // СОЗДАНИЕ. С 31.08 это единственная дорога к таким задачам — из «Моих
   // задач» они ушли, — и врать на ней нельзя.
-  const readOnlyReason = isArchived
-    ? 'Проект в архиве: новые задачи не создаются, правки существующих — как обычно.'
-    : !p.can_edit
-      ? 'Только чтение: вы наблюдатель проекта.'
-      : null
+  // У шаблона полосу заменяет плашка шаблона (TemplateBanner): она же говорит,
+  // кто его правит.
+  const readOnlyReason = gate.isTemplate
+    ? null
+    : isArchived
+      ? 'Проект в архиве: новые задачи не создаются, правки существующих — как обычно.'
+      : !p.can_edit
+        ? 'Только чтение: вы наблюдатель проекта.'
+        : null
 
   /** Тулбар фильтров — отдельная полоса под шапкой, как в макете (десктоп);
    *  на телефоне те же фильтры — чип «Фильтры (N)» в шапке → шторка. */
@@ -754,6 +778,7 @@ export function ProjectPage() {
         onChange={setFilters}
         showSort={showSort}
         showLabel={showLabel}
+        showDue={gate.showDatePresets}
         trailing={trailing}
       />
     </div>
@@ -765,6 +790,7 @@ export function ProjectPage() {
       onChange={setFilters}
       showSort={showSort}
       showLabel={showLabel}
+      showDue={gate.showDatePresets}
     />
   )
 
@@ -772,14 +798,15 @@ export function ProjectPage() {
     <div className="flex flex-col lg:h-full lg:overflow-hidden">
       <ProjectHeader
         project={p}
-        tab={tab}
+        gate={gate}
+        tab={shownTab}
         onTab={setTab}
         mobileFilters={
-          tab === 'list'
+          shownTab === 'list'
             ? mobileFilters(true, true)
-            : tab === 'board'
+            : shownTab === 'board'
               ? mobileFilters(false, true)
-              : tab === 'calendar'
+              : shownTab === 'calendar'
                 ? mobileFilters(false, false)
                 : undefined
         }
@@ -797,13 +824,15 @@ export function ProjectPage() {
         }}
       />
 
+      {gate.isTemplate && <TemplateBanner project={p} />}
+
       {readOnlyReason && (
         <p className="shrink-0 border-b border-hair bg-tint px-4 py-2 text-[14px] text-text2 lg:px-6">
           {readOnlyReason}
         </p>
       )}
 
-      {tab === 'list' && (
+      {shownTab === 'list' && (
         <>
           {toolbar(<ColumnsMenu projectId={id} />, true)}
           <ListTab
@@ -819,7 +848,7 @@ export function ProjectPage() {
           />
         </>
       )}
-      {tab === 'board' && (
+      {shownTab === 'board' && (
         <>
           {toolbar()}
           <div className="min-w-0 flex-1 px-4 pb-6 pt-4 lg:overflow-auto lg:px-6">
@@ -835,22 +864,27 @@ export function ProjectPage() {
           </div>
         </>
       )}
-      {tab === 'calendar' && (
+      {shownTab === 'calendar' && (
         <>
           {toolbar(undefined, false, false)}
           {/* На мобильном календарь — список дней со своими отступами, поэтому
               обёртка без padding; на десктопе — сетка в 24px. */}
           <div className="min-w-0 flex-1 pb-24 pt-2 lg:overflow-auto lg:p-6">
-            <CalendarView projectId={id} onTaskClick={openTask} filters={filters} />
+            <CalendarView
+              projectId={id}
+              onTaskClick={openTask}
+              filters={filters}
+              initialDay={p.template_anchor_on}
+            />
           </div>
         </>
       )}
-      {tab === 'timeline' && (
+      {shownTab === 'timeline' && (
         <div className="min-w-0 flex-1 pb-24 pt-2 lg:overflow-auto lg:p-6">
-          <TimelineView projectId={id} onTaskClick={openTask} />
+          <TimelineView projectId={id} onTaskClick={openTask} initialDay={p.template_anchor_on} />
         </div>
       )}
-      {tab === 'dashboard' && (
+      {shownTab === 'dashboard' && (
         <div className="min-w-0 flex-1 p-4 lg:overflow-auto lg:p-6">
           <Suspense
             fallback={
@@ -863,13 +897,13 @@ export function ProjectPage() {
           </Suspense>
         </div>
       )}
-      {tab === 'members' && (
+      {shownTab === 'members' && (
         <div className="min-w-0 flex-1 p-4 lg:overflow-auto lg:p-6">
-          <MembersTab projectId={id} canManage={p.can_manage} />
+          <MembersTab projectId={id} canManage={p.can_manage} isTemplate={gate.isTemplate} />
         </div>
       )}
 
-      {tab === 'about' && (
+      {shownTab === 'about' && (
         // pb-28 на мобильном — под плавающей пилюлей вида, иначе она накрывает
         // «Опасную зону».
         <div className="min-w-0 flex-1 p-4 pb-28 lg:overflow-auto lg:p-6">
@@ -882,9 +916,9 @@ export function ProjectPage() {
       <FloatingActionButton
         bottomOffset={8.25}
         hidden={
-          tab === 'dashboard' ||
-          tab === 'members' ||
-          tab === 'about' ||
+          shownTab === 'dashboard' ||
+          shownTab === 'members' ||
+          shownTab === 'about' ||
           !p.can_edit ||
           isArchived
         }

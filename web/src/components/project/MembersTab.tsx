@@ -32,9 +32,11 @@ interface MembersTabProps {
   projectId: string
   /** owner может добавлять/удалять участников и менять роли. */
   canManage: boolean
+  /** Шаблон (0060): состав — будущие участники проектов, доступа не даёт. */
+  isTemplate?: boolean
 }
 
-export function MembersTab({ projectId, canManage }: MembersTabProps) {
+export function MembersTab({ projectId, canManage, isTemplate = false }: MembersTabProps) {
   const members = useProjectMembers(projectId)
   const me = useMe()
   const add = useAddMember(projectId)
@@ -62,13 +64,17 @@ export function MembersTab({ projectId, canManage }: MembersTabProps) {
 
   const onRemove = async (m: ProjectMember) => {
     const isSelf = m.employee_id === me.data?.employee_id
-    const message = isSelf
-      ? 'Выйти из проекта? Вы потеряете к нему доступ.'
-      : `Убрать ${m.full_name || m.email || 'участника'} из проекта?`
+    // В шаблоне доступ от состава не зависит — «потеряете доступ» было бы
+    // неправдой, и уходить со страницы незачем.
+    const message = isTemplate
+      ? `Убрать ${isSelf ? 'себя' : m.full_name || m.email || 'участника'} из состава будущих проектов?`
+      : isSelf
+        ? 'Выйти из проекта? Вы потеряете к нему доступ.'
+        : `Убрать ${m.full_name || m.email || 'участника'} из проекта?`
     if (!confirm(message)) return
     try {
       await removeMember.mutateAsync(m.id)
-      if (isSelf) {
+      if (isSelf && !isTemplate) {
         await qc.invalidateQueries({ queryKey: projectKeys.all })
         nav('/projects')
       } else {
@@ -81,6 +87,17 @@ export function MembersTab({ projectId, canManage }: MembersTabProps) {
 
   return (
     <div className="space-y-2">
+      {isTemplate && (
+        <div className="mb-3 space-y-1">
+          <h2 className="font-display text-[17px] font-bold text-text">Состав будущего проекта</h2>
+          <p className="text-[14px] leading-[1.45] text-text2">
+            Эти люди станут участниками проекта, созданного по шаблону, с этими ролями. Доступа
+            к самому шаблону это не даёт — шаблон правят автор и администраторы Hub. Тот, кто
+            создаёт проект, станет его владельцем; исполнители и наблюдатели задач получат
+            доступ сами.
+          </p>
+        </div>
+      )}
       {members.isLoading && <p className="text-text2">Загружаем участников…</p>}
       {members.isError && (
         <QueryError
@@ -90,7 +107,9 @@ export function MembersTab({ projectId, canManage }: MembersTabProps) {
         />
       )}
       {members.data && members.data.length === 0 && (
-        <p className="text-text2">Пока нет участников.</p>
+        <p className="text-text2">
+          {isTemplate ? 'Состав пуст: в новый проект никто не добавится, кроме создателя и исполнителей задач.' : 'Пока нет участников.'}
+        </p>
       )}
 
       {members.data?.map((m) => (

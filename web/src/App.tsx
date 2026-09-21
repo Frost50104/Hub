@@ -26,6 +26,9 @@ const ProjectListPage = lazy(() =>
 const ArchivedProjectsPage = lazy(() =>
   import('@/pages/ArchivedProjectsPage').then((m) => ({ default: m.ArchivedProjectsPage })),
 )
+const ProjectTemplatesPage = lazy(() =>
+  import('@/pages/ProjectTemplatesPage').then((m) => ({ default: m.ProjectTemplatesPage })),
+)
 const ProjectPage = lazy(() =>
   import('@/pages/ProjectPage').then((m) => ({ default: m.ProjectPage })),
 )
@@ -138,6 +141,7 @@ export function App() {
         {/* Статический сегмент объявлен ДО «:id»: v6 и так ранжирует по
             специфичности, но порядок здесь читается как гарантия. */}
         <Route path="/projects/archived" element={<ArchivedProjectsPage />} />
+        <Route path="/projects/templates" element={<ProjectTemplatesPage />} />
           <Route path="/projects/:id" element={<ProjectPage />} />
           <Route path="/search" element={<SearchPage />} />
           {/* Профиль слит с настройками (редизайн 2026-08): старый путь живёт

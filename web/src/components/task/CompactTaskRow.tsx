@@ -2,7 +2,7 @@ import { ProjectChip } from '@/components/task/ProjectChip'
 import { TaskDoneControl } from '@/components/task/TaskDoneControl'
 import { PriorityBar } from '@/components/task/PriorityBar'
 import { cn } from '@/lib/cn'
-import { isOverdue, shortDate } from '@/lib/taskDates'
+import { shortDate, taskOverdue } from '@/lib/taskDates'
 import { type TaskProjectLabel } from '@/lib/taskProjectLabel'
 import { type Task } from '@/lib/tasks'
 
@@ -24,7 +24,7 @@ export function CompactTaskRow({
   onToggleDone?: () => void
 }) {
   const done = task.done
-  const overdue = isOverdue(task.due_at, task.done)
+  const overdue = taskOverdue(task)
   return (
     <div
       role="button"

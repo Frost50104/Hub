@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 
 import { Markdown } from '@/components/Markdown'
 import { DeleteProjectDialog } from '@/components/project/DeleteProjectDialog'
+import { SaveAsTemplateDialog } from '@/components/project/SaveAsTemplateDialog'
 import { ProjectBadgePicker } from '@/components/project/ProjectBadgePicker'
 import { ProjectKeyChip } from '@/components/project/ProjectKeyChip'
 import { Badge } from '@/components/ui/Badge'
@@ -12,6 +13,7 @@ import { InfoRow, InfoRows } from '@/components/ui/InfoRows'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { DrawerSection } from '@/components/task/DrawerSection'
+import { useMe } from '@/hooks/useMe'
 import { useArchiveProject, useProjectMembers, useUpdateProject } from '@/hooks/useProjects'
 import {
   forgetProjectDraft,
@@ -26,6 +28,7 @@ import {
   type ProjectAboutGate,
   type ProjectProfileDraft,
 } from '@/lib/projectAbout'
+import { templatesEnabled } from '@/lib/projectTemplates'
 import { PROJECT_ROLE_LABEL, type Project } from '@/lib/projects'
 
 const DESCRIPTION_MAX = 20_000
@@ -81,7 +84,11 @@ export function AboutTab({
   const draftRef = useRef(draft)
   draftRef.current = draft
 
-  const gate = projectAboutGate(project)
+  const me = useMe().data
+  const gate = projectAboutGate(project, {
+    templatesOn: templatesEnabled(me),
+    canCreateProjects: me?.can_create_projects === true,
+  })
 
   // Сервер — источник истины, но только когда он ДЕЙСТВИТЕЛЬНО изменился.
   // Сравнение с предыдущим ответом обязательно: без него эффект срабатывает и
@@ -207,6 +214,9 @@ function AboutRead({
       .filter((m) => m.role === 'owner')
       .map((m) => m.full_name || m.email || 'без имени'),
   })
+  if (project.created_from_template?.name) {
+    rows.push({ kind: 'text', label: 'Создан по шаблону', value: project.created_from_template.name })
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-[720px] flex-col gap-7">
@@ -332,6 +342,7 @@ function AboutSettings({
 }) {
   const [badgeOpen, setBadgeOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
   const archive = useArchiveProject(project.id)
   const isArchived = Boolean(project.archived_at)
 
@@ -450,6 +461,20 @@ function AboutSettings({
         </DrawerSection>
       )}
 
+      {gate.canSaveAsTemplate && (
+        <DrawerSection title="Шаблон">
+          <div className="flex flex-col items-start gap-2">
+            <Button type="button" variant="secondary" onClick={() => setSaveTemplateOpen(true)}>
+              Сохранить как шаблон…
+            </Button>
+            <p className="m-0 text-sm text-text2">
+              Колонки, метки, задачи со сроками и люди станут заготовкой в общей библиотеке.
+              Проект останется как есть.
+            </p>
+          </div>
+        </DrawerSection>
+      )}
+
       {gate.canArchive && (
         <DrawerSection title="Архив">
           <div className="flex flex-col items-start gap-2">
@@ -479,11 +504,12 @@ function AboutSettings({
               variant="destructive"
               onClick={() => setDeleteOpen(true)}
             >
-              Удалить проект
+              {project.is_template ? 'Удалить шаблон' : 'Удалить проект'}
             </Button>
             <p className="m-0 text-sm text-text2">
-              Проект уйдёт вместе со всеми задачами, комментариями и вложениями.
-              Восстановить будет нельзя — если нужно просто убрать с глаз, архивируйте.
+              {project.is_template
+                ? 'Шаблон уйдёт вместе со всеми задачами и вложениями. Проекты, уже созданные по нему, не пострадают.'
+                : 'Проект уйдёт вместе со всеми задачами, комментариями и вложениями. Восстановить будет нельзя — если нужно просто убрать с глаз, архивируйте.'}
             </p>
           </div>
         </DrawerSection>
@@ -496,6 +522,13 @@ function AboutSettings({
 
       {gate.canEditProfile && (
         <ProjectBadgePicker project={project} open={badgeOpen} onOpenChange={setBadgeOpen} />
+      )}
+      {gate.canSaveAsTemplate && (
+        <SaveAsTemplateDialog
+          project={project}
+          open={saveTemplateOpen}
+          onOpenChange={setSaveTemplateOpen}
+        />
       )}
       {gate.canDelete && (
         <DeleteProjectDialog

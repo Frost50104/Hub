@@ -153,6 +153,8 @@ export interface ProjectAboutSource {
   can_manage: boolean
   archived_at: string | null
   is_personal?: boolean
+  /** Шаблон проекта (0060): архива у него нет, «сохранить как шаблон» — тоже. */
+  is_template?: boolean
 }
 
 export interface ProjectAboutGate {
@@ -167,26 +169,38 @@ export interface ProjectAboutGate {
   canArchive: boolean
   /** Удаление — те же условия. */
   canDelete: boolean
+  /** «Сохранить как шаблон» (0060): модуль включён, человек создаёт проекты и
+   *  владеет этим; не личный (сервер 409 даже hub-admin'у) и не сам шаблон. */
+  canSaveAsTemplate: boolean
   /** Показывать ли кнопку «Настройки проекта». */
   canOpenSettings: boolean
   /** Строка внизу настроек, объясняющая, чего в них нет. null — объяснять нечего. */
   settingsLimitNote: string | null
 }
 
-export function projectAboutGate(project: ProjectAboutSource): ProjectAboutGate {
+export function projectAboutGate(
+  project: ProjectAboutSource,
+  { templatesOn = false, canCreateProjects = false }: { templatesOn?: boolean; canCreateProjects?: boolean } = {},
+): ProjectAboutGate {
   const archived = project.archived_at !== null
   const personal = project.is_personal === true
+  const template = project.is_template === true
 
   const canEditProfile = project.can_edit
   const canImport = project.can_edit && !archived
-  const canArchive = project.can_manage && !personal
+  // Шаблон не архивируется: прятать нечего — его и так не видит никто, кроме
+  // библиотеки. Сервер на архив шаблона отвечает 404.
+  const canArchive = project.can_manage && !personal && !template
   const canDelete = project.can_manage && !personal
+  const canSaveAsTemplate =
+    templatesOn && canCreateProjects && project.can_manage && !personal && !template
 
   // Именно ИЛИ, а не `= canEditProfile`. Равенство держится только потому, что
   // на сервере MANAGE_ROLES ⊆ EDIT_ROLES. Если ступени однажды разъедутся,
   // экран деградирует в «настройки открылись и в них ровно то, что можно», а
   // не в «кнопка пропала у управляющего».
-  const canOpenSettings = canEditProfile || canImport || canArchive || canDelete
+  const canOpenSettings =
+    canEditProfile || canImport || canArchive || canDelete || canSaveAsTemplate
 
   let settingsLimitNote: string | null = null
   if (canOpenSettings && personal) {
@@ -194,7 +208,7 @@ export function projectAboutGate(project: ProjectAboutSource): ProjectAboutGate 
     // враньём: он и есть владелец.
     settingsLimitNote =
       'Личное пространство: его нельзя архивировать и удалить, а открывается оно на «Моих задачах».'
-  } else if (canOpenSettings && !project.can_manage) {
+  } else if (canOpenSettings && !project.can_manage && !template) {
     settingsLimitNote = 'Архивировать и удалить проект может только владелец.'
   }
 
@@ -203,6 +217,7 @@ export function projectAboutGate(project: ProjectAboutSource): ProjectAboutGate 
     canImport,
     canArchive,
     canDelete,
+    canSaveAsTemplate,
     canOpenSettings,
     settingsLimitNote,
   }

@@ -9,6 +9,7 @@ import {
   humanDate,
   isOverdue,
   overdueDays,
+  taskOverdue,
   todayKey,
 } from './taskDates'
 
@@ -63,5 +64,16 @@ describe('humanDate', () => {
 
   it('мусор возвращает как есть, а не «Invalid Date»', () => {
     expect(humanDate('позавчера')).toBe('позавчера')
+  })
+})
+
+describe('taskOverdue (шаблоны, 0060)', () => {
+  const past = '2020-01-01T09:00:00Z'
+  it('задача шаблона не просрочена никогда', () => {
+    expect(taskOverdue({ due_at: past, done: false, is_template: true })).toBe(false)
+  })
+  it('обычная — как isOverdue', () => {
+    expect(taskOverdue({ due_at: past, done: false })).toBe(true)
+    expect(taskOverdue({ due_at: past, done: true })).toBe(false)
   })
 })

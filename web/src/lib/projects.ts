@@ -41,6 +41,12 @@ export interface Project {
    *  список проектов и карточка проекта; мутирующие ручки отдают null. */
   task_count?: number | null
   done_count?: number | null
+  /** Шаблон проекта (0060). Опциональны: старый бэкенд и фикстуры их не знают. */
+  is_template?: boolean
+  /** Точка отсчёта дат шаблона, `YYYY-MM-DD`. */
+  template_anchor_on?: string | null
+  /** Откуда создан живой проект (имя — снимком на момент создания). */
+  created_from_template?: { id: string; name: string | null } | null
 }
 
 export interface ProjectMember {

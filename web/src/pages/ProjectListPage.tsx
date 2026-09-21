@@ -9,9 +9,9 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
-import { Folder, FolderPlus, MoreHorizontal, Plus, Star } from 'lucide-react'
+import { ChevronRight, Folder, FolderPlus, Layers, MoreHorizontal, Plus, Star } from 'lucide-react'
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { CreateFolderDialog } from '@/components/project/CreateFolderDialog'
@@ -39,6 +39,7 @@ import { cn } from '@/lib/cn'
 import { dataAgeLabel } from '@/lib/dates'
 import { groupProjectsByFolder, UNFILED, type ProjectGroup } from '@/lib/groupProjects'
 import { projectContext } from '@/lib/projectAbout'
+import { templatesNavVisible } from '@/lib/projectTemplates'
 import { FolderActionsMenu } from '@/components/project/FolderActionsMenu'
 import { folderDropId, resolveFolderMove, type ProjectDragData } from '@/lib/projectDnd'
 import { type ProjectFolder } from '@/lib/projectFolders'
@@ -371,7 +372,8 @@ export function ProjectListPage() {
   const canManageFolders = foldersQuery.data?.can_manage ?? false
   // Право создавать проекты считает сервер (admin или офис/ТУ/франчайзи);
   // линейному сотруднику кнопок нет — он попадает в проекты по приглашению.
-  const canCreateProjects = useMe().data?.can_create_projects ?? false
+  const me = useMe()
+  const canCreateProjects = me.data?.can_create_projects ?? false
   const dndEnabled = isDesktop && folders.length > 0
 
   // distance:5 — обычный клик по строке по-прежнему открывает проект.
@@ -533,6 +535,18 @@ export function ProjectListPage() {
         <div className="flex flex-col pb-6">
           <MobilePageHeader title="Проекты" trailing={createButtons} className="pb-2" />
           {countLine && <p className="px-4 pb-2 text-[14px] text-text2">{countLine}</p>}
+          {/* Вход в библиотеку шаблонов на телефоне: сайдбара ниже lg нет, а в
+              таб-баре трекера вкладки «Проекты» нет — сюда приходят с «Главной». */}
+          {templatesNavVisible(me.data) && (
+            <Link
+              to="/projects/templates"
+              className="mx-4 mb-3 flex min-h-11 items-center gap-2.5 rounded-xl border border-glass-border bg-tint px-4 text-[15px] font-medium text-text"
+            >
+              <Layers className="h-4 w-4 text-text2" strokeWidth={1.8} />
+              <span className="flex-1">Шаблоны проектов</span>
+              <ChevronRight className="h-4 w-4 text-text3" strokeWidth={1.8} />
+            </Link>
+          )}
           {/* px-4 у карточек-состояний; строки папок тянутся во всю ширину сами. */}
           <div className={cn('flex flex-col gap-4', (projects.isError || (data && data.length === 0) || foldersQuery.isError || projects.isLoading) && 'px-4')}>
             {body}

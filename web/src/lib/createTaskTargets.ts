@@ -34,10 +34,24 @@ export const DELEGATE_TARGET = 'delegate'
  * Личного проекта здесь нет и быть не может: `GET /projects` не отдаёт его
  * никогда (серверный инвариант `personal_projects.py`). Он приходит прочерком.
  */
-export function createTaskTargets(projects: Project[] | undefined): CreateTaskTarget[] {
-  return (projects ?? [])
+export function createTaskTargets(
+  projects: Project[] | undefined,
+  current?: Project,
+): CreateTaskTarget[] {
+  const out = (projects ?? [])
     .filter((p) => p.can_edit)
     .map((p) => ({ value: p.id, label: p.name }))
+  // Проект, со страницы которого открыли диалог, — даже если его нет в
+  // `GET /projects`. Так живёт шаблон (0060): списки его не видят по
+  // построению, и без этой строки `initialTarget` уронил бы задачу в личное
+  // пространство автора (у FAB, сайдбара и шапки проекта — только id).
+  if (current && current.can_edit && !out.some((t) => t.value === current.id)) {
+    out.unshift({
+      value: current.id,
+      label: current.is_template ? `${current.name} (шаблон)` : current.name,
+    })
+  }
+  return out
 }
 
 /**

@@ -17,7 +17,7 @@ import { useUpdateTask } from '@/hooks/useTasks'
 import { useTimeline } from '@/hooks/useTimeline'
 import { cn } from '@/lib/cn'
 import { capitalizeFirst } from '@/lib/dates'
-import { isOverdue } from '@/lib/taskDates'
+import { taskOverdue } from '@/lib/taskDates'
 import { type Task, type TaskPriority } from '@/lib/tasks'
 import { type TimelineDependency } from '@/lib/timeline'
 import { plural } from '@/lib/typography'
@@ -50,6 +50,8 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 interface TimelineViewProps {
   projectId: string
   onTaskClick: (taskId: string) => void
+  /** `YYYY-MM-DD` — начать окно от этого дня (шаблон: точка отсчёта). */
+  initialDay?: string | null
 }
 
 function startOfDay(d: Date): Date {
@@ -95,13 +97,16 @@ interface BarLayout {
  * мусор; название стоит слева. Задачи без срока приходят по `include_undated`:
  * строка есть, полосы нет, внизу честная подпись «N без срока».
  */
-export function TimelineView({ projectId, onTaskClick }: TimelineViewProps) {
+export function TimelineView({ projectId, onTaskClick, initialDay }: TimelineViewProps) {
   const isDesktop = useIsDesktop()
   const today = useMemo(() => startOfDay(new Date()), [])
   const [scale, setScale] = useState<Scale>('day')
   // viewStart = today − 7: на 390px окно с 1-го числа показывало первые семь
   // дней, где полос нет вовсе, и Гант выглядел пустым до прокрутки.
-  const [viewStart, setViewStart] = useState<Date>(() => addDays(today, -7))
+  // Шаблон (0060) — от точки отсчёта: его сроки отсчитаны от неё.
+  const [viewStart, setViewStart] = useState<Date>(() =>
+    addDays(initialDay ? startOfDay(new Date(`${initialDay}T12:00:00`)) : today, -7),
+  )
 
   const pxPerDay = PX_PER_DAY[scale]
   const visibleDays = VISIBLE_DAYS[scale]
@@ -421,7 +426,7 @@ function TimelineBar({
     id: task.id,
     disabled: !draggable,
   })
-  const overdue = isOverdue(task.due_at, task.done)
+  const overdue = taskOverdue(task)
   const style: CSSProperties = {
     transform: CSS.Translate.toString(transform),
     left: bar.leftPx,

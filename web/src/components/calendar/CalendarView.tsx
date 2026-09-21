@@ -15,7 +15,7 @@ import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useTasks, useUpdateTask } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { capitalizeFirst } from '@/lib/dates'
-import { isOverdue } from '@/lib/taskDates'
+import { taskOverdue } from '@/lib/taskDates'
 import { toCalendarFilters, type TaskViewFilters } from '@/lib/taskFilters'
 import { type Task } from '@/lib/tasks'
 import { plural } from '@/lib/typography'
@@ -30,6 +30,8 @@ interface CalendarViewProps {
   projectId: string
   onTaskClick: (id: string) => void
   filters?: TaskViewFilters
+  /** `YYYY-MM-DD` — открыть на месяце этого дня (шаблон: точка отсчёта). */
+  initialDay?: string | null
 }
 
 function toIsoDate(d: Date): string {
@@ -127,12 +129,15 @@ const ICON_BTN =
  * сетка месяца нечитаема (ячейка сжимается до 55px), а пустых дней 21 из 31,
  * и прокручивать их незачем.
  */
-export function CalendarView({ projectId, onTaskClick, filters }: CalendarViewProps) {
+export function CalendarView({ projectId, onTaskClick, filters, initialDay }: CalendarViewProps) {
   const isDesktop = useIsDesktop()
   const today = useMemo(() => startOfDay(new Date()), [])
-  const [viewMonth, setViewMonth] = useState<Date>(
-    new Date(today.getFullYear(), today.getMonth(), 1),
-  )
+  // Шаблон (0060) открывается на месяце точки отсчёта: его сроки отсчитаны
+  // от неё и часто лежат далеко от сегодняшнего месяца.
+  const [viewMonth, setViewMonth] = useState<Date>(() => {
+    const base = initialDay ? new Date(`${initialDay}T12:00:00`) : today
+    return new Date(base.getFullYear(), base.getMonth(), 1)
+  })
   const [dragOverDay, setDragOverDay] = useState<string | null>(null)
 
   const cells = useMemo(() => gridForMonth(viewMonth), [viewMonth])
@@ -169,7 +174,7 @@ export function CalendarView({ projectId, onTaskClick, filters }: CalendarViewPr
     return d.getMonth() === viewMonth.getMonth() && d.getFullYear() === viewMonth.getFullYear()
   }
   const monthTasks = (tasks.data ?? []).filter(inMonth)
-  const overdueCount = monthTasks.filter((t) => isOverdue(t.due_at, t.done)).length
+  const overdueCount = monthTasks.filter((t) => taskOverdue(t)).length
 
   const onDragOver = (e: DragOverEvent) => {
     const overId = e.over ? String(e.over.id) : ''

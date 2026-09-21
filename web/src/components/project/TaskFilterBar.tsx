@@ -113,6 +113,9 @@ interface TaskFilterBarProps {
   showSort?: boolean
   /** Календарь не умеет фильтр по метке на бэке. */
   showLabel?: boolean
+  /** Пресеты по сроку («Сегодня», «Просроченные») считают от сегодняшнего дня —
+   *  у шаблона (0060) сроки от точки отсчёта, и пресеты там бессмысленны. */
+  showDue?: boolean
   /** Хвостовые контролы (например «Колонки») — в ОДНОЙ строке с
    * фильтрами, чтобы тулбар не разъезжался на три этажа. */
   trailing?: React.ReactNode
@@ -130,6 +133,7 @@ export function TaskFilterBar({
   onChange,
   showSort,
   showLabel = true,
+  showDue = true,
   trailing,
   layout = 'row',
 }: TaskFilterBarProps) {
@@ -217,6 +221,7 @@ export function TaskFilterBar({
         </FilterSelect>
       )}
 
+      {showDue && (
       <FilterSelect
         stack={stack}
         ariaLabel="Фильтр по сроку"
@@ -231,6 +236,7 @@ export function TaskFilterBar({
           </option>
         ))}
       </FilterSelect>
+      )}
 
       {showSort && (
         <FilterSelect

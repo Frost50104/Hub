@@ -8,6 +8,7 @@ import {
   FolderPlus,
   Home,
   Inbox,
+  Layers,
   LogOut,
   Plus,
   Settings,
@@ -73,6 +74,7 @@ import {
   type ProjectDragData,
 } from '@/lib/projectDnd'
 import { type Project } from '@/lib/projects'
+import { templatesNavVisible } from '@/lib/projectTemplates'
 import { requestInlineCreate } from '@/lib/quickCreate'
 import { useFolderCollapse } from '@/stores/projectFolders'
 
@@ -632,6 +634,23 @@ export function Sidebar({ onItemClick }: SidebarProps = {}) {
           <Archive className="h-4 w-4" />
           <span className="flex-1">Архив</span>
         </NavLink>
+        {templatesNavVisible(me.data) && (
+          <NavLink
+            to="/projects/templates"
+            onClick={onItemClick}
+            className={({ isActive }) =>
+              cn(
+                'flex h-[34px] items-center gap-[9px] rounded-[9px] px-2 text-[14px] transition-colors',
+                isActive
+                  ? 'bg-surface font-semibold text-text'
+                  : 'font-medium text-text2 hover:bg-glass hover:text-text',
+              )
+            }
+          >
+            <Layers className="h-4 w-4" />
+            <span className="flex-1">Шаблоны</span>
+          </NavLink>
+        )}
       </nav>
 
       <div className="flex items-center justify-between gap-2 border-t border-glass-border pt-3">

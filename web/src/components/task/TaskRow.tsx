@@ -7,7 +7,7 @@ import { AvatarStack } from '@/components/ui/AvatarStack'
 import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
 import { taskAssignees } from '@/lib/taskAssignees'
-import { isOverdue, shortDate } from '@/lib/taskDates'
+import { shortDate, taskOverdue } from '@/lib/taskDates'
 import { type TaskProjectLabel } from '@/lib/taskProjectLabel'
 import { type SubtaskStats, type Task } from '@/lib/tasks'
 
@@ -64,7 +64,7 @@ export function TaskRow({
   reserveContext = true,
 }: TaskRowProps) {
   const done = task.done
-  const overdue = isOverdue(task.due_at, task.done)
+  const overdue = taskOverdue(task)
   const assignees = taskAssignees(task)
 
   return (

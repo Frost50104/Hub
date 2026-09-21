@@ -139,6 +139,8 @@ export function useDeleteProject(id: string) {
       qc.invalidateQueries({ queryKey: projectKeys.all })
       qc.invalidateQueries({ queryKey: ['me-tasks'] })
       qc.invalidateQueries({ queryKey: ['me-stats'] })
+      // Удалённый шаблон уходит и из библиотеки (0060).
+      qc.invalidateQueries({ queryKey: ['project-templates'] })
     },
   })
 }

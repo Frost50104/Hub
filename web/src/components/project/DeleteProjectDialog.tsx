@@ -48,10 +48,11 @@ export function DeleteProjectDialog({
     if (!armed || remove.isPending) return
     try {
       await remove.mutateAsync(project.key)
-      toast.success(`Проект «${project.name}» удалён`)
+      toast.success(`${project.is_template ? 'Шаблон' : 'Проект'} «${project.name}» удалён`)
       // Уходим ПОСЛЕ onSuccess: иначе removeQueries отработает на уже
       // размонтированном дереве и страница успеет мигнуть ошибкой.
-      navigate('/projects', { replace: true })
+      // Шаблон живёт в библиотеке — туда и возвращаемся.
+      navigate(project.is_template ? '/projects/templates' : '/projects', { replace: true })
     } catch {
       // тост показывает глобальный onError мутаций
     }
@@ -63,7 +64,7 @@ export function DeleteProjectDialog({
       // Пока удаляем — диалог не закрываем: закрыть нечем, а исчезнувшая
       // модалка выглядит как «получилось».
       onOpenChange={(v) => !remove.isPending && onOpenChange(v)}
-      title={`Удалить проект «${project.name}»?`}
+      title={`Удалить ${project.is_template ? 'шаблон' : 'проект'} «${project.name}»?`}
       description="Это необратимо. Корзины нет — восстановить можно будет только из ночного бэкапа."
       desktopWidth={480}
       footer={

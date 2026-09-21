@@ -339,3 +339,26 @@ describe('projectContext', () => {
     expect(projectContext({ ...base, task_count: 3, description: 'суть' })).toContain(' · ')
   })
 })
+
+describe('projectAboutGate: шаблоны (0060)', () => {
+  const base = { archived_at: null, is_personal: false, can_edit: true, can_manage: true }
+  const on = { templatesOn: true, canCreateProjects: true }
+
+  it('«Сохранить как шаблон» — владельцу при включённом модуле', () => {
+    expect(projectAboutGate(base, on).canSaveAsTemplate).toBe(true)
+    expect(projectAboutGate(base).canSaveAsTemplate).toBe(false)
+    expect(projectAboutGate(base, { ...on, canCreateProjects: false }).canSaveAsTemplate).toBe(false)
+    expect(projectAboutGate({ ...base, can_manage: false }, on).canSaveAsTemplate).toBe(false)
+  })
+
+  it('личный проект шаблоном не становится (сервер 409 даже админу)', () => {
+    expect(projectAboutGate({ ...base, is_personal: true }, on).canSaveAsTemplate).toBe(false)
+  })
+
+  it('у шаблона нет архива и «сохранить как шаблон», удаление — есть', () => {
+    const g = projectAboutGate({ ...base, is_template: true }, on)
+    expect(g.canArchive).toBe(false)
+    expect(g.canSaveAsTemplate).toBe(false)
+    expect(g.canDelete).toBe(true)
+  })
+})

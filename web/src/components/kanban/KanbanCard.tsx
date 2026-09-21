@@ -9,7 +9,7 @@ import { TaskDoneControl } from '@/components/task/TaskDoneControl'
 import { AvatarStack } from '@/components/ui/AvatarStack'
 import { cn } from '@/lib/cn'
 import { taskAssignees } from '@/lib/taskAssignees'
-import { isOverdue, shortDate } from '@/lib/taskDates'
+import { shortDate, taskOverdue } from '@/lib/taskDates'
 import { describeRecurrence } from '@/lib/taskRecurrence'
 import { type Label } from '@/lib/labels'
 import { type SubtaskStats, type Task } from '@/lib/tasks'
@@ -67,7 +67,7 @@ export function KanbanCard({
       }
   const assignees = taskAssignees(task)
   const done = task.done
-  const overdue = isOverdue(task.due_at, task.done)
+  const overdue = taskOverdue(task)
   const hasMeta = (labels?.length ?? 0) > 0 || (subtasks?.total ?? 0) > 0
 
   return (

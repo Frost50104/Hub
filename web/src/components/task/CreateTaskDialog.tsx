@@ -17,7 +17,7 @@ import { PeoplePicker } from '@/components/PeoplePicker'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { useDelegateTask } from '@/hooks/useDelegated'
 import { useMe } from '@/hooks/useMe'
-import { useProjects } from '@/hooks/useProjects'
+import { useProject, useProjects } from '@/hooks/useProjects'
 import { useCreateTask } from '@/hooks/useTasks'
 import {
   createTaskReady,
@@ -57,6 +57,8 @@ interface CreateTaskDialogProps {
  * человек наблюдатель, а `POST /tasks` требует owner/editor: у сотрудника с
  * одним viewer-проектом кнопка вела в 403.
  */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export function CreateTaskDialog({
   open,
   onOpenChange,
@@ -66,10 +68,17 @@ export function CreateTaskDialog({
   const navigate = useNavigate()
   const location = useLocation()
   const projects = useProjects()
+  // Текущий проект — отдельно: шаблона (0060) в списке проектов нет, а диалог
+  // открывают с его страницы. Данные уже в кэше страницы — запроса не будет.
+  // Сайдбар берёт id из адреса, и на `/projects/templates` или
+  // `/projects/archived` это слово, а не проект — запроса за ним не шлём.
+  const current = useProject(
+    initialProjectId && UUID_RE.test(initialProjectId) ? initialProjectId : undefined,
+  )
   // Личный проект скрыт из `useProjects()` серверным инвариантом — id берём
   // из `/api/me`.
   const personalProjectId = useMe().data?.personal_project_id ?? null
-  const targets = createTaskTargets(projects.data)
+  const targets = createTaskTargets(projects.data, current.data)
   const [target, setTarget] = useState<string>(PERSONAL_TARGET)
   const [delegateTo, setDelegateTo] = useState<string | null>(null)
   const [title, setTitle] = useState('')

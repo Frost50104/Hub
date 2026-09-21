@@ -12,6 +12,8 @@ interface MobileFilterSheetProps {
   onChange: (next: TaskViewFilters) => void
   showSort?: boolean
   showLabel?: boolean
+  /** См. `TaskFilterBar.showDue` — у шаблона пресетов по сроку нет. */
+  showDue?: boolean
   className?: string
 }
 
@@ -26,6 +28,7 @@ export function MobileFilterSheet({
   onChange,
   showSort,
   showLabel = true,
+  showDue = true,
   className,
 }: MobileFilterSheetProps) {
   const [open, setOpen] = useState(false)
@@ -74,6 +77,7 @@ export function MobileFilterSheet({
             onChange={onChange}
             showSort={showSort}
             showLabel={showLabel}
+            showDue={showDue}
           />
         </div>
       </BottomSheet>

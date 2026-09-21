@@ -44,7 +44,13 @@ export interface Me {
   theme?: Theme | null
   /** Включённые для тенанта модули-острова («Гусиная гонка»). Поля нет у
    *  старого бэкенда — трактуем как «выключено». */
-  features?: { race?: boolean }
+  features?: {
+    race?: boolean
+    /** Шаблоны проектов (0060) включены для тенанта. */
+    project_templates?: boolean
+    /** env-флаг включён и человек hub-admin: пункт «Шаблоны» виден всегда. */
+    project_templates_admin?: boolean
+  }
 }
 
 export function hasRace(me: Me | undefined): boolean {

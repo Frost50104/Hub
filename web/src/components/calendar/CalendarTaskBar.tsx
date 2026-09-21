@@ -3,7 +3,7 @@ import { CSS } from '@dnd-kit/utilities'
 import type { CSSProperties } from 'react'
 
 import { cn } from '@/lib/cn'
-import { isOverdue } from '@/lib/taskDates'
+import { taskOverdue } from '@/lib/taskDates'
 import { type Task, type TaskPriority } from '@/lib/tasks'
 import { DONE_FILL, OVERDUE_FILL, doneTone } from '@/lib/tone'
 
@@ -46,7 +46,7 @@ export function CalendarTaskBar({ task, day, onClick, variant = 'cell' }: Calend
     transform: CSS.Translate.toString(transform),
     opacity: isDragging ? 0.4 : 1,
   }
-  const overdue = isOverdue(task.due_at, task.done)
+  const overdue = taskOverdue(task)
   const fill = overdue ? OVERDUE_FILL : DONE_FILL[doneTone(task.done)]
 
   return (
