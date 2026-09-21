@@ -8,6 +8,7 @@ import { TEXTAREA_CLASS } from '@/components/ui/Input'
 import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { formatBytes } from '@/lib/attachments'
 import { cn } from '@/lib/cn'
+import { extractErrorDetail } from '@/lib/errors'
 import {
   addFeedbackFiles,
   FEEDBACK_ACCEPT,
@@ -67,8 +68,12 @@ export function FeedbackDialog({
         'Спасибо! Сообщение отправлено — вы подписаны на задачу и получите уведомления об ответах',
       )
       onOpenChange(false)
-    } catch {
-      // тост показывает глобальный onError axios-клиента
+    } catch (e) {
+      // Отправка идёт голым запросом, а не мутацией, и глобальный тост
+      // queryClient её не ловит (axios-перехватчиков в приложении нет): до
+      // 21.09 сбой оставлял диалог открытым без единого слова. Текст и файлы
+      // в форме остаются — можно отправить ещё раз.
+      toast.error('Не удалось отправить сообщение', { description: extractErrorDetail(e) })
     } finally {
       setSending(false)
     }
