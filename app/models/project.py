@@ -15,12 +15,13 @@ the creator is automatically added as owner in ProjectMember on creation.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -39,7 +40,16 @@ from app.db import Base
 class Project(Base):
     __tablename__ = "projects"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "key", name="uq_projects_tenant_key"),
+        # Ключ уникален среди ЖИВЫХ проектов (0060): шаблоны вне пространства
+        # ключей. Под RLS `generate_unique_key` шаблонов не видит, и общий
+        # UNIQUE упирал бы создание проекта в невидимый ключ шаблона.
+        Index(
+            "uq_projects_tenant_key",
+            "tenant_id",
+            "key",
+            unique=True,
+            postgresql_where=text("NOT is_template"),
+        ),
         # «Ровно один личный проект на сотрудника» — БД-инвариант, а не
         # приложенческий лок: на этот индекс опирается идемпотентность
         # services/personal_projects.py::ensure_personal_project (гонка двух
@@ -65,6 +75,18 @@ class Project(Base):
         # отдаются INLINE в <img>. Whitelist на уровне БД значит, что даже баг
         # в ручке не сможет вернуть text/html. Цена — gif/avif позже потребуют
         # миграции; принято сознательно.
+        CheckConstraint(
+            "NOT (is_template AND personal_owner_id IS NOT NULL)",
+            name="ck_projects_template_not_personal",
+        ),
+        CheckConstraint(
+            "NOT (is_template AND folder_id IS NOT NULL)",
+            name="ck_projects_template_no_folder",
+        ),
+        CheckConstraint(
+            "template_anchor_on IS NULL OR is_template",
+            name="ck_projects_template_anchor",
+        ),
         CheckConstraint(
             "badge_mime IS NULL OR badge_mime IN "
             "('image/png', 'image/jpeg', 'image/webp')",
@@ -116,6 +138,21 @@ class Project(Base):
         nullable=True,
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Шаблон проекта (0060). Невидим всему коду, пока область шаблона не
+    # открыта (`app/db.py::set_template_scope`) — прячет его политика RLS, а не
+    # фильтры. Неизменяем (триггер): проект в шаблон только копируется.
+    is_template: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    # Точка отсчёта дат шаблона: при создании проекта сроки сдвигаются на
+    # (дата старта − точка отсчёта). Только у шаблона (CHECK).
+    template_anchor_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Откуда создан живой проект. БЕЗ внешнего ключа намеренно (см. 0060), имя —
+    # снимком: под замком живой проект шаблон не видит.
+    created_from_template_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True
+    )
+    created_from_template_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_by: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("shadow_users.employee_id", ondelete="RESTRICT"),

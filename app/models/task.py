@@ -136,6 +136,19 @@ class Task(Base):
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Задача шаблона (0060) — денормализованное зеркало `projects.is_template`
+    # для политики RLS: подзапрос к projects в политике сам шёл бы через RLS и
+    # открывал бы замок. Совпадение с проектом сторожит триггер
+    # `tasks_template_guard`; значение ставит `create_task_record` из проекта.
+    is_template: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    # Родилась копированием шаблона — такие задачи не считаются в «Создано»
+    # личной статистики (как копии по повтору), иначе проект по шаблону давал
+    # бы «+1 745 создано за неделю».
+    template_copy: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
 
 class TaskAssignee(Base):
