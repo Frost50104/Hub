@@ -123,7 +123,10 @@ export function LearnRacePage() {
               </p>
             ) : (
               <>
-                <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_460px]">
+                {/* `grid-cols-1` обязателен (ОС 21.09): без базовой колонки ниже lg у сетки
+                    одна неявная `auto`, и самый длинный адрес точки растягивал её до 635 px —
+                    экран ездил вбок, `truncate` в строках не спасал. */}
+                <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_460px]">
                   <RaceLeaderboard participants={participants} view={view} myStoreId={myStoreId} />
                   <RaceChart
                     races={races}
@@ -134,7 +137,7 @@ export function LearnRacePage() {
                     height={isDesktop ? 240 : 200}
                   />
                 </div>
-                <div className="mt-6 grid gap-6 lg:grid-cols-2">
+                <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
                   <RaceHistory
                     participants={participants}
                     storeId={historyStoreId}
