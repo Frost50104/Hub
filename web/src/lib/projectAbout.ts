@@ -235,6 +235,9 @@ export interface ProjectSummaryInput {
   /** null — список участников ещё не пришёл: ряд остаётся, значение скелетон. */
   memberCount: number | null
   ownerNames: string[]
+  /** Шаблон (0060): состав и владелец — будущего проекта, а не шаблона (правит
+   *  шаблон его автор), и «выполнено 0 из N» — шум: в шаблоне не выполняют. */
+  isTemplate?: boolean
 }
 
 export type ProjectSummaryRow =
@@ -259,19 +262,20 @@ export function projectSummaryRows(input: ProjectSummaryInput): ProjectSummaryRo
       value: total === 0 ? 'Пока нет задач' : plural(total, 'задача', 'задачи', 'задач'),
     })
     // «0 из 0» — шум: предыдущий ряд уже сказал, что задач нет.
-    if (total > 0 && input.done_count != null) {
+    if (total > 0 && input.done_count != null && !input.isTemplate) {
       rows.push({ kind: 'text', label: 'Выполнено', value: `${input.done_count} из ${total}` })
     }
   }
 
   rows.push({ kind: 'text', label: 'Создан', value: input.createdLabel })
 
+  const membersLabel = input.isTemplate ? 'Состав будущего проекта' : 'Участников'
   rows.push(
     input.memberCount === null
-      ? { kind: 'pending', label: 'Участников' }
+      ? { kind: 'pending', label: membersLabel }
       : {
           kind: 'text',
-          label: 'Участников',
+          label: membersLabel,
           value: plural(input.memberCount, 'участник', 'участника', 'участников'),
         },
   )
@@ -280,7 +284,7 @@ export function projectSummaryRows(input: ProjectSummaryInput): ProjectSummaryRo
   if (first) {
     rows.push({
       kind: 'text',
-      label: 'Владелец',
+      label: input.isTemplate ? 'Владелец будущего проекта' : 'Владелец',
       value: rest.length > 0 ? `${first} и ещё ${rest.length}` : first,
     })
   }

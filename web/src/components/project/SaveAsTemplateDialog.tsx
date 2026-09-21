@@ -79,7 +79,12 @@ export function SaveAsTemplateDialog({
   const total = data ? data.tasks + data.subtasks : 0
   const dropped = data ? droppedSummary(data.dropped) : null
   const warnings = data
-    ? previewWarnings(data, { includeAttachments }).filter((w) => w.tone !== 'blue')
+    ? previewWarnings(data, { includeAttachments }).filter(
+        // Шаблон не шлёт уведомлений: просрочка и напоминания — про проект из
+        // него, их считает диалог создания проекта (на проде «142 задачи сразу
+        // будут просрочены» здесь пугало зря).
+        (w) => w.kind !== 'overdue' && w.kind !== 'due_soon',
+      )
     : []
 
   return (

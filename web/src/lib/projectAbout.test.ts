@@ -362,3 +362,22 @@ describe('projectAboutGate: шаблоны (0060)', () => {
     expect(g.canDelete).toBe(true)
   })
 })
+
+describe('projectSummaryRows: шаблон (0060)', () => {
+  it('без «Выполнено», состав и владелец — будущего проекта', () => {
+    const rows = projectSummaryRows({
+      key: 'OT',
+      createdLabel: '21 сентября 2026 г.',
+      task_count: 298,
+      done_count: 0,
+      memberCount: 1,
+      ownerNames: ['Ленар Шавалеев'],
+      isTemplate: true,
+    })
+    const labels = rows.map((r) => r.label)
+    expect(labels).not.toContain('Выполнено')
+    expect(labels).toContain('Состав будущего проекта')
+    expect(labels).toContain('Владелец будущего проекта')
+    expect(labels).not.toContain('Владелец')
+  })
+})

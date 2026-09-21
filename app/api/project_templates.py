@@ -198,11 +198,17 @@ async def list_templates(
     if not templates:
         return []
     ids = [t.id for t in templates]
+    # Задачи верхнего уровня — как «N задач» в шапке проекта (`_task_counts`):
+    # на проде библиотека писала «382 задачи», а страница шаблона — «298 задач».
     task_counts = dict(
         (
             await db.execute(
                 select(Task.project_id, func.count())
-                .where(Task.project_id.in_(ids), Task.archived_at.is_(None))
+                .where(
+                    Task.project_id.in_(ids),
+                    Task.archived_at.is_(None),
+                    Task.parent_task_id.is_(None),
+                )
                 .group_by(Task.project_id)
             )
         ).all()

@@ -223,3 +223,18 @@ describe('тексты', () => {
     ).toBe(nb('54 задачи · не перенесены: Петров А. · уведомлено 5 человек'))
   })
 })
+
+describe('виды предупреждений', () => {
+  it('у каждого — свой kind, фильтруют по нему', () => {
+    const w = previewWarnings(
+      preview({
+        too_big: true,
+        disk_ok: false,
+        overdue_after_shift: 2,
+        due_soon_reminders: 1,
+        dropped_people: [{ employee_id: 'x', name: 'П', tasks: 1 }],
+      }),
+    )
+    expect(w.map((x) => x.kind)).toEqual(['too_big', 'disk', 'overdue', 'dropped', 'due_soon'])
+  })
+})

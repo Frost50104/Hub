@@ -188,6 +188,10 @@ export function previewNotifyLine(p: CopyPreview): string | null {
 }
 
 export interface PreviewWarning {
+  /** Что за предупреждение — по нему фильтруют, а не по тексту или цвету:
+   *  «Сохранить как шаблон» про просрочку и напоминания молчит — шаблон
+   *  уведомлений не шлёт, сроки сдвинутся при создании проекта. */
+  kind: 'too_big' | 'disk' | 'overdue' | 'dropped' | 'due_soon'
   tone: 'red' | 'amber' | 'blue'
   text: string
 }
@@ -203,24 +207,28 @@ export function previewWarnings(
   const out: PreviewWarning[] = []
   if (p.too_big) {
     out.push({
+      kind: 'too_big',
       tone: 'red',
       text: `Задач больше ${p.max_tasks} — такой объём за раз не копируется.`,
     })
   }
   if (!p.disk_ok && includeAttachments) {
     out.push({
+      kind: 'disk',
       tone: 'red',
       text: 'На сервере мало места для копий вложений — снимите галочку «Вложения».',
     })
   }
   if (p.overdue_after_shift > 0) {
     out.push({
+      kind: 'overdue',
       tone: 'red',
       text: `${plural(p.overdue_after_shift, 'задача сразу будет просрочена', 'задачи сразу будут просрочены', 'задач сразу будут просрочены')}: исполнители начнут получать напоминание каждый день.`,
     })
   }
   for (const person of p.dropped_people) {
     out.push({
+      kind: 'dropped',
       tone: 'amber',
       text:
         person.tasks > 0
@@ -230,6 +238,7 @@ export function previewWarnings(
   }
   if (p.due_soon_reminders > 0) {
     out.push({
+      kind: 'due_soon',
       tone: 'blue',
       text: `В ближайшие сутки придёт ${plural(p.due_soon_reminders, 'напоминание', 'напоминания', 'напоминаний')} о сроке.`,
     })

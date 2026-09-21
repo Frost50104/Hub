@@ -213,6 +213,7 @@ function AboutRead({
     ownerNames: (members.data ?? [])
       .filter((m) => m.role === 'owner')
       .map((m) => m.full_name || m.email || 'без имени'),
+    isTemplate: project.is_template === true,
   })
   if (project.created_from_template?.name) {
     rows.push({ kind: 'text', label: 'Создан по шаблону', value: project.created_from_template.name })
