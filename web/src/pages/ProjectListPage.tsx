@@ -1,4 +1,3 @@
-import { zodResolver } from '@hookform/resolvers/zod'
 import {
   DndContext,
   PointerSensor,
@@ -12,36 +11,23 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { Folder, FolderPlus, MoreHorizontal, Plus, Star } from 'lucide-react'
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
-import { z } from 'zod'
 
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { CreateFolderDialog } from '@/components/project/CreateFolderDialog'
+import { CreateProjectDialog } from '@/components/project/CreateProjectDialog'
 import { ProjectKeyChip } from '@/components/project/ProjectKeyChip'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/Dialog'
 import { dropZoneClass } from '@/components/ui/DropZone'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorBanner } from '@/components/ui/ErrorBanner'
 import { GroupHeader } from '@/components/ui/GroupHeader'
-import { Input, Textarea } from '@/components/ui/Input'
-import { Label } from '@/components/ui/Label'
 import { ListRow } from '@/components/ui/ListRow'
 import { SheetPicker } from '@/components/ui/SheetPicker'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMe } from '@/hooks/useMe'
 import {
-  useCreateProject,
   useProjectFolders,
   useProjects,
   useRenameFolder,
@@ -59,13 +45,6 @@ import { type ProjectFolder } from '@/lib/projectFolders'
 import { PROJECT_ROLE_LABEL, type Project } from '@/lib/projects'
 import { plural } from '@/lib/typography'
 import { useFolderCollapse } from '@/stores/projectFolders'
-
-const createSchema = z.object({
-  name: z.string().min(1).max(255),
-  description: z.string().max(4000).optional(),
-})
-
-type CreateFormValues = z.infer<typeof createSchema>
 
 /** «312 задач · 48 закрыто · описание» — вторая строка проекта. */
 // ─── Строка проекта ──────────────────────────────────────────────────────────
@@ -343,91 +322,6 @@ function FolderSection({
   )
 }
 
-// ─── Создание проекта ────────────────────────────────────────────────────────
-
-function CreateProjectDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean
-  onOpenChange: (v: boolean) => void
-}) {
-  const create = useCreateProject()
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors, isSubmitting },
-  } = useForm<CreateFormValues>({ resolver: zodResolver(createSchema) })
-
-  const onSubmit = handleSubmit(async (values) => {
-    try {
-      const project = await create.mutateAsync({
-        name: values.name,
-        description: values.description || undefined,
-      })
-      toast.success(`Проект ${project.key} создан`)
-      reset()
-      onOpenChange(false)
-    } catch {
-      // тост показывает глобальный onError мутаций
-    }
-  })
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <form onSubmit={onSubmit}>
-          <DialogHeader>
-            <DialogTitle>Новый проект</DialogTitle>
-            <DialogDescription>
-              Короткий ключ (HUB-123 в идентификаторах задач) подберётся автоматически из названия.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="name">Название</Label>
-              <Input
-                id="name"
-                placeholder="Signaris Hub"
-                autoFocus
-                {...register('name')}
-              />
-              {errors.name && <p className="text-xs text-red">{errors.name.message}</p>}
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="description">Описание (опционально)</Label>
-              <Textarea
-                id="description"
-                rows={3}
-                placeholder="Что делает этот проект?"
-                {...register('description')}
-              />
-              {errors.description && (
-                <p className="text-xs text-red">{errors.description.message}</p>
-              )}
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => onOpenChange(false)}
-              disabled={isSubmitting}
-            >
-              Отмена
-            </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Создаём…' : 'Создать'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
 
 /** Скелетон: 5 строк 64px, ширины чередуются, без пульсации. */
 const SKELETON_WIDTHS = [88, 64, 76, 52, 84]
