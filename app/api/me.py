@@ -17,6 +17,7 @@ from signaris_auth import Principal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.learn_home import AUTH_AVATAR_BASE
+from app.config import get_settings
 from app.deps import get_db, require_auth, require_auth_any
 from app.services.employee_profiles import ensure_profile_for_principal
 from app.services.guides import GuideLink, guides_for_role
@@ -49,6 +50,9 @@ class MeFeatures(BaseModel):
     # что тумблер модуля живёт на экране библиотеки.
     project_templates: bool = False
     project_templates_admin: bool = False
+    # Личные напоминания по задачам (0062): env-выключатель, тенантного нет —
+    # это ядро трекера. Выключено = строки «Напомнить» и вида в настройках нет.
+    task_reminders: bool = False
 
 
 class MeResponse(BaseModel):
@@ -155,6 +159,7 @@ async def get_me(
             race=race_on,
             project_templates=templates_on,
             project_templates_admin=templates_gate.env_enabled() and is_hub_admin(principal),
+            task_reminders=get_settings().task_reminders_enabled,
         ),
     )
 

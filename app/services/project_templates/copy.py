@@ -125,6 +125,8 @@ async def plan_copy(
                 Task.done,
                 Task.archived_at.is_not(None),
                 exists().where(child.recurrence_parent_id == Task.id),
+                Task.start_has_time,
+                Task.due_has_time,
             ).where(Task.project_id == src.id)
         )
     ).all()
@@ -144,6 +146,8 @@ async def plan_copy(
                 done=r[10],
                 archived=bool(r[11]),
                 has_recurrence_child=bool(r[12]),
+                start_has_time=bool(r[13]),
+                due_has_time=bool(r[14]),
             )
             for r in task_rows
         ]
@@ -466,7 +470,9 @@ async def apply_copy(
                 "priority": t.priority,
                 "created_by": actor_id,
                 "start_at": rows.shifted_start(t.start_at, shift),
-                "due_at": rows.shifted_due(t.due_at, shift),
+                "due_at": rows.shifted_due(t.due_at, shift, t.due_has_time),
+                "start_has_time": t.start_has_time and t.start_at is not None,
+                "due_has_time": t.due_has_time and t.due_at is not None,
                 "position": t.position,
                 "seq": seqs[t.id],
                 "done": False,
@@ -562,7 +568,8 @@ async def apply_copy(
     rec_rows: list[dict[str, Any]] = []
     src_by_id = {t.id: t for t in sel.ordered}
     for r in plan.recurrences:
-        new_due = rows.shifted_due(src_by_id[r.task_id].due_at, shift)
+        src_task = src_by_id[r.task_id]
+        new_due = rows.shifted_due(src_task.due_at, shift, src_task.due_has_time)
         if new_due is None:
             continue
         rec_rows.append(

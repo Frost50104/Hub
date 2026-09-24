@@ -70,8 +70,15 @@ from app.services.task_recurrence import (
     recurrence_info,
     spawn_next,
 )
-from app.services.taskdates import display_today, due_day
+from app.services.task_reminders import reschedule as reschedule_reminders
+from app.services.taskdates import (
+    DatePatchError,
+    display_today,
+    due_day,
+    resolve_date_patch,
+)
 from app.services.tasks import (
+    TIME_WITHOUT_DATE_DETAIL,
     allocate_task_seq,
     apply_done_filter,
     assert_parent_one_level,
@@ -298,6 +305,46 @@ async def get_task(
     return await _serialize_one(db, task, rights_for=(role, principal))
 
 
+def _apply_date_patch(
+    task: Task, body: TaskUpdate, changes: dict[str, Any], kind: str
+) -> bool:
+    """Применить пару (мгновение, «задано время») старта или срока; → изменилась ли.
+
+    Сравнивается ПАРА, а не только мгновение: время 12:00 даёт то же мгновение,
+    что день без времени, и проверка `body.due_at != task.due_at` пропустила
+    бы включение времени.
+    """
+    at_field, flag_field = f"{kind}_at", f"{kind}_has_time"
+    try:
+        pair = resolve_date_patch(
+            body.model_fields_set,
+            at_field=at_field,
+            flag_field=flag_field,
+            new_at=getattr(body, at_field),
+            new_flag=getattr(body, flag_field),
+        )
+    except DatePatchError:
+        raise HTTPException(
+            status_code=422,
+            detail=TIME_WITHOUT_DATE_DETAIL,
+        ) from None
+    if pair is None:
+        return False
+    old_at, old_flag = getattr(task, at_field), getattr(task, flag_field)
+    new_at, new_flag = pair
+    if (new_at, new_flag) == (old_at, old_flag):
+        return False
+    changes[at_field] = {
+        "old": old_at.isoformat() if old_at else None,
+        "new": new_at.isoformat() if new_at else None,
+        "old_has_time": old_flag,
+        "new_has_time": new_flag,
+    }
+    setattr(task, at_field, new_at)
+    setattr(task, flag_field, new_flag)
+    return True
+
+
 @router.patch("/tasks/{task_id}", response_model=TaskResponse)
 async def update_task(
     task_id: UUID,
@@ -359,19 +406,9 @@ async def update_task(
         changes["priority"] = {"old": task.priority, "new": body.priority}
         task.priority = body.priority
 
-    if "due_at" in body.model_fields_set and body.due_at != task.due_at:
-        changes["due_at"] = {
-            "old": task.due_at.isoformat() if task.due_at else None,
-            "new": body.due_at.isoformat() if body.due_at else None,
-        }
-        task.due_at = body.due_at
-
-    if "start_at" in body.model_fields_set and body.start_at != task.start_at:
-        changes["start_at"] = {
-            "old": task.start_at.isoformat() if task.start_at else None,
-            "new": body.start_at.isoformat() if body.start_at else None,
-        }
-        task.start_at = body.start_at
+    # Дата и флаг времени — ОДНА пара (0061), правило — `resolve_date_patch`.
+    dates_changed = _apply_date_patch(task, body, changes, "due")
+    dates_changed = _apply_date_patch(task, body, changes, "start") or dates_changed
 
     actor_name_row = await db.execute(
         select(ShadowUser.full_name, ShadowUser.email).where(
@@ -442,7 +479,8 @@ async def update_task(
             },
         )
 
-    if body.done is not None and body.done != task.done:
+    done_changed = body.done is not None and body.done != task.done
+    if done_changed:
         set_done(task, body.done)
         await record_activity(
             db,
@@ -476,6 +514,14 @@ async def update_task(
     if body.position is not None:
         # 3a stub — set as-is; rebalance / collision-handling lands with @dnd-kit in 3b.
         task.position = body.position
+
+    if dates_changed or done_changed:
+        # Личные напоминания-правила следуют за сроком (0062). Сначала flush
+        # задачи, потом строки напоминаний — порядок блокировок «задача →
+        # напоминания», тот же, что у повтора выше (он уже перенёс правила
+        # закрытой задачи на копию). Снятая галочка взводит правила снова.
+        await db.flush()
+        await reschedule_reminders(db, task)
 
     if changes:
         await record_activity(

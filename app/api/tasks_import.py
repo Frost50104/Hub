@@ -37,7 +37,7 @@ from app.models.stage import ProjectStage
 from app.models.task import TaskLabel, TaskLabelAssignment
 from app.schemas.task import TaskCreate, TaskImportReport
 from app.services.project_access import require_project_role
-from app.services.taskdates import due_noon_utc
+from app.services.taskdates import at_local, due_noon_utc
 from app.services.tasks import create_task_record
 
 router = APIRouter(tags=["tasks"])
@@ -61,26 +61,37 @@ _PRIORITY = {
 }
 
 
-def _parse_due(raw: str) -> datetime | None:
-    """«14.08.2026», «2026-08-14», «2026-08-14T10:00» → полдень display tz
-    (`taskdates.due_noon_utc` — та же конвенция, что карточка и ассистент)."""
+def _parse_due(raw: str) -> tuple[datetime, bool] | None:
+    """Срок из ячейки CSV → (мгновение, «задано время»).
+
+    «14.08.2026», «14.08.26», «2026-08-14» — день: полдень display tz, как у
+    карточки и ассистента (`taskdates.due_noon_utc`). «14.08.2026 15:30» и ISO
+    со временем — срок со временем (0061); наивное время — по display tz. До
+    0061 наивное ISO трактовалось как UTC, хотя докстринг обещал полдень.
+    """
     raw = raw.strip()
     if not raw:
         return None
     for fmt in ("%d.%m.%Y", "%d.%m.%y"):
         try:
-            d = datetime.strptime(raw, fmt).date()
-            return due_noon_utc(d)
+            return due_noon_utc(datetime.strptime(raw, fmt).date()), False
+        except ValueError:
+            pass
+    for fmt in ("%d.%m.%Y %H:%M", "%d.%m.%y %H:%M"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            return at_local(dt.date(), dt.time()), True
         except ValueError:
             pass
     try:
         if len(raw) == 10:
-            d = date.fromisoformat(raw)
-            return due_noon_utc(d)
+            return due_noon_utc(date.fromisoformat(raw)), False
         dt = datetime.fromisoformat(raw)
-        return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
     except ValueError:
         return None
+    if dt.tzinfo is None:
+        return at_local(dt.date(), dt.time().replace(second=0, microsecond=0)), True
+    return dt.astimezone(UTC), True
 
 
 @router.post("/projects/{project_id}/tasks/import", response_model=TaskImportReport)
@@ -175,14 +186,17 @@ async def import_tasks(
             else:
                 priority = mapped
 
-        due = None
+        due: datetime | None = None
+        due_has_time = False
         if row.get("due"):
-            due = _parse_due(row["due"])
-            if due is None:
+            parsed_due = _parse_due(row["due"])
+            if parsed_due is None:
                 errors.append(
                     f"Строка {line_no}: срок «{row['due']}» не распознан "
-                    "(нужен ДД.ММ.ГГГГ или ГГГГ-ММ-ДД) — без срока"
+                    "(нужен ДД.ММ.ГГГГ, ДД.ММ.ГГГГ ЧЧ:ММ или ГГГГ-ММ-ДД) — без срока"
                 )
+            else:
+                due, due_has_time = parsed_due
 
         stage = stages.get(row.get("stage", "").lower()) if row.get("stage") else None
         if row.get("stage") and stage is None:
@@ -227,6 +241,7 @@ async def import_tasks(
             priority=priority,  # type: ignore[arg-type]
             assignee_ids=assignee_ids or None,
             due_at=due,
+            due_has_time=due_has_time,
         )
         task = await create_task_record(db, principal=principal, project_id=project_id, body=body)
         if label_ids:

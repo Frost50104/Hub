@@ -104,6 +104,14 @@ class Settings(BaseSettings):
     # шаблона 404, меню спрятано; шаблоны остаются в БД и невидимы.
     project_templates_enabled: bool = Field(default=True)
 
+    # Личные напоминания по задачам (0062). Не «модуль-остров», а часть ядра
+    # трекера — тенантного тумблера нет; env-флаг — аварийный выключатель:
+    # гасит ручки (404), воркер, `/api/me.features.task_reminders` и строку в
+    # настройках уведомлений. Опрос воркера — раз в N секунд (точность «ко
+    # времени» ≈ опрос + отправка).
+    task_reminders_enabled: bool = Field(default=True)
+    task_reminders_poll_sec: float = Field(default=20.0, ge=5.0, le=300.0)
+
     # CORS — staging + prod fronts
     cors_origins: list[str] = Field(
         default_factory=lambda: [

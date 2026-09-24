@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
@@ -29,6 +30,42 @@ from app.services.task_assignees import (
     set_task_assignees,
 )
 from app.services.task_watchers import ensure_watcher
+from app.services.taskdates import DatePatchError, resolve_date_patch
+
+TIME_WITHOUT_DATE_DETAIL = "Время передаётся вместе с датой"
+
+
+DatePair = tuple[datetime | None, bool]
+
+
+def resolve_task_dates(body: TaskCreate) -> tuple[DatePair, DatePair]:
+    """Пары (мгновение, флаг времени) старта и срока новой задачи (0061).
+
+    422 — флаг без своей даты. Правило то же, что у правки
+    (`api/tasks.py::update_task`): оба зовут `taskdates.resolve_date_patch`.
+    """
+    fields = body.model_fields_set
+    try:
+        start = resolve_date_patch(
+            fields,
+            at_field="start_at",
+            flag_field="start_has_time",
+            new_at=body.start_at,
+            new_flag=body.start_has_time,
+        )
+        due = resolve_date_patch(
+            fields,
+            at_field="due_at",
+            flag_field="due_has_time",
+            new_at=body.due_at,
+            new_flag=body.due_has_time,
+        )
+    except DatePatchError:
+        raise HTTPException(
+            status_code=422,
+            detail=TIME_WITHOUT_DATE_DETAIL,
+        ) from None
+    return start or (None, False), due or (None, False)
 
 
 async def allocate_task_seq(db: AsyncSession, project_id: UUID) -> int:
@@ -161,6 +198,7 @@ async def create_task_record(
         # нельзя.
         resolved = [principal.employee_id]
     assignee_ids = resolved or []
+    (start_at, start_has_time), (due_at, due_has_time) = resolve_task_dates(body)
     assignee_names = await assert_assignees_in_tenant(db, assignee_ids)
     await assert_parent_one_level(db, body.parent_task_id, project_id=project_id)
     # Колонка: явная — всегда, без явной — первая по позиции, а если колонок в
@@ -182,8 +220,10 @@ async def create_task_record(
         description=body.description,
         priority=body.priority,
         created_by=principal.employee_id,
-        start_at=body.start_at,
-        due_at=body.due_at,
+        start_at=start_at,
+        due_at=due_at,
+        start_has_time=start_has_time,
+        due_has_time=due_has_time,
         is_template=project.is_template,
         # Сначала seq (row-lock проекта до конца транзакции), ПОТОМ позиция:
         # иначе два параллельных create (быстрый ввод Enter-Enter) считают

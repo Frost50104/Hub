@@ -243,6 +243,8 @@ async def _build_task_view(session: AsyncSession, task_id: UUID) -> PublicTaskVi
         priority=task.priority,
         start_at=task.start_at,
         due_at=task.due_at,
+        start_has_time=task.start_has_time,
+        due_has_time=task.due_has_time,
         assignee_initials=assignee_init,
         assignees_initials=assignee_inits,
         created_by_initials=creator_init,
@@ -267,6 +269,7 @@ async def _build_project_view(
             Task.priority,
             Task.due_at,
             Task.parent_task_id,
+            Task.due_has_time,
         )
         .where(Task.project_id == project_id, Task.archived_at.is_(None))
         .order_by(Task.position)
@@ -297,6 +300,7 @@ async def _build_project_view(
             done=row.done,
             priority=row.priority,
             due_at=row.due_at,
+            due_has_time=row.due_has_time,
             assignee_initials=(
                 inits_by_task.get(row.id, [None])[0]
                 if inits_by_task.get(row.id)

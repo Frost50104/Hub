@@ -36,6 +36,8 @@ class PublicTaskHit(BaseModel):
     done: bool
     priority: str
     due_at: datetime | None
+    # Задано ли время у срока (0061); без него — календарный день.
+    due_has_time: bool = False
     # Легаси-скаляр = первый исполнитель: публичную страницу обслуживает тот
     # же SPA-бандл, который у части пользователей ещё старый.
     assignee_initials: str | None
@@ -87,6 +89,8 @@ class PublicTaskView(BaseModel):
     priority: str
     start_at: datetime | None
     due_at: datetime | None
+    start_has_time: bool = False
+    due_has_time: bool = False
     # Легаси-скаляр = первый исполнитель: публичную страницу обслуживает тот
     # же SPA-бандл, который у части пользователей ещё старый.
     assignee_initials: str | None

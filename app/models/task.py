@@ -54,6 +54,14 @@ class Task(Base):
             "priority IN ('low', 'medium', 'high', 'urgent')",
             name="ck_tasks_priority",
         ),
+        # Время без даты не бывает (0061) — писатели нормализуют флаг сами
+        # (`services/taskdates.py::normalize_time_flag`), БД сторожит.
+        CheckConstraint(
+            "NOT start_has_time OR start_at IS NOT NULL", name="ck_tasks_start_has_time"
+        ),
+        CheckConstraint(
+            "NOT due_has_time OR due_at IS NOT NULL", name="ck_tasks_due_has_time"
+        ),
         # Номер уникален ВНУТРИ проекта. С 28.08 задачу можно перенести
         # (`services/task_move.py`), и это ограничение — причина, по которой
         # переезд ОБЯЗАН перевыдать `seq` через `allocate_task_seq` целевого
@@ -108,6 +116,16 @@ class Task(Base):
         DateTime(timezone=True), nullable=True
     )
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Задано ли у даты ВРЕМЯ (0061). `false` — календарный день: мгновение
+    # хранится полднем display tz и читается как день, как было до 0061.
+    # `true` — точный момент. Вывести это из мгновения нельзя: неполуденные
+    # сроки появлялись и без умысла человека (перетаскивание, CSV).
+    start_has_time: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    due_has_time: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     # Задача РОДИЛАСЬ по повтору вот этой. SET NULL, а НЕ CASCADE (в отличие от
     # соседнего parent_task_id): удаление старой закрытой копии не должно
     # уносить всю живую цепочку серии.
@@ -359,4 +377,62 @@ class TaskRecurrence(Base):
         server_default=text("now()"),
         onupdate=text("now()"),
         nullable=False,
+    )
+
+
+REMINDER_ANCHORS = ("at", "due", "due_day", "start", "start_day")
+
+
+class TaskReminder(Base):
+    """Личное напоминание по задаче (0062). Получатель — тот, кто поставил.
+
+    `anchor='at'` — разовое: момент выбран руками, строка удаляется после
+    срабатывания. Остальные якоря — ПРАВИЛО относительно срока или старта
+    (`offset_minutes` ДО якоря), которое живёт дальше: сработало → `fire_at`
+    NULL и `fired_anchor_at` = момент якоря; перенесли срок → взведено снова;
+    повтор переносит правило на копию. Решения — `services/task_reminders.py`.
+    """
+
+    __tablename__ = "task_reminders"
+    __table_args__ = (
+        CheckConstraint(
+            "anchor IN ('at', 'due', 'due_day', 'start', 'start_day')",
+            name="ck_task_reminders_anchor",
+        ),
+        CheckConstraint("offset_minutes BETWEEN 0 AND 10080", name="ck_task_reminders_offset"),
+        CheckConstraint(
+            "anchor <> 'at' OR (offset_minutes = 0 AND fire_at IS NOT NULL)",
+            name="ck_task_reminders_at",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    task_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    employee_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("shadow_users.employee_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    anchor: Mapped[str] = mapped_column(String(10), nullable=False)
+    offset_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"), default=0
+    )
+    # Следующий момент; NULL — сработало или «спит» (якоря нет/прошёл/задача
+    # выполнена). Воркер сканирует ТОЛЬКО непустые — частичный индекс.
+    fire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fired_anchor_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Поставлено hub-admin'ом без членства в проекте: доступ в момент
+    # срабатывания проверяется по членству, и без флага напоминание админа
+    # молча выбрасывалось бы. Кеш `shadow_users.hub_role` не годится — его
+    # пишет только staff-sync, а на staging он выключен.
+    via_admin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
     )

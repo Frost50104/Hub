@@ -67,6 +67,7 @@ class SearchTaskHit(BaseModel):
     done: bool
     priority: str
     due_at: datetime | None
+    due_has_time: bool = False
     assignee_id: UUID | None
     # `headline` is a snippet with the user's query highlighted via custom
     # marker pair ‹‹…››. Client splits on it — safer than serving HTML.
@@ -308,6 +309,7 @@ async def search(
                 done=t.done,
                 priority=t.priority,
                 due_at=t.due_at,
+                due_has_time=t.due_has_time,
                 assignee_id=(
                     assignees_by_task[t.id][0].employee_id
                     if assignees_by_task.get(t.id)

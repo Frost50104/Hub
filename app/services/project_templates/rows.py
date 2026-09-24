@@ -46,6 +46,9 @@ class SrcTask:
     done: bool
     archived: bool
     has_recurrence_child: bool = False
+    # Задано ли время у дат (0061). Дефолт — «день», как у строк до 0061.
+    start_has_time: bool = False
+    due_has_time: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,12 +122,19 @@ def seq_map(sel: Selection, first: int) -> dict[UUID, int]:
     return {t.id: first + i for i, t in enumerate(ordered)}
 
 
-def shifted_due(due_at: datetime | None, days: int) -> datetime | None:
-    """Срок — календарный день: сдвиг дня и снова полдень display tz."""
+def shifted_due(due_at: datetime | None, days: int, has_time: bool = False) -> datetime | None:
+    """Сдвиг срока на `days` календарных дней.
+
+    Без времени срок — календарный день: сдвиг дня и снова полдень display tz.
+    Со временем (0061) — тот же час в новом дне (`shift_days`, DST-безопасно):
+    полдень здесь молча снимал бы «к 15:00» у каждой задачи проекта по шаблону.
+    """
     if due_at is None:
         return None
     if days == 0:
         return due_at
+    if has_time:
+        return shift_days(due_at, days)
     return due_noon_utc(date.fromordinal(due_day(due_at).toordinal() + days))
 
 
@@ -155,7 +165,11 @@ def suggested_anchor(sel: Selection, today: date) -> date:
 
 def date_range(sel: Selection, days: int) -> tuple[date | None, date | None]:
     """Первый и последний срок ПОСЛЕ сдвига — для предпросмотра."""
-    dues = [shifted_due(t.due_at, days) for t in sel.ordered if t.due_at is not None]
+    dues = [
+        shifted_due(t.due_at, days, t.due_has_time)
+        for t in sel.ordered
+        if t.due_at is not None
+    ]
     if not dues:
         return None, None
     ds = [due_day(d) for d in dues if d is not None]
@@ -166,7 +180,7 @@ def overdue_after_shift(sel: Selection, days: int, today: date) -> int:
     """Сколько задач сразу окажутся просроченными (сроки до точки отсчёта)."""
     n = 0
     for t in sel.ordered:
-        d = shifted_due(t.due_at, days)
+        d = shifted_due(t.due_at, days, t.due_has_time)
         if d is not None and due_day(d) < today:
             n += 1
     return n
@@ -177,7 +191,7 @@ def due_within(sel: Selection, days: int, today: date, horizon_days: int = 1) ->
     напоминаний «скоро срок» придёт каждому исполнителю и наблюдателю."""
     n = 0
     for t in sel.ordered:
-        d = shifted_due(t.due_at, days)
+        d = shifted_due(t.due_at, days, t.due_has_time)
         if d is None:
             continue
         delta = (due_day(d) - today).days

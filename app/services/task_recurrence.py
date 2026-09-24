@@ -46,8 +46,16 @@ from app.schemas.task import TaskRecurrenceInfo
 from app.services.activity_writer import record_activity
 from app.services.recurrence_dates import describe, next_occurrence
 from app.services.stages import next_position
+from app.services.task_reminders import transfer_to_copies
 from app.services.task_watchers import ensure_watcher
-from app.services.taskdates import display_today, due_day, due_noon_utc
+from app.services.taskdates import (
+    at_local,
+    display_today,
+    due_day,
+    due_noon_utc,
+    local_time_of,
+    shift_days,
+)
 from app.services.tasks import allocate_task_seq
 
 log = structlog.get_logger("task_recurrence")
@@ -204,13 +212,26 @@ async def _copy_labels_and_fields(db: AsyncSession, *, src_id: UUID, dst_id: UUI
 
 
 def _shifted(moment: datetime | None, shift: int) -> datetime | None:
-    """Сдвиг `start_at` на ту же дельту в днях.
+    """Сдвиг `start_at` на ту же дельту в КАЛЕНДАРНЫХ днях с тем же часом display tz.
 
-    `timedelta` на инстанте безопасен ровно потому, что display tz сейчас без
-    перехода на летнее время; срок (`due_at`) так двигать нельзя — он идёт
-    через `due_noon_utc(date)`.
+    `shift_days`, а не `timedelta` на инстанте: время старта (0061) обязано
+    остаться «09:00» и через переход на летнее время.
     """
-    return None if moment is None else moment + timedelta(days=shift)
+    return None if moment is None else shift_days(moment, shift)
+
+
+def _copy_due(src: Task, due: date | None) -> datetime | None:
+    """Срок копии: день по сетке повтора, а час — источника, если время задано.
+
+    Без времени — полдень display tz, как было до 0061. С временем — «к 15:00»
+    остаётся «к 15:00» в новом дне: `due_noon_utc` здесь молча снимал бы время
+    у каждой копии серии.
+    """
+    if due is None:
+        return None
+    if src.due_has_time and src.due_at is not None:
+        return at_local(due, local_time_of(src.due_at))
+    return due_noon_utc(due)
 
 
 async def _clone_task(
@@ -235,7 +256,9 @@ async def _clone_task(
         # иначе «создано мной» в /me/stats распухает у исполнителя.
         created_by=src.created_by,
         start_at=_shifted(src.start_at, shift),
-        due_at=due_noon_utc(due) if due is not None else None,
+        due_at=_copy_due(src, due),
+        start_has_time=src.start_has_time and src.start_at is not None,
+        due_has_time=src.due_has_time and due is not None,
         seq=await allocate_task_seq(db, src.project_id),
         position=await next_position(db, src.project_id, stage_id=src.stage_id),
         recurrence_parent_id=recurrence_parent_id,
@@ -333,9 +356,14 @@ async def spawn_next(
             .order_by(Task.position, Task.seq)
         )
     ).scalars().all()
+    # Личные напоминания-правила переезжают на копию (0062): с самой задачи
+    # и только с ВЫПОЛНЕННЫХ подзадач — `set_done` подзадачи не закрывает, а
+    # клонируются все живые, и у ещё открытой старой подзадачи правило должно
+    # остаться при ней.
+    reminder_moves: dict[UUID, Task] = {task.id: copy}
     for sub in subtasks:
         sub_due = due_day(sub.due_at) + timedelta(days=shift) if sub.due_at is not None else None
-        await _clone_task(
+        sub_copy = await _clone_task(
             db,
             src=sub,
             shift=shift,
@@ -343,6 +371,8 @@ async def spawn_next(
             parent_id=copy.id,
             recurrence_parent_id=None,
         )
+        if sub.done:
+            reminder_moves[sub.id] = sub_copy
 
     await db.execute(
         insert(TaskRecurrence).values(
@@ -355,6 +385,8 @@ async def spawn_next(
             created_by=rule.created_by,
         )
     )
+
+    await transfer_to_copies(db, reminder_moves)
 
     await record_activity(
         db,

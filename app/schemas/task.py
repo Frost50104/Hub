@@ -72,6 +72,10 @@ class TaskCreate(BaseModel):
     assignee_ids: list[UUID] | None = Field(default=None, max_length=MAX_ASSIGNEES)
     start_at: datetime | None = None
     due_at: datetime | None = None
+    # Задано ли у даты время (0061). Не пришло — день, как у старых клиентов;
+    # правило пары — `taskdates.resolve_date_patch`.
+    start_has_time: bool | None = None
+    due_has_time: bool | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -89,6 +93,10 @@ class TaskUpdate(BaseModel):
     assignee_ids: list[UUID] | None = Field(default=None, max_length=MAX_ASSIGNEES)
     start_at: datetime | None = None
     due_at: datetime | None = None
+    # Флаг времени передаётся ТОЛЬКО вместе со своей датой (иначе 422 из
+    # ручки); дата без флага = день. См. `taskdates.resolve_date_patch`.
+    start_has_time: bool | None = None
+    due_has_time: bool | None = None
     position: Decimal | None = None
     # Для nullable-полей (assignee_id/start_at/due_at) endpoint
     # различает «поле не пришло» (нет в model_fields_set → не трогаем) и
@@ -203,6 +211,10 @@ class TaskResponse(BaseModel):
     created_by: UUID
     start_at: datetime | None = None
     due_at: datetime | None
+    # `false` — календарный день (мгновение условное, полдень display tz),
+    # `true` — точный момент (0061).
+    start_has_time: bool = False
+    due_has_time: bool = False
     position: Decimal
     # Номер в проекте («KEY-42» = project.key + seq). project_key заполняют
     # только кросс-проектные ручки (/me/tasks) — в контексте проекта фронт

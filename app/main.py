@@ -150,10 +150,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             reason="SIGNARIS_HUB_SIGNARIS_SERVICE_KEY missing or sid_sync disabled",
         )
 
+    # Личные напоминания по задачам (0062): опрос `task_reminders` раз в
+    # `task_reminders_poll_sec`. В процессе, а не systemd-таймером раз в
+    # минуту: самый частый таймер приложения — раз в час, а питоновский
+    # процесс каждую минуту × 2 env на VPS без swap — лишняя память. Лидер-лок
+    # держит воркер в одном процессе; дубль отправки гасит FOR UPDATE SKIP
+    # LOCKED и сама строка-токен.
+    reminders_task: asyncio.Task | None = None
+    if settings.task_reminders_enabled:
+        from app.services.task_reminders import start_worker as start_reminders_worker
+
+        reminders_task = asyncio.create_task(
+            supervise("task-reminders", start_reminders_worker)
+        )
+        log.info("task_reminders.task_created")
+    else:
+        log.info("task_reminders.disabled", reason="SIGNARIS_HUB_TASK_REMINDERS_ENABLED=false")
+
     try:
         yield
     finally:
-        for task in (deletion_task, staff_task, sid_sync_task):
+        for task in (deletion_task, staff_task, sid_sync_task, reminders_task):
             if task is not None:
                 task.cancel()
                 try:
@@ -238,6 +255,7 @@ def create_app() -> FastAPI:
     from app.api import stages as stages_api
     from app.api import stats as stats_api
     from app.api import surveys as surveys_api
+    from app.api import task_reminders as task_reminders_api
     from app.api import tasks as tasks_api
     from app.api import tasks_import as tasks_import_api
     from app.api import tenant as tenant_api
@@ -255,6 +273,7 @@ def create_app() -> FastAPI:
     app.include_router(project_folders_api.router, prefix="/api")
     app.include_router(stages_api.router, prefix="/api")
     app.include_router(tasks_api.router, prefix="/api")
+    app.include_router(task_reminders_api.router, prefix="/api")
     app.include_router(tasks_import_api.router, prefix="/api")
     app.include_router(calendar_api.router, prefix="/api")
     app.include_router(custom_fields_api.router, prefix="/api")

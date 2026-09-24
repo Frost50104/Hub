@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.task import Task
 from app.services.notification_dispatcher import dispatch
 from app.services.ru_plural import ru_plural
-from app.services.timefmt import fmt_dt
+from app.services.timefmt import fmt_due
 
 
 def _task_url(task: Task) -> str:
@@ -133,7 +133,9 @@ async def notify_due_soon(
     task: Task,
     recipient_id: UUID,
 ) -> None:
-    when = fmt_dt(task.due_at, "%d.%m в %H:%M") if task.due_at else "скоро"
+    # Час печатаем, только если его выбрали (0061): у дня без времени
+    # мгновение условное, и «в 12:00» было неправдой.
+    when = fmt_due(task.due_at, task.due_has_time) if task.due_at else "скоро"
     await _send(
         session,
         task,

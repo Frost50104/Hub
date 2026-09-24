@@ -128,7 +128,9 @@ async def _exec_update_tasks(
     db: AsyncSession, principal: Principal, args: dict[str, Any]
 ) -> dict[str, Any]:
     from app.api.tasks import update_task as api_update_task
+    from app.models.task import Task
     from app.schemas.task import TaskUpdate
+    from app.services.assistant.tools import keep_task_time
 
     raw = dict(args["patch"])
     if raw.get("due_at"):
@@ -137,8 +139,12 @@ async def _exec_update_tasks(
         raw["assignee_ids"] = [UUID(i) for i in raw["assignee_ids"]]
     ids = [UUID(i) for i in args["task_ids"]]
     for task_id in ids:
+        # Час срока сохраняем у КАЖДОЙ задачи свой (0061): патч плана собран по
+        # первой, и её время иначе разлилось бы на остальные.
+        task = await db.get(Task, task_id)
+        body = keep_task_time(task, raw) if task is not None else raw
         await api_update_task(
-            task_id=task_id, body=TaskUpdate(**raw), principal=principal, db=db
+            task_id=task_id, body=TaskUpdate(**body), principal=principal, db=db
         )
     return {"text": f"Изменено задач: {len(ids)}"}
 

@@ -192,7 +192,7 @@ async def test_notify_is_silent_for_template_tasks(monkeypatch):
     monkeypatch.setattr(notify, "dispatch", fake_dispatch)
     task = SimpleNamespace(
         id=uuid.uuid4(), project_id=uuid.uuid4(), tenant_id=uuid.uuid4(),
-        title="Т", is_template=True, due_at=None,
+        title="Т", is_template=True, due_at=None, due_has_time=False,
     )
     await notify.notify_assigned(None, task=task, assignee_id=uuid.uuid4(), actor_name="А")
     await notify.notify_overdue(None, task=task, recipient_id=uuid.uuid4())

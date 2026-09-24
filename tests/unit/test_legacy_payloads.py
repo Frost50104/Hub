@@ -71,6 +71,8 @@ class TestFrontendBodyShapeStillValidates:
             assignee_ids=[uuid4()],
             start_at="2026-08-25T09:00:00Z",
             due_at="2026-08-26T09:00:00Z",
+            start_has_time=True,
+            due_has_time=True,
         )
         assert body.title == "Задача"
 
@@ -85,6 +87,8 @@ class TestFrontendBodyShapeStillValidates:
             assignee_ids=[uuid4()],
             start_at=None,
             due_at=None,
+            start_has_time=False,
+            due_has_time=False,
             position=Decimal("1.5"),
         )
         assert body.done is True

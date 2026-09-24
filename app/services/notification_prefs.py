@@ -27,6 +27,8 @@ NOTIFICATION_KINDS: tuple[str, ...] = (
     "task.commented_on_watched",
     "task.due_soon",
     "task.overdue",
+    # Личное напоминание «ко времени» (0062) — ставит себе сам человек.
+    "task.reminder",
     # Learn-домен (Ф1+)
     "library.ack_required",
     "content.review_due",

@@ -64,6 +64,52 @@ def due_day(due_at: datetime) -> date:
     return _now(due_at).astimezone(display_tz()).date()
 
 
+def local_time_of(moment: datetime) -> time:
+    """Часы и минуты мгновения в display tz (без tzinfo)."""
+    return _now(moment).astimezone(display_tz()).time().replace(tzinfo=None)
+
+
+def at_local(d: date, t: time) -> datetime:
+    """День `d` в `t` по display tz → UTC-инстант.
+
+    Для копий по повтору и шаблону со ВРЕМЕНЕМ (0061): «к 15:00» остаётся
+    «к 15:00» в новом дне, в том числе через переход на летнее время.
+    """
+    return datetime.combine(d, t, tzinfo=display_tz()).astimezone(UTC)
+
+
+class DatePatchError(ValueError):
+    """Флаг времени пришёл без самой даты — ручка отвечает 422."""
+
+
+def resolve_date_patch(
+    fields_set: set[str],
+    *,
+    at_field: str,
+    flag_field: str,
+    new_at: datetime | None,
+    new_flag: bool | None,
+) -> tuple[datetime | None, bool] | None:
+    """Итоговая пара (мгновение, «задано время») для PATCH/создания (0061).
+
+    None — поле даты не трогали. Правила:
+    - дата пришла без флага → флаг `false`: так пишут старые PWA-бандлы, CSV и
+      ассистент, которые знают только дни;
+    - пришли оба → флаг как прислали, но у снятой даты (`null`) — всегда `false`;
+    - флаг без даты → `DatePatchError`: переключать время, не называя момент,
+      нельзя — у дня без времени мгновение условное (полдень).
+
+    Пара считается ЦЕЛИКОМ, а не внутри «дата изменилась»: время 12:00 даёт то
+    же мгновение, что день без времени, и флаг иначе не записался бы.
+    """
+    if at_field not in fields_set:
+        if flag_field in fields_set:
+            raise DatePatchError(at_field)
+        return None
+    flag = bool(new_flag) if flag_field in fields_set else False
+    return new_at, (flag and new_at is not None)
+
+
 def shift_days(moment: datetime, days: int) -> datetime:
     """Сдвинуть мгновение на `days` КАЛЕНДАРНЫХ дней с тем же часом в display tz.
 

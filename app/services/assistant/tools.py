@@ -47,7 +47,10 @@ from app.services.task_assignees import (
     load_assignees,
 )
 from app.services.taskdates import (
+    at_local,
+    due_day,
     due_noon_utc,
+    local_time_of,
     overdue_clause,
 )
 from app.services.taskdates import overdue_days as taskdates_overdue_days
@@ -89,7 +92,9 @@ def parse_due(value: str | None) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
-def fmt_due(value: datetime | None) -> str | None:
+def fmt_due(value: datetime | None, has_time: bool = False) -> str | None:
+    """«22 августа, суббота» или «22 августа, суббота, 15:00» — час только если
+    его выбрали (0061): у срока без времени мгновение условное (полдень)."""
     if value is None:
         return None
     local = value.astimezone(display_tz())
@@ -98,7 +103,8 @@ def fmt_due(value: datetime | None) -> str | None:
         "июля", "августа", "сентября", "октября", "ноября", "декабря",
     )
     days = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
-    return f"{local.day} {months[local.month - 1]}, {days[local.weekday()]}"
+    text = f"{local.day} {months[local.month - 1]}, {days[local.weekday()]}"
+    return f"{text}, {local.strftime('%H:%M')}" if has_time else text
 
 
 # ─── Аргументы ──────────────────────────────────────────────────────────────
@@ -241,7 +247,7 @@ async def serialize_task(ctx: ToolContext, task: Task, project_key: str) -> dict
         "done": task.done,
         "priority": PRIORITY_RU[task.priority],
         "assignees": [a.full_name or a.email or "—" for a in assignees],
-        "due": fmt_due(task.due_at),
+        "due": fmt_due(task.due_at, task.due_has_time),
         "overdue_days": overdue_days or None,
         "url": f"/projects/{task.project_id}?task={task.id}",
     }
@@ -593,6 +599,24 @@ async def _apply_task_patch(
     return patch
 
 
+def keep_task_time(task: Task, patch: dict[str, Any]) -> dict[str, Any]:
+    """Перенос ДНЯ без потери выбранного часа (0061) — для каждой задачи отдельно.
+
+    Модель называет день («перенеси на пятницу»), а `parse_due` даёт полдень;
+    PATCH с датой без флага снимает время. У задачи со временем берём новый
+    день и её же час. Зовётся на КАЖДОЙ задаче: массовый план строит патч по
+    первой (`t_update_tasks`), и час одной задачи иначе разлился бы на все.
+    """
+    due = patch.get("due_at")
+    if due is None or not (task.due_has_time and task.due_at is not None):
+        return patch
+    return {
+        **patch,
+        "due_at": at_local(due_day(due), local_time_of(task.due_at)),
+        "due_has_time": True,
+    }
+
+
 def _is_done_only(a: UpdateTaskArgs | UpdateTasksArgs) -> bool:
     """Правка трогает только «выполнена».
 
@@ -632,7 +656,7 @@ async def t_update_task(ctx: ToolContext, a: UpdateTaskArgs) -> dict[str, Any]:
         return {"error": "Не указано, что менять"}
     updated = await api_update_task(
         task_id=task.id,
-        body=TaskUpdate(**patch),
+        body=TaskUpdate(**keep_task_time(task, patch)),
         principal=ctx.principal,
         db=ctx.db,
     )
@@ -642,7 +666,7 @@ async def t_update_task(ctx: ToolContext, a: UpdateTaskArgs) -> dict[str, Any]:
         "title": updated.title,
         "done": updated.done,
         "priority": PRIORITY_RU[updated.priority],
-        "due": fmt_due(updated.due_at),
+        "due": fmt_due(updated.due_at, updated.due_has_time),
         "url": f"/projects/{updated.project_id}?task={updated.id}",
     }
 
