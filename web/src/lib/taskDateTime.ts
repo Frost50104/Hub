@@ -100,8 +100,9 @@ export interface DateTimePatch {
 export function dateTimePatch(field: DateTimeField, value: DateTimeValue): DateTimePatch | null {
   const atKey = field === 'due' ? 'due_at' : 'start_at'
   const flagKey = field === 'due' ? 'due_has_time' : 'start_has_time'
+  // Пустой день при коммите — снять срок вместе со временем (время черновик
+  // держит и при пустом дне, см. `dateDraft.withDay`).
   if (!value.day) {
-    if (value.time) return null
     return { body: { [atKey]: null }, cache: { [atKey]: null, [flagKey]: false } }
   }
   const year = Number(value.day.slice(0, 4))

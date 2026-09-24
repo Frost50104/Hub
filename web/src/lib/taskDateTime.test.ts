@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { commitAction, syncDraft } from './dateDraft'
+import { commitAction, syncDraft, withDay } from './dateDraft'
 import {
   compareDue,
   dayTimeToIso,
@@ -79,22 +79,27 @@ describe('taskDateTime — правило патча', () => {
   })
 
   it('снятая дата снимает и время', () => {
-    expect(dateTimePatch('due', { day: '', time: '' })).toEqual({
-      body: { due_at: null },
-      cache: { due_at: null, due_has_time: false },
-    })
+    const cleared = { body: { due_at: null }, cache: { due_at: null, due_has_time: false } }
+    expect(dateTimePatch('due', { day: '', time: '' })).toEqual(cleared)
+    // Черновик держит время и при пустом дне — коммит всё равно снимает срок.
+    expect(dateTimePatch('due', { day: '', time: '15:00' })).toEqual(cleared)
   })
 
   it('обрывки набора не сохраняются', () => {
     // Промежуточный год из Chrome — это не срок.
     expect(dateTimePatch('due', { day: '0202-10-15', time: '' })).toBeNull()
-    expect(dateTimePatch('due', { day: '', time: '15:00' })).toBeNull()
     expect(dateTimePatch('due', { day: '2026-09-30', time: '99:99' })).toBeNull()
   })
 })
 
 describe('dateDraft — черновик', () => {
   const server = { day: '2026-09-30', time: '15:00' }
+
+  it('перенабор дня не стирает время (Chrome на миг даёт пустую дату)', () => {
+    const typing = withDay(server, '')
+    expect(typing).toEqual({ day: '', time: '15:00' })
+    expect(withDay(typing, '2026-10-01')).toEqual({ day: '2026-10-01', time: '15:00' })
+  })
 
   it('сервер не перетирает несохранённый ввод', () => {
     const typing = { value: { day: '2026-10-0', time: '15:00' }, dirty: true }

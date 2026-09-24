@@ -11,7 +11,7 @@ import {
 
 import { MobileDateCell } from '@/components/ui/MobileDateCell'
 import { cn } from '@/lib/cn'
-import { commitAction, type DateDraft, syncDraft } from '@/lib/dateDraft'
+import { commitAction, type DateDraft, syncDraft, withDay } from '@/lib/dateDraft'
 import {
   type DateTimeField,
   type DateTimePatch,
@@ -174,7 +174,7 @@ export function DateTimeEditor({
   }, [timeOpen])
 
   const edit = (value: DateTimeValue) => setDraft({ value, dirty: true })
-  const setDay = (day: string) => edit({ day, time: day ? draftRef.current.value.time : '' })
+  const setDay = (day: string) => edit(withDay(draftRef.current.value, day))
   const setTime = (time: string) => edit({ day: draftRef.current.value.day, time })
   const clearTime = () => {
     edit({ day: draftRef.current.value.day, time: '' })

@@ -30,6 +30,18 @@ export function syncDraft(draft: DateDraft, server: DateTimeValue): DateDraft {
   return sameDateTime(draft.value, server) ? draft : { value: server, dirty: false }
 }
 
+/**
+ * Новый день в черновике, время — ПРЕЖНЕЕ, даже когда день пустой.
+ *
+ * Перенабор дня с клавиатуры в Chrome на миг даёт пустую дату (замер 24.09 на
+ * staging): если в этот миг стирать и время, пара уходила бы на сервер днём без
+ * времени — «15:00» молча пропадало при переносе срока. Пустой день при
+ * КОММИТЕ по-прежнему снимает срок целиком (`dateTimePatch`).
+ */
+export function withDay(value: DateTimeValue, day: string): DateTimeValue {
+  return { day, time: value.time }
+}
+
 export type CommitAction = 'none' | 'commit' | 'revert'
 
 /**

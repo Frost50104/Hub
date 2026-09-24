@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -18,6 +19,7 @@ import { shouldToastReminder } from '@/lib/taskReminders'
 export function useReminderToasts(enabled: boolean): void {
   const unread = useUnreadCount()
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const prev = useRef<number | undefined>(undefined)
   const shownId = useRef<number | null>(null)
   const next = unread.data?.count
@@ -34,6 +36,12 @@ export function useReminderToasts(enabled: boolean): void {
         if (cancelled || !latest || latest.id === shownId.current) return
         if (!shouldToastReminder(before, next, latest, Date.now())) return
         shownId.current = latest.id
+        // Разовое напоминание после отправки удалено, правило уснуло — строка
+        // «Напомнить» открытой карточки иначе показывала бы его до перезапроса.
+        const taskId = latest.payload?.task_id
+        if (typeof taskId === 'string') {
+          void qc.invalidateQueries({ queryKey: ['task', taskId, 'reminders'] })
+        }
         const url = latest.url
         toast(latest.title, {
           description: latest.body,
@@ -47,5 +55,5 @@ export function useReminderToasts(enabled: boolean): void {
     return () => {
       cancelled = true
     }
-  }, [next, enabled, navigate])
+  }, [next, enabled, navigate, qc])
 }
