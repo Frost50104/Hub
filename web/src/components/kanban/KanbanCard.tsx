@@ -9,7 +9,7 @@ import { TaskDoneControl } from '@/components/task/TaskDoneControl'
 import { AvatarStack } from '@/components/ui/AvatarStack'
 import { cn } from '@/lib/cn'
 import { taskAssignees } from '@/lib/taskAssignees'
-import { shortDate, taskOverdue } from '@/lib/taskDates'
+import { formatDueShort, taskOverdue } from '@/lib/taskDates'
 import { describeRecurrence } from '@/lib/taskRecurrence'
 import { type Label } from '@/lib/labels'
 import { type SubtaskStats, type Task } from '@/lib/tasks'
@@ -142,7 +142,7 @@ export function KanbanCard({
               overdue ? 'font-semibold text-red' : 'text-text2',
             )}
           >
-            {task.due_at ? shortDate(task.due_at) : 'Без срока'}
+            {task.due_at ? formatDueShort(task.due_at, task.due_has_time) : 'Без срока'}
           </span>
         </span>
         {assignees.length === 0 ? (

@@ -97,6 +97,52 @@ export function dayEndIso(key: string, tz: string = displayTz): string {
   return new Date(start - 1).toISOString()
 }
 
+const timeFormatters = new Map<string, Intl.DateTimeFormat>()
+
+function timeFormatter(tz: string): Intl.DateTimeFormat {
+  let f = timeFormatters.get(tz)
+  if (!f) {
+    // `hourCycle: 'h23'`, а не `hour12: false`: второй на части движков даёт
+    // «24:00» вместо «00:00» (тот же приём, что в `tzOffsetMs`).
+    f = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz,
+      hourCycle: 'h23',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    timeFormatters.set(tz, f)
+  }
+  return f
+}
+
+/** «HH:MM» мгновения в display tz (0061: время у старта и срока). */
+export function timeKey(value: string | number | Date, tz: string = displayTz): string {
+  const d = value instanceof Date ? value : new Date(value)
+  const parts = timeFormatter(tz).formatToParts(d)
+  const hh = parts.find((p) => p.type === 'hour')?.value ?? '00'
+  const mm = parts.find((p) => p.type === 'minute')?.value ?? '00'
+  return `${hh}:${mm}`
+}
+
+/**
+ * «15:30» → [15, 30]. Лениво к хвосту: Chrome отдаёт «15:30», а с `step`
+ * меньше минуты — «15:30:00». Вне диапазона — null.
+ */
+export function parseTimeKey(value: string): [number, number] | null {
+  const m = /^(\d{1,2}):(\d{2})/.exec(value.trim())
+  if (!m) return null
+  const hh = Number(m[1])
+  const mm = Number(m[2])
+  if (hh > 23 || mm > 59) return null
+  return [hh, mm]
+}
+
+/** День + «HH:MM» по display tz → ISO. Некорректное время — null. */
+export function dayTimeToIso(key: string, time: string, tz: string = displayTz): string | null {
+  const hm = parseTimeKey(time)
+  return hm ? atTimeIso(key, hm[0], hm[1], tz) : null
+}
+
 /** «16 авг» — без точки после месяца: ru-RU short даёт «16 авг.». */
 export function shortDate(iso: string): string {
   return new Date(iso)
@@ -122,6 +168,42 @@ export function humanDate(value: string): string {
     year: 'numeric',
     timeZone: displayTz,
   })
+}
+
+/**
+ * Срок в строке списка/на доске: «30 сен», а при выбранном времени — «30 сен 15:00».
+ * Час печатаем ТОЛЬКО если его выбрали: у срока без времени мгновение условное
+ * (полдень display tz), и «12:00» было бы неправдой.
+ */
+export function formatDueShort(iso: string, hasTime: boolean | undefined): string {
+  return hasTime ? `${shortDate(iso)} ${timeKey(iso)}` : shortDate(iso)
+}
+
+/** То же для карточки и публичной страницы: «30.09.2026» / «30.09.2026, 15:00». */
+export function formatDueLong(iso: string, hasTime: boolean | undefined): string {
+  return hasTime ? `${humanDate(iso)}, ${timeKey(iso)}` : humanDate(iso)
+}
+
+/**
+ * Порядок по сроку для «Моих задач»: по дню, внутри дня сначала «весь день»
+ * (без времени), потом по времени; без срока — в конце. Сортировка сервера по
+ * мгновению ставила бы «без времени» (условный полдень) между 11:00 и 13:00.
+ */
+export function compareDue(
+  a: { due_at: string | null; due_has_time?: boolean },
+  b: { due_at: string | null; due_has_time?: boolean },
+): number {
+  if (!a.due_at || !b.due_at) {
+    if (a.due_at === b.due_at) return 0
+    return a.due_at ? -1 : 1
+  }
+  const da = dayKey(a.due_at)
+  const db = dayKey(b.due_at)
+  if (da !== db) return da < db ? -1 : 1
+  const ta = a.due_has_time === true
+  const tb = b.due_has_time === true
+  if (ta !== tb) return ta ? 1 : -1
+  return Date.parse(a.due_at) - Date.parse(b.due_at)
 }
 
 /**

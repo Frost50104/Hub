@@ -69,6 +69,8 @@
    ```
    `alembic upgrade head` на старом коде — no-op (лишние ревизии БД он не откатит, аддитивные миграции старому коду не мешают).
 
+   **Откат «время и напоминания» (0061/0062, 24.09).** Этап B: `SIGNARIS_HUB_TASK_REMINDERS_ENABLED=false` + рестарт (воркер и ручки гаснут, строки остаются) → старый код → при нужде `alembic downgrade 0061`. Этап A: ПЕРЕД деплоем старого кода снять ограничения — `ALTER TABLE tasks DROP CONSTRAINT ck_tasks_due_has_time, DROP CONSTRAINT ck_tasks_start_has_time;` — иначе старый `update_task`, не знающий флага, на «снять срок» у задачи со временем упрётся в CHECK (500); затем старый код → `alembic downgrade 0060`.
+
 2. **Миграция, которую нужно откатить** (деструктивная/сломанная):
    ```bash
    ssh root@94.241.168.8
@@ -144,6 +146,8 @@ Staging-копии юнитов генерируются `ops/systemd/make-stagi
 - `signaris-hub[-staging]-race-sync.timer` — hourly :40 (`:00` — due-soon, `:20` — automations), «Гусиная гонка» (0057): дотяжка чеков iiko за [вчера, сегодня] одним OLAP-вызовом под fenced-локом слота + пуши не раньше 09:00 MSK (`app/jobs/race_sync.py`). Гейты: `RACE_ENABLED`, `RACE_SYNC_ENABLED` (staging=false), `IIKO_*`, тенантный тумблер.
 - `signaris-hub[-staging]-race-close.timer` — 00:45 UTC = 03:45 MSK (учётный день iiko + чеки после полуночи; 00:00–00:30 UTC занято цепочкой бэкапов), ночное закрытие дня: снимки, итоги заезда по `ends_on`, следующий заезд, база в режиме `race` (`app/jobs/race_close.py`). Пушей нет. **Установка на живом хосте** (bootstrap ставит все юниты разом; на уже поднятом — руками): `cp ops/systemd/signaris-hub{,-staging}-race-{sync,close}.{service,timer} /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now signaris-hub-race-sync.timer signaris-hub-race-close.timer signaris-hub-staging-race-sync.timer signaris-hub-staging-race-close.timer`.
 - `signaris-hub[-staging]-sites-sync.timer` — hourly :10 (`:40` — race-sync, подхватывает новые карточки в тот же час), снимок реестра объектов auth + применение к `stores` (`app/jobs/sites_sync.py` → `sync_sites()` → `registry_apply.apply_registry` по тенантам снимка, кроме занятых try-локом). На staging `SITES_SYNC_ENABLED=false` → только dry-run. Установка на живом хосте: `cp ops/systemd/signaris-hub{,-staging}-sites-sync.{service,timer} /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now signaris-hub-sites-sync.timer signaris-hub-staging-sites-sync.timer`.
+
+- **Воркер личных напоминаний (0062)** — не юнит и не таймер: живёт в процессе приложения (`lifespan` → `supervise("task-reminders")`), выкат = рестарт сервиса. Выключатель — `SIGNARIS_HUB_TASK_REMINDERS_ENABLED=false`, опрос — `SIGNARIS_HUB_TASK_REMINDERS_POLL_SEC` (20). На staging включён: напоминания там ставят себе люди на staging. **Если staging когда-нибудь восстанавливают из дампа прода — `TRUNCATE task_reminders` ДО старта сервиса:** VAPID общий, и копии прод-напоминаний ушли бы пушами на реальные устройства (гейт свежести 30 дн. копию недавнего дампа не отсечёт).
 
 ## nginx-инварианты
 

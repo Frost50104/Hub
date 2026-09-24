@@ -33,6 +33,11 @@ export interface Task {
   created_by: string
   start_at: string | null
   due_at: string | null
+  /** Задано ли у даты ВРЕМЯ (0061). `false`/нет поля — календарный день:
+   *  мгновение условное (полдень display tz), час не показываем. Optional:
+   *  объект старого кэша и оптимистичный объект поля не несут. */
+  start_has_time?: boolean
+  due_has_time?: boolean
   position: string | number
   /** Номер в проекте («KEY-42»). Optional: optimistic-объекты его не знают —
    * бейдж просто не рендерится до ответа сервера. */
@@ -125,6 +130,9 @@ export interface TaskCreateBody {
   assignee_ids?: string[]
   start_at?: string | null
   due_at?: string | null
+  /** Только вместе со своей датой; не пришёл — день (см. `lib/taskDateTime.ts`). */
+  start_has_time?: boolean
+  due_has_time?: boolean
 }
 
 export interface TaskUpdateBody {
@@ -143,6 +151,11 @@ export interface TaskUpdateBody {
   assignee_ids?: string[]
   start_at?: string | null
   due_at?: string | null
+  /** Только вместе со своей датой, иначе 422; не пришёл — день. Клиент шлёт
+   *  флаг лишь со значением `true` (`lib/taskDateTime.ts`): при откате одного
+   *  бэкенда `extra="forbid"` ломал бы тогда только правки со временем. */
+  start_has_time?: boolean
+  due_has_time?: boolean
   position?: string | number
 }
 

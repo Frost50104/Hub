@@ -18,6 +18,7 @@ import { useTimeline } from '@/hooks/useTimeline'
 import { cn } from '@/lib/cn'
 import { capitalizeFirst } from '@/lib/dates'
 import { taskOverdue } from '@/lib/taskDates'
+import { shiftTaskDates } from '@/lib/taskDateTime'
 import { type Task, type TaskPriority } from '@/lib/tasks'
 import { type TimelineDependency } from '@/lib/timeline'
 import { plural } from '@/lib/typography'
@@ -157,13 +158,9 @@ export function TimelineView({ projectId, onTaskClick, initialDay }: TimelineVie
     if (!task || !task.due_at) return
     const deltaDays = Math.round((e.delta.x ?? 0) / pxPerDay)
     if (deltaDays === 0) return
-    const oldDue = new Date(task.due_at)
-    const patch: { id: string; due_at: string; start_at?: string } = {
-      id: taskId,
-      due_at: addDays(oldDue, deltaDays).toISOString(),
-    }
-    if (task.start_at) patch.start_at = addDays(new Date(task.start_at), deltaDays).toISOString()
-    update.mutate(patch)
+    const patch = shiftTaskDates(task, deltaDays)
+    if (!patch) return
+    update.mutate({ id: taskId, ...patch.body, __optimistic: patch.cache })
   }
 
   // Шкала: в «дне» — каждая ячейка с числом; в «неделе» — понедельники;

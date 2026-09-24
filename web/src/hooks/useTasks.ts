@@ -17,6 +17,7 @@ import {
   type TaskListFilters,
   type TaskUpdateBody,
 } from '@/lib/tasks'
+import type { TimelineResponse } from '@/lib/timeline'
 
 export const taskKeys = {
   all: ['tasks'] as const,
@@ -126,9 +127,15 @@ interface MoveVars {
   stage_id: string | null
 }
 
+/** Ключ мутации правки задачи: «Напомнить» ждёт, пока правка ЭТОЙ задачи
+ *  (по `variables.id`) не дойдёт до сервера, — иначе POST напоминания мог бы
+ *  посчитаться от старого срока (0062). */
+export const TASK_UPDATE_KEY = ['task-update'] as const
+
 export function useUpdateTask(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
+    mutationKey: TASK_UPDATE_KEY,
     // __optimistic обязан отрезаться здесь — иначе улетит в тело PATCH.
     mutationFn: ({ id, __optimistic: _drop, ...body }: UpdateVars) =>
       tasksApi.update(id, body),
@@ -140,6 +147,7 @@ export function useUpdateTask(projectId: string) {
         qc.cancelQueries({ queryKey: ['tasks', projectId] }),
         qc.cancelQueries({ queryKey: ['me-tasks'] }),
         qc.cancelQueries({ queryKey: taskKeys.detail(id) }),
+        qc.cancelQueries({ queryKey: ['timeline', projectId] }),
       ])
       // Зеркала больше нет: колонка и «выполнена» — независимые оси (0044),
       // патч применяется как есть.
@@ -150,17 +158,29 @@ export function useUpdateTask(projectId: string) {
       const prevLists = qc.getQueriesData<Task[]>({ queryKey: ['tasks', projectId] })
       const prevMy = qc.getQueriesData<Task[]>({ queryKey: ['me-tasks'] })
       const prevDetail = qc.getQueryData<Task>(taskKeys.detail(id))
+      const prevTimeline = qc.getQueriesData<TimelineResponse>({
+        queryKey: ['timeline', projectId],
+      })
 
       qc.setQueriesData<Task[]>({ queryKey: ['tasks', projectId] }, apply)
       qc.setQueriesData<Task[]>({ queryKey: ['me-tasks'] }, apply)
+      // Хронология держит СВОЮ копию задач (`['timeline', …]`): без патча
+      // полоса после перетаскивания отскакивала до перезапроса, а следующее
+      // перетаскивание строило бы патч из старой копии и снимало время (0061).
+      qc.setQueriesData<TimelineResponse>({ queryKey: ['timeline', projectId] }, (old) =>
+        old ? { ...old, tasks: apply(old.tasks) ?? old.tasks } : old,
+      )
       if (prevDetail) {
         qc.setQueryData<Task>(taskKeys.detail(id), { ...prevDetail, ...patch })
       }
-      return { prevLists, prevMy, prevDetail, id }
+      return { prevLists, prevMy, prevDetail, prevTimeline, id }
     },
     onError: (_err, _vars, ctx) => {
       if (!ctx) return
       for (const [key, data] of [...ctx.prevLists, ...ctx.prevMy]) {
+        qc.setQueryData(key, data)
+      }
+      for (const [key, data] of ctx.prevTimeline) {
         qc.setQueryData(key, data)
       }
       if (ctx.prevDetail) {
@@ -177,6 +197,12 @@ export function useUpdateTask(projectId: string) {
       qc.invalidateQueries({ queryKey: ['me-stats'] })
       qc.invalidateQueries({ queryKey: taskKeys.detail(vars.id) })
       qc.invalidateQueries({ queryKey: ['task', vars.id, 'activity'] })
+      qc.invalidateQueries({ queryKey: ['timeline', projectId] })
+      // Личные напоминания-правила следуют за сроком, а закрытие повторяющейся
+      // задачи переносит их на копию (0062) — сервер пересчитал, сверяемся.
+      if (vars.due_at !== undefined || vars.start_at !== undefined || vars.done !== undefined) {
+        qc.invalidateQueries({ queryKey: ['task', vars.id, 'reminders'] })
+      }
       // Вкладка «Назначенные мной» шире прежней секции «Я поставил»: туда
       // попадают задачи ОБЫЧНЫХ проектов, поэтому её задевает не только смена
       // исполнителя, но и закрытие, и правка строки. Инвалидация неактивного

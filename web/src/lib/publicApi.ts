@@ -35,6 +35,9 @@ export interface PublicTaskView {
   priority: string
   start_at: string | null
   due_at: string | null
+  /** Задано ли у даты время (0061); нет поля — старый бэкенд, день. */
+  start_has_time?: boolean
+  due_has_time?: boolean
   /** @deprecated Первые инициалы из `assignees_initials`. */
   assignee_initials: string | null
   assignees_initials?: string[]
@@ -50,6 +53,7 @@ export interface PublicTaskHit {
   done: boolean
   priority: string
   due_at: string | null
+  due_has_time?: boolean
   /** @deprecated Первые инициалы из `assignees_initials`. */
   assignee_initials: string | null
   assignees_initials?: string[]

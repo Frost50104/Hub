@@ -5,8 +5,9 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
-import { useMe } from '@/hooks/useMe'
+import { hasTaskReminders, useMe } from '@/hooks/useMe'
 import { usePushAutoRefresh } from '@/hooks/usePushAutoRefresh'
+import { useReminderToasts } from '@/hooks/useReminderToasts'
 import { useThemeSync } from '@/hooks/useThemeSetting'
 import { logoutWithDeviceCleanup } from '@/lib/session'
 import {
@@ -78,6 +79,9 @@ export function Shell() {
   // Тема принадлежит аккаунту: до ответа /me работает кеш устройства, после —
   // решает сервер. Хук ОБЯЗАН стоять до раннего return NoAccessScreen.
   useThemeSync(me.data)
+  // Пришедшее напоминание (0062) — тостом в открытом приложении: у большинства
+  // пуш-подписки нет. До раннего return, как и хуки выше.
+  useReminderToasts(hasTaskReminders(me.data))
 
   // ЕДИНЫЙ эффект, boot-redirect строго ПЕРЕД remember: раздельные эффекты —
   // баг (remember успел бы перезаписать lastSpace='tasks' на первом маунте

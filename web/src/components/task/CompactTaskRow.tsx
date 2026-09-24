@@ -2,7 +2,7 @@ import { ProjectChip } from '@/components/task/ProjectChip'
 import { TaskDoneControl } from '@/components/task/TaskDoneControl'
 import { PriorityBar } from '@/components/task/PriorityBar'
 import { cn } from '@/lib/cn'
-import { shortDate, taskOverdue } from '@/lib/taskDates'
+import { formatDueShort, taskOverdue } from '@/lib/taskDates'
 import { type TaskProjectLabel } from '@/lib/taskProjectLabel'
 import { type Task } from '@/lib/tasks'
 
@@ -59,11 +59,11 @@ export function CompactTaskRow({
       </span>
       <span
         className={cn(
-          'shrink-0 text-right text-[14px] tabular-nums',
+          'shrink-0 whitespace-nowrap text-right text-[14px] tabular-nums',
           overdue ? 'font-semibold text-red' : 'text-text2',
         )}
       >
-        {task.due_at ? shortDate(task.due_at) : '—'}
+        {task.due_at ? formatDueShort(task.due_at, task.due_has_time) : '—'}
       </span>
     </div>
   )

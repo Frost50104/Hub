@@ -7,7 +7,7 @@ import { AvatarStack } from '@/components/ui/AvatarStack'
 import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
 import { taskAssignees } from '@/lib/taskAssignees'
-import { shortDate, taskOverdue } from '@/lib/taskDates'
+import { formatDueShort, taskOverdue } from '@/lib/taskDates'
 import { type TaskProjectLabel } from '@/lib/taskProjectLabel'
 import { type SubtaskStats, type Task } from '@/lib/tasks'
 
@@ -137,13 +137,15 @@ export function TaskRow({
         )}
       </span>
 
+      {/* nowrap: «30 сент 15:00» в узком треке молча переносился бы на вторую
+          строку, а не обрезался — на глаз этого не заметно. */}
       <span
         className={cn(
-          'text-right text-[14px] tabular-nums',
+          'whitespace-nowrap text-right text-[14px] tabular-nums',
           overdue ? 'font-semibold text-red' : 'text-text2',
         )}
       >
-        {task.due_at ? shortDate(task.due_at) : '—'}
+        {task.due_at ? formatDueShort(task.due_at, task.due_has_time) : '—'}
       </span>
     </div>
   )

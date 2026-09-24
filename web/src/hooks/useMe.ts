@@ -50,11 +50,19 @@ export interface Me {
     project_templates?: boolean
     /** env-флаг включён и человек hub-admin: пункт «Шаблоны» виден всегда. */
     project_templates_admin?: boolean
+    /** Личные напоминания по задачам (0062): env-выключатель, не тенантный. */
+    task_reminders?: boolean
   }
 }
 
 export function hasRace(me: Me | undefined): boolean {
   return me?.features?.race === true
+}
+
+/** «Напомнить» в карточке и вид в настройках — только при включённом модуле;
+ *  нет поля (старый бэкенд) — выключено. */
+export function hasTaskReminders(me: Me | undefined): boolean {
+  return me?.features?.task_reminders === true
 }
 
 /** Общие опции запроса: их же берёт префетч на экране auth-колбэка, чтобы

@@ -60,7 +60,7 @@ export function ImportTasksDialog({
         }
       }}
       title="Импорт задач из CSV"
-      description="Колонки: title (обязательная), description, assignee_email, due (ДД.ММ.ГГГГ или ГГГГ-ММ-ДД), priority, section, stage, labels (через |). Разделитель — «;» или «,». Секции, колонки и метки — только существующие; неизвестные — предупреждением, задача всё равно создаётся."
+      description="Колонки: title (обязательная), description, assignee_email, due (ДД.ММ.ГГГГ, можно со временем — ДД.ММ.ГГГГ ЧЧ:ММ — или ГГГГ-ММ-ДД), priority, section, stage, labels (через |). Разделитель — «;» или «,». Секции, колонки и метки — только существующие; неизвестные — предупреждением, задача всё равно создаётся."
       footer={
         <>
           <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={run.isPending}>

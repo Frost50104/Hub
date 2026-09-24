@@ -24,7 +24,7 @@
 6. **Самопроверка** — `POST /api/push/test` (rate-limit 10/час) и кнопка «Проверить» в «Настройки → Уведомления». Текст ответа собирает `push_sender.describe_push_result`: «не настроено на сервере», «устройство не подписано», «подписка давно не подтверждалась», «устройство больше не принимает» — пять разных бед выглядят для человека одинаково, и каждая обязана назвать себя.
 7. **Общее устройство: подписка следует за вошедшим (09.09).** Выход (`lib/session.ts`) отзывает строку на сервере — `DELETE /api/push/subscribe?endpoint=…` ГОЛЫМ `fetch` с токеном из `authClient.getAccessToken()` (через axios нельзя: интерцептор `attachAxiosAuth` на 401 делает `startLogin()`, и «Выйти» с протухшей сессией возвращало бы человека внутрь приложения), `keepalive: true`, таймаут 2 с, ошибки глотаются. **Браузерная подписка при выходе НЕ отменяется и `hub:push-opted-in` не снимается** — иначе вернувшемуся пришлось бы включать уведомления заново; снимается только привязка к человеку. Отзыв из браузера best-effort (вкладку закрыли, сеть отвалилась), поэтому вторая линия — на входе: `hub:push-owner` хранит, на кого endpoint привязан на сервере, и `shouldSyncPush` при `owner !== employeeId` **обходит 12-часовой троттл**, перевешивая endpoint на нового вошедшего за секунды вместо полусуток. Осознанное следствие: на устройстве с ранее выданным разрешением следующий вошедший получает свои пуши молча — разрешение принадлежит браузеру, а не аккаунту.
 
-## Триггеры: task-домен (6 kinds)
+## Триггеры: task-домен (7 kinds)
 
 | kind | Когда | Кому |
 |---|---|---|
@@ -34,6 +34,7 @@
 | `task.status_changed_on_watched` | смена этапа/статуса (`stage_id` → `set_stage`, зеркало `status`; в тексте — имя этапа) | всем watchers кроме автора |
 | `task.due_soon` | `status != 'done'` и `due_at` в течение 24ч | assignee + watchers |
 | `task.overdue` | `status != 'done'` и `due_at < NOW()` | assignee + watchers |
+| `task.reminder` | личное напоминание «ко времени» (0062): разовое или правило от срока/старта; воркер в lifespan, раз в 20 с | только тому, кто поставил |
 
 ## Триггеры: learn-домен (16 kinds)
 
@@ -71,6 +72,7 @@
 - `signaris-hub[-staging]-inactivity.timer` — daily 07:00 UTC, `app.jobs.inactivity`.
 - `signaris-hub[-staging]-automations.timer` — hourly :20, `app.jobs.automations_run`.
 - `signaris-hub[-staging]-race-sync.timer` — hourly :40, `app.jobs.race_sync` (дотяжка iiko + пуши гонки); `race-close.timer` — 00:45 UTC, `app.jobs.race_close` (без пушей).
+- **Личные напоминания (0062) — НЕ таймер, а воркер в lifespan** (`app/services/task_reminders.py::start_worker` под `supervise("task-reminders")`, опрос `SIGNARIS_HUB_TASK_REMINDERS_POLL_SEC`=20). Дубль сторожит сама строка (разовое удаляется, правило засыпает с `fired_anchor_at`), а не таблица `notifications` — поэтому «только пуш» (in_app выключен) не повторяется, в отличие от `due_soon`. Пуши — после commit, фоном по тенантам (семафор 2). Подсказка в карточке «придёт только во «Входящие»» считается из `delivery` ручки `GET /tasks/{id}/reminders` (свежие подписки + prefs вида + `vapid_status`). В открытом приложении пришедшее напоминание показывает тост (`useReminderToasts`).
 
 **Пуши из джоб и commit.** `notify_many` планирует push ДО commit'а вызывающего; там, где в той же транзакции ставятся метки дедупа (гонка), порядок другой — `queue_many` → commit → `schedule_push_batch`, иначе откат вернул бы метки и через час рассылка повторилась бы. Каждая джоба в конце зовёт `notify_batch.drain(timeout_sec=120)`: без него `asyncio.run` отменяет незавершённые фоновые задачи и хвост рассылки теряется молча; параллельность отправки — `PUSH_CONCURRENCY=4` сессии.
 

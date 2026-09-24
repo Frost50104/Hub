@@ -6,6 +6,7 @@ import { Markdown } from '@/components/Markdown'
 import { usePublicShare } from '@/hooks/usePublicShare'
 import { cn } from '@/lib/cn'
 import { type PublicProjectView, type PublicTaskView } from '@/lib/publicApi'
+import { timeKey } from '@/lib/taskDates'
 
 const PRIORITY_TONE: Record<string, string> = {
   low: 'text-text3',
@@ -28,6 +29,16 @@ function formatDate(iso: string | null | undefined): string | null {
     month: 'short',
     year: 'numeric',
   })
+}
+
+/** Дата срока/старта и, если выбрано, время по поясу сети (0061). */
+function formatDateWithTime(
+  iso: string | null | undefined,
+  hasTime: boolean | undefined,
+): string | null {
+  const day = formatDate(iso)
+  if (!iso || !day) return day
+  return hasTime ? `${day}, ${timeKey(iso)}` : day
 }
 
 function formatDateTime(iso: string): string {
@@ -160,8 +171,8 @@ function PageShell({ children }: { children: React.ReactNode }) {
 }
 
 function TaskView({ data }: { data: PublicTaskView }) {
-  const due = formatDate(data.due_at)
-  const start = formatDate(data.start_at)
+  const due = formatDateWithTime(data.due_at, data.due_has_time)
+  const start = formatDateWithTime(data.start_at, data.start_has_time)
   return (
     <article className="glass space-y-4 p-5 md:p-6">
       <header className="space-y-2">
@@ -302,7 +313,7 @@ function ProjectViewBlock({ data }: { data: PublicProjectView }) {
                   )}
                   {t.due_at && (
                     <span className="text-[10px] text-text3">
-                      {formatDate(t.due_at)}
+                      {formatDateWithTime(t.due_at, t.due_has_time)}
                     </span>
                   )}
                   <span

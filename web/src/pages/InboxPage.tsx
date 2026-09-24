@@ -1,4 +1,5 @@
 import {
+  AlarmClock,
   AtSign,
   Bell,
   BookOpen,
@@ -34,6 +35,7 @@ const KIND_ICON: Record<string, typeof Bell> = {
   'task.status_changed_on_watched': CheckCircle2,
   'task.due_soon': CalendarClock,
   'task.overdue': CalendarClock,
+  'task.reminder': AlarmClock,
 }
 
 /**
@@ -48,6 +50,7 @@ const KIND_TONE: Record<string, string> = {
   'task.status_changed_on_watched': 'bg-green-deep text-bg',
   'task.due_soon': 'bg-amber text-on-amber',
   'task.overdue': 'bg-red text-bg',
+  'task.reminder': 'bg-amber text-on-amber',
 }
 
 const DEFAULT_TONE = 'bg-surface text-text2'

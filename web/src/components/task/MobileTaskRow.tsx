@@ -8,7 +8,7 @@ import { cn } from '@/lib/cn'
 import { type Label } from '@/lib/labels'
 import { taskAssignees } from '@/lib/taskAssignees'
 import { type TaskContextMode } from '@/lib/taskContext'
-import { shortDate, taskOverdue } from '@/lib/taskDates'
+import { formatDueShort, taskOverdue } from '@/lib/taskDates'
 import { type TaskProjectLabel } from '@/lib/taskProjectLabel'
 import { type SubtaskStats, type Task } from '@/lib/tasks'
 
@@ -106,7 +106,7 @@ export function MobileTaskRow({
             overdue ? 'font-semibold text-red' : 'text-text2',
           )}
         >
-          {task.due_at ? shortDate(task.due_at) : '—'}
+          {task.due_at ? formatDueShort(task.due_at, task.due_has_time) : '—'}
         </span>
         {assignees.length === 0 ? (
           <span

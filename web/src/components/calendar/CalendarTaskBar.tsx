@@ -3,7 +3,7 @@ import { CSS } from '@dnd-kit/utilities'
 import type { CSSProperties } from 'react'
 
 import { cn } from '@/lib/cn'
-import { taskOverdue } from '@/lib/taskDates'
+import { dayKey, taskOverdue, timeKey } from '@/lib/taskDates'
 import { type Task, type TaskPriority } from '@/lib/tasks'
 import { DONE_FILL, OVERDUE_FILL, doneTone } from '@/lib/tone'
 
@@ -48,6 +48,10 @@ export function CalendarTaskBar({ task, day, onClick, variant = 'cell' }: Calend
   }
   const overdue = taskOverdue(task)
   const fill = overdue ? OVERDUE_FILL : DONE_FILL[doneTone(task.done)]
+  // Время — перед названием и только в ячейке дня срока (0061): у многодневной
+  // плашки остальные дни про время ничего не говорят.
+  const time =
+    task.due_at && task.due_has_time && dayKey(task.due_at) === day ? timeKey(task.due_at) : null
 
   return (
     <button
@@ -69,9 +73,10 @@ export function CalendarTaskBar({ task, day, onClick, variant = 'cell' }: Calend
         fill,
         PRIORITY_EDGE[task.priority],
       )}
-      title={task.title}
-      aria-label={task.title}
+      title={time ? `${time} ${task.title}` : task.title}
+      aria-label={time ? `${time} ${task.title}` : task.title}
     >
+      {time && <span className="mr-1 tabular-nums opacity-80">{time}</span>}
       {task.title}
     </button>
   )

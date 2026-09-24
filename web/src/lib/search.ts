@@ -23,6 +23,8 @@ export interface SearchTaskHit {
   done: boolean
   priority: 'low' | 'medium' | 'high' | 'urgent'
   due_at: string | null
+  /** Задано ли у срока время (0061). */
+  due_has_time?: boolean
   assignee_id: string | null
   /** ts_headline with ‹‹match›› markers — null if no description snippet. */
   headline: string | null

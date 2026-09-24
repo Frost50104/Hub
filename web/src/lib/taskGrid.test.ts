@@ -25,12 +25,12 @@ describe('MY_TASKS_GRID', () => {
 describe('projectTaskGrid', () => {
   it('без кастом-полей — три трека', () => {
     const g = projectTaskGrid([])
-    expect(g.columns).toBe('minmax(0,1fr) 96px 76px')
+    expect(g.columns).toBe('minmax(0,1fr) 96px 104px')
   })
 
   it('повторяет треки дизайна для select+number+text', () => {
     const g = projectTaskGrid([field('select', 0), field('number', 1), field('text', 2)])
-    expect(g.columns).toBe('minmax(0,1fr) 116px 82px 128px 96px 76px')
+    expect(g.columns).toBe('minmax(0,1fr) 116px 82px 128px 96px 104px')
   })
 
   it('число треков всегда = поля + 3', () => {

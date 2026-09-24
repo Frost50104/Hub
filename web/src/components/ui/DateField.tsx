@@ -31,14 +31,17 @@ export function DateField({
   disabled = false,
   className,
   ariaLabel,
+  type = 'date',
 }: {
   id?: string
-  /** `YYYY-MM-DD` или пустая строка. */
+  /** `YYYY-MM-DD` (или `HH:MM` у `type="time"`) либо пустая строка. */
   value: string
   onChange: (value: string) => void
   disabled?: boolean
   className?: string
   ariaLabel?: string
+  /** `time` — поле времени формы (0061, «Своё время» напоминания). */
+  type?: 'date' | 'time'
 }) {
   const isDesktop = useIsDesktop()
 
@@ -46,7 +49,7 @@ export function DateField({
     return (
       <Input
         id={id}
-        type="date"
+        type={type}
         value={value}
         aria-label={ariaLabel}
         disabled={disabled}
@@ -66,14 +69,14 @@ export function DateField({
       )}
     >
       <span className={cn('min-w-0 flex-1 truncate', !value && 'text-text3')}>
-        {value ? humanDate(value) : '—'}
+        {value ? (type === 'date' ? humanDate(value) : value) : '—'}
       </span>
       {!disabled && (
         // `inset-0` + `opacity-0`: коробку задаёт родитель, а контрол остаётся
         // нативным — системный пикер открывается тапом в любую точку поля.
         <input
           id={id}
-          type="date"
+          type={type}
           value={value}
           aria-label={ariaLabel}
           onChange={(e) => onChange(e.target.value)}

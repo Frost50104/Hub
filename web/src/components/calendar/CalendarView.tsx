@@ -16,6 +16,7 @@ import { useTasks, useUpdateTask } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { capitalizeFirst } from '@/lib/dates'
 import { taskOverdue } from '@/lib/taskDates'
+import { shiftTaskDates } from '@/lib/taskDateTime'
 import { toCalendarFilters, type TaskViewFilters } from '@/lib/taskFilters'
 import { type Task } from '@/lib/tasks'
 import { plural } from '@/lib/typography'
@@ -199,21 +200,11 @@ export function CalendarView({ projectId, onTaskClick, filters, initialDay }: Ca
     const offsetDays = diffDays(targetDay, sourceDay)
     if (offsetDays === 0) return
 
-    const oldDue = new Date(task.due_at)
-    const newDue = new Date(oldDue)
-    newDue.setDate(oldDue.getDate() + offsetDays)
-
-    const patch: { id: string; due_at: string; start_at?: string } = {
-      id: task.id,
-      due_at: newDue.toISOString(),
-    }
-    if (task.start_at) {
-      const oldStart = new Date(task.start_at)
-      const newStart = new Date(oldStart)
-      newStart.setDate(oldStart.getDate() + offsetDays)
-      patch.start_at = newStart.toISOString()
-    }
-    update.mutate(patch)
+    // Сдвиг по дням display tz с тем же часом, флаги времени едут вместе с
+    // датами (0061): без флага в теле сервер снял бы время.
+    const patch = shiftTaskDates(task, offsetDays)
+    if (!patch) return
+    update.mutate({ id: task.id, ...patch.body, __optimistic: patch.cache })
   }
 
   const note = tasks.isLoading ? (

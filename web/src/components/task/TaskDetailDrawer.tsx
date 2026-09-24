@@ -1,5 +1,6 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import {
+  AlarmClock,
   Archive,
   ArrowRightLeft,
   Bell,
@@ -15,7 +16,7 @@ import {
   Users,
   X,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -23,6 +24,11 @@ import { Markdown } from '@/components/Markdown'
 import { PeoplePickerMulti } from '@/components/PeoplePickerMulti'
 import { QueryError } from '@/components/QueryError'
 import { ShareDialog } from '@/components/share/ShareDialog'
+import {
+  createDraftEscapeRegistry,
+  DATE_CHIP,
+  DateTimeEditor,
+} from '@/components/task/DateTimeEditor'
 import { DrawerSection } from '@/components/task/DrawerSection'
 import { MoveTaskDialog } from '@/components/task/MoveTaskDialog'
 import { SubtaskList } from '@/components/task/SubtaskList'
@@ -48,7 +54,7 @@ import { Textarea } from '@/components/ui/Input'
 import { PropertyRow, PropertyRows } from '@/components/ui/PropertyRows'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
-import { useMe } from '@/hooks/useMe'
+import { hasTaskReminders, useMe } from '@/hooks/useMe'
 import { useToggleWatcher, useWatchers } from '@/hooks/useThreads'
 import { useProject, useProjectMembers } from '@/hooks/useProjects'
 import { useStages } from '@/hooks/useStages'
@@ -64,6 +70,7 @@ import {
   useUpdateTask,
 } from '@/hooks/useTasks'
 import { RecurrenceDialog } from '@/components/task/RecurrenceDialog'
+import { ReminderControl } from '@/components/task/ReminderControl'
 import { OptionButton } from '@/components/ui/OptionButton'
 import { cn } from '@/lib/cn'
 import {
@@ -73,8 +80,8 @@ import {
 } from '@/lib/taskRecurrence'
 import { taskAssignees } from '@/lib/taskAssignees'
 import { locationWithoutTask, projectLocation, taskLocation } from '@/lib/taskLinks'
-import { MobileDateCell } from '@/components/ui/MobileDateCell'
-import { dayKey, dueDayToIso, overdueDays, taskOverdue } from '@/lib/taskDates'
+import { overdueDays, taskOverdue } from '@/lib/taskDates'
+import { type DateTimePatch } from '@/lib/taskDateTime'
 import { describeTaskDeletion } from '@/lib/taskDeletion'
 import { PRIORITY_LABEL, taskKey, type TaskPriority } from '@/lib/tasks'
 import { plural } from '@/lib/typography'
@@ -129,9 +136,8 @@ const STAGE_SELECT =
 const MOBILE_CONTROL =
   'min-h-[46px] max-w-full appearance-none bg-transparent pr-2.5 text-right font-body text-[16px] text-text focus-visible:outline-none disabled:opacity-100'
 
-/** Дата — значение поля, а не статус: силуэт чипа 26px, не бейджа. */
-const DATE_INPUT =
-  'inline-flex h-[26px] items-center rounded-md bg-surface px-2 font-body text-[12px] font-semibold text-text2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 disabled:cursor-default'
+/** Силуэт чипа 26px для «Повтора» — тот же, что у даты и времени. */
+const DATE_INPUT = DATE_CHIP
 
 export function TaskDetailDrawer({
   taskId,
@@ -158,7 +164,8 @@ export function TaskDetailDrawer({
   // собирала бы из ключа старого проекта и уже нового номера («PLP-12» —
   // номера, которого нет нигде).
   const taskProjectId = task?.project_id ?? projectId
-  const myPersonalId = useMe().data?.personal_project_id
+  const me = useMe()
+  const myPersonalId = me.data?.personal_project_id
   const project = useProject(taskProjectId)
   // Этапы проекта: статус в карточке — раскрывающийся список с их именами
   // (имена пользовательские, этапов сколько угодно — ряд чипов не годится).
@@ -180,6 +187,13 @@ export function TaskDetailDrawer({
   // колонку автор меняет как обычно. `canStatus` здесь решал обе вещи сразу —
   // для шаблона их пришлось развести, иначе автор терял смену колонки.
   const isTemplate = task?.is_template === true || project.data?.is_template === true
+  // «Напомнить» (0062) — личное, права на правку не нужны: гейт только модуль,
+  // шаблон и архив (в архиве тик напоминание молча выбросил бы).
+  const remindersVisible =
+    hasTaskReminders(me.data) &&
+    !isTemplate &&
+    !task?.archived_at &&
+    !project.data?.archived_at
   const canStage = isTemplate ? !readOnly : canStatus
   // Наблюдателю мало сказать «нельзя» — надо назвать, кого просить.
   // `GET /projects/{id}/members` открыт любой роли в проекте (включая
@@ -200,8 +214,6 @@ export function TaskDetailDrawer({
   const projectTasks = useTasks(taskProjectId)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [dueAt, setDueAt] = useState('')
-  const [startAt, setStartAt] = useState('')
   const [editingDesc, setEditingDesc] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -237,14 +249,17 @@ export function TaskDetailDrawer({
     window.setTimeout(() => navigate(projectTo), 0)
   }
 
+  // Из подсказки «Напомнить» — в настройки уведомлений: карточку закрываем,
+  // маршрут тиком позже (тот же приём, что у `openProject`).
+  const openNotificationSettings = () => {
+    onClose()
+    window.setTimeout(() => navigate('/settings/notifications'), 0)
+  }
+
   useEffect(() => {
     if (task) {
       setTitle(task.title)
       setDescription(task.description ?? '')
-      // День в display tz, а не UTC-срез ISO: срок 12:00 МСК = 09:00Z, но
-      // инстанты у границы суток давали вчерашнюю дату в поле.
-      setDueAt(task.due_at ? dayKey(task.due_at) : '')
-      setStartAt(task.start_at ? dayKey(task.start_at) : '')
     }
   }, [task])
 
@@ -266,16 +281,15 @@ export function TaskDetailDrawer({
     }
   }
 
-  const saveDate = async (field: 'due_at' | 'start_at', val: string) => {
+  // Дата и время старта/срока — черновик в `DateTimeEditor`, сюда приходит
+  // готовый патч пары (0061). Флаг в кэш — явно, даже когда в теле его нет.
+  const commitDate = (patch: DateTimePatch) => {
     if (!task) return
-    // Полдень display tz — единая конвенция с CSV-импортом и ассистентом.
-    const iso = val ? dueDayToIso(val) : null
-    try {
-      await update.mutateAsync({ id: task.id, [field]: iso })
-    } catch {
-      // тост показывает глобальный onError мутаций
-    }
+    update.mutate({ id: task.id, ...patch.body, __optimistic: patch.cache })
   }
+  // Escape в поле даты с несохранённым вводом откатывает ввод, а не закрывает
+  // карточку (Radix ловит Escape раньше поля).
+  const draftEscape = useMemo(() => createDraftEscapeRegistry(), [])
 
   const key = taskKey(project.data?.key, task?.seq)
   const overdue = task ? taskOverdue(task) : false
@@ -311,6 +325,9 @@ export function TaskDetailDrawer({
           onOpenAutoFocus={(e) => {
             e.preventDefault()
             contentRef.current?.focus()
+          }}
+          onEscapeKeyDown={(e) => {
+            if (draftEscape.handle()) e.preventDefault()
           }}
           className={cn(
             'flex flex-col bg-bg-alt focus:outline-none',
@@ -486,7 +503,9 @@ export function TaskDetailDrawer({
                     ? 'Это шаблон: править его могут автор и администраторы Hub.'
                     : canStatus
                       ? 'Вы наблюдатель проекта: можно только отметить статус своей задачи.'
-                      : 'Вы наблюдатель проекта: поля доступны только для чтения.'}
+                      : remindersVisible
+                        ? 'Вы наблюдатель проекта: поля доступны только для чтения — напоминание себе поставить можно.'
+                        : 'Вы наблюдатель проекта: поля доступны только для чтения.'}
                 </span>
                 {/* Владельца может не быть вовсе — его могли разжаловать или
                     убрать из проекта. Тогда строку про доступ не показываем:
@@ -585,34 +604,42 @@ export function TaskDetailDrawer({
                     ))}
                   </select>
                 </PropertyRow>
+                {/* Дата и время — в одной строке (макет 4б, решение владельца
+                    24.09); редактор держит черновик и ключуется задачей, см.
+                    `DateTimeEditor`. */}
                 <PropertyRow label="Старт">
-                  <MobileDateCell
-                    value={startAt}
-                    ariaLabel="Дата старта"
+                  <DateTimeEditor
+                    key={`${task.id}:start`}
+                    field="start"
+                    variant="mobile"
+                    label="Дата старта"
+                    iso={task.start_at}
+                    hasTime={task.start_has_time}
                     readOnly={readOnly}
-                    onChange={(v) => {
-                      setStartAt(v)
-                      void saveDate('start_at', v)
-                    }}
+                    onCommit={commitDate}
+                    escape={draftEscape}
                   />
                 </PropertyRow>
                 <PropertyRow label="Срок">
-                  <MobileDateCell
-                    value={dueAt}
-                    ariaLabel="Срок"
+                  <DateTimeEditor
+                    key={`${task.id}:due`}
+                    field="due"
+                    variant="mobile"
+                    label="Срок"
+                    iso={task.due_at}
+                    hasTime={task.due_has_time}
                     readOnly={readOnly}
-                    onChange={(v) => {
-                      setDueAt(v)
-                      void saveDate('due_at', v)
-                    }}
-                    className={cn(overdue && 'font-semibold text-red')}
-                  >
-                    {overdue && task.due_at && (
-                      <span className="shrink-0 text-[13px] font-semibold text-red">
-                        −{overdueDays(task.due_at)} дн
-                      </span>
-                    )}
-                  </MobileDateCell>
+                    onCommit={commitDate}
+                    escape={draftEscape}
+                    dateClassName={cn(overdue && 'font-semibold text-red')}
+                    badge={
+                      overdue && task.due_at ? (
+                        <span className="shrink-0 text-[13px] font-semibold text-red">
+                          −{overdueDays(task.due_at)} дн
+                        </span>
+                      ) : null
+                    }
+                  />
                 </PropertyRow>
                 {/* Повтор — ОТДЕЛЬНОЙ строкой, а не внутри ячейки срока: там
                     невидимый input[type=date] растянут на всю ячейку и перехватил
@@ -625,6 +652,13 @@ export function TaskDetailDrawer({
                     {task.recurrence ? describeRecurrence(task.recurrence) : '—'}
                   </span>
                 </PropertyRow>
+                {remindersVisible && (
+                  <ReminderControl
+                    task={task}
+                    desktop={false}
+                    onOpenSettings={openNotificationSettings}
+                  />
+                )}
                 {/* Кастом-поля — теми же строками 48px, что Этап/Приоритет/Срок
                     (макет «Задача · мобильный»), а не стопкой «подпись + инпут»
                     (QA-0821 #14). */}
@@ -769,61 +803,77 @@ export function TaskDetailDrawer({
                     <>
                       <Dt icon={Calendar}>Старт</Dt>
                       <dd className="m-0">
-                        <input
-                          type="date"
-                          value={startAt}
-                          disabled={readOnly}
-                          aria-label="Дата старта"
-                          onChange={(e) => {
-                            setStartAt(e.target.value)
-                            void saveDate('start_at', e.target.value)
-                          }}
-                          className={DATE_INPUT}
+                        <DateTimeEditor
+                          key={`${task.id}:start`}
+                          field="start"
+                          variant="desktop"
+                          label="Дата старта"
+                          iso={task.start_at}
+                          hasTime={task.start_has_time}
+                          readOnly={readOnly}
+                          onCommit={commitDate}
+                          escape={draftEscape}
                         />
                       </dd>
 
                       <Dt icon={Calendar}>Срок</Dt>
-                      <dd className="m-0 flex flex-wrap items-center gap-2">
-                        <input
-                          type="date"
-                          value={dueAt}
-                          disabled={readOnly}
-                          aria-label="Срок"
-                          onChange={(e) => {
-                            setDueAt(e.target.value)
-                            void saveDate('due_at', e.target.value)
-                          }}
-                          className={cn(
-                            DATE_INPUT,
-                            overdue && 'bg-red font-bold text-bg',
-                          )}
+                      <dd className="m-0">
+                        <DateTimeEditor
+                          key={`${task.id}:due`}
+                          field="due"
+                          variant="desktop"
+                          label="Срок"
+                          iso={task.due_at}
+                          hasTime={task.due_has_time}
+                          readOnly={readOnly}
+                          onCommit={commitDate}
+                          escape={draftEscape}
+                          dateClassName={cn(overdue && 'bg-red font-bold text-bg')}
+                          after={
+                            <>
+                              {overdue && task.due_at && (
+                                <span className="text-[14px] text-red">
+                                  просрочено на{' '}
+                                  {plural(overdueDays(task.due_at), 'день', 'дня', 'дней')}
+                                </span>
+                              )}
+                              {/* Повтор живёт в строке срока: он и есть свойство
+                                  срока. Силуэт — тот же чип 26px, что у даты. */}
+                              {!readOnly && (
+                                <button
+                                  type="button"
+                                  onClick={() => setRepeatOpen(true)}
+                                  disabled={!repeatAllowed}
+                                  title={repeatBlocked ?? undefined}
+                                  aria-label="Повтор задачи"
+                                  className={cn(
+                                    DATE_INPUT,
+                                    'gap-1',
+                                    task.recurrence && 'bg-amber/30 text-text',
+                                    !repeatAllowed && 'opacity-60',
+                                  )}
+                                >
+                                  <Repeat className="h-3.5 w-3.5" strokeWidth={1.9} />
+                                  {task.recurrence ? describeRecurrence(task.recurrence) : 'Повтор'}
+                                </button>
+                              )}
+                            </>
+                          }
                         />
-                        {overdue && task.due_at && (
-                          <span className="text-[14px] text-red">
-                            просрочено на {plural(overdueDays(task.due_at), 'день', 'дня', 'дней')}
-                          </span>
-                        )}
-                        {/* Повтор живёт в строке срока: он и есть свойство
-                            срока. Силуэт — тот же чип 26px, что у даты. */}
-                        {!readOnly && (
-                          <button
-                            type="button"
-                            onClick={() => setRepeatOpen(true)}
-                            disabled={!repeatAllowed}
-                            title={repeatBlocked ?? undefined}
-                            aria-label="Повтор задачи"
-                            className={cn(
-                              DATE_INPUT,
-                              'gap-1',
-                              task.recurrence && 'bg-amber/30 text-text',
-                              !repeatAllowed && 'opacity-60',
-                            )}
-                          >
-                            <Repeat className="h-3.5 w-3.5" strokeWidth={1.9} />
-                            {task.recurrence ? describeRecurrence(task.recurrence) : 'Повтор'}
-                          </button>
-                        )}
                       </dd>
+
+                      {remindersVisible && (
+                        <>
+                          <Dt icon={AlarmClock}>Напомнить</Dt>
+                          <dd className="m-0 min-w-0">
+                            <ReminderControl
+                              task={task}
+                              desktop
+                              onOpenSettings={openNotificationSettings}
+                            />
+                          </dd>
+                        </>
+                      )}
                     </>
                   )}
 

@@ -5,6 +5,7 @@ import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
 import { cn } from '@/lib/cn'
 import { type SearchGroup, type SearchTaskHit } from '@/lib/search'
+import { formatDueShort } from '@/lib/taskDates'
 
 import { HighlightedSnippet } from './HighlightedSnippet'
 
@@ -105,10 +106,7 @@ export function SearchResults({
                       <span className="flex shrink-0 items-center gap-2">
                         {t.due_at && (
                           <span className="text-[12px] text-text2">
-                            {new Date(t.due_at).toLocaleDateString('ru-RU', {
-                              day: 'numeric',
-                              month: 'short',
-                            })}
+                            {formatDueShort(t.due_at, t.due_has_time)}
                           </span>
                         )}
                         <span

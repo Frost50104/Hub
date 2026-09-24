@@ -19,6 +19,7 @@ import { useProjects } from '@/hooks/useProjects'
 import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { GROUP_LABEL, groupTasksByDue } from '@/lib/myTasksGroups'
+import { compareDue } from '@/lib/taskDates'
 import {
   MY_TASKS_TABS,
   clearNewPersonalParams,
@@ -160,13 +161,16 @@ function useWindowTasks(tab: MyTasksTab) {
   const enabled = isDueWindowTab(tab)
   const tasks = useMyTasks(enabled ? { due_window: tab } : {})
   const toggleDoneWork = useToggleDone('')
-  return { tasks, enabled, toggleDoneWork }
+  // Внутри дня — «весь день», потом по времени (0061): сервер сортирует по
+  // мгновению, и срок без времени (условный полдень) вставал между 11:00 и 13:00.
+  const sorted = useMemo(() => [...(tasks.data ?? [])].sort(compareDue), [tasks.data])
+  return { tasks, sorted, enabled, toggleDoneWork }
 }
 
 function DesktopMyTasks({ pane }: { pane: MyTasksPane }) {
   const { tab } = pane
-  const { tasks } = useWindowTasks(tab)
-  const groups = useMemo(() => groupTasksByDue(tasks.data ?? []), [tasks.data])
+  const { tasks, sorted } = useWindowTasks(tab)
+  const groups = useMemo(() => groupTasksByDue(sorted), [sorted])
   const toggleDone = useTabToggleDone(pane)
 
   const row = (t: Task) => (
@@ -274,7 +278,7 @@ function DesktopMyTasks({ pane }: { pane: MyTasksPane }) {
                         </section>
                       ),
                   )
-                : tasks.data.map(row)}
+                : sorted.map(row)}
             </div>
           )}
         </>
@@ -301,8 +305,8 @@ function useTabToggleDone(pane: MyTasksPane) {
 
 function MobileMyTasks({ pane }: { pane: MyTasksPane }) {
   const { tab } = pane
-  const { tasks } = useWindowTasks(tab)
-  const groups = useMemo(() => groupTasksByDue(tasks.data ?? []), [tasks.data])
+  const { tasks, sorted } = useWindowTasks(tab)
+  const groups = useMemo(() => groupTasksByDue(sorted), [sorted])
   const toggleDone = useTabToggleDone(pane)
 
   // Скроллим в начало при смене вкладки: с «Все» (десятки строк) на «Личные»
@@ -375,7 +379,7 @@ function MobileMyTasks({ pane }: { pane: MyTasksPane }) {
                       </section>
                     ),
                 )
-              : tasks.data.map(row))}
+              : sorted.map(row))}
         </>
       )}
 

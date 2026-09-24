@@ -23,8 +23,10 @@ const FIELD_WIDTH: Record<CustomFieldType, number> = {
 
 /** Колонка исполнителей: стек из трёх 24px-аватаров с перекрытием −4px + «+N». */
 const ASSIGNEES_WIDTH = 96
-/** Срок в формате «16 авг» табличными цифрами. */
-const DUE_WIDTH = 76
+/** Срок табличными цифрами: «16 авг», а со временем (0061) — «28 февр 00:00».
+ *  104 — замер самой широкой подписи полужирным (просрочка) шрифтом Onest 14px
+ *  в Chrome 24.09; прежние 76 вмещали только дату. */
+const DUE_WIDTH = 104
 /** Ниже этого заголовок задачи перестаёт читаться — дальше горизонтальный скролл. */
 const TITLE_MIN_WIDTH = 280
 /** padding строки: 21px слева (3px отданы планке приоритета) + 24px справа. */
@@ -65,6 +67,6 @@ export function projectTaskGrid(fields: CustomFieldDefinition[]): TaskGrid {
  * читалось отдельно от задачи.
  */
 export const MY_TASKS_GRID: TaskGrid = {
-  columns: 'minmax(0,1fr) 92px 88px',
-  minWidth: TITLE_MIN_WIDTH + 92 + 88 + 19,
+  columns: `minmax(0,1fr) 92px ${DUE_WIDTH}px`,
+  minWidth: TITLE_MIN_WIDTH + 92 + DUE_WIDTH + 19,
 }

@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/Button'
 import { Switch } from '@/components/ui/Switch'
-import { hasRace, useMe } from '@/hooks/useMe'
+import { hasRace, hasTaskReminders, useMe } from '@/hooks/useMe'
 import { usePush } from '@/hooks/usePush'
 import {
   useNotificationPreferences,
@@ -26,6 +26,7 @@ import {
 export function NotificationsSettingsTab() {
   const me = useMe()
   const raceOn = hasRace(me.data)
+  const remindersOn = hasTaskReminders(me.data)
   const prefsQuery = useNotificationPreferences()
   const setPrefs = useSetNotificationPreferences()
   const { permission, subscribed, subscribe, unsubscribe } = usePush()
@@ -209,7 +210,10 @@ export function NotificationsSettingsTab() {
         </p>
 
         {NOTIFICATION_GROUP_ORDER.filter((group) => group !== 'race' || raceOn).map((group) => {
-          const kinds = NOTIFICATION_KINDS.filter((k) => KIND_GROUP[k] === group)
+          // Вид модуля, выключенного env-флагом, не показываем — как группу гонки.
+          const kinds = NOTIFICATION_KINDS.filter(
+            (k) => KIND_GROUP[k] === group && (k !== 'task.reminder' || remindersOn),
+          )
           if (kinds.length === 0) return null
           return (
             <section

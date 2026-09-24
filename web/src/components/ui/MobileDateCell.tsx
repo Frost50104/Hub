@@ -26,6 +26,9 @@ export function MobileDateCell({
   onChange,
   className,
   children,
+  type = 'date',
+  placeholder = '—',
+  grow = true,
 }: {
   value: string
   ariaLabel: string
@@ -35,21 +38,40 @@ export function MobileDateCell({
   className?: string
   /** Сосед слева (бейдж «−N дн»); он ВНЕ зоны тапа. */
   children?: ReactNode
+  /** `time` — поле времени (0061) тем же приёмом: на iOS нативный
+   *  `input[type=time]` так же не слушает стили и размеры. */
+  type?: 'date' | 'time'
+  /** Текст пустого значения: у даты прочерк, у времени — «+ время». */
+  placeholder?: string
+  /** Растягивать зону тапа на свободную ширину строки. Время — нет: оно
+   *  стоит рядом с датой, и зона ограничена своим текстом (не меньше 44px). */
+  grow?: boolean
 }) {
-  const shown = value ? humanDate(value) : '—'
+  const shown = value ? (type === 'date' ? humanDate(value) : value) : placeholder
   return (
-    <span className="flex min-w-0 flex-1 items-center justify-end gap-2">
+    <span className={cn('flex min-w-0 items-center justify-end gap-2', grow && 'flex-1')}>
       {children}
       {/* flex-1, а не по ширине текста: иначе у пустой даты зона тапа была бы
           22px — ровно по прочерку. Тап должен ловиться на всей свободной
           ширине строки, а бейдж «−N дн» остаётся слева, вне этой зоны. */}
-      <span className="relative flex min-h-[46px] min-w-0 flex-1 items-center justify-end">
-        <span className={cn('pr-2.5 text-[16px] text-text', !value && 'text-text2', className)}>
+      <span
+        className={cn(
+          'relative flex min-h-[46px] items-center justify-end',
+          grow ? 'min-w-0 flex-1' : 'min-w-11 shrink-0',
+        )}
+      >
+        <span
+          className={cn(
+            'whitespace-nowrap pr-2.5 text-[16px] text-text',
+            !value && 'text-text2',
+            className,
+          )}
+        >
           {shown}
         </span>
         {!readOnly && (
           <input
-            type="date"
+            type={type}
             value={value}
             aria-label={ariaLabel}
             onChange={(e) => onChange(e.target.value)}
