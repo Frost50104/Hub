@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest'
 import {
   anchorMoment,
   deliveryHint,
+  reminderAddBlock,
+  reminderBlockLabel,
+  reminderBlockText,
   reminderLabel,
   reminderPresets,
   reminderStatus,
@@ -73,6 +76,28 @@ describe('reminderPresets', () => {
     const inHour = reminderPresets(noDates, NOW)[0]
     expect(inHour?.hint).toBe('11:00')
     expect(inHour?.body).toEqual({ anchor: 'at', fire_at: '2026-09-29T08:00:00.000Z' })
+  })
+})
+
+describe('reminderAddBlock — почему поставить нельзя', () => {
+  const five = [0, 15, 60, 1440, 30].map((offset, i) => item({ id: `r${i}`, offset_minutes: offset }))
+
+  it('выполненная задача — «выполнена», даже при упоре в потолок', () => {
+    expect(reminderAddBlock({ done: true }, [])).toBe('done')
+    expect(reminderAddBlock({ done: true }, five)).toBe('done')
+  })
+
+  it('потолок — пятое напоминание, до него можно', () => {
+    expect(reminderAddBlock({ done: false }, five)).toBe('limit')
+    expect(reminderAddBlock({ done: false }, five.slice(0, 4))).toBeNull()
+    expect(reminderAddBlock({ done: false }, [])).toBeNull()
+  })
+
+  it('причина названа словами — пустой шторки не бывает', () => {
+    expect(reminderBlockLabel('done')).toBe('Задача выполнена')
+    expect(reminderBlockLabel('limit')).toBe('Не больше 5 на задачу')
+    expect(reminderBlockText('done')).toMatch(/не приходят/)
+    expect(reminderBlockText('limit')).toMatch(/не больше 5 напоминаний/)
   })
 })
 

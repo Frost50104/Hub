@@ -182,6 +182,36 @@ export function reminderPresets(
   return result
 }
 
+/**
+ * Почему новое напоминание поставить нельзя; null — можно. Зеркало 409 ручки
+ * POST: выполненная задача и потолок на задачу.
+ *
+ * Причину обязательно называть словами: без неё шторка на телефоне у закрытой
+ * задачи открывалась пустой — заголовок и «Готово», ни вариантов, ни
+ * объяснения (ОС владельца 24.09, iPhone).
+ */
+export type ReminderAddBlock = 'done' | 'limit'
+
+export function reminderAddBlock(
+  task: Pick<Task, 'done'>,
+  items: readonly TaskReminderItem[],
+): ReminderAddBlock | null {
+  if (task.done) return 'done'
+  return items.length >= MAX_REMINDERS_PER_TASK ? 'limit' : null
+}
+
+/** Коротко — в строку свойств и рядом с чипами. */
+export function reminderBlockLabel(block: ReminderAddBlock): string {
+  return block === 'done' ? 'Задача выполнена' : `Не больше ${MAX_REMINDERS_PER_TASK} на задачу`
+}
+
+/** Полностью — пояснение в шторке. */
+export function reminderBlockText(block: ReminderAddBlock): string {
+  return block === 'done'
+    ? 'Задача выполнена — напоминания по ней не приходят. Поставить новое можно, когда задачу вернут в работу.'
+    : `На задачу — не больше ${MAX_REMINDERS_PER_TASK} напоминаний. Удалите одно, чтобы поставить другое.`
+}
+
 /** Название напоминания: «За 1 ч до срока», «Накануне, 9:00», «30.09 в 16:42». */
 export function reminderLabel(item: TaskReminderItem, now: number): string {
   const off = item.offset_minutes

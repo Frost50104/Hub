@@ -39,9 +39,11 @@ import {
 } from '@/lib/taskDates'
 import {
   deliveryHint,
-  MAX_REMINDERS_PER_TASK,
   momentHint,
   momentText,
+  reminderAddBlock,
+  reminderBlockLabel,
+  reminderBlockText,
   type ReminderCreateBody,
   type ReminderPreset,
   reminderLabel,
@@ -85,7 +87,8 @@ export function ReminderControl({ task, desktop, onOpenSettings }: Props) {
 
   const items = reminders.data?.items ?? []
   const hint = deliveryHint(reminders.data?.delivery)
-  const canAdd = !task.done && items.length < MAX_REMINDERS_PER_TASK
+  const block = reminderAddBlock(task, items)
+  const canAdd = block === null
   const busy = updating || create.isPending
   const now = Date.now()
   const presets = canAdd ? reminderPresets(task, now, items) : []
@@ -155,26 +158,36 @@ export function ReminderControl({ task, desktop, onOpenSettings }: Props) {
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {!canAdd && items.length === 0 && <span className="text-[13px] text-text2">—</span>}
+        {/* Причина словами, а не прочерк. У выполненной задачи с напоминаниями
+            её уже несут сами чипы («не сработает — задача выполнена»). */}
+        {block && (block === 'limit' || items.length === 0) && (
+          <span className="text-[13px] text-text2">{reminderBlockLabel(block)}</span>
+        )}
         {custom}
       </div>
     )
   }
 
   const first = items.find((i) => i.state === 'armed') ?? items[0]
+  // Шторке есть что показать, только если есть свои напоминания или варианты.
+  // Иначе строка — подпись с причиной, без стрелки: пустая шторка читалась
+  // как поломка (ОС 24.09).
+  const openable = items.length > 0 || canAdd
   return (
     <>
-      <PropertyRow label="Напомнить" onClick={() => setSheetOpen(true)}>
-        <span className={cn('flex min-w-0 items-center gap-1', !first && 'text-text2')}>
+      <PropertyRow label="Напомнить" onClick={openable ? () => setSheetOpen(true) : undefined}>
+        <span className={cn('flex min-w-0 items-center gap-1', first?.state !== 'armed' && 'text-text2')}>
           <span className="truncate">
             {first
               ? first.state === 'armed' && first.fire_at
                 ? `${reminderLabel(first, now)} · ${momentHint(first.fire_at, now)}`
                 : reminderLabel(first, now)
-              : '—'}
+              : block
+                ? reminderBlockLabel(block)
+                : '—'}
           </span>
           {items.length > 1 && <span className="shrink-0 text-text2">+{items.length - 1}</span>}
-          <ChevronRight className="h-4 w-4 shrink-0 text-text2" strokeWidth={1.9} />
+          {openable && <ChevronRight className="h-4 w-4 shrink-0 text-text2" strokeWidth={1.9} />}
         </span>
       </PropertyRow>
       <ResponsiveDialog
@@ -237,7 +250,9 @@ export function ReminderControl({ task, desktop, onOpenSettings }: Props) {
             </div>
           </section>
         )}
-        {hint && <DeliveryHintBlock text={hint} onOpenSettings={goSettings} />}
+        {block && <SheetNote text={reminderBlockText(block)} />}
+        {/* Куда придёт — вопрос, только пока что-то может прийти. */}
+        {hint && block !== 'done' && <DeliveryHintBlock text={hint} onOpenSettings={goSettings} />}
       </ResponsiveDialog>
       {custom}
     </>
@@ -252,6 +267,15 @@ function sheetSubtitle(task: Task): string {
 function SheetLabel({ children }: { children: React.ReactNode }) {
   return (
     <span className="text-[12px] font-bold uppercase tracking-[0.07em] text-text2">{children}</span>
+  )
+}
+
+function SheetNote({ text }: { text: string }) {
+  return (
+    <div className="flex items-start gap-2 rounded-[14px] border border-glass-border bg-tint px-3.5 py-3 text-[14px] text-text2">
+      <AlarmClockOff className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.9} />
+      <span>{text}</span>
+    </div>
   )
 }
 
