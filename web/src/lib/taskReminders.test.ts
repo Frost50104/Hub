@@ -11,7 +11,6 @@ import {
   reminderStatus,
   shouldToastReminder,
   type TaskReminderItem,
-  timezoneNote,
 } from './taskReminders'
 
 // Всё в МСК (UTC+3): 29.09 10:00 МСК = 07:00Z.
@@ -125,11 +124,6 @@ describe('тексты', () => {
     expect(deliveryHint({ push_devices: 1, push_on: false, inapp_on: false })).toBe(
       'Напоминания выключены в настройках уведомлений.',
     )
-  })
-
-  it('пометка пояса — только если часы устройства другие', () => {
-    expect(timezoneNote(NOW, () => '10:00')).toBeNull()
-    expect(timezoneNote(NOW, () => '12:00')).toBe('Время — московское')
   })
 })
 

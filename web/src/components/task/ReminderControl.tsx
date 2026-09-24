@@ -20,7 +20,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
-import { PropertyRow } from '@/components/ui/PropertyRows'
+import { PROPERTY_VALUE_PAD, PropertyRow } from '@/components/ui/PropertyRows'
 import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import {
   useCreateReminder,
@@ -50,7 +50,6 @@ import {
   reminderPresets,
   reminderStatus,
   type TaskReminderItem,
-  timezoneNote,
 } from '@/lib/taskReminders'
 import { type Task } from '@/lib/tasks'
 
@@ -176,7 +175,13 @@ export function ReminderControl({ task, desktop, onOpenSettings }: Props) {
   return (
     <>
       <PropertyRow label="Напомнить" onClick={openable ? () => setSheetOpen(true) : undefined}>
-        <span className={cn('flex min-w-0 items-center gap-1', first?.state !== 'armed' && 'text-text2')}>
+        <span
+          className={cn(
+            'flex min-w-0 items-center gap-1.5',
+            PROPERTY_VALUE_PAD,
+            first?.state !== 'armed' && 'text-text2',
+          )}
+        >
           <span className="truncate">
             {first
               ? first.state === 'armed' && first.fire_at
@@ -187,7 +192,8 @@ export function ReminderControl({ task, desktop, onOpenSettings }: Props) {
                 : '—'}
           </span>
           {items.length > 1 && <span className="shrink-0 text-text2">+{items.length - 1}</span>}
-          {openable && <ChevronRight className="h-4 w-4 shrink-0 text-text2" strokeWidth={1.9} />}
+          {/* Размер и толщина — как у галочки «Колонки» строкой выше. */}
+          {openable && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text2" strokeWidth={2} />}
         </span>
       </PropertyRow>
       <ResponsiveDialog
@@ -431,7 +437,6 @@ function CustomReminderDialog({
   const fireAt = day && time ? dayTimeToIso(day, time) : null
   const past = fireAt !== null && Date.parse(fireAt) <= now + MINUTE
   const tooFar = fireAt !== null && day > addDaysKey(todayKey(now), 366)
-  const note = timezoneNote(now)
   const valid = fireAt !== null && !past && !tooFar
   return (
     <ResponsiveDialog
@@ -463,7 +468,6 @@ function CustomReminderDialog({
       </div>
       {past && <p className="text-[13px] text-red">Это время уже прошло.</p>}
       {tooFar && <p className="text-[13px] text-red">Не дальше чем на год вперёд.</p>}
-      {note && <p className="text-[13px] text-text2">{note}.</p>}
     </ResponsiveDialog>
   )
 }

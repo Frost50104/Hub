@@ -29,6 +29,14 @@ export function PropertyRows({
   )
 }
 
+/**
+ * Правый отступ ТЕКСТОВОГО значения строки. Контролы несут его сами
+ * (`MOBILE_CONTROL`, `MobileDateCell`, ссылка «Проект»), а голый текст без него
+ * вставал на 10px правее соседей — ОС владельца 24.09 про «Повтор» и
+ * «Напомнить».
+ */
+export const PROPERTY_VALUE_PAD = 'pr-2.5'
+
 interface PropertyRowProps {
   label: ReactNode
   /** Контрол или значение справа — выравнивание по правому краю. */

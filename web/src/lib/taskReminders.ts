@@ -262,16 +262,6 @@ export function deliveryHint(d: ReminderDelivery | undefined): string | null {
   return null
 }
 
-/** Пометка «время московское» — только если часы устройства показывают другое. */
-export function timezoneNote(now: number, localHM: (ms: number) => string = localTimeKey): string | null {
-  return localHM(now) === timeKey(now) ? null : 'Время — московское'
-}
-
-function localTimeKey(ms: number): string {
-  const d = new Date(ms)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
 /**
  * Тост в открытом приложении: счётчик непрочитанных вырос, и новейшее
  * непрочитанное — свежее напоминание. Без тоста у сотрудника без пуш-подписки

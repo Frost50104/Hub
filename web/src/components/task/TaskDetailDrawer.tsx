@@ -51,7 +51,7 @@ import { Button } from '@/components/ui/Button'
 import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { Textarea } from '@/components/ui/Input'
-import { PropertyRow, PropertyRows } from '@/components/ui/PropertyRows'
+import { PROPERTY_VALUE_PAD, PropertyRow, PropertyRows } from '@/components/ui/PropertyRows'
 import { Skeleton, SkeletonRows } from '@/components/ui/Skeleton'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { hasTaskReminders, useMe } from '@/hooks/useMe'
@@ -648,7 +648,9 @@ export function TaskDetailDrawer({
                   label="Повтор"
                   onClick={!readOnly && repeatAllowed ? () => setRepeatOpen(true) : undefined}
                 >
-                  <span className={cn('truncate', !task.recurrence && 'text-text2')}>
+                  <span
+                    className={cn('truncate', PROPERTY_VALUE_PAD, !task.recurrence && 'text-text2')}
+                  >
                     {task.recurrence ? describeRecurrence(task.recurrence) : '—'}
                   </span>
                 </PropertyRow>
