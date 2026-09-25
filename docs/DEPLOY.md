@@ -299,7 +299,7 @@ INTEGRATED_PRODUCTS: frozenset[str] = frozenset({"net", "sonar", "hub"})
 | `STAFF_SYNC_ENABLED` / `STAFF_SYNC_INTERVAL_SEC` | pull-воркер штата (0052), 15 мин; **staging=false навсегда** — VAPID общий с прод, bootstrap-залп по staging-копии подписок ушёл бы на реальные устройства |
 | `SITES_SYNC_ENABLED` | зеркало реестра объектов (0053): планировщика НЕТ, флаг гейтит живой прогон ручного `POST /api/learn/sites/sync` (false = форс dry-run) |
 | `HR_CONSUMER_ENABLED` | кадровые данные из auth (16d, 0063): читать `/org-directory`, вести заморозку, отчёт `hr_sync.report` и правило K. `true` на обоих env с 25.09 (staging инертен — синк штата выключен). **После каткатa выключатель НЕ снимает заморозку** — рычаг отката `hr_mode=shadow` в auth |
-| `HR_APPLY_TENANTS` | slug-и через запятую, где кадровые данные ПРИМЕНЯЮТСЯ; пусто = только отчёт. Каткат тенанта = добавить slug + рестарт `signaris-hub` (порядок — `docs/ARCHITECTURE.md` §«Кадровые данные из auth» и план части C) |
+| `HR_APPLY_TENANTS` | slug-и через запятую, где кадровые данные ПРИМЕНЯЮТСЯ; пусто = только отчёт. Каткат тенанта = добавить slug + рестарт `signaris-hub` (порядок — §«Каткат кадровых данных в auth» ниже). На проде с 25.09 — `signaris,uppetit` |
 | `HR_VALVE_MAX_CARDS` / `HR_VALVE_MAX_MANDATORY` / `HR_DEACTIVATION_RUNS` | предохранитель N=10 / M=20 и правило K=3 |
 | `HR_RELEASE_ON_NAME_MISMATCH` | default false: включение учётки под другим именем = тот же человек (возврат + WARN). `true` — аварийный рычаг, если в auth снова появится переиспользование отключённой учётки |
 | `SITES_SNAPSHOT_FRESH_DAYS` | свежесть снимка зеркала, фиксированные сутки (14): протухло → карточки магазинов показывают локальные поля с меткой |
@@ -321,9 +321,11 @@ INTEGRATED_PRODUCTS: frozenset[str] = frozenset({"net", "sonar", "hub"})
    `systemd-run --wait --pipe --uid=signaris -p EnvironmentFile=/opt/signaris-hub/.env -p WorkingDirectory=/opt/signaris-hub /opt/signaris-hub/.venv/bin/python -m app.jobs.hr_cutover --tenant X --window open`;
 2. вторая выгрузка `app.jobs.export_hr_for_auth` той же командой → файл владельцу → auth;
 3. auth: `check` + `apply` в `shadow`, отчёт с id;
-4. наш прогон (кнопка «Обновить из auth») — отчёт «0, кроме `tu_for_non_tu`»;
-5. снимок для отката: `audience_members`, кадровые колонки `employee_profiles`,
-   `tu_store_assignments`, справочники тенанта — `COPY` в файлы вне git (700/600);
+4. наш прогон (кнопка «Обновить из auth» или рестарт `signaris-hub` — воркер штата начинает с
+   прогона, `hr_sync.report` в журнале через ~12 с) — отчёт «0, кроме `tu_for_non_tu`»;
+5. снимок для отката: `pg_dump -Fc` таблиц `audience_members`, `automation_jobs`, `departments`,
+   `employee_profiles`, `franchisees`, `hr_sync_state`, `positions`, `shadow_users`, `stores`,
+   `tu_store_assignments` в файл вне git (700/600);
 6. auth: `set_hr_mode X auth`;
 7. наш прогон: заморожен, режим «отчёт», 0 изменений;
 8. `SIGNARIS_HUB_HR_APPLY_TENANTS=X` в `.env` + `systemctl restart signaris-hub` → первый прогон
@@ -335,3 +337,22 @@ INTEGRATED_PRODUCTS: frozenset[str] = frozenset({"net", "sonar", "hub"})
 `HR_APPLY_TENANTS`; карточки, заархивированные по K, восстанавливаются обычной кнопкой; отделы,
 заархивированные auth, — в «Оргструктуре»; порча данных — сравнить со снимком шага 5. auth долго
 недоступен, а править надо — `hr_cutover --tenant X --force-unfreeze` (до следующего полного снимка).
+
+**Выполнен 25.09.2026 — обе организации за один заход** (решение владельца: «не тянуть, раз всё
+готово, но с возможностью отката»; недели dry-run не было — отчёт с утра совпадал с отчётом auth
+по id). Хронология, UTC:
+
+| Время | Шаг |
+|---|---|
+| 12:47:35 / 12:47:39 | окно открыто — signaris / uppetit |
+| 12:47:53 / 12:47:56 | вторая выгрузка (от утренней отличалась одной должностью, сменённой в Hub в 10:07) |
+| 12:48 | снимок отката — `/root/hr-cutover/pre-cutover-20260925.dump` (600, 167 КБ) |
+| 12:49:42 / 12:49:44 | auth `apply` в `shadow`; наш отчёт: signaris 0, uppetit 1 (`tu_for_non_tu`) |
+| 12:52:25 | auth `set_hr_mode signaris auth`; наш отчёт — заморожен, 0 |
+| 12:54:15 → 12:54:27 | `HR_APPLY_TENANTS=signaris` + рестарт → первое применение signaris: 0 |
+| 12:55:08 | auth `set_hr_mode uppetit auth`; наш отчёт — заморожен, 1 |
+| 12:56:15 → 12:56:29 | `HR_APPLY_TENANTS=signaris,uppetit` + рестарт → первое применение uppetit: снята одна строка ТУ у карточки не-ТУ (точка архивная), остальное 0 |
+| 12:56:4x | окно закрыто у обеих; состояние `synced` |
+| 12:57:00 | контрольный прогон: 0 / 0, `/api/health/hr` ok |
+
+Снимок отката держим до 02.10 (неделя наблюдения), потом удаляем: в нём ПДн.
