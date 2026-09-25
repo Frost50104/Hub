@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { Switch } from '@/components/ui/Switch'
 import { MobileDateCell } from '@/components/ui/MobileDateCell'
+import { NativeDateInput } from '@/components/ui/NativeDateInput'
 import { cn } from '@/lib/cn'
 import { type CustomFieldDefinition } from '@/lib/customFields'
 
@@ -166,8 +167,9 @@ function DateEditor({ value, onChange, disabled, variant, label }: ScalarEditorP
     )
   }
   return (
-    <input
+    <NativeDateInput
       type="date"
+      layout="block"
       value={str}
       onChange={(e) => {
         const next = e.target.value

@@ -44,7 +44,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/Dialog'
-import { Input } from '@/components/ui/Input'
+import { FIELD_INPUT_CLASS, Input } from '@/components/ui/Input'
+import { NativeDateInput } from '@/components/ui/NativeDateInput'
 import { Label } from '@/components/ui/Label'
 import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { Select } from '@/components/ui/Select'
@@ -853,11 +854,13 @@ function AssignDialog({ course, onClose }: { course: CourseDetail; onClose: () =
           <EmployeeListNote data={employees.data} />
           <div>
             <Label htmlFor="assign-due">Срок (необязательно)</Label>
-            <Input
+            <NativeDateInput
               id="assign-due"
               type="datetime-local"
+              layout="block"
               value={dueAt}
               onChange={(e) => setDueAt(e.target.value)}
+              className={FIELD_INPUT_CLASS}
             />
           </div>
         </div>

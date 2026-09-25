@@ -33,13 +33,13 @@ export const TEXTAREA_CLASS = `min-h-[80px] rounded-lg px-3 py-2 text-sm ${FIELD
  *  Собранный руками селект брал только кольцо и получал двойной контур. */
 export const SELECT_CLASS = `h-10 rounded-lg px-3 text-sm ${FIELD_CLASS}`
 
+/** Поле ввода целиком — для родных полей даты формы (`NativeDateInput`),
+ *  которые рисуются не через `Input`, но обязаны выглядеть так же. */
+export const FIELD_INPUT_CLASS = `flex h-9 rounded-lg px-3 py-1 text-sm ${FIELD_CLASS}`
+
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
   ({ className, ...props }, ref) => (
-    <input
-      ref={ref}
-      className={cn('flex h-9 rounded-lg px-3 py-1 text-sm', FIELD_CLASS, className)}
-      {...props}
-    />
+    <input ref={ref} className={cn(FIELD_INPUT_CLASS, className)} {...props} />
   ),
 )
 Input.displayName = 'Input'

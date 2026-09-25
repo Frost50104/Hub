@@ -1,4 +1,5 @@
-import { Input } from '@/components/ui/Input'
+import { FIELD_INPUT_CLASS } from '@/components/ui/Input'
+import { NativeDateInput } from '@/components/ui/NativeDateInput'
 import { SELECT_FIELD_CLASS } from '@/components/ui/Select'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/cn'
@@ -46,15 +47,17 @@ export function DateField({
   const isDesktop = useIsDesktop()
 
   if (isDesktop) {
+    // Родное поле, но пустое читается пустым и в Safari (ОС 25.09).
     return (
-      <Input
+      <NativeDateInput
         id={id}
         type={type}
+        layout="block"
         value={value}
         aria-label={ariaLabel}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className={className}
+        className={cn(FIELD_INPUT_CLASS, className)}
       />
     )
   }

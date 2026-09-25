@@ -10,6 +10,7 @@ import {
 } from 'react'
 
 import { MobileDateCell } from '@/components/ui/MobileDateCell'
+import { NativeDateInput } from '@/components/ui/NativeDateInput'
 import { cn } from '@/lib/cn'
 import { commitAction, type DateDraft, syncDraft, withDay } from '@/lib/dateDraft'
 import {
@@ -253,7 +254,7 @@ export function DateTimeEditor({
       onBlur={onGroupBlur}
       onKeyDown={onKeyDown}
     >
-      <input
+      <NativeDateInput
         type="date"
         value={day}
         disabled={readOnly}
@@ -263,7 +264,7 @@ export function DateTimeEditor({
       />
       {day && (time || timeOpen) ? (
         <span className="inline-flex items-center gap-0.5">
-          <input
+          <NativeDateInput
             ref={timeRef}
             type="time"
             value={time}
