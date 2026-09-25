@@ -627,6 +627,10 @@ async def update_department(
     )
     if parent_changed:
         # Правило «отделу X» матчит и под-отделы — иерархия влияет на членство.
+        # Сессия autoflush=False: без flush загрузчик карт (Core-select по
+        # departments) видел бы СТАРОГО родителя, и пересчёт закреплял бы
+        # прежнее членство — изменение применялось только следующим rebuild.
+        await db.flush()
         diffs = await rebuild_tenant(db, principal.tenant_id)
         await notify_new_audience_members(db, diffs)
     await db.commit()
