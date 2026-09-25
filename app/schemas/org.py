@@ -85,6 +85,9 @@ class DepartmentCreate(BaseModel):
 class DepartmentUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     parent_id: UUID | None = None
+    # Архив отделов ведёт auth (16d); вернуть отдел в Hub нужно после отката
+    # организации в режим, где кадровые данные снова ведутся здесь.
+    archived: bool | None = None
     model_config = ConfigDict(extra="forbid")
 
     @field_validator("name")
@@ -125,6 +128,9 @@ class DepartmentResponse(BaseModel):
     id: UUID
     name: str
     parent_id: UUID | None
+    # 0063: отделы архивирует auth (16d). Архивный в пикерах не предлагается,
+    # но текущее значение карточки видно с пометкой «(архив)».
+    archived_at: datetime | None = None
 
 
 class GroupResponse(BaseModel):
@@ -132,6 +138,22 @@ class GroupResponse(BaseModel):
     name: str
     description: str | None = None
     member_ids: list[UUID]
+
+
+class HrStateResponse(BaseModel):
+    """Кадровые данные ведутся в auth (16d) — что показать над кадровыми полями.
+
+    `state`: window (перенос в auth, правка закрыта) | blocked (изменения ждут
+    hub-admin) | paused (заморожено, обновление из auth не включено) | stale
+    (давно не обновлялось) | synced. `edit_url`/`org_url` — куда править.
+    """
+
+    frozen: bool
+    window: bool
+    state: str | None
+    synced_at: datetime | None
+    edit_url: str
+    org_url: str
 
 
 class OrgSnapshotResponse(BaseModel):
@@ -145,6 +167,8 @@ class OrgSnapshotResponse(BaseModel):
     franchisee_groups: list[GroupResponse]
     departments: list[DepartmentResponse]
     user_groups: list[GroupResponse]
+    # Необязательное: старый бэкенд поля не шлёт — клиент считает «не заморожено».
+    hr: HrStateResponse | None = None
 
 
 # --- Audience dry-run --------------------------------------------------------

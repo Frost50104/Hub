@@ -52,7 +52,7 @@ from app.schemas.employee import (
     TuStoresReplace,
     UnlinkedLoginResponse,
 )
-from app.services import audit
+from app.services import audit, hr_state
 from app.services.audience_resolver import recalc_profile
 from app.services.auth_state import auth_states_for_profiles
 from app.services.employee_profiles import (
@@ -87,8 +87,25 @@ async def _get_profile_or_404(db: AsyncSession, profile_id: UUID) -> EmployeePro
     return profile
 
 
+async def _frozen(db: AsyncSession, tenant_id: UUID) -> bool:
+    return hr_state.is_frozen(await hr_state.load_state(db, tenant_id))
+
+
+def _hr_locked(frozen: bool, profile: EmployeeProfile) -> bool:
+    # Кассы заморозку не наследуют (16d, требование 7): их поля — Hub.
+    return frozen and profile.account_kind == "person"
+
+
+async def _refuse_in_window(db: AsyncSession, tenant_id: UUID) -> None:
+    """Окно каткатa (ручная заморозка через CLI): между второй выгрузкой и
+    импортом в auth любая правка карточек разошлась бы с копией в auth."""
+    if hr_state.in_window(await hr_state.load_state(db, tenant_id)):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=hr_state.HR_WINDOW_DETAIL)
+
+
 async def _to_response(db: AsyncSession, profile: EmployeeProfile) -> EmployeeResponse:
     resp = EmployeeResponse.model_validate(profile)
+    resp.hr_locked = _hr_locked(await _frozen(db, profile.tenant_id), profile)
     if profile.org_role == "tu":
         resp.tu_store_ids = [
             row[0]
@@ -120,9 +137,11 @@ async def _to_responses(
     # Роль и статус учётки — один расчёт на оба экрана (`services/auth_state.py`,
     # 16.09): там же появляется «Приглашён(а)» по зеркалу `auth_invitations`.
     states = await auth_states_for_profiles(db, profiles)
+    frozen = bool(profiles) and await _frozen(db, profiles[0].tenant_id)
     out = []
     for p in profiles:
         resp = EmployeeResponse.model_validate(p)
+        resp.hr_locked = _hr_locked(frozen, p)
         resp.tu_store_ids = assignments.get(p.id, [])
         info = states.get(p.id)
         resp.hub_role = info.hub_role if info else None
@@ -271,6 +290,9 @@ async def trigger_staff_sync(
         "roles_cleared": report.roles_cleared,
         "archived": report.archived,
         "invitations": report.invitations,
+        # Кадровые данные из auth (16d) — отчёт только своей организации:
+        # числа и id, без ПДн. None — потребитель выключен или тенанта нет.
+        "hr": report.hr.get(str(principal.tenant_id)),
     }
 
 
@@ -354,6 +376,19 @@ async def update_employee(
     fields = body.model_dump(exclude_unset=True)
     if "email" in fields:
         fields["email"] = normalize_email(fields["email"])
+    # Кадровые поля ведёт auth (16d): отказ только на ИЗМЕНЁННОЕ значение —
+    # форма шлёт объект целиком, и вчерашние бандлы тоже; телефон и права
+    # на контент правятся как раньше.
+    state = await hr_state.load_state(db, profile.tenant_id)
+    if _hr_locked(hr_state.is_frozen(state), profile) and hr_state.changed_hr_fields(
+        profile, fields
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=hr_state.HR_WINDOW_DETAIL
+            if hr_state.in_window(state)
+            else hr_state.HR_FROZEN_DETAIL,
+        )
     # Имя и email принадлежат auth: `_sync_linked_profile` перезапишет их при
     # следующем входе человека, поэтому правка здесь была бы принята, показана
     # применённой и молча пропала (ОС 28.08).
@@ -421,6 +456,24 @@ async def replace_tu_stores(
     db: AsyncSession = Depends(get_db),
 ) -> EmployeeResponse:
     profile = await _get_profile_or_404(db, profile_id)
+    if _hr_locked(await _frozen(db, profile.tenant_id), profile):
+        current = set(
+            (
+                await db.execute(
+                    select(TuStoreAssignment.store_id).where(
+                        TuStoreAssignment.profile_id == profile_id
+                    )
+                )
+            ).scalars()
+        )
+        if current == set(body.store_ids):
+            # Форма зовёт эту ручку при каждом сохранении ТУ — тот же набор
+            # проходит без перезаписи, иначе сохранение телефона ломалось бы.
+            return await _to_response(db, profile)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=hr_state.HR_TU_DETAIL,
+        )
     if profile.org_role != "tu":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -461,6 +514,7 @@ async def archive_employee(
     db: AsyncSession = Depends(get_db),
 ) -> EmployeeResponse:
     profile = await _get_profile_or_404(db, profile_id)
+    await _refuse_in_window(db, principal.tenant_id)
     await archive_profile(db, profile, reason=body.reason, actor_id=principal.employee_id)
     await db.commit()
     await db.refresh(profile)
@@ -475,6 +529,29 @@ async def restore_employee(
     db: AsyncSession = Depends(get_db),
 ) -> EmployeeResponse:
     profile = await _get_profile_or_404(db, profile_id)
+    state = await hr_state.load_state(db, principal.tenant_id)
+    if hr_state.in_window(state):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=hr_state.HR_WINDOW_DETAIL)
+    if (
+        hr_state.is_frozen(state)
+        and profile.archive_reason == "auth_deactivated"
+        and profile.employee_id is not None
+    ):
+        # Карточку вернёт синк, когда учётку включат в auth. Восстановленная
+        # руками при отключённой учётке через тик снова ушла бы в архив — с
+        # пушами обязательных курсов в промежутке (старые бандлы кнопку видят).
+        auth_active = (
+            await db.execute(
+                select(ShadowUser.auth_active).where(
+                    ShadowUser.employee_id == profile.employee_id
+                )
+            )
+        ).scalar_one_or_none()
+        if auth_active is not True:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=hr_state.HR_RESTORE_DEACTIVATED_DETAIL,
+            )
     try:
         await restore_profile(
             db, profile, actor_id=principal.employee_id, new_employee_id=body.employee_id
@@ -495,6 +572,7 @@ async def link_employee_login(
 ) -> EmployeeResponse:
     """Привязать «непривязанный вход» к существующей активной карточке."""
     profile = await _get_profile_or_404(db, profile_id)
+    await _refuse_in_window(db, principal.tenant_id)
     if profile.status != "active":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -606,6 +684,10 @@ async def import_employees(
     stores = await _ref_map(Store)
     departments = await _ref_map(Department)
     franchisees = await _ref_map(Franchisee)
+    # Кадровые данные ведёт auth (16d): у карточек людей кадровые колонки не
+    # пишутся, справочники по имени не создаются. Кассы — как раньше.
+    frozen = await _frozen(db, principal.tenant_id)
+    frozen_row = "кадровые данные сотрудника ведутся в auth — в файле оставьте email и телефон"
 
     # Карточки по почте — активные обновляем, архивные называем отдельно:
     # «карточки нет — заводится в auth» про архивную было бы неправдой.
@@ -691,7 +773,9 @@ async def import_employees(
                 errors.append(f"Строка {line_no}: hired_at не в формате YYYY-MM-DD")
                 continue
         try:
-            position = _resolve_ref("Должность", positions, Position, row.get("position", ""))
+            position = _resolve_ref(
+                "Должность", positions, Position, row.get("position", ""), allow_create=not frozen
+            )
             store = _resolve_ref(
                 "Магазин",
                 stores,
@@ -700,14 +784,35 @@ async def import_employees(
                 allow_create=create_missing_refs,
             )
             department = _resolve_ref(
-                "Отдел", departments, Department, row.get("department", "")
+                "Отдел", departments, Department, row.get("department", ""), allow_create=not frozen
             )
             franchisee = _resolve_ref(
-                "Франчайзи", franchisees, Franchisee, row.get("franchisee", "")
+                "Франчайзи",
+                franchisees,
+                Franchisee,
+                row.get("franchisee", ""),
+                allow_create=not frozen,
             )
         except ValueError as e:
-            errors.append(f"Строка {line_no}: {e}")
+            suffix = " (справочники ведутся в auth)" if frozen else ""
+            errors.append(f"Строка {line_no}: {e}{suffix}")
             continue
+
+        if _hr_locked(frozen, profile):
+            wanted: dict[str, object] = {"org_role": org_role}
+            if hired_at is not None:
+                wanted["hired_at"] = hired_at
+            if position is not None:
+                wanted["position_id"] = position.id
+            if store is not None:
+                wanted["store_id"] = store.id
+            if department is not None:
+                wanted["department_id"] = department.id
+            if franchisee is not None and org_role == "franchisee_owner":
+                wanted["franchisee_id"] = franchisee.id
+            if hr_state.changed_hr_fields(profile, wanted):
+                errors.append(f"Строка {line_no}: {frozen_row}")
+                continue
 
         await db.flush()  # id для только что созданных справочников
         if row.get("phone"):
@@ -739,6 +844,8 @@ async def import_employees(
         manager_id = manager_ids.get(manager_email)
         if manager_id is None:
             errors.append(f"{profile.email}: руководитель {manager_email} не найден")
+        elif _hr_locked(frozen, profile) and manager_id != profile.manager_profile_id:
+            errors.append(f"{profile.email}: руководитель — {frozen_row}")
         else:
             _apply(profile, "manager_profile_id", manager_id)
 

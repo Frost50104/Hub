@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.deps import get_db, require_auth
-from app.models.employee_profile import EmployeeProfile
+from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
 from app.models.org import (
     Department,
     Franchisee,
@@ -54,6 +54,7 @@ from app.schemas.org import (
     DryRunProfile,
     GroupMembersReplace,
     GroupResponse,
+    HrStateResponse,
     MergeBody,
     MergePreviewResponse,
     MergeResultResponse,
@@ -65,7 +66,7 @@ from app.schemas.org import (
     StoreResponse,
     StoreUpdate,
 )
-from app.services import audit, store_merge
+from app.services import audit, hr_state, store_merge
 from app.services.audience_resolver import (
     dimension_counts,
     dry_run,
@@ -80,6 +81,35 @@ from app.services.learn_notify import notify_new_audience_members
 router = APIRouter(tags=["learn-org"])
 
 _ADMIN = require_auth(roles=["admin"])
+
+
+async def _refuse_frozen_directory(db: AsyncSession, tenant_id: UUID) -> None:
+    """Должности, франчайзи и отделы ведёт auth (16d, требование 1)."""
+    state = await hr_state.load_state(db, tenant_id)
+    if hr_state.in_window(state):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=hr_state.HR_WINDOW_DETAIL)
+    if hr_state.is_frozen(state):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=hr_state.HR_DIRECTORY_DETAIL
+        )
+
+
+def _hr_view(principal: Principal, state) -> HrStateResponse | None:  # noqa: ANN001
+    settings = get_settings()
+    view = hr_state.derive_view(
+        state,
+        applying=hr_state.tenant_applies(
+            principal.tenant_slug, settings.hr_apply_tenant_slugs
+        ),
+        now=datetime.now(UTC),
+        interval_sec=settings.staff_sync_interval_sec,
+    )
+    if not view.frozen:
+        return None
+    base = settings.signaris_auth_base_url.rstrip("/")
+    return HrStateResponse(
+        **view.as_dict(), edit_url=f"{base}/admin/employees", org_url=f"{base}/admin/org"
+    )
 
 
 async def _load_groups(
@@ -125,6 +155,7 @@ async def org_snapshot(
         ),
         departments=[DepartmentResponse.model_validate(x) for x in departments],
         user_groups=await _load_groups(db, UserGroup, UserGroupMember, "profile_id"),
+        hr=_hr_view(principal, await hr_state.load_state(db, principal.tenant_id)),
     )
 
 
@@ -243,6 +274,7 @@ async def create_position(
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
 ) -> RefResponse:
+    await _refuse_frozen_directory(db, principal.tenant_id)
     return RefResponse.model_validate(await _create_ref(db, principal, Position, body, "position"))
 
 
@@ -253,6 +285,7 @@ async def update_position(
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
 ) -> RefResponse:
+    await _refuse_frozen_directory(db, principal.tenant_id)
     return RefResponse.model_validate(
         await _update_ref(db, principal, Position, ref_id, body, "position")
     )
@@ -264,6 +297,7 @@ async def delete_position(
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    await _refuse_frozen_directory(db, principal.tenant_id)
     in_use = await _profiles_use(db, EmployeeProfile.position_id, ref_id)
     await _delete_ref(db, principal, Position, ref_id, "position", in_use=in_use)
 
@@ -274,6 +308,7 @@ async def create_franchisee(
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
 ) -> RefResponse:
+    await _refuse_frozen_directory(db, principal.tenant_id)
     row = await _create_ref(db, principal, Franchisee, body, "franchisee")
     return RefResponse(
         id=row.id, name=row.name, description=row.contact_info, archived_at=row.archived_at
@@ -287,6 +322,7 @@ async def update_franchisee(
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
 ) -> RefResponse:
+    await _refuse_frozen_directory(db, principal.tenant_id)
     row = await _update_ref(db, principal, Franchisee, ref_id, body, "franchisee")
     return RefResponse(
         id=row.id, name=row.name, description=row.contact_info, archived_at=row.archived_at
@@ -299,6 +335,7 @@ async def delete_franchisee(
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    await _refuse_frozen_directory(db, principal.tenant_id)
     in_use = await _profiles_use(db, EmployeeProfile.franchisee_id, ref_id) or (
         (
             await db.execute(select(Store.id).where(Store.franchisee_id == ref_id).limit(1))
@@ -340,6 +377,15 @@ async def create_store(
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
 ) -> StoreResponse:
+    state = await hr_state.load_state(db, principal.tenant_id)
+    if hr_state.in_window(state) and body.site_id is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=hr_state.HR_WINDOW_DETAIL)
+    if hr_state.is_frozen(state) and body.franchisee_id is not None:
+        # Франчайзи точки — только из `site_franchisees` auth (16d).
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=hr_state.HR_STORE_FRANCHISEE_DETAIL,
+        )
     if body.site_id is not None:
         await _validate_site_link(db, body.site_id, exclude_store_id=None)
     store = Store(
@@ -382,6 +428,21 @@ async def update_store(
     if store is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Магазин не найден")
     fields = body.model_dump(exclude_unset=True)
+    state = await hr_state.load_state(db, principal.tenant_id)
+    if hr_state.is_frozen(state) and (
+        "franchisee_id" in fields and fields["franchisee_id"] != store.franchisee_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=hr_state.HR_STORE_FRANCHISEE_DETAIL,
+        )
+    if hr_state.in_window(state) and (
+        ("site_id" in fields and fields["site_id"] != store.site_id)
+        or (fields.get("archived") is False and store.archived_at is not None)
+    ):
+        # Окно каткатa: объект точки и её разархивация меняют перевод точек
+        # в карточках — копия в auth разошлась бы с выгрузкой.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=hr_state.HR_WINDOW_DETAIL)
     if fields.get("site_id") is not None:
         await _validate_site_link(db, fields["site_id"], exclude_store_id=store.id)
     diff = {}
@@ -436,6 +497,15 @@ async def delete_store(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     in_use = await _profiles_use(db, EmployeeProfile.store_id, ref_id)
+    if not in_use and hr_state.is_frozen(await hr_state.load_state(db, principal.tenant_id)):
+        # Строки ТУ уходят каскадом молча, а закреплённые точки ведёт auth.
+        in_use = (
+            await db.execute(
+                select(TuStoreAssignment.store_id)
+                .where(TuStoreAssignment.store_id == ref_id)
+                .limit(1)
+            )
+        ).scalar_one_or_none() is not None
     # Таблицы гонки ссылаются на stores с RESTRICT — без проверки удаление
     # падало бы IntegrityError'ом в 500.
     from app.models.race import RaceParticipant, RaceResult, RaceSnapshot
@@ -479,6 +549,8 @@ async def merge_store(
     db: AsyncSession = Depends(get_db),
 ) -> MergeResultResponse:
     """Слить карточку `ref_id` в `body.into`: данные переезжают, `ref_id` — в архив."""
+    if hr_state.in_window(await hr_state.load_state(db, principal.tenant_id)):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=hr_state.HR_WINDOW_DETAIL)
     await db.execute(sa_text("SET LOCAL lock_timeout = '5s'"))
     try:
         plan = await store_merge.plan_merge(db, loser_id=ref_id, winner_id=body.into)
@@ -580,6 +652,7 @@ async def create_department(
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
 ) -> DepartmentResponse:
+    await _refuse_frozen_directory(db, principal.tenant_id)
     dep = Department(tenant_id=principal.tenant_id, name=body.name, parent_id=body.parent_id)
     db.add(dep)
     await db.flush()
@@ -604,6 +677,7 @@ async def update_department(
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
 ) -> DepartmentResponse:
+    await _refuse_frozen_directory(db, principal.tenant_id)
     dep = await db.get(Department, ref_id)
     if dep is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Отдел не найден")
@@ -614,6 +688,9 @@ async def update_department(
         )
     fields = body.model_dump(exclude_unset=True)
     parent_changed = "parent_id" in fields and fields["parent_id"] != dep.parent_id
+    archived = fields.pop("archived", None)
+    if archived is not None and archived != (dep.archived_at is not None):
+        dep.archived_at = func.now() if archived else None
     for name, value in fields.items():
         setattr(dep, name, value)
     audit.record(
@@ -644,6 +721,7 @@ async def delete_department(
     principal: Principal = Depends(_ADMIN),
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    await _refuse_frozen_directory(db, principal.tenant_id)
     has_children = (
         await db.execute(select(Department.id).where(Department.parent_id == ref_id).limit(1))
     ).scalar_one_or_none() is not None

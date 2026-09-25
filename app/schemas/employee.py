@@ -81,6 +81,9 @@ class EmployeeResponse(BaseModel):
     # no_account|invited|not_linked|not_logged_in|active|blocked|deleted;
     # `invited` (16.09) — почта есть среди непринятых приглашений auth.
     auth_state: str | None = None
+    # Кадровые поля ведёт auth (16d): организация заморожена, а карточка —
+    # человека (у кассы поля свои, требование 7). Считает сервер.
+    hr_locked: bool = False
 
 
 class InvitationResponse(BaseModel):

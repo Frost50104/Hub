@@ -106,6 +106,8 @@ class ApplyReport:
     refreshed: list[UUID] = field(default_factory=list)
     conflicts: int = 0
     pending: int = 0
+    # Окно каткатa кадровых данных (16d): применение пропущено целиком.
+    skipped_window: bool = False
 
 
 def norm_name(s: str) -> str:
@@ -234,6 +236,14 @@ async def apply_registry(
     аудитории и уходят уведомления новым членам — та же побочка, что у
     ручного архива в `update_store`, и отозвать её нельзя.
     """
+    from app.services import hr_state
+
+    if hr_state.in_window(await hr_state.load_state(session, tenant_id)):
+        # Окно каткатa (ручная заморозка): новые и закрытые точки меняют перевод
+        # точек в карточках — копия кадровых данных в auth разошлась бы с
+        # выгрузкой. Реестр применится первым прогоном после закрытия окна.
+        log.info("registry_apply.skipped_window", tenant_id=str(tenant_id))
+        return ApplyReport(skipped_window=True)
     plan, stores, sites = await _load_plan(session)
     report = ApplyReport(pending=len(plan.pending))
     if dry_run:

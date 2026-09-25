@@ -109,7 +109,10 @@ async def write_freeze_state(
             .values(tenant_id=tenant_id)
             .on_conflict_do_nothing(index_elements=["tenant_id"])
         )
-        state = (await db.execute(select(HrSyncState).with_for_update())).scalar_one()
+        state = await db.get(
+            HrSyncState, tenant_id, with_for_update=True, populate_existing=True
+        )
+        assert state is not None  # только что вставлена или уже была
         if state.fetched_at is not None and state.fetched_at >= fetched_at:
             return False
         now = datetime.now(UTC)
@@ -978,9 +981,13 @@ async def run_tenant(run: TenantRun, *, settings: Settings | None = None) -> Ten
             .on_conflict_do_nothing(index_elements=["tenant_id"])
         )
         try:
-            state = (
-                await db.execute(select(HrSyncState).with_for_update(nowait=True))
-            ).scalar_one()
+            state = await db.get(
+                HrSyncState,
+                run.tenant_id,
+                with_for_update={"nowait": True},
+                populate_existing=True,
+            )
+            assert state is not None  # только что вставлена или уже была
         except DBAPIError:
             if run.override_fingerprint is not None:
                 raise OverrideRejected(

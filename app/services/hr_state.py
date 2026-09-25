@@ -20,8 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hr_sync import HrSyncState
@@ -125,9 +125,15 @@ def tenant_applies(tenant_slug: str | None, apply_slugs: frozenset[str]) -> bool
     return bool(tenant_slug) and tenant_slug.strip().lower() in apply_slugs
 
 
-async def load_state(db: AsyncSession) -> HrSyncState | None:
-    """Строка тенанта сессии. RLS скоупит выборку — ручного tenant-фильтра нет."""
-    return (await db.execute(select(HrSyncState))).scalar_one_or_none()
+async def load_state(db: AsyncSession, tenant_id: UUID) -> HrSyncState | None:
+    """Строка тенанта — по первичному ключу.
+
+    Не `select(HrSyncState)` в надежде на RLS: под сессией без него (bypass,
+    миграционная роль, тесты под суперпользователем) такой запрос видит строки
+    всех организаций и падает на второй. Это не ручная фильтрация по тенанту —
+    строка у организации ровно одна, и RLS по-прежнему стережёт чужую.
+    """
+    return await db.get(HrSyncState, tenant_id)
 
 
 def changed_hr_fields(current: Any, incoming: dict[str, Any]) -> list[str]:
