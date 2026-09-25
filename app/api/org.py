@@ -73,6 +73,7 @@ from app.services.audience_resolver import (
     rebuild_tenant,
     validate_rules,
 )
+from app.services.auth_state import auth_state_for, staff_snapshot_fresh
 from app.services.content_access import require_content_role
 from app.services.learn_notify import notify_new_audience_members
 
@@ -517,8 +518,6 @@ async def point_accounts(
     «Сотрудниках», и если такую не показать здесь, она станет невидимой и
     неисправимой. На проде такая одна — карточка, про которую auth не знает.
     """
-    from app.api.employees import auth_state_for, staff_snapshot_fresh
-
     settings = get_settings()
     staff_synced = staff_snapshot_fresh(
         (await db.execute(select(func.max(ShadowUser.staff_synced_at)))).scalar_one_or_none(),
