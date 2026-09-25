@@ -1,6 +1,7 @@
 """GET /api/env — public bootstrap config for the SPA.
 
-The frontend reads version (for UpdateBanner), vapid_public_key (for push
+The frontend reads version (Sentry release; the update banner compares
+`/version.json` instead), vapid_public_key (for push
 subscribe) and sentry_dsn (for Sentry init) from this endpoint. Anonymous
 access — no auth.
 """

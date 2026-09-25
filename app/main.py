@@ -222,6 +222,7 @@ def create_app() -> FastAPI:
     from app.api import courses as courses_api
     from app.api import custom_fields as custom_fields_api
     from app.api import dependencies as dependencies_api
+    from app.api import diag as diag_api
     from app.api import employees as employees_api
     from app.api import env as env_api
     from app.api import favorites as favorites_api
@@ -263,6 +264,7 @@ def create_app() -> FastAPI:
     from app.api import watchers as watchers_api
 
     app.include_router(env_api.router, prefix="/api")
+    app.include_router(diag_api.router, prefix="/api")
     app.include_router(feedback_api.router, prefix="/api")
     app.include_router(guides_api.router, prefix="/api")
     app.include_router(me_api.router, prefix="/api")

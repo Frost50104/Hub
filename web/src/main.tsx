@@ -10,6 +10,9 @@ import { UpdateBanner } from './components/UpdateBanner'
 import { setBackendEnv } from './lib/appEnv'
 import { queryClient } from './lib/queryClient'
 import { installPreloadRecovery } from './lib/preloadRecovery'
+import { installServiceWorker } from './lib/serviceWorker'
+import { reportSwHung } from './lib/swBrowser'
+import { installSwMessageListener, swInbox } from './lib/swMessages'
 import { initSentry } from './lib/sentry'
 import { setDisplayTz } from './lib/taskDates'
 import { initTheme } from './lib/theme'
@@ -19,6 +22,12 @@ import './styles/globals.css'
 // хэши, а PWA ещё на вчерашнем бандле) лечится перезагрузкой, а не экраном
 // «Что-то пошло не так».
 installPreloadRecovery()
+// Регистрация воркера и его пробы — своими руками, без плагина (25.09): у
+// `virtual:pwa-register` слушатель `controlling` перезагружал соседние
+// вкладки. Слушатель сообщений воркера — до React: клик по уведомлению может
+// прийти раньше, чем смонтируется Shell, и ждёт в `swInbox`.
+installServiceWorker({ onHung: reportSwHung })
+if ('serviceWorker' in navigator) installSwMessageListener(navigator.serviceWorker, swInbox)
 
 const root = document.getElementById('root')
 if (!root) throw new Error('#root element missing in index.html')

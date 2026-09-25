@@ -8,6 +8,7 @@ import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { hasTaskReminders, useMe } from '@/hooks/useMe'
 import { usePushAutoRefresh } from '@/hooks/usePushAutoRefresh'
 import { useReminderToasts } from '@/hooks/useReminderToasts'
+import { useSwOpenUrl } from '@/hooks/useSwOpenUrl'
 import { useThemeSync } from '@/hooks/useThemeSetting'
 import { logoutWithDeviceCleanup } from '@/lib/session'
 import {
@@ -82,6 +83,8 @@ export function Shell() {
   // Пришедшее напоминание (0062) — тостом в открытом приложении: у большинства
   // пуш-подписки нет. До раннего return, как и хуки выше.
   useReminderToasts(hasTaskReminders(me.data))
+  // Клик по push-уведомлению — SPA-переходом, а не навигацией документа (25.09).
+  useSwOpenUrl()
 
   // ЕДИНЫЙ эффект, boot-redirect строго ПЕРЕД remember: раздельные эффекты —
   // баг (remember успел бы перезаписать lastSpace='tasks' на первом маунте

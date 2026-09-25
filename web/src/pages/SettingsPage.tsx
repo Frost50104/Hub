@@ -10,6 +10,8 @@ import { useMe } from '@/hooks/useMe'
 import { logoutWithDeviceCleanup } from '@/lib/session'
 import { cn } from '@/lib/cn'
 import { HUB_ROLE_BADGE } from '@/lib/learn'
+import { hungBrowserHint, isDesktopMacUa } from '@/lib/swPolicy'
+import { useSwStatus } from '@/lib/swStatusStore'
 
 const TABS = [
   { to: 'account', label: 'Учётная запись', icon: User },
@@ -72,11 +74,22 @@ export function SettingsPage() {
     </nav>
   )
 
+  // Вердикт «регистрация воркера зависла» ставит `lib/serviceWorker.ts` по
+  // видимому времени без ответа `update()`; из страницы это не лечится
+  // (разбор 25.09), человеку остаётся перезапустить браузер.
+  const swHealth = useSwStatus((s) => s.health)
   const version = (
-    <span className="text-[14px] text-text2">
-      Версия <span className="font-mono text-text">{__APP_VERSION__}</span>
-      {__APP_MODE__ !== 'production' && ` · ${__APP_MODE__}`}
-    </span>
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="text-[14px] text-text2">
+        Версия <span className="font-mono text-text">{__APP_VERSION__}</span>
+        {__APP_MODE__ !== 'production' && ` · ${__APP_MODE__}`}
+      </span>
+      {swHealth === 'hung' && (
+        <p className="max-w-md text-[13px] leading-snug text-amber">
+          {hungBrowserHint(isDesktopMacUa(navigator.userAgent, navigator.maxTouchPoints))}
+        </p>
+      )}
+    </div>
   )
 
   if (!isDesktop) {

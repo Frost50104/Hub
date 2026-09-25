@@ -10,6 +10,8 @@ import { TvRail } from '@/components/race/tv/TvRail'
 import { useElementSize } from '@/hooks/useElementSize'
 import { usePublicRace } from '@/hooks/usePublicRace'
 import { shouldOfferUpdate } from '@/lib/appVersion'
+import { settleInFlightUpdate } from '@/lib/serviceWorker'
+import { INFLIGHT_SETTLE_MS } from '@/lib/swPolicy'
 import { boardState, leagueOptions, tvPageSize, tvRotation } from '@/lib/raceBoard'
 
 const PAGE_MS = 15_000
@@ -58,7 +60,12 @@ export function RaceTvPage() {
         const res = await fetch('/version.json', { cache: 'no-store' })
         if (!res.ok) return
         const data = (await res.json()) as { version?: string }
-        if (data.version && shouldOfferUpdate(__APP_VERSION__, data.version, null)) window.location.reload()
+        if (data.version && shouldOfferUpdate(__APP_VERSION__, data.version, null)) {
+          // Не обрывать нашу пробу воркера перезагрузкой — то же правило, что у
+          // кнопки «Обновить» (`lib/appUpdate.ts`).
+          await settleInFlightUpdate(INFLIGHT_SETTLE_MS)
+          window.location.reload()
+        }
       } catch {
         // офлайн — следующая проверка через час
       }

@@ -213,6 +213,20 @@ deploy_frontend() {
     echo "ERROR: index.html попал в прекеш воркера (web/dist/sw.js) — баннер обновления перестанет уходить. См. globPatterns в web/vite.config.ts." >&2
     exit 1
   fi
+  # Регистрация воркера живёт в web/src/lib/serviceWorker.ts (25.09). Если в
+  # index.html снова появилась регистрация от плагина (`injectRegister` не
+  # false: `registerSW.js`, inline-вариант `vite-plugin-pwa:inline-sw` или голый
+  # `serviceWorker.register`), а в sw.js — чанк workbox-window (то есть кто-то
+  # вернул импорт `virtual:pwa-register`, чей слушатель `controlling`
+  # перезагружает соседние вкладки), выкат падает.
+  if grep -Eq 'registerSW|serviceWorker\.register|vite-plugin-pwa:' "$PROJECT_DIR/web/dist/index.html"; then
+    echo "ERROR: в web/dist/index.html вернулась регистрация воркера плагином — см. injectRegister в web/vite.config.ts." >&2
+    exit 1
+  fi
+  if grep -q 'workbox-window' "$PROJECT_DIR/web/dist/sw.js"; then
+    echo "ERROR: в web/dist/sw.js вернулся workbox-window — значит снова импортирован virtual:pwa-register, который перезагружает соседние вкладки." >&2
+    exit 1
+  fi
 
   echo "==> Uploading dist to $ENV..."
   # БЕЗ --delete, и это не оплошность (ОС 16.09: «работа не сохраняется, даже

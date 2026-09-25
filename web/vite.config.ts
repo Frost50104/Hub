@@ -97,6 +97,12 @@ export default defineConfig(({ mode }) => ({
     VitePWA({
       strategies: 'injectManifest',
       registerType: 'prompt',
+      // Регистрацию делает `src/lib/serviceWorker.ts`, а не плагин: у его
+      // виртуального модуля слушатель `controlling` перезагружал соседние
+      // вкладки (25.09). Без `false` плагин при отсутствии импорта
+      // `virtual:pwa-register` сам вставил бы `registerSW.js` в index.html;
+      // сторож — `deploy.sh`.
+      injectRegister: false,
       srcDir: 'src',
       filename: 'sw.ts',
       injectManifest: {
