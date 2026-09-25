@@ -21,6 +21,10 @@ import {
   splitDateTime,
 } from '@/lib/taskDateTime'
 
+/** Время, которое подставляет «+ время»: минуты — 00, чтобы набор одних часов
+ *  давал ровно час. */
+const DEFAULT_TIME = '12:00'
+
 /** Дата/время — значение поля, а не статус: силуэт чипа 26px, не бейджа. */
 export const DATE_CHIP =
   'inline-flex h-[26px] items-center rounded-md bg-surface px-2 font-body text-[12px] font-semibold text-text2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 disabled:cursor-default'
@@ -177,6 +181,14 @@ export function DateTimeEditor({
   const edit = (value: DateTimeValue) => setDraft({ value, dirty: true })
   const setDay = (day: string) => edit(withDay(draftRef.current.value, day))
   const setTime = (time: string) => edit({ day: draftRef.current.value.day, time })
+  // «+ время» ставит время сразу ЗНАЧЕНИЕМ. Пустое поле Safari показывает с
+  // подсказкой «12:30», но это не значение: Enter и уход фокуса его теряли, а
+  // одни набранные часы без минут значением не становились (ОС 25.09). Теперь
+  // Enter сохраняет подставленное, набор «15» даёт 15:00, Escape отменяет.
+  const openTime = () => {
+    edit({ day: draftRef.current.value.day, time: DEFAULT_TIME })
+    setTimeOpen(true)
+  }
   const clearTime = () => {
     edit({ day: draftRef.current.value.day, time: '' })
     setTimeOpen(false)
@@ -293,7 +305,7 @@ export function DateTimeEditor({
       ) : day && !readOnly ? (
         <button
           type="button"
-          onClick={() => setTimeOpen(true)}
+          onClick={openTime}
           className={cn(DATE_CHIP, 'border border-dashed border-glass-border bg-transparent')}
         >
           + время
