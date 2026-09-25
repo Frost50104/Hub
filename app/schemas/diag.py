@@ -73,7 +73,7 @@ class DiagClick(BaseModel):
 class SwDiagIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["sw_hung", "update_click"]
+    kind: Literal["sw_hung", "sw_recovered", "update_click"]
     ts: str = Field(max_length=40)
     app: DiagApp
     env: DiagEnv

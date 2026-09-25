@@ -57,12 +57,15 @@ export function sendDiag(payload: SwDiagPayload, token: string | null): void {
   sendSwDiag(payload, token, (url, init) => fetch(url, init))
 }
 
-/** Вердикт «регистрация зависла» — один раз на загрузку страницы (`installServiceWorker({ onHung })`). */
-export function reportSwHung(): void {
+/**
+ * Вердикт «регистрация зависла» (`sw_hung`) и его снятие (`sw_recovered`) —
+ * `installServiceWorker({ onHung, onRecovered })`.
+ */
+export function reportSwHealth(kind: 'sw_hung' | 'sw_recovered'): void {
   const s = useSwStatus.getState()
   const env = browserEnv()
   const payload = buildSwDiag({
-    kind: 'sw_hung',
+    kind,
     now: Date.now(),
     loadedVersion: __APP_VERSION__,
     serverVersion: s.polled?.version ?? null,

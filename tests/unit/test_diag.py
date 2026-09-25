@@ -69,6 +69,7 @@ def test_schema_accepts_both_kinds() -> None:
     assert click.click.steps[0].name == "lookup"
     hung = SwDiagIn.model_validate(_body("sw_hung"))
     assert hung.click is None
+    assert SwDiagIn.model_validate(_body("sw_recovered")).kind == "sw_recovered"
 
 
 def test_schema_rejects_event_and_unknown_fields() -> None:

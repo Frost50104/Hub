@@ -44,6 +44,13 @@ export const STARTUP_PROBE_DELAY_MS = 5000
 /** Повтор после провала установки (404 чанка посреди rsync, обрыв сети). */
 export const PROBE_RETRY_DELAY_MS = 45_000
 export const PROBE_MAX_RETRIES = 2
+/**
+ * Перепроверка вердикта «завис»: одна проба через 5 минут (и одна на смену
+ * версии). Опыт 25.09: на iPhone проба, поставленная в очередь позади идущей
+ * установки, не завершилась за 20 с, хотя очередь дальше работала — без
+ * перепроверки подсказка «перезапустите браузер» жила бы до перезагрузки.
+ */
+export const HUNG_RECHECK_MS = 5 * 60_000
 /** Сколько живёт опрошенная баннером версия как замена недоступному `version.json`. */
 export const POLLED_VERSION_FRESH_MS = 60_000
 /** Тихая активация ожидающего воркера (решение владельца 25.09). Откат — одна строка. */
@@ -108,7 +115,14 @@ export function decideUpdateClick(input: UpdateClickInput): UpdateClickAction {
   return { kind: 'toast', reason: 'latest', activateWaiting }
 }
 
-export type ProbeTrigger = 'startup' | 'version-changed' | 'visible' | 'settled' | 'retry'
+export type ProbeTrigger =
+  | 'startup'
+  | 'version-changed'
+  | 'visible'
+  | 'settled'
+  | 'retry'
+  | 'install-finished'
+  | 'recheck'
 
 export interface ProbeInput {
   trigger: ProbeTrigger
@@ -124,6 +138,13 @@ export interface ProbeInput {
   /** Версия, при которой стартовала последняя проба. */
   probedVersion: string
   retries: number
+  /**
+   * Идёт установка воркера (`registration.installing`). Проба в это время
+   * встала бы в очередь WebKit позади установки — так и зависла проба на
+   * iPhone 25.09. Ждём `install-finished`.
+   */
+  installing: boolean
+  hungAt: number | null
 }
 
 /** Пути, где страница вот-вот выгрузится целиком (`/login` уходит на SSO полной навигацией). */
@@ -133,15 +154,27 @@ export function probeForbiddenOnPath(path: string): boolean {
 
 /** Запускать ли `registration.update()` сейчас. */
 export function decideProbe(input: ProbeInput): boolean {
-  if (input.health === 'hung') return false
-  if (input.inFlight || !input.visible || !input.online) return false
+  if (input.inFlight || input.installing || !input.visible || !input.online) return false
   if (probeForbiddenOnPath(input.path)) return false
   const spaced = input.lastProbeAt === null || input.now - input.lastProbeAt >= PROBE_MIN_INTERVAL_MS
+  if (input.health === 'hung') {
+    // Зависшую очередь новыми заданиями не лечат, но вердикт может быть
+    // ложным — перепроверяем редко: раз в HUNG_RECHECK_MS и на смену версии.
+    if (input.trigger === 'recheck') {
+      return input.hungAt !== null && input.now - input.hungAt >= HUNG_RECHECK_MS
+    }
+    if (input.trigger === 'version-changed') return spaced && input.seenVersion !== input.probedVersion
+    return false
+  }
   switch (input.trigger) {
     case 'startup':
       return input.lastProbeAt === null
+    case 'install-finished':
+      return input.lastProbeAt === null || (spaced && input.seenVersion !== input.probedVersion)
     case 'retry':
       return spaced && input.retries < PROBE_MAX_RETRIES
+    case 'recheck':
+      return false
     case 'version-changed':
     case 'visible':
     case 'settled':

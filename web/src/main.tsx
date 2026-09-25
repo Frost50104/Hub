@@ -11,7 +11,7 @@ import { setBackendEnv } from './lib/appEnv'
 import { queryClient } from './lib/queryClient'
 import { installPreloadRecovery } from './lib/preloadRecovery'
 import { installServiceWorker } from './lib/serviceWorker'
-import { reportSwHung } from './lib/swBrowser'
+import { reportSwHealth } from './lib/swBrowser'
 import { installSwMessageListener, swInbox } from './lib/swMessages'
 import { initSentry } from './lib/sentry'
 import { setDisplayTz } from './lib/taskDates'
@@ -26,7 +26,10 @@ installPreloadRecovery()
 // `virtual:pwa-register` слушатель `controlling` перезагружал соседние
 // вкладки. Слушатель сообщений воркера — до React: клик по уведомлению может
 // прийти раньше, чем смонтируется Shell, и ждёт в `swInbox`.
-installServiceWorker({ onHung: reportSwHung })
+installServiceWorker({
+  onHung: () => reportSwHealth('sw_hung'),
+  onRecovered: () => reportSwHealth('sw_recovered'),
+})
 if ('serviceWorker' in navigator) installSwMessageListener(navigator.serviceWorker, swInbox)
 
 const root = document.getElementById('root')

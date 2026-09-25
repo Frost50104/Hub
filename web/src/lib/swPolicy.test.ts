@@ -4,6 +4,7 @@ import {
   createVisibleClock,
   decideProbe,
   decideUpdateClick,
+  HUNG_RECHECK_MS,
   hungBrowserHint,
   isDesktopMacUa,
   nextSwHealth,
@@ -152,6 +153,8 @@ function probe(over: Partial<ProbeInput> = {}): ProbeInput {
     seenVersion: LOADED,
     probedVersion: LOADED,
     retries: 0,
+    installing: false,
+    hungAt: null,
     ...over,
   }
 }
@@ -165,11 +168,26 @@ describe('decideProbe', () => {
     expect(decideProbe(probe({ path: '/auth/callback' }))).toBe(true)
   })
 
-  it('после вердикта «завис» проб нет вообще', () => {
-    expect(decideProbe(probe({ health: 'hung' }))).toBe(false)
-    expect(
-      decideProbe(probe({ health: 'hung', trigger: 'version-changed', seenVersion: NEWER, lastProbeAt: NOW - 90_000 })),
-    ).toBe(false)
+  it('после вердикта «завис» — только перепроверка через 5 минут и одна проба на смену версии', () => {
+    const hung = { health: 'hung' as const, hungAt: NOW - HUNG_RECHECK_MS, lastProbeAt: NOW - 90_000 }
+    expect(decideProbe(probe({ health: 'hung', hungAt: NOW - 1000 }))).toBe(false)
+    expect(decideProbe(probe({ ...hung, trigger: 'visible', seenVersion: NEWER }))).toBe(false)
+    expect(decideProbe(probe({ ...hung, trigger: 'settled', seenVersion: NEWER }))).toBe(false)
+    expect(decideProbe(probe({ ...hung, trigger: 'retry' }))).toBe(false)
+    expect(decideProbe(probe({ ...hung, trigger: 'recheck' }))).toBe(true)
+    expect(decideProbe(probe({ ...hung, trigger: 'recheck', hungAt: NOW - HUNG_RECHECK_MS + 1 }))).toBe(false)
+    expect(decideProbe(probe({ ...hung, trigger: 'version-changed', seenVersion: NEWER }))).toBe(true)
+    expect(decideProbe(probe({ ...hung, trigger: 'version-changed' }))).toBe(false)
+    // Здоровой регистрации перепроверка не нужна.
+    expect(decideProbe(probe({ trigger: 'recheck', lastProbeAt: NOW - 90_000 }))).toBe(false)
+  })
+
+  it('пока воркер ставится, проб нет; по концу установки — стартовая или по разошедшейся версии', () => {
+    expect(decideProbe(probe({ installing: true }))).toBe(false)
+    expect(decideProbe(probe({ installing: true, trigger: 'version-changed', seenVersion: NEWER, lastProbeAt: NOW - 90_000 }))).toBe(false)
+    expect(decideProbe(probe({ trigger: 'install-finished' }))).toBe(true)
+    expect(decideProbe(probe({ trigger: 'install-finished', lastProbeAt: NOW - 90_000 }))).toBe(false)
+    expect(decideProbe(probe({ trigger: 'install-finished', lastProbeAt: NOW - 90_000, seenVersion: NEWER }))).toBe(true)
   })
 
   it('проба в полёте или офлайн — не запускаем', () => {

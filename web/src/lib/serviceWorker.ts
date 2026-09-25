@@ -28,6 +28,7 @@ import { SKIP_WAITING } from './swMessages'
 import {
   createVisibleClock,
   decideProbe,
+  HUNG_RECHECK_MS,
   nextSwHealth,
   PROBE_MAX_RETRIES,
   PROBE_RETRY_DELAY_MS,
@@ -79,6 +80,8 @@ export interface SwDeps {
   store: SwStatusStore
   /** Вердикт «регистрация зависла» — один раз на загрузку страницы. */
   onHung: () => void
+  /** Проба после вердикта «завис» всё же завершилась — вердикт снят. */
+  onRecovered: () => void
 }
 
 /** Шаг проверки «висит ли проба» — секунда, чтобы вердикт не опаздывал. */
@@ -153,6 +156,7 @@ export function createServiceWorkerController(deps: SwDeps): SwController {
         patch({ health, hungAt: deps.now() })
         stopHungTicker()
         deps.onHung()
+        deps.setTimeout(() => runProbe('recheck'), HUNG_RECHECK_MS)
       }
     }, HUNG_TICK_MS)
   }
@@ -170,8 +174,12 @@ export function createServiceWorkerController(deps: SwDeps): SwController {
       if (worker.state === 'installed') {
         retries = 0
         requestActivation()
+        // Установка кончилась — теперь проба не встанет в очередь позади неё
+        // (на iPhone 25.09 именно такая проба и «зависла»).
+        runProbe('install-finished')
       } else if (worker.state === 'redundant') {
         scheduleRetry()
+        runProbe('install-finished')
       }
     })
   }
@@ -191,6 +199,8 @@ export function createServiceWorkerController(deps: SwDeps): SwController {
       seenVersion: state.seenVersion,
       probedVersion: state.probedVersion,
       retries,
+      installing: registration.installing != null,
+      hungAt: state.hungAt,
     })
     if (!allowed) return
     startupProbePending = false
@@ -208,8 +218,10 @@ export function createServiceWorkerController(deps: SwDeps): SwController {
       if (inFlight === probe) inFlight = null
       stopHungTicker()
       const visibleMs = clock?.elapsedVisible(deps.now()) ?? 0
+      const wasHung = store.getState().health === 'hung'
       const health = nextSwHealth(store.getState().health, { result, visibleMs })
       patch({ health, probeStartedAt: null, ...(health === 'ok' ? { hungAt: null } : {}) })
+      if (wasHung && health === 'ok') deps.onRecovered()
       refreshSnapshot()
       if (result === 'rejected') scheduleRetry()
       requestActivation()
@@ -307,6 +319,7 @@ function realDeps(): SwDeps {
     silentActivation: SILENT_ACTIVATION,
     store: useSwStatus,
     onHung: () => undefined,
+    onRecovered: () => undefined,
   }
 }
 

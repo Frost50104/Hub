@@ -7,7 +7,7 @@ import {
   type SwRegistrationLike,
   type SwWorkerLike,
 } from './serviceWorker'
-import { PROBE_HUNG_MS, PROBE_RETRY_DELAY_MS, STARTUP_PROBE_DELAY_MS } from './swPolicy'
+import { HUNG_RECHECK_MS, PROBE_HUNG_MS, PROBE_RETRY_DELAY_MS, STARTUP_PROBE_DELAY_MS } from './swPolicy'
 import { createSwStatusStore } from './swStatusStore'
 
 const LOADED = 'aaaaaaa-20260925-100000'
@@ -93,6 +93,7 @@ function setup(reg: FakeRegistration | undefined, over: Partial<SwDeps> = {}) {
   let visibilityListener: (() => void) | null = null
   const store = createSwStatusStore(LOADED, Date.now())
   const hung = vi.fn()
+  const recovered = vi.fn()
   const deps: SwDeps = {
     container: fakeContainer(reg),
     prod: true,
@@ -111,6 +112,7 @@ function setup(reg: FakeRegistration | undefined, over: Partial<SwDeps> = {}) {
     silentActivation: true,
     store,
     onHung: hung,
+    onRecovered: recovered,
     ...over,
   }
   const controller = createServiceWorkerController(deps)
@@ -118,6 +120,7 @@ function setup(reg: FakeRegistration | undefined, over: Partial<SwDeps> = {}) {
     controller,
     store,
     hung,
+    recovered,
     deps,
     setVisible(next: boolean) {
       visible = next
@@ -232,9 +235,9 @@ describe('пробы', () => {
     expect(reg.updates).toBe(2)
   })
 
-  it('вердикт «завис» — по 20 с видимого времени, один onHung, проб больше нет', async () => {
+  it('вердикт «завис» — по 20 с видимого времени, один onHung; обычных проб больше нет', async () => {
     const reg = fakeRegistration()
-    const { controller, store, hung, setVisible } = setup(reg)
+    const { controller, store, hung, recovered, setVisible } = setup(reg)
     await controller.install()
     await vi.advanceTimersByTimeAsync(STARTUP_PROBE_DELAY_MS)
     setVisible(false)
@@ -244,13 +247,51 @@ describe('пробы', () => {
     await vi.advanceTimersByTimeAsync(PROBE_HUNG_MS + 1000)
     expect(store.getState().health).toBe('hung')
     expect(hung).toHaveBeenCalledTimes(1)
-    controller.noteServerVersion(NEWER, Date.now())
-    expect(reg.updates).toBe(1)
-    // Поздний ответ снимает вердикт.
+    setVisible(false)
+    setVisible(true)
+    expect(reg.updates).toBe(1) // видимость пробу не запускает
+    // Поздний ответ снимает вердикт и сообщает о выздоровлении.
     reg.resolveUpdate?.()
     await vi.advanceTimersByTimeAsync(0)
     expect(store.getState().health).toBe('ok')
     expect(store.getState().hungAt).toBeNull()
+    expect(recovered).toHaveBeenCalledTimes(1)
+  })
+
+  it('после «завис» — одна проба на смену версии и перепроверка через 5 минут', async () => {
+    const reg = fakeRegistration()
+    const { controller, store } = setup(reg)
+    await controller.install()
+    await vi.advanceTimersByTimeAsync(STARTUP_PROBE_DELAY_MS + PROBE_HUNG_MS + 1000)
+    expect(store.getState().health).toBe('hung')
+    // Висящая проба всё ещё в полёте — новая не стартует, пока та не завершится.
+    controller.noteServerVersion(NEWER, Date.now())
+    expect(reg.updates).toBe(1)
+    reg.resolveUpdate?.()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(store.getState().health).toBe('ok')
+    // Снова зависла: версия сменилась ещё раз — одна проба.
+    const fresh = fakeRegistration()
+    const again = setup(fresh)
+    await again.controller.install()
+    await vi.advanceTimersByTimeAsync(STARTUP_PROBE_DELAY_MS + PROBE_HUNG_MS + 1000)
+    expect(again.store.getState().health).toBe('hung')
+    // Перепроверка через 5 минут: первая проба так и висит → в полёте → нет; иначе была бы.
+    await vi.advanceTimersByTimeAsync(HUNG_RECHECK_MS)
+    expect(fresh.updates).toBe(1)
+  })
+
+  it('пока воркер ставится, стартовая проба ждёт конца установки', async () => {
+    const installing = fakeWorker('installing')
+    const reg = fakeRegistration({ installing })
+    const { controller } = setup(reg)
+    await controller.install()
+    await vi.advanceTimersByTimeAsync(STARTUP_PROBE_DELAY_MS)
+    expect(reg.updates).toBe(0)
+    reg.installing = null
+    reg.waiting = installing
+    installing.fire('installed')
+    expect(reg.updates).toBe(1)
   })
 
   it('отказ update() — повтор через паузу, не больше двух', async () => {

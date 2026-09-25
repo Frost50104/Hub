@@ -19,7 +19,7 @@
 import type { SwHealth } from './swPolicy'
 import type { SwSnapshot } from './swStatusStore'
 
-export type SwDiagKind = 'sw_hung' | 'update_click'
+export type SwDiagKind = 'sw_hung' | 'sw_recovered' | 'update_click'
 
 export type DiagStepName = 'lookup' | 'version' | 'token' | 'inflight' | 'activate' | 'purge'
 export type DiagStepResult = 'ok' | 'timeout' | 'error' | 'skipped'
