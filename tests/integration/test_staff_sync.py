@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import httpx
@@ -14,9 +15,12 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import tenant_scoped_session
+from app.models.audience import Audience
+from app.models.course import Course
 from app.models.employee_profile import EmployeeProfile
 from app.models.shadow import AuthInvitation, ShadowUser
-from app.services import staff_sync
+from app.services import notify_batch, staff_sync
 from app.services.staff_sync import sync_staff
 
 pytestmark = pytest.mark.integration
@@ -456,3 +460,137 @@ async def test_fetch_pagination_overflow_returns_none(monkeypatch):
     _mock_transport(monkeypatch, handler)
     monkeypatch.setattr(staff_sync, "_MAX_PAGES", 3)
     assert await staff_sync._fetch_staff_pages() is None
+
+
+# --- Устойчивость: тенант и строка падают поодиночке, пуши — после commit --
+
+
+async def test_failing_tenant_does_not_stop_others(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """Раньше исключение тенанта уходило из цикла, и остальные не синкались."""
+    doomed_tenant = uuid.uuid4()
+    rows = [
+        _staff_row(doomed_tenant, email="doomed@t.ru"),  # его тенант идёт первым
+        _staff_row(tenant_id, email="survivor@t.ru"),
+    ]
+    _mock_fetch(monkeypatch, rows)
+    real_apply = staff_sync._apply_tenant
+
+    async def flaky(session, tid, tenant_rows, now, report, *, dry_run):  # noqa: ANN001, ANN202
+        pushes = await real_apply(session, tid, tenant_rows, now, report, dry_run=dry_run)
+        if tid == doomed_tenant:
+            raise RuntimeError("сбой после записи")
+        return pushes
+
+    monkeypatch.setattr(staff_sync, "_apply_tenant", flaky)
+    report = await sync_staff()
+
+    assert report.failed_tenants == 1
+    # Счётчики откатившегося тенанта в отчёт не попадают.
+    assert report.profiles_created == 1
+    survivor = (
+        await db.execute(select(EmployeeProfile).where(EmployeeProfile.email == "survivor@t.ru"))
+    ).scalar_one()
+    assert survivor.tenant_id == tenant_id
+    doomed = (
+        await db.execute(select(EmployeeProfile).where(EmployeeProfile.email == "doomed@t.ru"))
+    ).scalar_one_or_none()
+    assert doomed is None
+
+
+async def test_bad_row_is_skipped_and_tenant_commits(
+    rls_enforced,  # noqa: ARG001 — ДО db: RLS реально действует, как на проде
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    monkeypatch,
+):
+    """Человек перешёл из другой организации, а старая карточка держит вход.
+
+    `employee_id` уникален глобально: INSERT новой карточки падает
+    IntegrityError'ом. Раньше это роняло тенант каждые 15 минут; теперь
+    строка пропускается в своём savepoint, остальные применяются.
+    """
+    moved = uuid.uuid4()
+    old_tenant = uuid.uuid4()
+    db.add(
+        ShadowUser(employee_id=moved, tenant_id=tenant_id, email="moved@t.ru", full_name="Перешёл")
+    )
+    await db.commit()
+    async with tenant_scoped_session(old_tenant) as other:
+        other.add(
+            EmployeeProfile(
+                tenant_id=old_tenant,
+                email="moved@t.ru",
+                full_name="Перешёл",
+                employee_id=moved,
+                status="archived",
+                archive_reason="auto_inactivity",
+                archived_at=datetime.now(UTC),
+            )
+        )
+        await other.commit()
+
+    rows = [
+        _staff_row(tenant_id, employee_id=moved, email="moved@t.ru"),
+        _staff_row(tenant_id, email="fresh@t.ru"),
+    ]
+    _mock_fetch(monkeypatch, rows)
+    report = await sync_staff()
+
+    assert report.failed_tenants == 0
+    assert report.failed_rows == 1
+    assert report.profiles_created == 1
+    fresh = (
+        await db.execute(select(EmployeeProfile).where(EmployeeProfile.email == "fresh@t.ru"))
+    ).scalar_one()
+    assert fresh.employee_id is not None
+
+
+async def test_new_card_push_goes_only_after_commit(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """Пуш новой карточке раньше уходил ДО commit'а: откат тенанта — и на
+    следующем тике «вам назначен курс» приходил второй раз."""
+    sent: list = []
+    monkeypatch.setattr(notify_batch, "schedule_push_batch", sent.append)
+    audience = Audience(tenant_id=tenant_id, is_all=True)
+    db.add(audience)
+    await db.flush()
+    db.add(
+        Course(
+            tenant_id=tenant_id,
+            title="Обязательный",
+            status="published",
+            course_type="mandatory",
+            audience_id=audience.id,
+        )
+    )
+    await db.commit()
+
+    row = _staff_row(tenant_id, email="pushed@t.ru")
+    invitation = {
+        "kind": "invitation",
+        "invitation_id": str(uuid.uuid4()),
+        "tenant_id": str(tenant_id),
+        "email": "invited@t.ru",
+        "invited_expires_at": "2026-10-01T00:00:00Z",
+    }
+    _mock_fetch(monkeypatch, [row, invitation])
+
+    def _boom(value):  # noqa: ANN001, ANN202, ARG001
+        raise RuntimeError("сбой уже после создания карточки")
+
+    monkeypatch.setattr(staff_sync, "_parse_dt", _boom)
+    report = await sync_staff()
+    assert report.failed_tenants == 1
+    assert sent == []
+    card = (
+        await db.execute(select(EmployeeProfile).where(EmployeeProfile.email == "pushed@t.ru"))
+    ).scalar_one_or_none()
+    assert card is None
+
+    monkeypatch.setattr(staff_sync, "_parse_dt", lambda value: None)
+    report = await sync_staff()
+    assert report.profiles_created == 1
+    assert [b.payload["kind"] for b in sent] == ["course.assigned"]

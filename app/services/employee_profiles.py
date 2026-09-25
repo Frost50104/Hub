@@ -33,7 +33,11 @@ from app.models.employee_profile import EmployeeProfile
 from app.models.shadow import ShadowUser
 from app.services import audit
 from app.services.audience_resolver import recalc_profile
-from app.services.learn_notify import notify_new_audience_members
+from app.services.learn_notify import (
+    notify_new_audience_members,
+    queue_new_audience_members,
+)
+from app.services.notify_batch import PushBatch
 
 log = structlog.get_logger("employee_profiles")
 
@@ -272,8 +276,14 @@ async def ensure_profile_for_staff_row(
     full_name: str,
     link_only: bool = False,
     account_kind: str = "person",
+    pushes: list[PushBatch] | None = None,
 ) -> StaffRowOutcome:
     """Матчинг/создание карточки из PULL-строки штата (staff-sync, 0052).
+
+    `pushes` — сборщик пачек: с ним пуши новой карточке НЕ планируются, а
+    возвращаются вызывающему для отправки после commit (синк пишет весь
+    тенант одной транзакцией, и пуш, ушедший до отката, повторился бы на
+    следующем тике). Без него — прежнее поведение, пуш сразу.
 
     `link_only=True` — режим сервисных учёток (решение владельца 04.09):
     существующую карточку ПРИВЯЗЫВАЕМ (непривязанная карточка кафе показывала
@@ -384,7 +394,10 @@ async def ensure_profile_for_staff_row(
     # Членство сразу: is_all/exclude-only аудитории должны включить новичка
     # (и уведомить об обязательных материалах — как при ручном заведении).
     diffs = await recalc_profile(db, profile)
-    await notify_new_audience_members(db, diffs)
+    if pushes is None:
+        await notify_new_audience_members(db, diffs)
+    else:
+        pushes.extend(await queue_new_audience_members(db, diffs))
     log.info("staff_sync.profile_created", profile_id=str(inserted_id), email=norm)
     return "created"
 

@@ -41,7 +41,7 @@ read-only, см. `classify_staff_row`). Строки несут ПДн (ФИО/e
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -50,17 +50,20 @@ import httpx
 import structlog
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DBAPIError
 
 from app.config import get_settings
 from app.db import tenant_scoped_session
 from app.models.employee_profile import EmployeeProfile
 from app.models.shadow import AuthInvitation, ShadowUser
+from app.services import notify_batch
 from app.services.employee_profiles import (
     archive_profile,
     classify_staff_row,
     ensure_profile_for_staff_row,
     normalize_account_kind,
 )
+from app.services.notify_batch import PushBatch
 
 log = structlog.get_logger("staff_sync")
 
@@ -88,7 +91,19 @@ class StaffSyncReport:
     roles_cleared: int = 0
     archived: int = 0
     invitations: int = 0
+    # Строки, которые не удалось применить (savepoint откатился), и тенанты,
+    # чья транзакция упала целиком: сбой одного больше не обрывает остальных.
+    failed_rows: int = 0
+    failed_tenants: int = 0
     tenants: set[str] = field(default_factory=set)
+
+    def absorb(self, other: StaffSyncReport) -> None:
+        """Прибавить счётчики тенанта — только после его УСПЕШНОГО commit'а:
+        иначе отчёт кнопки хвастался бы записями, которые откатились."""
+        for f in fields(self):
+            value = getattr(other, f.name)
+            if isinstance(value, int) and not isinstance(value, bool):
+                setattr(self, f.name, getattr(self, f.name) + value)
 
 
 async def _fetch_staff_pages() -> list[dict[str, Any]] | None:
@@ -161,10 +176,25 @@ async def sync_staff(*, dry_run: bool = False) -> StaffSyncReport:
     now = datetime.now(UTC)
     for tenant_id, rows in _rows_by_tenant(items).items():
         report.tenants.add(tenant_id)
-        async with tenant_scoped_session(UUID(tenant_id)) as db:
-            await _apply_tenant(db, UUID(tenant_id), rows, now, report, dry_run=dry_run)
-            if not dry_run:
-                await db.commit()
+        tenant_report = StaffSyncReport(dry_run=dry_run)
+        try:
+            async with tenant_scoped_session(UUID(tenant_id)) as db:
+                pushes = await _apply_tenant(
+                    db, UUID(tenant_id), rows, now, tenant_report, dry_run=dry_run
+                )
+                if not dry_run:
+                    await db.commit()
+        except Exception:  # noqa: BLE001 — один тенант не должен ронять остальные
+            # Раньше исключение уходило из цикла, и тенанты после упавшего
+            # не синхронизировались вовсе — каждые 15 минут, до починки.
+            report.failed_tenants += 1
+            log.exception("staff_sync.tenant_failed", tenant_id=tenant_id)
+            continue
+        report.absorb(tenant_report)
+        # Пуши — строго ПОСЛЕ commit'а: пуш, ушедший до отката, повторился бы
+        # на следующем тике. Через модуль: тесты глушат отправку подменой.
+        for batch in pushes:
+            notify_batch.schedule_push_batch(batch)
     log.info(
         "staff_sync.done",
         dry_run=dry_run,
@@ -179,6 +209,8 @@ async def sync_staff(*, dry_run: bool = False) -> StaffSyncReport:
         roles_cleared=report.roles_cleared,
         archived=report.archived,
         invitations=report.invitations,
+        failed_rows=report.failed_rows,
+        failed_tenants=report.failed_tenants,
     )
     return report
 
@@ -191,7 +223,23 @@ async def _apply_tenant(
     report: StaffSyncReport,
     *,
     dry_run: bool,
-) -> None:
+) -> list[PushBatch]:
+    """Применить строки тенанта в его транзакции → пачки пушей для отправки
+    после commit'а (commit и отправку делает вызывающий)."""
+    pushes: list[PushBatch] = []
+    # Кто уже привязан и с каким видом — одним запросом: на обычном прогоне
+    # почти все строки такие, и раньше каждая стоила отдельного SELECT'а.
+    linked_kinds: dict[UUID, str] = dict(
+        (
+            await db.execute(
+                select(EmployeeProfile.employee_id, EmployeeProfile.account_kind).where(
+                    EmployeeProfile.employee_id.is_not(None)
+                )
+            )
+        )
+        .tuples()
+        .all()
+    )
     invitations: list[dict[str, Any]] = []
     for row in rows:
         if row.get("kind") == "invitation":
@@ -282,41 +330,42 @@ async def _apply_tenant(
             # привязываем — непривязанная показывала «без учётки» при живой
             # учётке в auth. Создание по-прежнему закрыто (link_only).
             report.service_accounts += 1
-            if dry_run:
-                outcome = await classify_staff_row(
-                    db, employee_id=employee_uuid, email=email, link_only=True
-                )
-            else:
-                outcome = await ensure_profile_for_staff_row(
-                    db,
-                    tenant_id=tenant_id,
-                    employee_id=employee_uuid,
-                    email=email,
-                    full_name=full_name,
-                    link_only=True,
-                    account_kind=account_kind,
-                )
+            outcome = await _card_outcome(
+                db,
+                linked_kinds,
+                tenant_id=tenant_id,
+                employee_id=employee_uuid,
+                email=email,
+                full_name=full_name,
+                account_kind=account_kind,
+                link_only=True,
+                dry_run=dry_run,
+                pushes=pushes,
+            )
             if outcome == "linked":
                 report.profiles_linked += 1
             elif outcome == "email_conflict":
                 report.email_conflicts += 1
+            elif outcome == "row_failed":
+                report.failed_rows += 1
             continue
         if not role:
             continue
         if is_active is not True:
             report.inactive_skipped += 1
             continue
-        if dry_run:
-            outcome = await classify_staff_row(db, employee_id=employee_uuid, email=email)
-        else:
-            outcome = await ensure_profile_for_staff_row(
-                db,
-                tenant_id=tenant_id,
-                employee_id=employee_uuid,
-                email=email,
-                full_name=full_name,
-                account_kind=account_kind,
-            )
+        outcome = await _card_outcome(
+            db,
+            linked_kinds,
+            tenant_id=tenant_id,
+            employee_id=employee_uuid,
+            email=email,
+            full_name=full_name,
+            account_kind=account_kind,
+            link_only=False,
+            dry_run=dry_run,
+            pushes=pushes,
+        )
         if outcome == "created":
             report.profiles_created += 1
         elif outcome == "linked":
@@ -325,6 +374,8 @@ async def _apply_tenant(
             report.email_conflicts += 1
         elif outcome == "archived_skip":
             report.archived_skips += 1
+        elif outcome == "row_failed":
+            report.failed_rows += 1
 
     # Приглашения — снапшот целиком: принятые/отозванные исчезают сами.
     if not dry_run:
@@ -368,6 +419,63 @@ async def _apply_tenant(
             .values(hub_role=None)
         )
         report.roles_cleared += result.rowcount
+    return pushes
+
+
+async def _card_outcome(
+    db,  # noqa: ANN001 — AsyncSession
+    linked_kinds: dict[UUID, str],
+    *,
+    tenant_id: UUID,
+    employee_id: UUID,
+    email: str,
+    full_name: str,
+    account_kind: str,
+    link_only: bool,
+    dry_run: bool,
+    pushes: list[PushBatch],
+) -> str:
+    """Исход строки для карточки; живой путь — в своём savepoint.
+
+    Одна плохая строка раньше роняла транзакцию тенанта целиком, и синк падал
+    на ней каждые 15 минут. Пример — человек, перешедший из другой
+    организации, пока его старая карточка держит вход: `employee_id`
+    уникален глобально, INSERT упадёт IntegrityError'ом. Теперь строка
+    пропускается (`row_failed`), остальные применяются.
+
+    Пачки пушей строки попадают в общий список только после ЧИСТОГО выхода из
+    savepoint: откаченная карточка не должна «назначать курс».
+    """
+    if linked_kinds.get(employee_id) == account_kind:
+        # Привязана и вид тот же — обе функции ниже вернули бы already_linked.
+        return "already_linked"
+    if dry_run:
+        return await classify_staff_row(
+            db, employee_id=employee_id, email=email, link_only=link_only
+        )
+    row_pushes: list[PushBatch] = []
+    try:
+        async with db.begin_nested():
+            outcome = await ensure_profile_for_staff_row(
+                db,
+                tenant_id=tenant_id,
+                employee_id=employee_id,
+                email=email,
+                full_name=full_name,
+                link_only=link_only,
+                account_kind=account_kind,
+                pushes=row_pushes,
+            )
+    except DBAPIError as exc:
+        # В лог — только класс ошибки и id: текст несёт параметры (ПДн).
+        log.warning(
+            "staff_sync.row_failed",
+            employee_id=str(employee_id),
+            error=type(exc.orig).__name__ if exc.orig is not None else type(exc).__name__,
+        )
+        return "row_failed"
+    pushes.extend(row_pushes)
+    return outcome
 
 
 def _parse_dt(value: Any) -> datetime | None:

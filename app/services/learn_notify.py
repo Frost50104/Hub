@@ -24,8 +24,9 @@ from app.models.course import Course
 from app.models.employee_profile import EmployeeProfile
 from app.models.library import LibraryMaterial, MaterialAcknowledgement
 from app.models.progress import CourseProgress
+from app.services import notify_batch
 from app.services.audience_resolver import MembershipDiff
-from app.services.notify_batch import notify_many
+from app.services.notify_batch import PushBatch
 
 log = structlog.get_logger("learn_notify")
 
@@ -50,12 +51,11 @@ async def _employee_ids(
     return {r[0]: r[1] for r in rows}
 
 
-async def notify_ack_required(
+async def _queue_ack_required(
     db: AsyncSession, material: LibraryMaterial, profile_ids: list[UUID]
-) -> int:
-    """Разослать library.ack_required списку профилей. → сколько отправлено."""
+) -> tuple[int, PushBatch | None]:
     recipients = await _employee_ids(db, profile_ids)
-    return await notify_many(
+    return await notify_batch.queue_many(
         db,
         tenant_id=material.tenant_id,
         employee_ids=list(recipients.values()),
@@ -67,15 +67,47 @@ async def notify_ack_required(
     )
 
 
+async def notify_ack_required(
+    db: AsyncSession, material: LibraryMaterial, profile_ids: list[UUID]
+) -> int:
+    """Разослать library.ack_required списку профилей. → сколько отправлено."""
+    created, batch = await _queue_ack_required(db, material, profile_ids)
+    if batch is not None:
+        notify_batch.schedule_push_batch(batch)
+    return created
+
+
 async def notify_new_audience_members(
     db: AsyncSession, diffs: dict[UUID, MembershipDiff]
 ) -> None:
-    """Hook granted_at: новым членам аудиторий — pending обязательные материалы."""
+    """Hook granted_at: новым членам аудиторий — pending обязательные материалы.
+
+    Пуш планируется сразу — годится, когда откат транзакции вызывающего ничего
+    не сломает. Иначе — `queue_new_audience_members` и отправка после commit.
+    """
+    # Через модуль, а не импортом имени: тесты глушат отправку подменой
+    # `notify_batch.schedule_push_batch`, и прямой импорт её обошёл бы.
+    for batch in await queue_new_audience_members(db, diffs):
+        notify_batch.schedule_push_batch(batch)
+
+
+async def queue_new_audience_members(
+    db: AsyncSession, diffs: dict[UUID, MembershipDiff]
+) -> list[PushBatch]:
+    """То же, что `notify_new_audience_members`, но пуши НЕ планирует.
+
+    In-app строки ложатся в сессию вызывающего (уйдут с его commit'ом или
+    откатятся вместе с ним), пачки пушей возвращаются: вызывающий отправляет
+    их `schedule_push_batch` ПОСЛЕ commit. Нужно синкам, которые пишут много
+    карточек в одной транзакции: пуш, ушедший до commit, при откате тенанта
+    повторился бы на следующем тике — «вам назначен курс» дважды.
+    """
+    batches: list[PushBatch] = []
     added_by_audience = {
         audience_id: diff.added for audience_id, diff in diffs.items() if diff.added
     }
     if not added_by_audience:
-        return
+        return batches
 
     materials = (
         (
@@ -105,7 +137,9 @@ async def notify_new_audience_members(
             )
         }
         fresh = [pid for pid in profile_ids if pid not in acked]
-        sent = await notify_ack_required(db, material, fresh)
+        sent, batch = await _queue_ack_required(db, material, fresh)
+        if batch is not None:
+            batches.append(batch)
         if sent:
             log.info(
                 "learn_notify.ack_on_grant",
@@ -145,7 +179,7 @@ async def notify_new_audience_members(
         }
         fresh = [pid for pid in profile_ids if pid not in done]
         recipients = await _employee_ids(db, fresh)
-        sent = await notify_many(
+        sent, batch = await notify_batch.queue_many(
             db,
             tenant_id=course.tenant_id,
             employee_ids=list(recipients.values()),
@@ -155,9 +189,12 @@ async def notify_new_audience_members(
             url=f"/learn/courses/{course.id}",
             payload={"course_id": str(course.id)},
         )
+        if batch is not None:
+            batches.append(batch)
         if sent:
             log.info(
                 "learn_notify.course_on_grant",
                 course_id=str(course.id),
                 sent=sent,
             )
+    return batches
