@@ -5,6 +5,7 @@ import type { AuthState } from './authState'
 import type { EmployeeProgressRow } from './learnProgress'
 import { materialDownloadName } from './materialFileName'
 import { parseEcho, type VideoProgressEcho } from './videoWatch'
+import type { HrSyncReport, HrView } from './hrLock'
 
 // ─── Оргструктура ────────────────────────────────────────────────────────────
 
@@ -75,6 +76,8 @@ export interface OrgDepartment {
   id: string
   name: string
   parent_id: string | null
+  /** 0063: отделы архивирует auth (16d). Необязательное — старый бэкенд поля не шлёт. */
+  archived_at?: string | null
 }
 
 export interface OrgGroup {
@@ -93,6 +96,11 @@ export interface OrgSnapshot {
   franchisee_groups: OrgGroup[]
   departments: OrgDepartment[]
   user_groups: OrgGroup[]
+  /**
+   * Кадровые данные ведутся в auth (16d). Нет поля или `null` — правка в Hub,
+   * как раньше (старый бэкенд — тоже «не заморожено»).
+   */
+  hr?: HrView | null
 }
 
 export type GroupKind =
@@ -159,6 +167,8 @@ export interface EmployeeProfile {
   /** Кеш из auth (staff-sync, 0052): hub-роль и честный статус учётки. */
   hub_role?: string | null
   auth_state?: string | null
+  /** Кадровые поля ведёт auth (16d): считает сервер, у касс всегда false. */
+  hr_locked?: boolean
 }
 
 /** Непринятое приглашение с ролью hub — «добавлен, но ещё не входил». */
@@ -193,6 +203,26 @@ export interface StaffSyncReport {
   roles_cleared: number
   archived: number
   invitations: number
+  /** Кадровые данные из auth (16d): отчёт только своей организации. */
+  hr?: HrSyncReport | null
+}
+
+/** Отложенный набор предохранителя (16d) — «Посмотреть и применить». */
+export interface HrPending {
+  fingerprint: string
+  since: string | null
+  reason: string | null
+  cards: number
+  mandatory: number
+  fields: Record<string, number>
+  items: Array<{
+    id: string
+    full_name: string
+    changes: Array<{ field: string; old: string | null; new: string | null }>
+  }>
+  archive: Array<{ id: string; full_name: string }>
+  returns: Array<{ id: string; full_name: string }>
+  directory: Array<{ kind: string; action: string; name: string | null; value: string | null }>
 }
 
 export interface EmployeeUpsert {
@@ -1340,7 +1370,9 @@ export const learnApi = {
     api.post<OrgDepartment>('/learn/org/departments', body).then((r) => r.data),
   updateDepartment: (
     id: string,
-    body: Partial<{ name: string; parent_id: string | null }>,
+    // `archived` — вернуть отдел из архива после отката организации (16d):
+    // архив отделов ведёт auth, пока организация заморожена.
+    body: Partial<{ name: string; parent_id: string | null; archived: boolean }>,
   ): Promise<OrgDepartment> =>
     api.patch<OrgDepartment>(`/learn/org/departments/${id}`, body).then((r) => r.data),
   deleteDepartment: (id: string): Promise<void> =>
@@ -1377,6 +1409,13 @@ export const learnApi = {
     api.post<StaffSyncReport>('/learn/employees/sync').then((r) => r.data),
   updateEmployee: (id: string, body: EmployeeUpsert & { status_text?: string | null }): Promise<EmployeeProfile> =>
     api.patch<EmployeeProfile>(`/learn/employees/${id}`, body).then((r) => r.data),
+  /** Что держит предохранитель кадровых данных; null — ничего. */
+  hrPending: (): Promise<HrPending | null> =>
+    api.get<HrPending | null>('/learn/employees/hr/pending').then((r) => r.data),
+  applyHrPending: (fingerprint: string): Promise<{ report: HrSyncReport }> =>
+    api
+      .post<{ report: HrSyncReport }>('/learn/employees/hr/apply-pending', { fingerprint })
+      .then((r) => r.data),
   replaceTuStores: (id: string, storeIds: string[]): Promise<EmployeeProfile> =>
     api
       .put<EmployeeProfile>(`/learn/employees/${id}/tu-stores`, { store_ids: storeIds })

@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 
 import { AudiencePicker } from '@/components/learn/AudiencePicker'
 import { EmployeeListNote } from '@/components/learn/EmployeeListNote'
+import { HrNotice } from '@/components/learn/HrNotice'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { FilterChip } from '@/components/ui/FilterChip'
@@ -26,6 +27,7 @@ import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/cn'
 import { optionMatches, queryTokens } from '@/lib/selectOptions'
 import { AUTH_STATE_LABEL, showAuthStateBadge } from '@/lib/authState'
+import type { HrView } from '@/lib/hrLock'
 import type { PointAccount } from '@/lib/learn'
 import { shortDate } from '@/lib/taskDates'
 import { learnApi, type GroupKind, type MergePreview, type OrgDepartment, type OrgGroup, type OrgRef, type OrgSnapshot, type OrgStore, type SiteMirror, type SitePending } from '@/lib/learn'
@@ -71,12 +73,16 @@ export function LearnOrgPage() {
         {org.isError && <QueryError onRetry={() => void org.refetch()} />}
         {org.data && (
           <>
-            {tab === 'positions' && <RefTab kind="positions" refs={org.data.positions} />}
+            {tab === 'positions' && (
+              <RefTab kind="positions" refs={org.data.positions} hr={org.data.hr ?? null} />
+            )}
             {tab === 'stores' && <StoresTab org={org.data} />}
             {tab === 'franchisees' && (
-              <RefTab kind="franchisees" refs={org.data.franchisees} />
+              <RefTab kind="franchisees" refs={org.data.franchisees} hr={org.data.hr ?? null} />
             )}
-            {tab === 'departments' && <DepartmentsTab departments={org.data.departments} />}
+            {tab === 'departments' && (
+              <DepartmentsTab departments={org.data.departments} hr={org.data.hr ?? null} />
+            )}
             {tab === 'groups' && <GroupsTab org={org.data} />}
             {tab === 'access' && <AccessTab />}
           </>
@@ -88,7 +94,22 @@ export function LearnOrgPage() {
 
 // ─── Должности / Франчайзи ───────────────────────────────────────────────────
 
-function RefTab({ kind, refs }: { kind: 'positions' | 'franchisees'; refs: OrgRef[] }) {
+/** Справочник ведётся в auth (16d): только список — кнопок, которые сервер
+ *  отклонит, нет (правило «нет контрола без прав»). */
+function DirectoryNotice({ hr }: { hr: HrView }) {
+  return <HrNotice view={hr} href={hr.org_url} text="Справочник ведётся в auth" />
+}
+
+function RefTab({
+  kind,
+  refs,
+  hr,
+}: {
+  kind: 'positions' | 'franchisees'
+  refs: OrgRef[]
+  hr: HrView | null
+}) {
+  const frozen = hr?.frozen === true
   const [name, setName] = useState('')
   const [editing, setEditing] = useState<OrgRef | null>(null)
   const create = useOrgMutation((n: string) => learnApi.createRef(kind, { name: n }))
@@ -107,22 +128,25 @@ function RefTab({ kind, refs }: { kind: 'positions' | 'franchisees'; refs: OrgRe
 
   return (
     <div className="space-y-3">
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void add()
-        }}
-      >
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={kind === 'positions' ? 'Новая должность…' : 'Новый франчайзи…'}
-        />
-        <Button type="submit" disabled={!name.trim() || create.isPending}>
-          <Plus className="h-4 w-4" /> Добавить
-        </Button>
-      </form>
+      {hr && frozen && <DirectoryNotice hr={hr} />}
+      {!frozen && (
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void add()
+          }}
+        >
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={kind === 'positions' ? 'Новая должность…' : 'Новый франчайзи…'}
+          />
+          <Button type="submit" disabled={!name.trim() || create.isPending}>
+            <Plus className="h-4 w-4" /> Добавить
+          </Button>
+        </form>
+      )}
       <ul className="divide-y divide-glass-border rounded-xl border border-glass-border bg-glass">
         {refs.length === 0 && (
           <li className="p-4 text-sm text-text3">Пока пусто — добавьте первую запись.</li>
@@ -132,29 +156,33 @@ function RefTab({ kind, refs }: { kind: 'positions' | 'franchisees'; refs: OrgRe
             <span className={cn('flex-1 text-sm', r.archived_at ? 'text-text3 line-through' : 'text-text')}>
               {r.name}
             </span>
-            <IconAction
-              title="Переименовать"
-              onClick={() => setEditing(r)}
-              icon={<Pencil className="h-3.5 w-3.5" />}
-            />
-            <IconAction
-              title={r.archived_at ? 'Вернуть из архива' : 'В архив'}
-              onClick={() =>
-                void update.mutateAsync({ id: r.id, body: { archived: !r.archived_at } })
-              }
-              icon={
-                r.archived_at ? (
-                  <ArchiveRestore className="h-3.5 w-3.5" />
-                ) : (
-                  <Archive className="h-3.5 w-3.5" />
-                )
-              }
-            />
-            <IconAction
-              title="Удалить"
-              onClick={() => void remove.mutateAsync(r.id)}
-              icon={<Trash2 className="h-3.5 w-3.5" />}
-            />
+            {!frozen && (
+              <>
+                <IconAction
+                  title="Переименовать"
+                  onClick={() => setEditing(r)}
+                  icon={<Pencil className="h-3.5 w-3.5" />}
+                />
+                <IconAction
+                  title={r.archived_at ? 'Вернуть из архива' : 'В архив'}
+                  onClick={() =>
+                    void update.mutateAsync({ id: r.id, body: { archived: !r.archived_at } })
+                  }
+                  icon={
+                    r.archived_at ? (
+                      <ArchiveRestore className="h-3.5 w-3.5" />
+                    ) : (
+                      <Archive className="h-3.5 w-3.5" />
+                    )
+                  }
+                />
+                <IconAction
+                  title="Удалить"
+                  onClick={() => void remove.mutateAsync(r.id)}
+                  icon={<Trash2 className="h-3.5 w-3.5" />}
+                />
+              </>
+            )}
           </li>
         ))}
       </ul>
@@ -176,6 +204,10 @@ function RefTab({ kind, refs }: { kind: 'positions' | 'franchisees'; refs: OrgRe
 // ─── Магазины ────────────────────────────────────────────────────────────────
 
 function StoresTab({ org }: { org: OrgSnapshot }) {
+  // Франчайзи точки ведёт auth (`site_franchisees`, 16d); в окне каткатa ещё
+  // закрыты объект реестра, разархивация, слияние и создание из реестра.
+  const frozen = org.hr?.frozen === true
+  const inWindow = org.hr?.window === true
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
   const [franchiseeId, setFranchiseeId] = useState('')
@@ -287,7 +319,7 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
             .mutateAsync({
               name: name.trim(),
               code: code.trim() || undefined,
-              franchisee_id: franchiseeId || null,
+              franchisee_id: frozen ? null : franchiseeId || null,
             })
             .then(() => {
               setName('')
@@ -308,18 +340,20 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
           onChange={(e) => setCode(e.target.value)}
           placeholder="Код"
         />
-        <SearchableSelect
-          className="w-44"
-          sheetTitle="Франчайзи"
-          placeholder="Собственный"
-          clearLabel="Собственный"
-          aria-label="Франчайзи"
-          value={franchiseeId || null}
-          onChange={(v) => setFranchiseeId(v ?? '')}
-          options={org.franchisees
-            .filter((f) => !f.archived_at)
-            .map((f) => ({ value: f.id, label: f.name }))}
-        />
+        {!frozen && (
+          <SearchableSelect
+            className="w-44"
+            sheetTitle="Франчайзи"
+            placeholder="Собственный"
+            clearLabel="Собственный"
+            aria-label="Франчайзи"
+            value={franchiseeId || null}
+            onChange={(v) => setFranchiseeId(v ?? '')}
+            options={org.franchisees
+              .filter((f) => !f.archived_at)
+              .map((f) => ({ value: f.id, label: f.name }))}
+          />
+        )}
         <Button type="submit" disabled={!name.trim() || create.isPending}>
           <Plus className="h-4 w-4" /> Добавить
         </Button>
@@ -344,11 +378,11 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
                   </span>
                 </span>
                 {p.candidate_store_id && (
-                  <Button size="sm" variant="secondary" disabled={update.isPending} onClick={() => void linkPending(p)}>
+                  <Button size="sm" variant="secondary" disabled={update.isPending || inWindow} onClick={() => void linkPending(p)}>
                     Привязать к «{p.candidate_store_name}»
                   </Button>
                 )}
-                <Button size="sm" variant="secondary" disabled={create.isPending} onClick={() => void createFromSite(p)}>
+                <Button size="sm" variant="secondary" disabled={create.isPending || inWindow} onClick={() => void createFromSite(p)}>
                   Создать карточку
                 </Button>
               </li>
@@ -371,7 +405,7 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
               <li key={g.site_id} className="flex flex-wrap items-center gap-2 text-xs text-text2">
                 <span className="min-w-0 flex-1">{g.stores.map((x) => x.name).join('  ·  ')}</span>
                 {g.stores.length === 2 && (
-                  <Button size="sm" variant="secondary" onClick={() => void openMerge(g.stores)}>
+                  <Button size="sm" variant="secondary" disabled={inWindow} onClick={() => void openMerge(g.stores)}>
                     Слить…
                   </Button>
                 )}
@@ -447,19 +481,21 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
               onClick={() => setEditing(s)}
               icon={<Pencil className="h-3.5 w-3.5" />}
             />
-            <IconAction
-              title={s.archived_at ? 'Вернуть из архива' : 'В архив'}
-              onClick={() =>
-                void update.mutateAsync({ id: s.id, body: { archived: !s.archived_at } })
-              }
-              icon={
-                s.archived_at ? (
-                  <ArchiveRestore className="h-3.5 w-3.5" />
-                ) : (
-                  <Archive className="h-3.5 w-3.5" />
-                )
-              }
-            />
+            {!(inWindow && s.archived_at) && (
+              <IconAction
+                title={s.archived_at ? 'Вернуть из архива' : 'В архив'}
+                onClick={() =>
+                  void update.mutateAsync({ id: s.id, body: { archived: !s.archived_at } })
+                }
+                icon={
+                  s.archived_at ? (
+                    <ArchiveRestore className="h-3.5 w-3.5" />
+                  ) : (
+                    <Archive className="h-3.5 w-3.5" />
+                  )
+                }
+              />
+            )}
             <IconAction
               title="Удалить"
               onClick={() => void remove.mutateAsync(s.id)}
@@ -468,6 +504,12 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
           </li>
         ))}
       </ul>
+      {inWindow && (
+        <p className="text-xs text-text3">
+          Идёт перенос кадровых данных в auth — слияние, привязка к объекту реестра и
+          возврат точки из архива временно закрыты.
+        </p>
+      )}
       <HomelessAccounts accounts={homeless} />
 
       <Dialog open={editing !== null} onOpenChange={(v) => !v && setEditing(null)}>
@@ -479,6 +521,7 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
               sites={sites.data?.items ?? []}
               stores={org.stores}
               franchisees={org.franchisees}
+              hr={org.hr ?? null}
               pending={update.isPending}
               onSave={async (body) => {
                 await update.mutateAsync({ id: editing.id, body })
@@ -564,6 +607,7 @@ function StoreEditForm({
   sites,
   stores,
   franchisees,
+  hr,
   pending,
   onSave,
   onCancel,
@@ -573,6 +617,7 @@ function StoreEditForm({
   sites: SiteMirror[]
   stores: OrgStore[]
   franchisees: OrgRef[]
+  hr: HrView | null
   pending: boolean
   onSave: (body: {
     name: string
@@ -625,9 +670,14 @@ function StoreEditForm({
             placeholder="Собственный"
             clearLabel="Собственный"
             value={franchiseeId || null}
+            disabled={hr?.frozen === true}
             onChange={(v) => setFranchiseeId(v ?? '')}
             options={franchisees.map((f) => ({ value: f.id, label: f.name }))}
+            currentLabel={franchisees.find((f) => f.id === franchiseeId)?.name ?? null}
           />
+          {hr?.frozen && (
+            <HrNotice view={hr} href={hr.org_url} text="Франчайзи точки ведётся в auth" />
+          )}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="store-site">Объект реестра</Label>
@@ -637,6 +687,7 @@ function StoreEditForm({
             placeholder="Не привязан"
             clearLabel="Не привязан"
             value={siteId || null}
+            disabled={hr?.window === true}
             onChange={(v) => setSiteId(v ?? '')}
             options={siteOptions}
           />
@@ -705,13 +756,25 @@ function SiteCard({ site }: { site: SiteMirror }) {
 
 // ─── Отделы (дерево) ─────────────────────────────────────────────────────────
 
-function DepartmentsTab({ departments }: { departments: OrgDepartment[] }) {
+function DepartmentsTab({
+  departments,
+  hr,
+}: {
+  departments: OrgDepartment[]
+  hr: HrView | null
+}) {
+  const frozen = hr?.frozen === true
   const [name, setName] = useState('')
   const [parentId, setParentId] = useState('')
   const create = useOrgMutation((body: { name: string; parent_id?: string | null }) =>
     learnApi.createDepartment(body),
   )
   const remove = useOrgMutation((id: string) => learnApi.deleteDepartment(id))
+  // Отделы архивирует auth (16d). Вернуть отдел в Hub нужно после отката
+  // организации, когда кадровые данные снова ведутся здесь.
+  const restore = useOrgMutation((id: string) =>
+    learnApi.updateDepartment(id, { archived: false }),
+  )
 
   const children = useMemo(() => {
     const map = new Map<string | null, OrgDepartment[]>()
@@ -730,12 +793,23 @@ function DepartmentsTab({ departments }: { departments: OrgDepartment[] }) {
           className="flex items-center gap-2 border-b border-glass-border px-4 py-2.5"
           style={{ paddingLeft: `${1 + depth * 1.25}rem` }}
         >
-          <span className="flex-1 text-sm text-text">{d.name}</span>
-          <IconAction
-            title="Удалить"
-            onClick={() => void remove.mutateAsync(d.id)}
-            icon={<Trash2 className="h-3.5 w-3.5" />}
-          />
+          <span className={cn('flex-1 text-sm', d.archived_at ? 'text-text3 line-through' : 'text-text')}>
+            {d.name}
+          </span>
+          {!frozen && d.archived_at && (
+            <IconAction
+              title="Вернуть из архива"
+              onClick={() => void restore.mutateAsync(d.id)}
+              icon={<ArchiveRestore className="h-3.5 w-3.5" />}
+            />
+          )}
+          {!frozen && (
+            <IconAction
+              title="Удалить"
+              onClick={() => void remove.mutateAsync(d.id)}
+              icon={<Trash2 className="h-3.5 w-3.5" />}
+            />
+          )}
         </div>
         {renderTree(d.id, depth + 1)}
       </div>
@@ -743,6 +817,8 @@ function DepartmentsTab({ departments }: { departments: OrgDepartment[] }) {
 
   return (
     <div className="space-y-3">
+      {hr && frozen && <DirectoryNotice hr={hr} />}
+      {!frozen && (
       <form
         className="flex flex-wrap gap-2"
         onSubmit={(e) => {
@@ -764,16 +840,19 @@ function DepartmentsTab({ departments }: { departments: OrgDepartment[] }) {
         />
         <Select className="w-52" value={parentId} onChange={(e) => setParentId(e.target.value)}>
           <option value="">Верхний уровень</option>
-          {departments.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
+          {departments
+            .filter((d) => !d.archived_at)
+            .map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
         </Select>
         <Button type="submit" disabled={!name.trim() || create.isPending}>
           <Plus className="h-4 w-4" /> Добавить
         </Button>
       </form>
+      )}
       <div className="rounded-xl border border-glass-border bg-glass">
         {departments.length === 0 ? (
           <p className="p-4 text-sm text-text3">

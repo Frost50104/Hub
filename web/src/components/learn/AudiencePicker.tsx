@@ -176,7 +176,7 @@ export function AudiencePicker({
       case 'franchisee_group_ids':
         return org.data.franchisee_groups.map((g) => ({ id: g.id, label: g.name }))
       case 'department_ids':
-        return org.data.departments.map((d) => ({ id: d.id, label: d.name }))
+        return org.data.departments.filter((d) => !d.archived_at).map((d) => ({ id: d.id, label: d.name }))
       case 'user_group_ids':
         return org.data.user_groups.map((g) => ({ id: g.id, label: g.name }))
       case 'profile_ids':
@@ -184,8 +184,29 @@ export function AudiencePicker({
     }
   }
 
+  // Подпись уже выбранного условия ищется по ВСЕМ строкам справочника, включая
+  // архивные: иначе правило со ссылкой на заархивированную (в том числе в auth,
+  // 16d) должность читалось бы «…». Новые варианты архивных не предлагают.
+  const archivedLabel = (key: DimensionKey, id: string): string | null => {
+    if (!org.data) return null
+    const rows: ReadonlyArray<{ id: string; name: string; archived_at?: string | null }> =
+      key === 'position_ids'
+        ? org.data.positions
+        : key === 'store_ids'
+          ? org.data.stores
+          : key === 'franchisee_ids'
+            ? org.data.franchisees
+            : key === 'department_ids'
+              ? org.data.departments
+              : []
+    const row = rows.find((r) => r.id === id)
+    return row?.archived_at ? `${row.name} (архив)` : null
+  }
   const labelFor = (key: DimensionKey, id: string): string =>
-    optionsFor(key).find((o) => o.id === id)?.label ?? extraLabels?.[id] ?? '…'
+    optionsFor(key).find((o) => o.id === id)?.label ??
+    archivedLabel(key, id) ??
+    extraLabels?.[id] ??
+    '…'
 
   const updateRule = (index: number, next: AudienceRuleDraft) => {
     const rules = val.rules.map((r, i) => (i === index ? next : r))
@@ -350,11 +371,22 @@ export function AudiencePicker({
             {dryRun.data.count === 0 && emptyReason && (
               <span className="mt-0.5 block text-text2">
                 {emptyPickText(emptyReason)}{' '}
-                {emptyReason.kind === 'value' && (
-                  <Link to="/learn/employees" className="text-amber hover:underline">
-                    Заполнить у сотрудников
-                  </Link>
-                )}
+                {emptyReason.kind === 'value' &&
+                  (org.data?.hr?.frozen ? (
+                    // Кадровые данные ведутся в auth (16d): заполнять — там.
+                    <a
+                      href={org.data.hr.edit_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-amber hover:underline"
+                    >
+                      Заполнить в auth →
+                    </a>
+                  ) : (
+                    <Link to="/learn/employees" className="text-amber hover:underline">
+                      Заполнить у сотрудников
+                    </Link>
+                  ))}
               </span>
             )}
           </span>

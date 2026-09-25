@@ -8,6 +8,7 @@ import {
   Upload,
   UserX,
 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -21,6 +22,14 @@ import {
   type AuthState,
 } from '@/lib/authState'
 import { IMPORT_DIALOG_HINT, importReportLine, importToastText } from '@/lib/employeeImport'
+import { extractErrorDetail } from '@/lib/errors'
+import {
+  hrSyncToastLine,
+  isHrFrozenError,
+  omitHrFields,
+  returnsByItself,
+  type HrView,
+} from '@/lib/hrLock'
 import {
   employeeRowsCaption,
   matchesRowFilter,
@@ -30,6 +39,8 @@ import {
 import { filterOptions } from '@/lib/selectOptions'
 
 import { EmployeeListNote } from '@/components/learn/EmployeeListNote'
+import { HrNotice } from '@/components/learn/HrNotice'
+import { HrPendingBanner } from '@/components/learn/HrPendingBanner'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { QueryError } from '@/components/QueryError'
 import { Badge } from '@/components/ui/Badge'
@@ -107,14 +118,20 @@ export function LearnEmployeesPage() {
   )
   const chipCounts = useMemo(() => rowFilterCounts(allRows), [allRows])
   const [syncing, setSyncing] = useState(false)
+  const qc = useQueryClient()
+  const hr = org.data?.hr ?? null
   const runSync = async () => {
     setSyncing(true)
     try {
       const report = await learnApi.syncStaff()
       const t = staffSyncToast(report)
-      if (t.kind === 'success') toast.success(t.text)
-      else toast.message(t.text)
+      // Кадровые данные из auth (16d) — вторая строка того же тоста.
+      const description = hrSyncToastLine(report.hr) ?? undefined
+      if (t.kind === 'success') toast.success(t.text, { description })
+      else toast.message(t.text, { description })
       await employees.refetch()
+      void qc.invalidateQueries({ queryKey: ['learn-org'] })
+      void qc.invalidateQueries({ queryKey: ['learn-hr-pending'] })
     } catch {
       toast.error('Не удалось синхронизировать с auth')
     } finally {
@@ -144,7 +161,14 @@ export function LearnEmployeesPage() {
                       {e.full_name}
                     </p>
                     <p className="truncate text-xs text-text3">
-                      {[positionName(e.position_id), storeName(e.store_id), e.email]
+                      {[
+                        e.status === 'archived' && e.archive_reason === 'auth_deactivated'
+                          ? 'учётка отключена в auth'
+                          : null,
+                        positionName(e.position_id),
+                        storeName(e.store_id),
+                        e.email,
+                      ]
                         .filter(Boolean)
                         .join(' · ')}
                     </p>
@@ -226,6 +250,9 @@ export function LearnEmployeesPage() {
             </a>
           </div>
         </div>
+
+        {/* Предохранитель кадровых данных (16d): изменения из auth ждут hub-admin. */}
+        {hr?.state === 'blocked' && <HrPendingBanner />}
 
         <div className="flex flex-wrap gap-2">
           <div className="relative min-w-[200px] flex-1">
@@ -348,10 +375,11 @@ export function LearnEmployeesPage() {
           key={cardOpen.id}
           profile={cardOpen}
           org={org.data}
+          hr={hr}
           onClose={() => setCardOpen(null)}
         />
       )}
-      {importOpen && <ImportDialog onClose={() => setImportOpen(false)} />}
+      {importOpen && <ImportDialog frozen={!!hr?.frozen} onClose={() => setImportOpen(false)} />}
       {unlinkedOpen && <UnlinkedDialog onClose={() => setUnlinkedOpen(false)} />}
     </div>
   )
@@ -374,10 +402,12 @@ function formatSyncTime(iso: string): string {
 function EmployeeCardDialog({
   profile,
   org,
+  hr,
   onClose,
 }: {
   profile: EmployeeProfile
   org: OrgSnapshot
+  hr: HrView | null
   onClose: () => void
 }) {
   const [form, setForm] = useState<EmployeeUpsert & { email: string; full_name: string }>({
@@ -404,6 +434,13 @@ function EmployeeCardDialog({
   const authOwnsIdentity = profile.last_activity_at !== null
 
   const managers = useEmployees({ status: 'active' })
+  const qc = useQueryClient()
+  // Списочная ручка `archived_twin` не заполняет — тянем одиночную. Она же —
+  // свежий признак заморозки: список мог прийти до каткатa.
+  const full = useEmployee(profile.id)
+  // Кадровые поля ведёт auth (16d): считает сервер, у касс всегда false.
+  const locked = (full.data?.hr_locked ?? profile.hr_locked) === true
+  const inWindow = hr?.window === true
 
   const save = useEmployeeMutation(async () => {
     const { email, full_name, ...rest } = form
@@ -413,17 +450,15 @@ function EmployeeCardDialog({
     // целиком — иначе сохранение должности или роли ловило бы 422 на ровном
     // месте. У непривязанной legacy-карточки владельца ещё нет — там имя и
     // почту правит HR (почта — ключ будущей привязки).
-    const saved = await learnApi.updateEmployee(
-      profile.id,
-      authOwnsIdentity ? rest : { ...rest, ...identity },
-    )
-    if (form.org_role === 'tu' && tuStores !== null) {
+    const body = authOwnsIdentity ? rest : { ...rest, ...identity }
+    // Замороженные кадровые поля не уходят вовсе: сервер отказал бы на
+    // изменение, а неизменённые ему не нужны. Точки ТУ — тоже из auth.
+    const saved = await learnApi.updateEmployee(profile.id, locked ? omitHrFields(body) : body)
+    if (!locked && form.org_role === 'tu' && tuStores !== null) {
       await learnApi.replaceTuStores(saved.id, [...tuStores])
     }
     return saved
   })
-  // Списочная ручка `archived_twin` не заполняет — тянем одиночную.
-  const full = useEmployee(profile.id)
   const twin = full.data?.archived_twin ?? null
   const archive = useEmployeeMutation(() => learnApi.archiveEmployee(profile.id))
   const restore = useEmployeeMutation(() => learnApi.restoreEmployee(profile.id))
@@ -435,7 +470,30 @@ function EmployeeCardDialog({
     // У карточки, которой владеет auth, эти поля недоступны и не отправляются —
     // требовать их заполненности незачем.
     if (!authOwnsIdentity && (!form.email.trim() || !form.full_name.trim())) return
-    await save.mutateAsync(undefined as never)
+    try {
+      await save.mutateAsync(undefined as never)
+    } catch (err) {
+      // Отказ заморозки: организацию перевели в auth, пока форма была открыта
+      // (или вчерашний список). Тост показал глобальный обработчик; форму
+      // перечитываем — кадровые поля с сервера, правки телефона и прав остаются.
+      if (isHrFrozenError(extractErrorDetail(err))) {
+        void qc.invalidateQueries({ queryKey: ['learn-employees'] })
+        void qc.invalidateQueries({ queryKey: ['learn-org'] })
+        const fresh = (await full.refetch()).data ?? profile
+        setForm((f) => ({
+          ...f,
+          hired_at: fresh.hired_at,
+          org_role: fresh.org_role,
+          position_id: fresh.position_id,
+          store_id: fresh.store_id,
+          department_id: fresh.department_id,
+          franchisee_id: fresh.franchisee_id,
+          manager_profile_id: fresh.manager_profile_id,
+        }))
+        setTuStores(fresh.org_role === 'tu' ? new Set(fresh.tu_store_ids) : null)
+      }
+      return
+    }
     toast.success('Сохранено')
     onClose()
   }
@@ -503,11 +561,29 @@ function EmployeeCardDialog({
                   onChange={(e) => set('phone', e.target.value || null)}
                 />
               </div>
+              {/* Права на контент — рядом с телефоном: оба правятся в Hub всегда,
+                  а на телефоне идут до кадрового блока, который бывает закрыт. */}
+              <div className="space-y-1.5">
+                <Label htmlFor="emp-content">Права на контент</Label>
+                <Select
+                  id="emp-content"
+                  value={form.content_role}
+                  onChange={(e) =>
+                    set('content_role', e.target.value as 'none' | 'author' | 'publisher')
+                  }
+                >
+                  <option value="none">Нет</option>
+                  <option value="author">Автор (черновики)</option>
+                  <option value="publisher">Публикатор</option>
+                </Select>
+              </div>
+              {locked && hr && <HrNotice view={hr} className="sm:col-span-2" />}
               <div className="space-y-1.5">
                 <Label htmlFor="emp-hired">Дата найма</Label>
                 <DateField
                   id="emp-hired"
                   value={form.hired_at ?? ''}
+                  disabled={locked}
                   onChange={(v) => set('hired_at', v || null)}
                 />
               </div>
@@ -516,6 +592,7 @@ function EmployeeCardDialog({
                 <Select
                   id="emp-role"
                   value={form.org_role}
+                  disabled={locked}
                   onChange={(e) => set('org_role', e.target.value as OrgRole)}
                 >
                   {Object.entries(ORG_ROLE_LABEL).map(([k, v]) => (
@@ -530,14 +607,17 @@ function EmployeeCardDialog({
                 <Select
                   id="emp-position"
                   value={form.position_id ?? ''}
+                  disabled={locked}
                   onChange={(e) => set('position_id', e.target.value || null)}
                 >
                   <option value="">—</option>
+                  {/* Архивную не предлагаем, но ТЕКУЩЕЕ значение показываем:
+                      иначе поле читалось бы «—» (паттерн LearnShiftsPage). */}
                   {org.positions
-                    .filter((p) => !p.archived_at)
+                    .filter((p) => !p.archived_at || p.id === form.position_id)
                     .map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name}
+                        {p.archived_at ? `${p.name} (архив)` : p.name}
                       </option>
                     ))}
                 </Select>
@@ -549,6 +629,7 @@ function EmployeeCardDialog({
                     id="emp-store"
                     sheetTitle="Точка"
                     value={form.store_id ?? null}
+                    disabled={locked}
                     onChange={(v) => set('store_id', v)}
                     options={org.stores
                       .filter((s) => !s.archived_at)
@@ -566,14 +647,17 @@ function EmployeeCardDialog({
                   <Select
                     id="emp-dep"
                     value={form.department_id ?? ''}
+                    disabled={locked}
                     onChange={(e) => set('department_id', e.target.value || null)}
                   >
                     <option value="">—</option>
-                    {org.departments.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
+                    {org.departments
+                      .filter((d) => !d.archived_at || d.id === form.department_id)
+                      .map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.archived_at ? `${d.name} (архив)` : d.name}
+                        </option>
+                      ))}
                   </Select>
                 </div>
               )}
@@ -583,14 +667,15 @@ function EmployeeCardDialog({
                   <Select
                     id="emp-fr"
                     value={form.franchisee_id ?? ''}
+                    disabled={locked}
                     onChange={(e) => set('franchisee_id', e.target.value || null)}
                   >
                     <option value="">—</option>
                     {org.franchisees
-                      .filter((f) => !f.archived_at)
+                      .filter((f) => !f.archived_at || f.id === form.franchisee_id)
                       .map((f) => (
                         <option key={f.id} value={f.id}>
-                          {f.name}
+                          {f.archived_at ? `${f.name} (архив)` : f.name}
                         </option>
                       ))}
                   </Select>
@@ -606,6 +691,7 @@ function EmployeeCardDialog({
                   id="emp-manager"
                   sheetTitle="Руководитель"
                   value={form.manager_profile_id ?? null}
+                  disabled={locked}
                   onChange={(v) => set('manager_profile_id', v)}
                   options={(managers.data?.items ?? [])
                     .filter((m) => m.id !== profile?.id)
@@ -618,23 +704,28 @@ function EmployeeCardDialog({
                 />
                 <EmployeeListNote data={managers.data} />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="emp-content">Права на контент</Label>
-                <Select
-                  id="emp-content"
-                  value={form.content_role}
-                  onChange={(e) =>
-                    set('content_role', e.target.value as 'none' | 'author' | 'publisher')
-                  }
-                >
-                  <option value="none">Нет</option>
-                  <option value="author">Автор (черновики)</option>
-                  <option value="publisher">Публикатор</option>
-                </Select>
-              </div>
             </div>
 
-            {form.org_role === 'tu' && (
+            {form.org_role === 'tu' && locked && (
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium text-text">Закреплённые точки ТУ</p>
+                {/* Набор ведёт auth: вместо 63 неактивных галочек — то, что есть. */}
+                {(tuStores?.size ?? 0) === 0 ? (
+                  <p className="text-xs text-text3">Точки не закреплены</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {org.stores
+                      .filter((s) => tuStores?.has(s.id))
+                      .map((s) => (
+                        <Badge key={s.id} variant="outline" className="text-text2">
+                          {s.archived_at ? `${s.name} (архив)` : s.name}
+                        </Badge>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {form.org_role === 'tu' && !locked && (
               <div className="space-y-1.5">
                 <Label htmlFor="emp-tu-search">Закреплённые точки ТУ</Label>
                 {/* Выбор здесь множественный, поэтому не выпадашка, а список с
@@ -683,12 +774,23 @@ function EmployeeCardDialog({
             )}
           </div>
 
+          {profile.status === 'active' && locked && !inWindow && (
+            <p className="mt-3 text-xs text-text3">
+              «В архив» освобождает вход. Для отпуска или декрета отключите учётку в auth —
+              карточка сохранит историю и вернётся сама.
+            </p>
+          )}
+          {inWindow && (
+            <p className="mt-3 text-xs text-text3">
+              Идёт перенос кадровых данных в auth — архив и восстановление временно закрыты.
+            </p>
+          )}
           <DialogFooter className="flex-wrap">
             {profile.status === 'active' && (
               <Button
                 type="button"
                 variant="secondary"
-                disabled={archive.isPending}
+                disabled={archive.isPending || inWindow}
                 onClick={() =>
                   void archive.mutateAsync(undefined as never).then(() => {
                     // Тост называет главное последствие: ящик освободился.
@@ -705,11 +807,18 @@ function EmployeeCardDialog({
                 <Archive className="h-4 w-4" /> В архив
               </Button>
             )}
-            {profile.status === 'archived' && (
+            {profile.status === 'archived' && returnsByItself(profile, hr) && (
+              // Учётку отключили в auth: карточку вернёт синк, когда её включат.
+              // Сервер кнопку отклонил бы (409), пока учётка отключена.
+              <p className="self-center text-xs text-text2">
+                Вернётся сам, когда учётку включат в auth
+              </p>
+            )}
+            {profile.status === 'archived' && !returnsByItself(profile, hr) && (
               <Button
                 type="button"
                 variant="secondary"
-                disabled={restore.isPending}
+                disabled={restore.isPending || inWindow}
                 onClick={() =>
                   void restore.mutateAsync(undefined as never).then(() => {
                     toast.success('Карточка восстановлена')
@@ -740,7 +849,7 @@ function EmployeeCardDialog({
 
 // ─── CSV-импорт ──────────────────────────────────────────────────────────────
 
-function ImportDialog({ onClose }: { onClose: () => void }) {
+function ImportDialog({ frozen, onClose }: { frozen: boolean; onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null)
   const [report, setReport] = useState<ImportReport | null>(null)
   const run = useEmployeeMutation(async (dryRun: boolean) => {
@@ -759,6 +868,13 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
           <DialogTitle>Импорт сотрудников из CSV</DialogTitle>
           <DialogDescription>{IMPORT_DIALOG_HINT}</DialogDescription>
         </DialogHeader>
+        {frozen && (
+          // Кадровые данные ведутся в auth (16d): строка, меняющая кадровое поле
+          // сотрудника, — ошибка строки; справочники по имени не создаются.
+          <p className="rounded-lg border border-hair bg-tint px-3 py-2 text-xs text-text2">
+            Кадровые колонки ведутся в auth — в файле оставьте email и телефон.
+          </p>
+        )}
         <div className="space-y-3">
           <Input
             type="file"
