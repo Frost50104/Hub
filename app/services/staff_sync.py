@@ -114,7 +114,7 @@ class StaffSyncReport:
                 setattr(self, f.name, getattr(self, f.name) + value)
 
 
-async def _fetch_staff_pages() -> list[dict[str, Any]] | None:
+async def _fetch_staff_pages(*, timeout: float = 20.0) -> list[dict[str, Any]] | None:
     """Все строки штата из auth; None = снимка нет (нет доступа/сеть/обрыв).
 
     Отдельная функция — единственная точка HTTP: тесты подменяют её целиком,
@@ -131,7 +131,7 @@ async def _fetch_staff_pages() -> list[dict[str, Any]] | None:
         async with httpx.AsyncClient(
             base_url=settings.signaris_auth_base_url,
             headers={"X-Service-Key": settings.staff_service_key},
-            timeout=20.0,
+            timeout=timeout,
         ) as client:
             for _ in range(_MAX_PAGES):
                 params: dict[str, Any] = {"product": "hub", "limit": _PAGE_LIMIT}

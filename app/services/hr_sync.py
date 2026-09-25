@@ -118,8 +118,13 @@ async def write_freeze_state(
         now = datetime.now(UTC)
         state.fetched_at = fetched_at
         if directory is not None:
+            authoritative = directory.tenants.get(tenant_id, False)
+            if authoritative and not state.authoritative:
+                state.authoritative_since = now
+            elif not authoritative:
+                state.authoritative_since = None
             state.in_snapshot = tenant_id in directory.tenants
-            state.authoritative = directory.tenants.get(tenant_id, False)
+            state.authoritative = authoritative
             state.snapshot_at = fetched_at
         state.updated_at = now
         await db.commit()
@@ -142,6 +147,8 @@ class TenantRun:
     # видел админ, — рост M сверх показанного отклоняется.
     override_fingerprint: str | None = None
     override_max_mandatory: int | None = None
+    # Кто нажал «Применить» — в журнал `hr_override`.
+    override_actor: UUID | None = None
 
 
 @dataclass
@@ -1078,7 +1085,7 @@ async def run_tenant(run: TenantRun, *, settings: Settings | None = None) -> Ten
             audit.record(
                 db,
                 tenant_id=run.tenant_id,
-                actor_id=None,
+                actor_id=run.override_actor,
                 action="hr_override",
                 object_type="hr_sync",
                 object_label="Кадровые данные из auth",

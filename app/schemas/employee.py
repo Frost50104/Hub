@@ -144,3 +144,53 @@ class ImportReport(BaseModel):
     skipped: int
     errors: list[str]
     dry_run: bool
+
+
+# --- Кадровые данные из auth: отложенный набор предохранителя (16d) ------------
+
+
+class HrPendingChange(BaseModel):
+    """Поле карточки «было → станет»; значения — уже подписи (названия)."""
+
+    field: str
+    old: str | None
+    new: str | None
+
+
+class HrPendingCard(BaseModel):
+    id: UUID
+    full_name: str
+    changes: list[HrPendingChange]
+
+
+class HrPendingPerson(BaseModel):
+    id: UUID
+    full_name: str
+
+
+class HrPendingDirectoryOp(BaseModel):
+    kind: str  # position | franchisee | department | store
+    action: str  # archive | rename | update | restore | reparent | franchisee
+    name: str | None
+    value: str | None
+
+
+class HrPendingResponse(BaseModel):
+    """Что держит предохранитель — для диалога «Посмотреть и применить»."""
+
+    fingerprint: str
+    since: datetime | None
+    reason: str | None
+    cards: int
+    mandatory: int
+    fields: dict[str, int]
+    items: list[HrPendingCard]
+    archive: list[HrPendingPerson]
+    returns: list[HrPendingPerson]
+    directory: list[HrPendingDirectoryOp]
+
+
+class HrApplyPendingBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fingerprint: str = Field(min_length=64, max_length=64)

@@ -132,8 +132,10 @@ async def load_state(db: AsyncSession, tenant_id: UUID) -> HrSyncState | None:
     миграционная роль, тесты под суперпользователем) такой запрос видит строки
     всех организаций и падает на второй. Это не ручная фильтрация по тенанту —
     строка у организации ровно одна, и RLS по-прежнему стережёт чужую.
+    `populate_existing` — всегда из базы: синк пишет строку своими сессиями,
+    и объект, закешированный этой сессией раньше, показал бы прошлое состояние.
     """
-    return await db.get(HrSyncState, tenant_id)
+    return await db.get(HrSyncState, tenant_id, populate_existing=True)
 
 
 def changed_hr_fields(current: Any, incoming: dict[str, Any]) -> list[str]:
@@ -145,3 +147,46 @@ def changed_hr_fields(current: Any, incoming: dict[str, Any]) -> list[str]:
         for name in HR_PROFILE_FIELDS
         if name in incoming and incoming[name] != getattr(current, name)
     ]
+
+
+# --- Здоровье для алертов (`/api/health/hr` → scripts/healthcheck.sh) -----------
+
+HEALTH_BLOCKED_AFTER = timedelta(hours=1)
+HEALTH_PAUSED_AFTER = timedelta(hours=1)
+HEALTH_STALE_AFTER = timedelta(hours=1)
+HEALTH_WINDOW_AFTER = timedelta(hours=6)
+
+
+def health_problems(row: HrSyncState, *, applying: bool, now: datetime) -> list[str]:
+    """Коды проблем организации — без названий и чисел (ручка анонимная).
+
+    - `window_open` — окно каткатa открыто дольше 6 часов: его забыли закрыть,
+      а правка кадров в Hub всё это время закрыта;
+    - `blocked` — предохранитель держит изменения дольше часа;
+    - `paused` — организация заморожена, но применение для неё не включено
+      дольше часа: правки из auth в Hub не приходят, а в Hub их не сделать;
+    - `stale` — применение включено, но успешного прогона не было больше часа.
+    """
+    problems: list[str] = []
+    if (
+        row.cutover_freeze
+        and row.cutover_since is not None
+        and now - row.cutover_since > HEALTH_WINDOW_AFTER
+    ):
+        problems.append("window_open")
+    if (
+        row.pending_fingerprint
+        and row.pending_since is not None
+        and now - row.pending_since > HEALTH_BLOCKED_AFTER
+    ):
+        problems.append("blocked")
+    if row.authoritative and not row.cutover_freeze:
+        since = row.authoritative_since
+        if not applying:
+            if since is None or now - since > HEALTH_PAUSED_AFTER:
+                problems.append("paused")
+        else:
+            ref = row.last_applied_at or since
+            if ref is None or now - ref > HEALTH_STALE_AFTER:
+                problems.append("stale")
+    return problems

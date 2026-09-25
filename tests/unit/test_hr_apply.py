@@ -276,7 +276,7 @@ def test_return_same_name_any_word_order_and_release_on_other_name():
     )
     back = _k(card, _row(card, active=True, name="иванова мария"))
     assert back is not None and back.action == "return" and back.email == card.email
-    other = _k(card, _row(card, active=True, name="Пётр Петров"))
+    other = _k(card, _row(card, active=True, name="Пётр Петров"), release_on_name_mismatch=True)
     assert other is not None and other.action == "release"
     assert other.name == "Мария Иванова"  # имя прежнего человека — архивной карточке
 
@@ -285,8 +285,8 @@ def test_after_auth_fix_mismatch_returns_with_warning():
     card = _card(
         status="archived", archive_reason="auth_deactivated", auth_deactivated_name="Мария Иванова"
     )
-    action = _k(card, _row(card, active=True, name="Мария Петрова"),
-                release_on_name_mismatch=False)
+    # Умолчание с выката auth 25.09: несовпадение имени — тот же человек.
+    action = _k(card, _row(card, active=True, name="Мария Петрова"))
     assert action is not None and action.action == "return" and action.name_mismatch is True
 
 

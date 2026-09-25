@@ -97,12 +97,13 @@ class Settings(BaseSettings):
     hr_valve_max_cards: int = Field(default=10, ge=0)
     hr_valve_max_mandatory: int = Field(default=20, ge=0)
     hr_deactivation_runs: int = Field(default=3, ge=2, le=50)
-    # Учётку включили, а имя не совпало со снимком при архиве: true — это другой
-    # человек (auth оживлял отключённую учётку приглашением на ту же почту),
-    # вход старой карточки отвязываем. auth закрыл это 25.09 (приглашение на
-    # адрес с живой учёткой → 409); ПОСЛЕ их выката выставить false на обоих
-    # env — тогда несовпадение = тот же человек с новой фамилией: возврат + WARN.
-    hr_release_on_name_mismatch: bool = Field(default=True)
+    # Учётку включили, а имя не совпало со снимком при архиве. До 25.09 auth
+    # оживлял отключённую учётку приглашением на ту же почту — это был другой
+    # человек, и true отвязывает вход старой карточки. С выката auth 25.09
+    # 12:14 UTC (main@07481b3) приглашение на адрес с живой учёткой → 409:
+    # несовпадение = тот же человек с новой фамилией, false — возврат + WARN.
+    # true — аварийный рычаг, если в auth снова появится путь переиспользования.
+    hr_release_on_name_mismatch: bool = Field(default=False)
 
     @property
     def hr_apply_tenant_slugs(self) -> frozenset[str]:

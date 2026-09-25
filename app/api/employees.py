@@ -45,6 +45,12 @@ from app.schemas.employee import (
     EmployeeListResponse,
     EmployeeResponse,
     EmployeeUpdate,
+    HrApplyPendingBody,
+    HrPendingCard,
+    HrPendingChange,
+    HrPendingDirectoryOp,
+    HrPendingPerson,
+    HrPendingResponse,
     ImportReport,
     InvitationResponse,
     LinkBody,
@@ -325,6 +331,216 @@ async def list_unlinked_logins(
         )
         for u in rows.scalars().all()
     ]
+
+
+# --- Кадровые данные из auth: отложенный набор предохранителя (16d) ---------------
+# Объявлены ДО `/learn/employees/{profile_id}`: иначе «hr» ушёл бы в разбор UUID.
+
+
+async def _names(db: AsyncSession, model: type, ids: set[UUID], column: str = "name") -> dict:
+    if not ids:
+        return {}
+    col = getattr(model, column)
+    return dict((await db.execute(select(model.id, col).where(model.id.in_(ids)))).tuples().all())
+
+
+@router.get("/learn/employees/hr/pending", response_model=HrPendingResponse | None)
+async def get_hr_pending(
+    principal: Principal = Depends(_ADMIN),
+    db: AsyncSession = Depends(get_db),
+) -> HrPendingResponse | None:
+    """Что держит предохранитель: «было → станет» с названиями, кого
+    архивируют и возвращают по отключению в auth, правки справочников.
+
+    В состоянии хранятся только id — имена считаются здесь, при запросе.
+    None — отложенного набора нет (применён или больше не актуален).
+    """
+    state = await hr_state.load_state(db, principal.tenant_id)
+    if state is None or not state.pending_fingerprint or not state.pending_ops:
+        return None
+    ops = state.pending_ops
+    cards_raw: list[dict] = ops.get("cards") or []
+    k_raw: list[dict] = ops.get("k") or []
+    dir_raw: list[list] = ops.get("directory") or []
+
+    def ids_of(values) -> set[UUID]:  # noqa: ANN001
+        out: set[UUID] = set()
+        for value in values:
+            if value:
+                try:
+                    out.add(UUID(str(value)))
+                except ValueError:
+                    continue
+        return out
+
+    ref_ids: dict[str, set[UUID]] = {
+        f: set() for f in ("position_id", "department_id", "franchisee_id", "store_id")
+    }
+    card_ids = ids_of(c["id"] for c in cards_raw) | ids_of(k["id"] for k in k_raw)
+    for card in cards_raw:
+        for field, pair in (card.get("changes") or {}).items():
+            if field in ref_ids:
+                ref_ids[field] |= ids_of(pair)
+            elif field == "manager_profile_id":
+                card_ids |= ids_of(pair)
+        for side in card.get("tu") or []:
+            ref_ids["store_id"] |= ids_of(side)
+    for op in dir_raw:
+        kind = op[0]
+        ref_ids.setdefault(f"{kind}_id", set()).add(UUID(op[2]))
+        for key, value in op[3]:
+            if key == "parent_id":
+                ref_ids["department_id"] |= ids_of([value])
+            elif key == "franchisee_id":
+                ref_ids["franchisee_id"] |= ids_of([value])
+
+    names = {
+        "position_id": await _names(db, Position, ref_ids["position_id"]),
+        "department_id": await _names(db, Department, ref_ids["department_id"]),
+        "franchisee_id": await _names(db, Franchisee, ref_ids["franchisee_id"]),
+        "store_id": await _names(db, Store, ref_ids["store_id"]),
+        "manager_profile_id": await _names(db, EmployeeProfile, card_ids, "full_name"),
+    }
+
+    def label(field: str, value: str | None) -> str | None:
+        if value is None:
+            return None
+        table = names.get(field)
+        if table is None:
+            return value  # hired_at, org_role — подпись делает клиент
+        try:
+            return table.get(UUID(value), "—")
+        except ValueError:
+            return value
+
+    items: list[HrPendingCard] = []
+    for card in cards_raw:
+        changes = [
+            HrPendingChange(field=field, old=label(field, pair[0]), new=label(field, pair[1]))
+            for field, pair in sorted((card.get("changes") or {}).items())
+        ]
+        tu = card.get("tu")
+        if tu:
+            old, new = (
+                ", ".join(sorted(label("store_id", x) or "—" for x in side)) or None for side in tu
+            )
+            changes.append(HrPendingChange(field="tu_stores", old=old, new=new))
+        card_id = UUID(card["id"])
+        items.append(
+            HrPendingCard(
+                id=card_id,
+                full_name=names["manager_profile_id"].get(card_id, "—"),
+                changes=changes,
+            )
+        )
+
+    def people(action: str) -> list[HrPendingPerson]:
+        return [
+            HrPendingPerson(
+                id=UUID(k["id"]),
+                full_name=names["manager_profile_id"].get(UUID(k["id"]), "—"),
+            )
+            for k in k_raw
+            if k.get("action") == action
+        ]
+
+    directory: list[HrPendingDirectoryOp] = []
+    for kind, action, raw_id, values in dir_raw:
+        table = names.get(f"{kind}_id", {})
+        value = None
+        for key, raw in values:
+            if key == "name":
+                value = raw
+            elif key == "parent_id":
+                value = label("department_id", raw)
+            elif key == "franchisee_id":
+                value = label("franchisee_id", raw)
+        directory.append(
+            HrPendingDirectoryOp(
+                kind=kind, action=action, name=table.get(UUID(raw_id)), value=value
+            )
+        )
+
+    fields: dict[str, int] = {}
+    for item in items:
+        for change in item.changes:
+            fields[change.field] = fields.get(change.field, 0) + 1
+    counts = ops.get("counts") or {}
+    return HrPendingResponse(
+        fingerprint=state.pending_fingerprint,
+        since=state.pending_since,
+        reason=state.blocked_reason,
+        cards=int(counts.get("cards") or 0),
+        mandatory=int(counts.get("mandatory") or 0),
+        fields=fields,
+        items=items,
+        archive=people("archive"),
+        returns=people("return"),
+        directory=directory,
+    )
+
+
+@router.post("/learn/employees/hr/apply-pending")
+async def apply_hr_pending(
+    body: HrApplyPendingBody,
+    principal: Principal = Depends(_ADMIN),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Кнопка обхода предохранителя: применить РОВНО показанный набор.
+
+    Те же условия применения, что у синка (тенант в списке применения,
+    authoritative, полный снимок), без порогов. Набор считается заново по
+    свежему снимку: отпечаток не совпал или новых обязательных членств стало
+    больше показанного — 409 «откройте снова». Счётчики правила K кнопка не
+    трогает: прогона штата здесь нет.
+    """
+    from app.services import hr_sync, staff_sync
+    from app.services.org_directory_sync import fetch_org_directory
+
+    await enforce_rate_limit(
+        bucket="hr:override", employee_id=str(principal.employee_id), limit=5, window_sec=60
+    )
+    state = await hr_state.load_state(db, principal.tenant_id)
+    if state is None or not state.pending_fingerprint:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Отложенных изменений нет — возможно, их уже применили",
+        )
+    if body.fingerprint != state.pending_fingerprint:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Набор изменений изменился — откройте его снова",
+        )
+    shown_mandatory = int(((state.pending_ops or {}).get("counts") or {}).get("mandatory") or 0)
+    # Прогон идёт своими сессиями; транзакцию запроса не держим открытой, пока
+    # ждём auth (до 20 секунд на два запроса).
+    await db.commit()
+    directory = await fetch_org_directory(timeout=10.0)
+    items = await staff_sync._fetch_staff_pages(timeout=10.0)
+    if directory is None or items is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="auth сейчас не отдаёт кадровые данные — попробуйте через несколько минут",
+        )
+    rows = [r for r in items if str(r.get("tenant_id")) == str(principal.tenant_id)]
+    from datetime import UTC, datetime
+
+    try:
+        result = await hr_sync.run_tenant(
+            hr_sync.TenantRun(
+                tenant_id=principal.tenant_id,
+                tenant_slug=principal.tenant_slug,
+                fetched_at=datetime.now(UTC),
+                directory=directory,
+                rows=rows,
+                override_fingerprint=body.fingerprint,
+                override_max_mandatory=shown_mandatory,
+                override_actor=principal.employee_id,
+            )
+        )
+    except hr_sync.OverrideRejected as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
+    return {"report": result.report}
 
 
 @router.get("/learn/employees/{profile_id}", response_model=EmployeeResponse)

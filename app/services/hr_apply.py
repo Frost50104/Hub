@@ -380,7 +380,7 @@ def plan_deactivation(
     runs_needed: int,
     min_age: timedelta,
     now: datetime,
-    release_on_name_mismatch: bool = True,
+    release_on_name_mismatch: bool = False,
 ) -> KAction | None:
     """Решение правила K по строке и карточке (требование 6 контракта).
 

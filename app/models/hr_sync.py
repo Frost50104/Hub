@@ -32,6 +32,7 @@ class HrSyncState(Base):
         Boolean, nullable=False, server_default=text("false")
     )
     snapshot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    authoritative_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Ручное окно каткатa — пишет ТОЛЬКО CLI `app.jobs.hr_cutover`.
     cutover_freeze: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")

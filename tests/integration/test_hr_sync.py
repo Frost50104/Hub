@@ -129,7 +129,7 @@ def _mock(monkeypatch, *, directory, rows) -> None:
     async def fake_directory(**kw):  # noqa: ANN003, ANN202
         return directory
 
-    async def fake_staff():  # noqa: ANN202
+    async def fake_staff(**kw):  # noqa: ANN003, ANN202
         return rows
 
     monkeypatch.setattr(staff_sync, "fetch_org_directory", fake_directory)
@@ -487,6 +487,13 @@ async def test_deactivation_archive_return_and_release(
     back = await _card(db, card.id)
     assert back.status == "active" and back.inactivity_warned_at is None
 
+    # Аварийный рычаг: несовпадение имени = другой человек (так было до выката
+    # auth 25.09, когда приглашение оживляло отключённую учётку).
+    hr_env(
+        hr_consumer_enabled="true",
+        hr_apply_tenants=_slug(tenant_id),
+        hr_release_on_name_mismatch="true",
+    )
     # Снова отключили → архив; включили под ДРУГИМ именем → другой человек.
     shadow = await _fresh(
         db, select(ShadowUser).where(ShadowUser.employee_id == card.employee_id)
@@ -553,3 +560,117 @@ async def test_hr_mode_null_unfreezes(db: AsyncSession, tenant_id: uuid.UUID, mo
     await staff_sync.sync_staff()
     state = await _state(tenant_id)
     assert state.authoritative is False and state.in_snapshot is False
+
+
+async def test_renamed_return_is_warned_not_released_by_default(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch, hr_env
+):
+    """С выката auth 25.09 оживить учётку другому человеку нельзя: включение
+    под другим именем — это тот же человек с новой фамилией (декрет)."""
+    seed = await _seed(db, tenant_id)
+    hr_env(hr_consumer_enabled="true", hr_apply_tenants=_slug(tenant_id))
+    card = seed.filled
+    card_row = await _card(db, card.id)
+    card_row.status = "archived"
+    card_row.archive_reason = "auth_deactivated"
+    card_row.archived_at = datetime.now(UTC)
+    card_row.auth_deactivated_name = "Заполненная Карточка"
+    await db.commit()
+    directory = _directory(tenant_id, **_dir_rows(seed, new_position=uuid.uuid4()))
+    row = _row(
+        tenant_id,
+        card.employee_id,
+        _mail(tenant_id, "filled"),
+        "Заполненная Новофамильная",
+        hr=_hr(position_id=seed.p_barista.id, site_id=seed.site_1),
+    )
+    _mock(monkeypatch, directory=directory, rows=[row])
+    report = await staff_sync.sync_staff()
+    k = report.hr[str(tenant_id)]["k"]
+    assert k["return"] == [str(card.id)] and k["return_name_mismatch"] == [str(card.id)]
+    back = await _card(db, card.id)
+    assert back.status == "active" and back.employee_id == card.employee_id
+
+
+# --- Кнопка обхода, окно каткатa --------------------------------------------------------
+
+
+async def test_pending_view_shows_names_and_apply_endpoint_checks_fingerprint(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch, hr_env
+):
+    from fastapi import HTTPException
+
+    from app.api import employees as employees_api
+    from app.schemas.employee import HrApplyPendingBody
+    from app.services import org_directory_sync
+
+    seed = await _seed(db, tenant_id)
+    hr_env(
+        hr_consumer_enabled="true", hr_apply_tenants=_slug(tenant_id), hr_valve_max_cards="0"
+    )
+    baker = uuid.uuid4()
+    rows = [
+        _row(
+            tenant_id,
+            seed.filled.employee_id,
+            _mail(tenant_id, "filled"),
+            "Заполненная Карточка",
+            hr=_hr(position_id=baker, site_id=seed.site_1),
+        )
+    ]
+    directory = _directory(tenant_id, **_dir_rows(seed, new_position=baker))
+    _mock(monkeypatch, directory=directory, rows=rows)
+
+    async def fake_directory(**kw):  # noqa: ANN003, ANN202
+        return directory
+
+    async def _noop(**kw) -> None:  # noqa: ANN003
+        return None
+
+    monkeypatch.setattr(org_directory_sync, "fetch_org_directory", fake_directory)
+    monkeypatch.setattr(employees_api, "enforce_rate_limit", _noop)
+    await staff_sync.sync_staff()
+
+    admin = make_principal(
+        tenant_id, email=_mail(tenant_id, "boss"), role="admin", tenant_slug=_slug(tenant_id)
+    )
+    await _register(db, admin)
+    await db.commit()
+    pending = await employees_api.get_hr_pending(principal=admin, db=db)
+    assert pending is not None and pending.cards == 1
+    (item,) = pending.items
+    assert item.full_name == "Заполненная Карточка"
+    assert {c.field: (c.old, c.new) for c in item.changes}["position_id"] == ("Бариста", "Пекарь")
+    assert {(d.kind, d.action, d.name, d.value) for d in pending.directory} == {
+        ("store", "franchisee", "Точка 1", "ИП Иванов")
+    }
+
+    with pytest.raises(HTTPException) as err:
+        await employees_api.apply_hr_pending(
+            HrApplyPendingBody(fingerprint="0" * 64), principal=admin, db=db
+        )
+    assert err.value.status_code == 409
+    result = await employees_api.apply_hr_pending(
+        HrApplyPendingBody(fingerprint=pending.fingerprint), principal=admin, db=db
+    )
+    assert result["report"]["mode"] == "apply"
+    assert (await _card(db, seed.filled.id)).position_id == baker
+    assert await employees_api.get_hr_pending(principal=admin, db=db) is None
+
+
+async def test_cutover_window_cli(db: AsyncSession, tenant_id: uuid.UUID, monkeypatch, hr_env):
+    from app.jobs import hr_cutover
+
+    await _seed(db, tenant_id)
+    hr_env(hr_consumer_enabled="true", hr_apply_tenants="")
+    assert await hr_cutover._change(_slug(tenant_id), window="open", force_unfreeze=False) == 0
+    state = await _state(tenant_id)
+    assert state.cutover_freeze is True and state.cutover_since is not None
+    assert await hr_cutover._change(_slug(tenant_id), window="close", force_unfreeze=False) == 0
+    state = await _state(tenant_id)
+    assert state.cutover_freeze is False and state.cutover_since is None
+    audit_rows = (
+        await db.execute(select(AuditLog).where(AuditLog.action == "hr_window"))
+    ).scalars().all()
+    assert len([a for a in audit_rows if a.tenant_id == tenant_id]) == 2
+    assert await hr_cutover._change("нет-такой", window="open", force_unfreeze=False) == 2

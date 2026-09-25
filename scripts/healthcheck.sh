@@ -14,6 +14,7 @@
 #   HEALTHCHECK_PUSH_URLS="https://hub.signaris.ru/api/health/push ..."
 #   HEALTHCHECK_DISK_PATH=/
 #   HEALTHCHECK_DISK_MIN_GB=8
+#   HEALTHCHECK_HR_URLS="https://hub.signaris.ru/api/health/hr"
 set -euo pipefail
 
 URLS=${HEALTHCHECK_URLS:-"https://hub.signaris.ru/api/env https://hub-staging.signaris.ru/api/env"}
@@ -29,6 +30,9 @@ PUSH_URLS=${HEALTHCHECK_PUSH_URLS:-"https://hub.signaris.ru/api/health/push http
 #
 # 8 ГБ — выше порога отказа загрузки (5 ГБ + размер файла), чтобы алерт пришёл
 # ДО того, как загрузки начнут отбиваться, а не вместе с ними.
+# Кадровые данные из auth (16d). Только прод: на staging синк штата выключен
+# навсегда, строк состояния там нет.
+HR_URLS=${HEALTHCHECK_HR_URLS:-"https://hub.signaris.ru/api/health/hr"}
 DISK_PATH=${HEALTHCHECK_DISK_PATH:-/}
 DISK_MIN_GB=${HEALTHCHECK_DISK_MIN_GB:-8}
 EMAIL=${HEALTHCHECK_ALERT_EMAIL:-ops@signaris.ru}
@@ -130,3 +134,40 @@ if [[ -n "${free_kb:-}" ]]; then
     echo 0 > "$disk_state"
   fi
 fi
+
+# --- Кадровые данные из auth -----------------------------------------------
+# Ручка отдаёт {"status": "ok"|"attention", "problems": [...]}: коды без
+# названий организаций. Каждый код значит «правка кадров в Hub закрыта, а из
+# auth ничего не приходит». Триггер — по СМЕНЕ набора проблем: одно сообщение
+# при появлении, одно при исправлении, без повтора каждые 5 минут.
+hr_text() {
+  local out=""
+  for code in $(echo "$1" | tr ',' ' '); do
+    case "$code" in
+      window_open) out+="окно каткатa открыто больше 6 ч (закройте: hr_cutover --window close); " ;;
+      blocked) out+="предохранитель держит изменения больше часа (hub-admin: «Сотрудники» → «Посмотреть и применить»); " ;;
+      paused) out+="организация заморожена, но применение не включено больше часа (SIGNARIS_HUB_HR_APPLY_TENANTS); " ;;
+      stale) out+="успешного применения не было больше часа (auth недоступен или сбой — журнал hr_sync); " ;;
+      *) out+="$code; " ;;
+    esac
+  done
+  echo "$out"
+}
+
+for url in $HR_URLS; do
+  state_file="$STATE_DIR/hr.$(slug "$url").state"
+  prev=$(cat "$state_file" 2>/dev/null || echo "")
+  body=$(curl -fs --max-time 10 "$url" 2>/dev/null || echo "")
+  # Недоступность самой ручки ловит проверка /api/env выше.
+  [[ -n "$body" ]] || continue
+  problems=$(echo "$body" | sed -n 's/.*"problems":[[:space:]]*\[\([^]]*\)\].*/\1/p' | tr -d '" ')
+  [[ "$problems" == "$prev" ]] && continue
+  echo "$problems" > "$state_file"
+  if [[ -z "$problems" ]]; then
+    logger -t signaris-hub-health "HR RECOVERED $url"
+    send_telegram "✅ [Hub] кадровые данные из auth снова в порядке: $url"
+  else
+    logger -t signaris-hub-health "HR ATTENTION $url ($problems)"
+    send_telegram "🔴 [Hub] кадровые данные из auth: $(hr_text "$problems")— $url"
+  fi
+done

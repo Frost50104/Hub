@@ -70,6 +70,9 @@ def upgrade() -> None:
             "authoritative", sa.Boolean(), nullable=False, server_default=sa.text("false")
         ),
         sa.Column("snapshot_at", sa.DateTime(timezone=True), nullable=True),
+        # С какого момента организация authoritative — алерт «заморожено, но
+        # правки auth не применяются дольше часа» (тенант не в списке применения).
+        sa.Column("authoritative_since", sa.DateTime(timezone=True), nullable=True),
         # Ручное окно каткатa: пишет ТОЛЬКО CLI `app.jobs.hr_cutover`.
         sa.Column(
             "cutover_freeze", sa.Boolean(), nullable=False, server_default=sa.text("false")
