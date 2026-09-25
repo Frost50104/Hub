@@ -80,6 +80,36 @@ class Settings(BaseSettings):
     # с меткой «данные реестра устарели».
     sites_snapshot_fresh_days: int = Field(default=14)
 
+    # Кадровые данные из auth (шаг 16d, 0063). План —
+    # ~/.claude/plans/pure-plotting-hartmanis.md.
+    # - hr_consumer_enabled — читать снимок справочников `/org-directory`,
+    #   вести состояние заморозки, отчёт и счётчики правила K. Выключено — ключ
+    #   `hr` игнорируется, как до 16d. После каткатa выключатель останавливает
+    #   обновления, но НЕ снимает заморозку: она читает `hr_sync_state`.
+    # - hr_apply_tenants — slug-и тенантов через запятую, где кадровые данные
+    #   ПРИМЕНЯЮТСЯ. Пусто — везде только отчёт. Это не заморозка (её ведёт
+    #   `hr_mode` в auth, ручной флаг контракт запрещает), а наш рубильник
+    #   записи: каткат тенанта = добавить его сюда.
+    # - N / M / K — предохранитель (карточек, новых обязательных членств) и
+    #   число прогонов подряд с отключённой учёткой до архива.
+    hr_consumer_enabled: bool = Field(default=False)
+    hr_apply_tenants: str = Field(default="")
+    hr_valve_max_cards: int = Field(default=10, ge=0)
+    hr_valve_max_mandatory: int = Field(default=20, ge=0)
+    hr_deactivation_runs: int = Field(default=3, ge=2, le=50)
+    # Учётку включили, а имя не совпало со снимком при архиве: true — это другой
+    # человек (auth оживлял отключённую учётку приглашением на ту же почту),
+    # вход старой карточки отвязываем. auth закрыл это 25.09 (приглашение на
+    # адрес с живой учёткой → 409); ПОСЛЕ их выката выставить false на обоих
+    # env — тогда несовпадение = тот же человек с новой фамилией: возврат + WARN.
+    hr_release_on_name_mismatch: bool = Field(default=True)
+
+    @property
+    def hr_apply_tenant_slugs(self) -> frozenset[str]:
+        return frozenset(
+            part.strip().lower() for part in self.hr_apply_tenants.split(",") if part.strip()
+        )
+
     # Sid-sync (Phase 2 SLO) — фоновый воркер опрашивает фид ревокации SSO-сессий
     # (GET /api/products/revoked-sids, X-Service-Key) и держит локальный
     # blacklist `sso_session_id`'ов. `require_auth` отказывает в access-токенах

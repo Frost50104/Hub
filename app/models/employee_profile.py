@@ -39,7 +39,11 @@ PROFILE_STATUSES = ("active", "archived")
 # ОСВОБОЖДАЮТ вход — см. `employee_profiles.UNBINDING_REASONS`. Отдельной
 # причины «уволен» нет намеренно: любая архивация админом означает, что человек
 # ушёл, а спрашивать об этом значило бы дать возможность ответить неверно.
-ARCHIVE_REASONS = ("manual", "auto_inactivity", "auth_deleted")
+#
+# `auth_deactivated` (0063) — учётку отключили в auth K прогонов подряд
+# (кадровые данные ведутся в auth, отключение = увольнение). Вход СОХРАНЯЕТ:
+# включение учётки возвращает карточку с историей.
+ARCHIVE_REASONS = ("manual", "auto_inactivity", "auth_deleted", "auth_deactivated")
 
 #: Вид учётной записи (0056). `service` — касса точки: общий логин на планшете,
 #: в поле имени адрес. Такая карточка остаётся в Hub (на кассе открыт её
@@ -68,8 +72,8 @@ class EmployeeProfile(Base):
             name="ck_employee_profiles_account_kind",
         ),
         CheckConstraint(
-            "archive_reason IS NULL OR "
-            "archive_reason IN ('manual', 'auto_inactivity', 'auth_deleted')",
+            "archive_reason IS NULL OR archive_reason IN "
+            "('manual', 'auto_inactivity', 'auth_deleted', 'auth_deactivated')",
             name="ck_employee_profiles_archive_reason",
         ),
     )
@@ -144,6 +148,11 @@ class EmployeeProfile(Base):
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archive_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Имя учётки в момент архива по отключению в auth (0063). Возврат снимает
+    # архив, только если имя совпало: auth оживляет отключённую учётку
+    # приглашением на ту же почту, и фид переименовывает архивную карточку в
+    # нового человека — сверять приходится со снимком, а не с `full_name`.
+    auth_deactivated_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Денормализация для правила «90 дней неактивности» (cron сверяет с
     # порогами из learning_settings).

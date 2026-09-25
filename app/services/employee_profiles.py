@@ -508,8 +508,14 @@ async def archive_profile(
     *,
     reason: str,
     actor_id: UUID | None,
+    recalc: bool = True,
 ) -> None:
     """Единый каскад архивации. Идемпотентен (уже архивный → no-op).
+
+    `recalc=False` — членства снимет пакетный пересчёт вызывающего
+    (`recalc_profiles`): синк кадровых данных пишет строки всех карточек и
+    берёт замок пересчёта ОДИН раз в конце — порядок «строка → замок», как у
+    всех остальных писателей.
 
     Одно исключение: архивная карточка, которая по своей причине вход ДЕРЖИТ
     (`auto_inactivity`), при удалении или переводе учётки в auth
@@ -537,7 +543,8 @@ async def archive_profile(
         profile.employee_id = None
     await db.flush()
     # Каскад: членства аудиторий (recalc_profile для archived удаляет все).
-    await recalc_profile(db, profile)
+    if recalc:
+        await recalc_profile(db, profile)
     # Каскад Ф5: pending-автосценарии отменяются (курс не назначится вдогонку).
     from sqlalchemy import update
 
@@ -604,9 +611,13 @@ async def restore_profile(
     *,
     actor_id: UUID | None,
     new_employee_id: UUID | None = None,
+    recalc: bool = True,
 ) -> None:
     """Восстановление из архива, опционально с перепривязкой к новому
-    auth-аккаунту (повторный найм: в auth у человека новый employee_id)."""
+    auth-аккаунту (повторный найм: в auth у человека новый employee_id).
+
+    `recalc=False` — пересчёт и уведомления делает вызывающий пачкой (синк).
+    """
     if profile.status == "active":
         return
     dup = await _find_by_email(db, profile.email, status="active")
@@ -629,8 +640,9 @@ async def restore_profile(
     # порядок с начала: сначала предупреждение, потом grace.
     profile.inactivity_warned_at = None
     await db.flush()
-    diffs = await recalc_profile(db, profile)
-    await notify_new_audience_members(db, diffs)
+    if recalc:
+        diffs = await recalc_profile(db, profile)
+        await notify_new_audience_members(db, diffs)
     audit.record(
         db,
         tenant_id=profile.tenant_id,

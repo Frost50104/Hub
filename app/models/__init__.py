@@ -12,6 +12,7 @@ from app.models.custom_field import CustomFieldDefinition, TaskCustomFieldValue
 from app.models.dependency import TaskDependency
 from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
 from app.models.engagement import Favorite, SearchQueryLog
+from app.models.hr_sync import HrSyncState
 from app.models.learning_settings import LearningSettings
 from app.models.library import (
     LibraryMaterial,
@@ -95,6 +96,7 @@ __all__ = [
     "Franchisee",
     "FranchiseeGroup",
     "FranchiseeGroupMember",
+    "HrSyncState",
     "LearningSettings",
     "LessonProgress",
     "LessonTemplate",

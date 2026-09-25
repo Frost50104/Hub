@@ -504,6 +504,52 @@ async def recalc_profile(db: AsyncSession, profile: EmployeeProfile) -> dict[UUI
     return diffs
 
 
+async def recalc_profiles(
+    db: AsyncSession, tenant_id: UUID, profile_ids: set[UUID]
+) -> dict[UUID, MembershipDiff]:
+    """Пересчитать набор сотрудников одним проходом (синк кадровых данных).
+
+    `recalc_profile` на карточку грузит оргструктуру, аудитории и правила
+    заново — на массовой правке это сотни запросов под замком. Здесь всё
+    грузится один раз, членства читаются только по заданным карточкам.
+    Карточка вне популяции (архивная, касса) теряет все членства — как в
+    `recalc_profile`. Замок — первым: атрибуты читаются уже под ним.
+    """
+    if not profile_ids:
+        return {}
+    await _lock_tenant(db, tenant_id)
+    ids = list(profile_ids)
+    attrs_map = await load_attrs_map(db, profile_ids=ids)
+    current: dict[UUID, set[UUID]] = {}
+    for audience_id, profile_id in await db.execute(
+        select(AudienceMember.audience_id, AudienceMember.profile_id).where(
+            AudienceMember.profile_id.in_(ids)
+        )
+    ):
+        current.setdefault(audience_id, set()).add(profile_id)
+    rules_by_audience: dict[UUID, list[RuleSpec]] = {}
+    for rule in (await db.execute(select(AudienceRule))).scalars().all():
+        rules_by_audience.setdefault(rule.audience_id, []).append(rule_spec_from_row(rule))
+    diffs: dict[UUID, MembershipDiff] = {}
+    for audience in (await db.execute(select(Audience))).scalars().all():
+        rules = rules_by_audience.get(audience.id, [])
+        desired = {
+            pid
+            for pid, attrs in attrs_map.items()
+            if audience_matches(audience.is_all, rules, attrs, is_none=audience.is_none)
+        }
+        diff = await _apply_membership_diff(
+            db,
+            tenant_id=audience.tenant_id,
+            audience_id=audience.id,
+            current=current.get(audience.id, set()),
+            desired=desired,
+        )
+        if diff.added or diff.removed:
+            diffs[audience.id] = diff
+    return diffs
+
+
 async def rebuild_tenant(db: AsyncSession, tenant_id: UUID) -> dict[UUID, MembershipDiff]:
     """Полный reconcile тенанта. Diff, не truncate.
 

@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, String, Text, text
+from sqlalchemy import DateTime, SmallInteger, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -61,6 +61,15 @@ class ShadowUser(Base):
     # опустошила бы экраны.
     account_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
     staff_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Правило K (0063, кадровые данные из auth): сколько прогонов ПОДРЯД
+    # выгрузка отдаёт учётку отключённой и с какого момента. Пишет только синк
+    # штата; счётчик с потолком — auth выгружает отключённых бессрочно.
+    inactive_runs: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("0")
+    )
+    inactive_since: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

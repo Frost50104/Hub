@@ -48,22 +48,24 @@ from uuid import UUID
 
 import httpx
 import structlog
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError
 
 from app.config import get_settings
 from app.db import tenant_scoped_session
 from app.models.employee_profile import EmployeeProfile
-from app.models.shadow import AuthInvitation, ShadowUser
-from app.services import notify_batch
+from app.models.shadow import AuthInvitation, ShadowTenant, ShadowUser
+from app.services import hr_sync, notify_batch
 from app.services.employee_profiles import (
     archive_profile,
     classify_staff_row,
     ensure_profile_for_staff_row,
     normalize_account_kind,
 )
+from app.services.hr_state import tenant_applies
 from app.services.notify_batch import PushBatch
+from app.services.org_directory_sync import DirectorySnapshot, fetch_org_directory
 
 log = structlog.get_logger("staff_sync")
 
@@ -95,7 +97,13 @@ class StaffSyncReport:
     # чья транзакция упала целиком: сбой одного больше не обрывает остальных.
     failed_rows: int = 0
     failed_tenants: int = 0
+    # Прогон по тенанту пропущен: более новый прогон его уже обработал (кнопка
+    # и воркер подряд) — применять старый снимок поверх нового нельзя.
+    skipped_tenants: int = 0
     tenants: set[str] = field(default_factory=set)
+    # Кадровые данные из auth (16d): отчёт по тенанту — числа и id, без ПДн.
+    hr: dict[str, dict[str, Any]] = field(default_factory=dict)
+    hr_failed: int = 0
 
     def absorb(self, other: StaffSyncReport) -> None:
         """Прибавить счётчики тенанта — только после его УСПЕШНОГО commit'а:
@@ -174,21 +182,71 @@ async def sync_staff(
     её счётчики. Выгрузка auth от этого не меняется — она общая на ключ.
     """
     report = StaffSyncReport(dry_run=dry_run)
+    settings = get_settings()
+    # Кадровый потребитель (16d) живёт только в живом прогоне: dry-run синка
+    # штата — «ни одной записи», а отчёт кадровых данных пишет состояние.
+    consumer = settings.hr_consumer_enabled and not dry_run
+    fetched_at = datetime.now(UTC)
+    # Снимок справочников — ПЕРЕД штатом (контракт 16d): строки штата
+    # ссылаются на справочники, мониторинг auth ждёт оба маршрута.
+    directory = await fetch_org_directory() if consumer else None
     items = await _fetch_staff_pages()
+    rows_by_tenant = _rows_by_tenant(items) if items is not None else {}
+
+    proceed: dict[UUID, bool] = {}
+    slugs: dict[UUID, str] = {}
+    if consumer:
+        slugs = await _tenant_slugs()
+        # Все тенанты Hub, а не только пришедшие в штате: `shadow_tenants`
+        # пишут лишь запросы, и организация без единого входа иначе не
+        # заморозилась бы; тенанты снимка — туда же.
+        tenants = set(slugs) | {UUID(t) for t in rows_by_tenant}
+        if directory is not None:
+            tenants |= set(directory.tenants)
+        if only_tenant is not None:
+            tenants &= {only_tenant}
+        for tid in sorted(tenants, key=str):
+            try:
+                proceed[tid] = await hr_sync.write_freeze_state(
+                    tid, fetched_at=fetched_at, directory=directory
+                )
+            except Exception:  # noqa: BLE001 — один тенант не должен ронять остальные
+                proceed[tid] = False
+                log.exception("hr_sync.freeze_state_failed", tenant_id=str(tid))
+
     if items is None:
         report.available = False
         return report
 
-    now = datetime.now(UTC)
-    for tenant_id, rows in _rows_by_tenant(items).items():
+    now = fetched_at
+    apply_slugs = settings.hr_apply_tenant_slugs
+    for tenant_id, rows in rows_by_tenant.items():
         if only_tenant is not None and tenant_id != str(only_tenant):
             continue
+        tid = UUID(tenant_id)
+        if consumer and not proceed.get(tid, False):
+            report.skipped_tenants += 1
+            continue
         report.tenants.add(tenant_id)
+        # Тенант, где кадровые данные применяются: новые карточки людей
+        # заводит T3 — сразу с кадровыми полями, в том же INSERT (требование 5).
+        hr_creates = (
+            consumer
+            and directory is not None
+            and directory.tenants.get(tid, False)
+            and tenant_applies(slugs.get(tid), apply_slugs)
+        )
         tenant_report = StaffSyncReport(dry_run=dry_run)
         try:
-            async with tenant_scoped_session(UUID(tenant_id)) as db:
-                pushes = await _apply_tenant(
-                    db, UUID(tenant_id), rows, now, tenant_report, dry_run=dry_run
+            async with tenant_scoped_session(tid) as db:
+                applied = await _apply_tenant(
+                    db,
+                    tid,
+                    rows,
+                    now,
+                    tenant_report,
+                    dry_run=dry_run,
+                    hr_creates=hr_creates,
                 )
                 if not dry_run:
                     await db.commit()
@@ -201,8 +259,10 @@ async def sync_staff(
         report.absorb(tenant_report)
         # Пуши — строго ПОСЛЕ commit'а: пуш, ушедший до отката, повторился бы
         # на следующем тике. Через модуль: тесты глушат отправку подменой.
-        for batch in pushes:
+        for batch in applied.pushes:
             notify_batch.schedule_push_batch(batch)
+        if consumer:
+            await _run_hr(report, tid, slugs.get(tid), fetched_at, directory, rows, applied)
     log.info(
         "staff_sync.done",
         dry_run=dry_run,
@@ -219,8 +279,45 @@ async def sync_staff(
         invitations=report.invitations,
         failed_rows=report.failed_rows,
         failed_tenants=report.failed_tenants,
+        skipped_tenants=report.skipped_tenants,
+        hr_failed=report.hr_failed,
     )
     return report
+
+
+async def _tenant_slugs() -> dict[UUID, str]:
+    """Все тенанты Hub (id → slug) — перебор для состояния заморозки."""
+    async with tenant_scoped_session(None, bypass_rls=True) as db:
+        rows = await db.execute(select(ShadowTenant.id, ShadowTenant.slug))
+        return dict(rows.tuples().all())
+
+
+async def _run_hr(
+    report: StaffSyncReport,
+    tenant_id: UUID,
+    slug: str | None,
+    fetched_at: datetime,
+    directory: DirectorySnapshot | None,
+    rows: list[dict[str, Any]],
+    applied: _TenantApplied,
+) -> None:
+    """T3 кадровых данных — своей транзакцией, после commit'а T2."""
+    try:
+        result = await hr_sync.run_tenant(
+            hr_sync.TenantRun(
+                tenant_id=tenant_id,
+                tenant_slug=slug,
+                fetched_at=fetched_at,
+                directory=directory,
+                rows=rows,
+                linked_this_run=applied.linked,
+            )
+        )
+    except Exception:  # noqa: BLE001 — сбой кадровой части не отменяет синк штата
+        report.hr_failed += 1
+        log.exception("hr_sync.tenant_failed", tenant_id=str(tenant_id))
+        return
+    report.hr[str(tenant_id)] = result.report
 
 
 async def _apply_tenant(
@@ -231,10 +328,17 @@ async def _apply_tenant(
     report: StaffSyncReport,
     *,
     dry_run: bool,
-) -> list[PushBatch]:
+    hr_creates: bool = False,
+) -> _TenantApplied:
     """Применить строки тенанта в его транзакции → пачки пушей для отправки
-    после commit'а (commit и отправку делает вызывающий)."""
+    после commit'а (commit и отправку делает вызывающий) и `employee_id`
+    привязанных этим прогоном карточек (требование 5 для кадровой части).
+
+    `hr_creates` — тенант, где кадровые данные применяются: новую карточку
+    человеку с кадровым блоком заводит кадровая часть (T3), сразу с полями.
+    """
     pushes: list[PushBatch] = []
+    linked: set[UUID] = set()
     # Кто уже привязан и с каким видом — одним запросом: на обычном прогоне
     # почти все строки такие, и раньше каждая стоила отдельного SELECT'а.
     linked_kinds: dict[UUID, str] = dict(
@@ -281,29 +385,18 @@ async def _apply_tenant(
         # пустым (правило _sync_linked_profile).
         report.shadows_upserted += 1
         if not dry_run:
-            stmt = pg_insert(ShadowUser).values(
-                employee_id=employee_uuid,
-                tenant_id=tenant_id,
-                email=email,
-                full_name=full_name or email,
-                hub_role=role,
-                auth_active=bool(is_active) if is_active is not None else None,
-                account_kind=account_kind,
-                staff_synced_at=now,
+            await db.execute(
+                shadow_upsert(
+                    employee_id=employee_uuid,
+                    tenant_id=tenant_id,
+                    email=email,
+                    full_name=full_name or email,
+                    role=role,
+                    is_active=is_active,
+                    account_kind=account_kind,
+                    now=now,
+                )
             )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["employee_id"],
-                set_={
-                    "tenant_id": tenant_id,
-                    "email": email,
-                    "full_name": stmt.excluded.full_name,
-                    "hub_role": role,
-                    "auth_active": stmt.excluded.auth_active,
-                    "account_kind": account_kind,
-                    "staff_synced_at": now,
-                },
-            )
-            await db.execute(stmt)
 
         if deleted_raw:
             # Ручка удалённых не отдаёт (отказ auth), ветка — толерантность к
@@ -354,6 +447,7 @@ async def _apply_tenant(
             )
             if outcome == "linked":
                 report.profiles_linked += 1
+                linked.add(employee_uuid)
             elif outcome == "email_conflict":
                 report.email_conflicts += 1
             elif outcome == "row_failed":
@@ -363,6 +457,29 @@ async def _apply_tenant(
             continue
         if is_active is not True:
             report.inactive_skipped += 1
+            continue
+        if hr_creates and _has_authoritative_hr(row):
+            # Заведёт кадровая часть, с полями в том же INSERT. Привязку
+            # существующей карточки по-прежнему делаем здесь.
+            outcome = await _card_outcome(
+                db,
+                linked_kinds,
+                tenant_id=tenant_id,
+                employee_id=employee_uuid,
+                email=email,
+                full_name=full_name,
+                account_kind=account_kind,
+                link_only=True,
+                dry_run=dry_run,
+                pushes=pushes,
+            )
+            if outcome == "linked":
+                report.profiles_linked += 1
+                linked.add(employee_uuid)
+            elif outcome == "email_conflict":
+                report.email_conflicts += 1
+            elif outcome == "row_failed":
+                report.failed_rows += 1
             continue
         outcome = await _card_outcome(
             db,
@@ -380,6 +497,7 @@ async def _apply_tenant(
             report.profiles_created += 1
         elif outcome == "linked":
             report.profiles_linked += 1
+            linked.add(employee_uuid)
         elif outcome == "email_conflict":
             report.email_conflicts += 1
         elif outcome == "archived_skip":
@@ -429,7 +547,96 @@ async def _apply_tenant(
             .values(hub_role=None)
         )
         report.roles_cleared += result.rowcount
-    return pushes
+        # Правило K считает прогоны ПОДРЯД: учётка, выпавшая из выгрузки,
+        # начинает счёт заново, если вернётся отключённой.
+        await db.execute(
+            update(ShadowUser)
+            .where(
+                ShadowUser.inactive_runs > 0,
+                or_(
+                    ShadowUser.staff_synced_at.is_(None),
+                    ShadowUser.staff_synced_at < now,
+                ),
+            )
+            .values(inactive_runs=0, inactive_since=None)
+        )
+    return _TenantApplied(pushes=pushes, linked=linked)
+
+
+@dataclass
+class _TenantApplied:
+    pushes: list[PushBatch]
+    linked: set[UUID]
+
+
+# Потолок счётчика K: auth выгружает отключённые учётки бессрочно, и smallint
+# без потолка примерно через год переполнился бы и уронил синк тенанта.
+INACTIVE_RUNS_CAP = 100
+
+
+def shadow_upsert(
+    *,
+    employee_id: UUID,
+    tenant_id: UUID,
+    email: str,
+    full_name: str,
+    role: str | None,
+    is_active: Any,
+    account_kind: str,
+    now: datetime,
+):  # noqa: ANN201 — SQLAlchemy Insert
+    """Upsert тени из строки штата — с кешем роли и счётчиком правила K.
+
+    Счётчик растёт, только пока выгрузка отдаёт учётку ОТКЛЮЧЁННОЙ
+    (`is_active is False`); отсутствие поля — «не знаю», счёт сбрасывается.
+    Ведётся всегда, даже с выключенным кадровым потребителем: иначе после
+    включения старый счётчик сработал бы на давно включённом человеке.
+    """
+    auth_active = bool(is_active) if is_active is not None else None
+    inactive = auth_active is False
+    stmt = pg_insert(ShadowUser).values(
+        employee_id=employee_id,
+        tenant_id=tenant_id,
+        email=email,
+        full_name=full_name,
+        hub_role=role,
+        auth_active=auth_active,
+        account_kind=account_kind,
+        staff_synced_at=now,
+        inactive_runs=1 if inactive else 0,
+        inactive_since=now if inactive else None,
+    )
+    return stmt.on_conflict_do_update(
+        index_elements=["employee_id"],
+        set_={
+            "tenant_id": tenant_id,
+            "email": email,
+            "full_name": stmt.excluded.full_name,
+            "hub_role": role,
+            "auth_active": stmt.excluded.auth_active,
+            "account_kind": account_kind,
+            "staff_synced_at": now,
+            "inactive_runs": case(
+                (
+                    stmt.excluded.auth_active.is_(False),
+                    func.least(ShadowUser.inactive_runs + 1, INACTIVE_RUNS_CAP),
+                ),
+                else_=0,
+            ),
+            "inactive_since": case(
+                (
+                    stmt.excluded.auth_active.is_(False),
+                    func.coalesce(ShadowUser.inactive_since, now),
+                ),
+                else_=None,
+            ),
+        },
+    )
+
+
+def _has_authoritative_hr(row: dict[str, Any]) -> bool:
+    block = row.get("hr")
+    return isinstance(block, dict) and block.get("authoritative") is True
 
 
 async def _card_outcome(

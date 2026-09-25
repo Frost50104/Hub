@@ -477,11 +477,11 @@ async def test_failing_tenant_does_not_stop_others(
     _mock_fetch(monkeypatch, rows)
     real_apply = staff_sync._apply_tenant
 
-    async def flaky(session, tid, tenant_rows, now, report, *, dry_run):  # noqa: ANN001, ANN202
-        pushes = await real_apply(session, tid, tenant_rows, now, report, dry_run=dry_run)
+    async def flaky(session, tid, tenant_rows, now, report, **kw):  # noqa: ANN001, ANN202
+        applied = await real_apply(session, tid, tenant_rows, now, report, **kw)
         if tid == doomed_tenant:
             raise RuntimeError("сбой после записи")
-        return pushes
+        return applied
 
     monkeypatch.setattr(staff_sync, "_apply_tenant", flaky)
     report = await sync_staff()

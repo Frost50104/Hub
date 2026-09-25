@@ -202,6 +202,9 @@ class Department(Base):
         nullable=True,
         index=True,
     )
+    # 0063: отделы архивирует auth (кадровые справочники 16d). Архивный отдел
+    # не удаляется (на него ссылаются карточки), в пикерах не предлагается.
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), nullable=False
     )
