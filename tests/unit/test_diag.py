@@ -113,3 +113,61 @@ async def test_handler_logs_nested_body_and_returns_204(monkeypatch: pytest.Monk
     assert entry["kind"] == "sw_hung"
     assert entry["diag"]["sw"]["health"] == "hung"
     assert entry["diag"]["kind"] == "sw_hung"
+
+
+class _FakePipeline:
+    """Ровно то, чем пользуется `check_and_increment`: incr + expire + execute."""
+
+    def __init__(self, store: dict[str, int]) -> None:
+        self.store = store
+        self.ops: list[tuple] = []
+
+    def incr(self, key: str) -> _FakePipeline:
+        self.ops.append(("incr", key))
+        return self
+
+    def expire(self, key: str, ttl: int) -> _FakePipeline:
+        self.ops.append(("expire", key, ttl))
+        return self
+
+    async def execute(self) -> list:
+        out: list = []
+        for op in self.ops:
+            if op[0] == "incr":
+                self.store[op[1]] = self.store.get(op[1], 0) + 1
+                out.append(self.store[op[1]])
+            else:
+                out.append(True)
+        return out
+
+
+class _FakeRedis:
+    def __init__(self) -> None:
+        self.store: dict[str, int] = {}
+
+    def pipeline(self) -> _FakePipeline:
+        return _FakePipeline(self.store)
+
+
+async def test_handler_returns_429_after_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Живой лимит 30/час: 31-й вызов — 429 с Retry-After. Redis — в памяти:
+    настоящего в тестовом окружении нет, а остальные тесты лимитер выключают."""
+    from fastapi import HTTPException
+
+    from app import deps
+
+    fake = _FakeRedis()
+    monkeypatch.setattr(deps, "get_redis", lambda: fake)
+    principal = SimpleNamespace(employee_id=uuid4(), tenant_id=uuid4())
+    body = SwDiagIn.model_validate(_body("update_click"))
+
+    for _ in range(diag_api.DIAG_RATE_LIMIT):
+        response = await diag_api.post_diag(body, principal)  # type: ignore[arg-type]
+        assert response.status_code == 204
+
+    with pytest.raises(HTTPException) as exc:
+        await diag_api.post_diag(body, principal)  # type: ignore[arg-type]
+    assert exc.value.status_code == 429
+    assert exc.value.headers is not None
+    assert exc.value.headers["Retry-After"] == str(diag_api.DIAG_RATE_WINDOW_SEC)
+    assert fake.store == {f"rl:diag:send:{principal.employee_id}": diag_api.DIAG_RATE_LIMIT + 1}
