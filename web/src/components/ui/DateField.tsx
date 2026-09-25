@@ -53,6 +53,7 @@ export function DateField({
         id={id}
         type={type}
         layout="block"
+        dimDisabled
         value={value}
         aria-label={ariaLabel}
         disabled={disabled}

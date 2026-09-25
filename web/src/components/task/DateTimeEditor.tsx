@@ -182,6 +182,14 @@ export function DateTimeEditor({
     setTimeOpen(false)
     flush()
   }
+  // Явное снятие даты (ОС 25.09: «дату не удалить, только поменять»). Стереть
+  // с клавиатуры по-прежнему можно только целиком: неполную дату черновик
+  // откатывает — защита от опечатки, а не способ снять срок.
+  const clearDate = () => {
+    edit({ day: '', time: '' })
+    setTimeOpen(false)
+    flush()
+  }
 
   const onGroupBlur = (e: FocusEvent<HTMLElement>) => {
     const next = e.relatedTarget
@@ -254,14 +262,19 @@ export function DateTimeEditor({
       onBlur={onGroupBlur}
       onKeyDown={onKeyDown}
     >
-      <NativeDateInput
-        type="date"
-        value={day}
-        disabled={readOnly}
-        aria-label={label}
-        onChange={(e) => setDay(e.target.value)}
-        className={cn(DATE_CHIP, dateClassName)}
-      />
+      <span className="inline-flex items-center gap-0.5">
+        <NativeDateInput
+          type="date"
+          value={day}
+          disabled={readOnly}
+          aria-label={label}
+          onChange={(e) => setDay(e.target.value)}
+          className={cn(DATE_CHIP, dateClassName)}
+        />
+        {day && !readOnly && (
+          <ClearButton label={`Убрать дату: ${label}`} title="Убрать дату" onClick={clearDate} />
+        )}
+      </span>
       {day && (time || timeOpen) ? (
         <span className="inline-flex items-center gap-0.5">
           <NativeDateInput
@@ -274,15 +287,7 @@ export function DateTimeEditor({
             className={cn(DATE_CHIP, 'text-text')}
           />
           {!readOnly && (
-            <button
-              type="button"
-              onClick={clearTime}
-              aria-label={`Убрать время: ${label}`}
-              title="Убрать время"
-              className="flex h-[26px] w-6 items-center justify-center rounded-md text-text2 hover:bg-glass hover:text-text"
-            >
-              <X className="h-3.5 w-3.5" strokeWidth={1.9} />
-            </button>
+            <ClearButton label={`Убрать время: ${label}`} title="Убрать время" onClick={clearTime} />
           )}
         </span>
       ) : day && !readOnly ? (
@@ -296,5 +301,20 @@ export function DateTimeEditor({
       ) : null}
       {after}
     </span>
+  )
+}
+
+/** × рядом с чипом даты или времени: снимает ровно то, у чего стоит. */
+function ClearButton({ label, title, onClick }: { label: string; title: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={title}
+      className="flex h-[26px] w-6 items-center justify-center rounded-md text-text2 hover:bg-glass hover:text-text"
+    >
+      <X className="h-3.5 w-3.5" strokeWidth={1.9} />
+    </button>
   )
 }
