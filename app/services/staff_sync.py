@@ -161,11 +161,17 @@ def _rows_by_tenant(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any
     return by_tenant
 
 
-async def sync_staff(*, dry_run: bool = False) -> StaffSyncReport:
+async def sync_staff(
+    *, dry_run: bool = False, only_tenant: UUID | None = None
+) -> StaffSyncReport:
     """Один прогон синка по всем тенантам из ответа auth.
 
     `dry_run=True` — тот же fetch и та же классификация, но ни одной записи
     в БД и ни одного пуша: счётчики показывают, что СДЕЛАЛ БЫ живой прогон.
+
+    `only_tenant` — только этот тенант (кнопка «Обновить из auth»): админ
+    одной организации не должен ни запускать синк чужой, ни видеть в отчёте
+    её счётчики. Выгрузка auth от этого не меняется — она общая на ключ.
     """
     report = StaffSyncReport(dry_run=dry_run)
     items = await _fetch_staff_pages()
@@ -175,6 +181,8 @@ async def sync_staff(*, dry_run: bool = False) -> StaffSyncReport:
 
     now = datetime.now(UTC)
     for tenant_id, rows in _rows_by_tenant(items).items():
+        if only_tenant is not None and tenant_id != str(only_tenant):
+            continue
         report.tenants.add(tenant_id)
         tenant_report = StaffSyncReport(dry_run=dry_run)
         try:

@@ -248,11 +248,16 @@ async def trigger_staff_sync(
     dry-run: флаг выключают ровно на время выката правок, и кнопка в обход
     него одним кликом устроила бы bootstrap с неотзываемой рассылкой —
     порядок включения из HUB_TASK_staff_endpoint_REPLY.md стал бы фикцией.
+
+    Только своя организация: до 25.09 кнопка гоняла синк всех тенантов, и
+    админ одной организации запускал его чужой и видел её счётчики.
     """
-    from app.services.staff_sync import sync_staff
+    from app.services import staff_sync
 
     effective_dry_run = dry_run or not get_settings().staff_sync_enabled
-    report = await sync_staff(dry_run=effective_dry_run)
+    report = await staff_sync.sync_staff(
+        dry_run=effective_dry_run, only_tenant=principal.tenant_id
+    )
     return {
         "available": report.available,
         "dry_run": report.dry_run,

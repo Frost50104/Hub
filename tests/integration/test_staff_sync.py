@@ -594,3 +594,37 @@ async def test_new_card_push_goes_only_after_commit(
     report = await sync_staff()
     assert report.profiles_created == 1
     assert [b.payload["kind"] for b in sent] == ["course.assigned"]
+
+
+async def test_manual_sync_touches_only_own_tenant(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """Кнопка «Обновить из auth» гоняла синк всех организаций: админ одной
+    запускал его чужой и видел в тосте её счётчики."""
+    from app.api import employees as employees_api
+    from tests.integration.conftest import make_principal
+
+    stranger_tenant = uuid.uuid4()
+    rows = [
+        _staff_row(tenant_id, email="mine@t.ru"),
+        _staff_row(stranger_tenant, email="theirs@t.ru"),
+    ]
+    _mock_fetch(monkeypatch, rows)
+    monkeypatch.setattr(
+        employees_api, "get_settings", lambda: SimpleNamespace(staff_sync_enabled=True)
+    )
+    admin = make_principal(tenant_id, email="sync-admin@t.ru", role="admin")
+
+    result = await employees_api.trigger_staff_sync(dry_run=False, principal=admin, db=db)
+
+    assert result["profiles_created"] == 1
+    emails = set(
+        (
+            await db.execute(
+                select(EmployeeProfile.email).where(
+                    EmployeeProfile.email.in_(["mine@t.ru", "theirs@t.ru"])
+                )
+            )
+        ).scalars()
+    )
+    assert emails == {"mine@t.ru"}
