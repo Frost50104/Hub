@@ -19,7 +19,7 @@
   `stores.archived_at` принадлежит Hub и реестр её не отражает.
 - Планировщика НЕТ (ручной триггер — POST /api/learn/sites/sync); от гонки
   двух ручных запусков — per-tenant `pg_try_advisory_xact_lock`.
-- 401/403 и 404 с телом `{"code": "sites_export_disabled"}` — «доступа/фида
+- 401/403 и 404 с кодом `sites_export_disabled` в теле — «доступа/фида
   пока нет», INFO без шторма; ГОЛЫЙ 404 — WARNING с полным URL: он неотличим
   от опечатки в base_url, и без URL зеркало осталось бы пустым молча.
 
@@ -40,6 +40,7 @@ from sqlalchemy import delete, text
 from app.config import get_settings
 from app.db import tenant_scoped_session
 from app.models.shadow import ShadowSite
+from app.services.auth_http import disabled_code
 
 log = structlog.get_logger("sites_sync")
 
@@ -86,10 +87,7 @@ async def _fetch_sites() -> tuple[list[dict[str, Any]], int] | None:
     if resp.status_code == 404:
         # Машиночитаемый рубильник auth против голого 404: второй неотличим
         # от опечатки в base_url, поэтому обязан кричать WARNING'ом с URL.
-        try:
-            body_code = resp.json().get("code")
-        except ValueError:
-            body_code = None
+        body_code = disabled_code(resp)
         if body_code == "sites_export_disabled":
             log.info("sites_sync.unavailable", status=404, code=body_code)
         else:
