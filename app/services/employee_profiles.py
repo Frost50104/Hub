@@ -509,8 +509,22 @@ async def archive_profile(
     reason: str,
     actor_id: UUID | None,
 ) -> None:
-    """Единый каскад архивации. Идемпотентен (уже архивный → no-op)."""
+    """Единый каскад архивации. Идемпотентен (уже архивный → no-op).
+
+    Одно исключение: архивная карточка, которая по своей причине вход ДЕРЖИТ
+    (`auto_inactivity`), при удалении или переводе учётки в auth
+    (`auth_deleted`) вход отдаёт. Раньше здесь был безусловный no-op, и вход
+    оставался занят навсегда: `employee_id` уникален глобально, так что
+    человек, переведённый в другую организацию, не мог получить там карточку —
+    ни синком, ни первым входом.
+    """
     if profile.status == "archived":
+        if (
+            reason == "auth_deleted"
+            and profile.employee_id is not None
+            and profile.archive_reason not in UNBINDING_REASONS
+        ):
+            await _release_login(db, profile, reason=reason, actor_id=actor_id)
         return
     profile.status = "archived"
     profile.archived_at = datetime.now(UTC)
@@ -550,6 +564,40 @@ async def archive_profile(
     log.info("profile.archived", profile_id=str(profile.id), reason=reason)
 
 
+async def _release_login(
+    db: AsyncSession,
+    profile: EmployeeProfile,
+    *,
+    reason: str,
+    actor_id: UUID | None,
+) -> None:
+    """Архивная карточка отдаёт вход: причина меняется на освобождающую.
+
+    Каскад архивации уже прошёл при первой архивации (членства сняты,
+    автосценарии отменены), повторять его нечего.
+    """
+    old_reason = profile.archive_reason
+    profile.archive_reason = reason
+    profile.employee_id = None
+    await db.flush()
+    audit.record(
+        db,
+        tenant_id=profile.tenant_id,
+        actor_id=actor_id,
+        action="archive",
+        object_type="employee_profile",
+        object_id=profile.id,
+        object_label=profile.full_name,
+        diff={"reason": {"old": old_reason, "new": reason}},
+    )
+    log.info(
+        "profile.login_released",
+        profile_id=str(profile.id),
+        old_reason=old_reason,
+        reason=reason,
+    )
+
+
 async def restore_profile(
     db: AsyncSession,
     profile: EmployeeProfile,
@@ -575,6 +623,11 @@ async def restore_profile(
     profile.status = "active"
     profile.archived_at = None
     profile.archive_reason = None
+    # Предупреждение о неактивности — с прошлой жизни карточки. Оставленное,
+    # оно дало бы джобе неактивности повод заархивировать вернувшегося уже
+    # наутро: предупреждён давно, grace-период давно истёк. Сброс = обычный
+    # порядок с начала: сначала предупреждение, потом grace.
+    profile.inactivity_warned_at = None
     await db.flush()
     diffs = await recalc_profile(db, profile)
     await notify_new_audience_members(db, diffs)

@@ -306,17 +306,19 @@ async def _apply_tenant(
             shadow = await db.get(ShadowUser, employee_uuid)
             if shadow is not None and shadow.deleted_at is None:
                 shadow.deleted_at = now
+            # Любой статус, а не только активные: архивная карточка, которая
+            # держит вход (`auto_inactivity`), должна его отдать — это делает
+            # `archive_profile`; на активной — обычный каскад архивации.
             profile = (
                 await db.execute(
-                    select(EmployeeProfile).where(
-                        EmployeeProfile.employee_id == employee_uuid,
-                        EmployeeProfile.status == "active",
-                    )
+                    select(EmployeeProfile).where(EmployeeProfile.employee_id == employee_uuid)
                 )
             ).scalar_one_or_none()
             if profile is not None:
+                was_active = profile.status == "active"
                 await archive_profile(db, profile, reason="auth_deleted", actor_id=None)
-                report.archived += 1
+                if was_active:
+                    report.archived += 1
             continue
 
         # Учебная карточка — только людям (требование 1: сервисной учётке
