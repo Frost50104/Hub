@@ -327,3 +327,40 @@ def test_build_attrs_carries_org_role():
 
 def test_normalize_email():
     assert normalize_email("  Ivanov@Uppetit.RU ") == "ivanov@uppetit.ru"
+
+
+# --- rebuild_tenant: замок до загрузки атрибутов --------------------------------
+
+
+async def test_rebuild_tenant_locks_before_loading_attrs(monkeypatch):
+    """Атрибуты, прочитанные мимо замка, откатывали чужой свежий пересчёт.
+
+    Порядок вызовов фиксируем шпионом: интеграционные тесты гонку двух
+    транзакций детерминированно не воспроизводят.
+    """
+    from app.services import audience_resolver
+
+    calls: list[str] = []
+
+    async def fake_lock(db, tenant_id):  # noqa: ANN001, ARG001
+        calls.append("lock")
+
+    async def fake_load(db, **kw):  # noqa: ANN001, ARG001
+        calls.append("load")
+        return {}
+
+    class _Result:
+        def scalars(self):  # noqa: ANN202
+            return self
+
+        def all(self):  # noqa: ANN202
+            return []
+
+    class _Db:
+        async def execute(self, stmt):  # noqa: ANN001, ANN202, ARG002
+            return _Result()
+
+    monkeypatch.setattr(audience_resolver, "_lock_tenant", fake_lock)
+    monkeypatch.setattr(audience_resolver, "load_attrs_map", fake_load)
+    assert await audience_resolver.rebuild_tenant(_Db(), uuid4()) == {}
+    assert calls == ["lock", "load"]

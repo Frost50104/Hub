@@ -507,10 +507,16 @@ async def recalc_profile(db: AsyncSession, profile: EmployeeProfile) -> dict[UUI
 async def rebuild_tenant(db: AsyncSession, tenant_id: UUID) -> dict[UUID, MembershipDiff]:
     """Полный reconcile тенанта. Diff, не truncate.
 
-    Запускается ТОЛЬКО админ-кнопкой «Пересчитать доступы»: ночной джобы нет —
-    юнита в `ops/systemd/` не существует (прежний докстринг обещал «nightly» и
-    вводил в заблуждение).
+    Ночной джобы нет — юнита в `ops/systemd/` не существует. Зовут кнопка
+    «Пересчитать доступы», CSV-импорт, правки оргструктуры и применение реестра.
+
+    Замок — ДО загрузки атрибутов. `recalc_audience` берёт его и сам, но уже
+    с готовой картой: атрибуты, прочитанные мимо замка, могли устареть, пока
+    мы его ждали, — и пересчёт, закоммиченный в это окно (правка карточки,
+    первый вход), этот rebuild молча откатывал к прочитанному. Xact-замок
+    реентерабелен: повторный вызов в той же транзакции не ждёт.
     """
+    await _lock_tenant(db, tenant_id)
     diffs: dict[UUID, MembershipDiff] = {}
     attrs_map = await load_attrs_map(db)
     audiences = (await db.execute(select(Audience))).scalars().all()
