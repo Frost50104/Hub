@@ -334,7 +334,10 @@ async def load_tenant_rows(tenant_id: UUID) -> TenantRows:
         async def rows(model: Any) -> list[Any]:
             return list((await db.execute(select(model))).scalars().all())
 
-        result = TenantRows(
+        # Без явного rollback(): он «протухает» загруженные объекты, и после
+        # закрытия сессии их поля уже не прочитать. Транзакция только читающая —
+        # её откатит само закрытие сессии, не трогая загруженные значения.
+        return TenantRows(
             positions=await rows(Position),
             departments=await rows(Department),
             franchisees=await rows(Franchisee),
@@ -343,10 +346,6 @@ async def load_tenant_rows(tenant_id: UUID) -> TenantRows:
             tu_rows=await rows(TuStoreAssignment),
             site_ids={str(s) for s in (await db.execute(select(ShadowSite.site_id))).scalars()},
         )
-        # Без явного rollback(): он «протухает» загруженные объекты, и после
-        # закрытия сессии их поля уже не прочитать. Транзакция только читающая —
-        # её откатит само закрытие сессии, не трогая загруженные значения.
-    return result
 
 
 def foreign_rows(tenant_id: UUID, data: TenantRows) -> list[str]:
