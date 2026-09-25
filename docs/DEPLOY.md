@@ -246,6 +246,8 @@ TELEGRAM_CHAT_ID=-100123456789
 
 **Свободное место (15.09).** Тот же скрипт проверяет диск: `HEALTHCHECK_DISK_PATH` (default `/`) и `HEALTHCHECK_DISK_MIN_GB` (default 8). До этой правки проверки диска не было вовсе, и единственной защитой оставался statvfs-порог на загрузке медиа — то есть о заканчивающемся месте узнавали бы в момент, когда сотрудник уже получил отказ. Порог 8 ГБ выше порога отказа загрузки (`media_min_free_bytes` 5 ГБ + размер файла), чтобы алерт пришёл ДО того, как загрузки начнут отбиваться. Триггер краевой (состояние в `/var/lib/signaris-hub/disk.*.state`) — иначе сообщение уходило бы каждые 5 минут и его перестали бы читать. Проверка без ожидания реального заполнения: `HEALTHCHECK_DISK_MIN_GB=999 /opt/signaris-hub/scripts/healthcheck.sh` → алерт, затем обычный запуск → recovery.
 
+**Кадровые данные из auth (25.09).** Тот же скрипт читает `HEALTHCHECK_HR_URLS` (default — только прод: на staging синк штата выключен) → `GET /api/health/hr` отдаёт `{"status", "problems": [...]}` с кодами без названий организаций: `window_open` (окно каткатa открыто > 6 ч — закрыть `hr_cutover --window close`), `blocked` (предохранитель держит изменения > 1 ч — hub-admin: «Сотрудники» → «Посмотреть и применить»), `paused` (организация заморожена, но не в `HR_APPLY_TENANTS` > 1 ч), `stale` (применения не было > 1 ч). Триггер — по СМЕНЕ набора проблем (состояние в `/var/lib/signaris-hub/hr.*.state`).
+
 После правки env-файла ничего перезапускать не нужно (oneshot-сервис читает его при каждом запуске). Проверка: временно вписать несуществующий URL в `HEALTHCHECK_URLS` → через ~10 минут придёт DOWN-сообщение, после удаления — OK-сообщение.
 
 ## DNS
@@ -296,6 +298,10 @@ INTEGRATED_PRODUCTS: frozenset[str] = frozenset({"net", "sonar", "hub"})
 | `STAFF_SERVICE_KEY` | **отдельный** ключ метки hub (штат + реестр объектов): ошибка в общем ключе молча отняла бы отзыв SSO-сессий. Значение — CLAUDE.md → СЕКРЕТЫ |
 | `STAFF_SYNC_ENABLED` / `STAFF_SYNC_INTERVAL_SEC` | pull-воркер штата (0052), 15 мин; **staging=false навсегда** — VAPID общий с прод, bootstrap-залп по staging-копии подписок ушёл бы на реальные устройства |
 | `SITES_SYNC_ENABLED` | зеркало реестра объектов (0053): планировщика НЕТ, флаг гейтит живой прогон ручного `POST /api/learn/sites/sync` (false = форс dry-run) |
+| `HR_CONSUMER_ENABLED` | кадровые данные из auth (16d, 0063): читать `/org-directory`, вести заморозку, отчёт `hr_sync.report` и правило K. `true` на обоих env с 25.09 (staging инертен — синк штата выключен). **После каткатa выключатель НЕ снимает заморозку** — рычаг отката `hr_mode=shadow` в auth |
+| `HR_APPLY_TENANTS` | slug-и через запятую, где кадровые данные ПРИМЕНЯЮТСЯ; пусто = только отчёт. Каткат тенанта = добавить slug + рестарт `signaris-hub` (порядок — `docs/ARCHITECTURE.md` §«Кадровые данные из auth» и план части C) |
+| `HR_VALVE_MAX_CARDS` / `HR_VALVE_MAX_MANDATORY` / `HR_DEACTIVATION_RUNS` | предохранитель N=10 / M=20 и правило K=3 |
+| `HR_RELEASE_ON_NAME_MISMATCH` | default false: включение учётки под другим именем = тот же человек (возврат + WARN). `true` — аварийный рычаг, если в auth снова появится переиспользование отключённой учётки |
 | `SITES_SNAPSHOT_FRESH_DAYS` | свежесть снимка зеркала, фиксированные сутки (14): протухло → карточки магазинов показывают локальные поля с меткой |
 | `RACE_ENABLED` | глобальный рубильник «Гусиной гонки» (0057), default true; второй рубильник — тенантный ключ `learning_settings.race_enabled` (default false, тумблер в «Управление → Гонка»). Выключено = ручки 404, пункт меню/маршрут спрятаны, джобы выходят, данные остаются |
 | `RACE_SYNC_ENABLED` | обращения к iiko и пуши гонки (default true). **Staging=false навсегда**: креды iiko общие с продом, а Redis-DB разные — лок слота лицензии с staging проду не виден; VAPID тоже общий. На staging гонку смотрят на синтетике `scripts/race_seed_demo.py` |
@@ -304,3 +310,28 @@ INTEGRATED_PRODUCTS: frozenset[str] = frozenset({"net", "sonar", "hub"})
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY_PATH` / `VAPID_SUBJECT` | Web Push |
 | `SENTRY_DSN` | включает Sentry backend (+frontend через /api/env); пока не задан |
 | `PUBLIC_LINKS_ENABLED` | feature-flag публичных ссылок (default true) |
+
+
+## Каткат кадровых данных в auth (16d, часть C)
+
+Порядок на организацию (`signaris` первым, `uppetit` после суток без замечаний); каждый шаг — по
+слову владельца и в связке с сессией auth:
+
+1. окно каткатa — джоба с env прода, как все джобы на сервере:
+   `systemd-run --wait --pipe --uid=signaris -p EnvironmentFile=/opt/signaris-hub/.env -p WorkingDirectory=/opt/signaris-hub /opt/signaris-hub/.venv/bin/python -m app.jobs.hr_cutover --tenant X --window open`;
+2. вторая выгрузка `app.jobs.export_hr_for_auth` той же командой → файл владельцу → auth;
+3. auth: `check` + `apply` в `shadow`, отчёт с id;
+4. наш прогон (кнопка «Обновить из auth») — отчёт «0, кроме `tu_for_non_tu`»;
+5. снимок для отката: `audience_members`, кадровые колонки `employee_profiles`,
+   `tu_store_assignments`, справочники тенанта — `COPY` в файлы вне git (700/600);
+6. auth: `set_hr_mode X auth`;
+7. наш прогон: заморожен, режим «отчёт», 0 изменений;
+8. `SIGNARIS_HUB_HR_APPLY_TENANTS=X` в `.env` + `systemctl restart signaris-hub` → первый прогон
+   применения: 0 изменений (кроме ожидаемой правки ТУ);
+9. `hr_cutover --tenant X --window close` — **обязательно** (CLI печатает итог);
+10. сутки наблюдения: `journalctl -u signaris-hub | grep hr_sync`, алерты `/api/health/hr`.
+
+Откат: auth ставит `hr_mode=shadow` → следующий полный снимок снимает заморозку; убрать тенант из
+`HR_APPLY_TENANTS`; карточки, заархивированные по K, восстанавливаются обычной кнопкой; отделы,
+заархивированные auth, — в «Оргструктуре»; порча данных — сравнить со снимком шага 5. auth долго
+недоступен, а править надо — `hr_cutover --tenant X --force-unfreeze` (до следующего полного снимка).
