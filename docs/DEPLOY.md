@@ -12,7 +12,7 @@
 | Backend port | 5060 | 5059 |
 | Build команда | `npm run build:staging` | `npm run build` |
 
-**VPS:** оба окружения на одном новом VPS `94.241.168.8` (Ubuntu 24.04 LTS). Авторизация — root по паролю (пароль в локальном `Hub/CLAUDE.md` → СЕКРЕТЫ).
+**VPS:** оба окружения на одном новом VPS `94.241.168.8` (Ubuntu 24.04 LTS). Авторизация — root по ключу деплоя `~/.ssh/signaris_hub_deploy` (`SSH_KEY` в `deploy/.env`); пароль (локальный `Hub/CLAUDE.md` → СЕКРЕТЫ) — только запасной путь: с 28.09 на сервере fail2ban, повторные отказы пароля банят адрес — см. §«fail2ban (SSH)».
 
 **VAPID-ключ:** единый для двух env, лежит в `/opt/signaris-hub/vapid_private.pem` (mode 600 root:signaris).
 
@@ -249,6 +249,53 @@ TELEGRAM_CHAT_ID=-100123456789
 **Кадровые данные из auth (25.09).** Тот же скрипт читает `HEALTHCHECK_HR_URLS` (default — только прод: на staging синк штата выключен) → `GET /api/health/hr` отдаёт `{"status", "problems": [...]}` с кодами без названий организаций: `window_open` (окно каткатa открыто > 6 ч — закрыть `hr_cutover --window close`), `blocked` (предохранитель держит изменения > 1 ч — hub-admin: «Сотрудники» → «Посмотреть и применить»), `paused` (организация заморожена, но не в `HR_APPLY_TENANTS` > 1 ч), `stale` (применения не было > 1 ч). Триггер — по СМЕНЕ набора проблем (состояние в `/var/lib/signaris-hub/hr.*.state`).
 
 После правки env-файла ничего перезапускать не нужно (oneshot-сервис читает его при каждом запуске). Проверка: временно вписать несуществующий URL в `HEALTHCHECK_URLS` → через ~10 минут придёт DOWN-сообщение, после удаления — OK-сообщение.
+
+## fail2ban (SSH, 28.09)
+
+Зачем: SSH root по паролю открыт в интернет, 27.09 за сутки было 16,8 тыс. «Failed password» (7 тыс. — с одного адреса); до 28.09 не стояло ни fail2ban, ни ufw. Пакет `fail2ban` 1.0.2-3ubuntu0.1 (сборка Ubuntu, исправленная под Python 3.12), бэкенд — systemd-journal, действие — `nftables`. Защищён один jail — `sshd`.
+
+Конфиг — два файла, **оба вне git** (ставились руками):
+
+```ini
+# /etc/fail2ban/jail.d/zz-signaris.local
+[DEFAULT]
+ignoreip = 127.0.0.1/8 ::1 100.64.0.0/10 fd7a:115c:a1e0::/48
+bantime = 1h
+findtime = 10m
+maxretry = 10
+bantime.increment = true
+bantime.maxtime = 1w
+
+[sshd]
+enabled = true
+mode = normal
+
+# /etc/fail2ban/fail2ban.d/zz-signaris.local
+[Definition]
+dbpurgeage = 1w
+```
+
+Почему так:
+
+- **Тайнет (IPv4 и IPv6) не банится никогда.** Это запасной путь `deploy.sh` и вход, если публичный адрес владельца попал в бан. Публичные адреса владельца меняются и в белый список НЕ внесены.
+- **`maxretry 10`, а не 5.** Неудачная команда `sshpass` пишет в журнал две строки «Failed password» — верный пароль иногда отбивается (известно с 09.09, причина не выяснена). Ходить на сервер — ключом, тогда отказов нет вовсе.
+- **`dbpurgeage` — в секции `[Definition]`, не `[DEFAULT]`:** в `[DEFAULT]` значение молча игнорируется. Без него нарастание бана смотрело бы только на последние сутки.
+- **Конфиг кладётся ДО `apt install`:** postinst сразу поднимает jail `sshd` с настройками пакета (maxretry 5, без нашего белого списка).
+- **Проба `deploy.sh`** (`PreferredAuthentications=none`) оставляет только «Connection closed by authenticating user … [preauth]». В `mode = normal` это не отказ — проверено `fail2ban-regex`.
+- **Забаненный адрес получает REJECT,** то есть «Connection refused». Проба `deploy.sh` это видит и уходит на тайнет (`SERVER_HOST_FALLBACK`).
+
+Команды (по тайнету, ключом):
+
+```bash
+fail2ban-client status sshd                   # отказы, баны, список адресов
+fail2ban-client set sshd unbanip <ip>         # снять бан с одного адреса
+fail2ban-client get sshd ignoreip             # действующий белый список
+systemctl disable --now fail2ban              # откат: баны снимаются все сразу
+```
+
+Если закрыты и публичный адрес, и тайнет — веб-консоль Timeweb.
+
+Первые 30 секунд после включения: 24 отказа, первый бан. Новый VPS — поставить так же, `deploy/bootstrap-vps.sh` fail2ban не ставит.
 
 ## DNS
 
