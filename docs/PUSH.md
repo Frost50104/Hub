@@ -37,6 +37,8 @@
 | `task.overdue` | `status != 'done'` и `due_at < NOW()` | assignee + watchers |
 | `task.reminder` | личное напоминание «ко времени» (0062): разовое или правило от срока/старта; воркер в lifespan, раз в 20 с | только тому, кто поставил |
 
+**Удаление комментария снимает его уведомления** (`task.mentioned`, `task.commented_on_watched`) у всех получателей, прочитанные тоже — `notify.py::comment_notifications_where`: по `payload.comment_id` (с 28.09), у старых строк — парой `payload.task_id` + `created_at` (уведомления пишутся той же транзакцией, что и комментарий). Уже показанный на устройстве пуш не отзывается: воркер показывает каждый пуш без `tag`, а пуш-«отзыв» сам обязан что-то показать.
+
 ## Триггеры: learn-домен (16 kinds)
 
 Источник истины полного списка — `app/services/notification_prefs.py::NOTIFICATION_KINDS` (фронт-словарь `web/src/lib/notificationKinds.ts`, реэкспорт через `notifications.ts`, синхронен — менять парой).
