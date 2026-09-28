@@ -19,11 +19,12 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from signaris_auth import Principal
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import enforce_rate_limit, get_db_template_page, require_auth
+from app.models.notification import Notification
 from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskComment, TaskWatcher  # noqa: F401 — used below
 from app.schemas.comment import CommentCreate, CommentResponse, CommentUpdate
@@ -33,7 +34,11 @@ from app.services.mention_parser import (
     render_mentions,
     resolve_mentions,
 )
-from app.services.notify import notify_commented, notify_mentioned
+from app.services.notify import (
+    comment_notifications_where,
+    notify_commented,
+    notify_mentioned,
+)
 from app.services.personal_projects import require_task_access
 from app.services.project_access import ensure_project_member
 
@@ -252,6 +257,7 @@ async def create_comment(
         await notify_mentioned(
             db,
             task=task,
+            comment_id=comment.id,
             comment_body=shown_body,
             actor_name=actor_name,
             recipient_id=emp_id,
@@ -266,6 +272,7 @@ async def create_comment(
         await notify_commented(
             db,
             task=task,
+            comment_id=comment.id,
             comment_body=shown_body,
             actor_name=actor_name,
             recipient_id=emp_id,
@@ -335,6 +342,17 @@ async def delete_comment(
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db_template_page),
 ) -> None:
+    """Мягкое удаление + чистка уведомлений, которые комментарий родил.
+
+    Уведомления снимаются у ВСЕХ получателей, прочитанные тоже, — как при
+    удалении задачи (`tasks.py::delete_task`): строка «Входящих» с цитатой
+    удалённого текста вела в обсуждение, где его уже нет (ОС 08.09, RH-23).
+    RLS на `notifications` — только по тенанту, поэтому сессия автора видит
+    чужие строки своей организации. Уже доставленный пуш не отзывается.
+
+    Подписка и viewer-членство упомянутого остаются — то же правило, что при
+    правке упоминания (см. докстринг модуля).
+    """
     comment = await db.get(TaskComment, comment_id)
     if comment is None or comment.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Комментарий не найден")
@@ -344,4 +362,5 @@ async def delete_comment(
             detail="Удалять может только автор",
         )
     comment.deleted_at = datetime.now(UTC)
+    await db.execute(delete(Notification).where(comment_notifications_where(comment)))
     await db.commit()

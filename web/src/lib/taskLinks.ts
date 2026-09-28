@@ -84,3 +84,23 @@ export function locationWithoutTask(pathname: string, search: string): string {
   const query = params.toString()
   return query ? `${pathname}?${query}` : pathname
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Номер задачи из адреса уведомления: `/projects/{p}?task={id}`,
+ * `/my?tab=personal&task={id}`, в том числе абсолютного. Не задача — `null`.
+ *
+ * Нужен переходу из уведомления (пуш, «Входящие»): он обязан показать СВЕЖЕЕ
+ * обсуждение, а не кэш полминутной давности (ОС 08.09, RH-23). `window` не
+ * трогает — чистая функция под vitest без jsdom.
+ */
+export function taskIdFromHref(href: string | null | undefined): string | null {
+  if (!href) return null
+  const start = href.indexOf('?')
+  if (start < 0) return null
+  const hash = href.indexOf('#', start)
+  const query = href.slice(start + 1, hash < 0 ? undefined : hash)
+  const id = new URLSearchParams(query).get('task')
+  return id && UUID_RE.test(id) ? id : null
+}

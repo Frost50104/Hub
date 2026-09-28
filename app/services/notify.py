@@ -13,9 +13,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import ColumnElement, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.task import Task
+from app.models.notification import Notification
+from app.models.task import Task, TaskComment
 from app.services.notification_dispatcher import dispatch
 from app.services.ru_plural import ru_plural
 from app.services.timefmt import fmt_due
@@ -87,10 +89,20 @@ async def notify_done_changed(
     )
 
 
+# Виды, которые рождает комментарий (`comments.py::create_comment`). Их же
+# снимает удаление комментария — `comment_notifications_where`.
+COMMENT_NOTIFICATION_KINDS = ("task.mentioned", "task.commented_on_watched")
+
+
+def _comment_payload(task: Task, comment_id: UUID) -> dict[str, str]:
+    return {"task_id": str(task.id), "comment_id": str(comment_id)}
+
+
 async def notify_mentioned(
     session: AsyncSession,
     *,
     task: Task,
+    comment_id: UUID,
     comment_body: str,
     actor_name: str,
     recipient_id: UUID,
@@ -103,7 +115,7 @@ async def notify_mentioned(
         title=f"{actor_name} упомянул вас",
         body=f"«{task.title}»: {_truncate(comment_body)}",
         url=_task_url(task),
-        payload={"task_id": str(task.id)},
+        payload=_comment_payload(task, comment_id),
     )
 
 
@@ -111,6 +123,7 @@ async def notify_commented(
     session: AsyncSession,
     *,
     task: Task,
+    comment_id: UUID,
     comment_body: str,
     actor_name: str,
     recipient_id: UUID,
@@ -123,7 +136,40 @@ async def notify_commented(
         title="Новый комментарий",
         body=f"{actor_name} в «{task.title}»: {_truncate(comment_body)}",
         url=_task_url(task),
-        payload={"task_id": str(task.id)},
+        payload=_comment_payload(task, comment_id),
+    )
+
+
+def comment_notifications_where(comment: TaskComment) -> ColumnElement[bool]:
+    """Уведомления, которые родил комментарий, — их снимает его удаление.
+
+    Удалённый комментарий карточка не показывает, а строка «Входящих» с его
+    цитатой оставалась у всех получателей и вела в обсуждение, где его нет
+    (ОС 08.09, RH-23: «вижу по уведомлению два комментария, а второго нет»).
+
+    С 28.09 строка несёт `payload.comment_id`. У строк постарше его нет, и они
+    находятся парой (задача, `created_at`): уведомления пишутся той же
+    транзакцией, что и комментарий (`create_comment`, один commit), а `now()` в
+    Postgres — время начала транзакции, так что метки совпадают до микросекунды.
+    На проде 28.09 у всех 255 уведомлений о комментариях нашлась ровно одна
+    пара. Инвариант сломается, если рассылку вынесут после commit (так уже
+    устроен `notify_assigned_from_template`), — но новым строкам запасная ветка
+    не нужна.
+
+    Задача сверяется по `payload.task_id`, а не по суффиксу URL: перенос задачи
+    переписывает URL уведомлений (`task_move.py`), payload он не трогает.
+    """
+    comment_key = Notification.payload["comment_id"].astext
+    return and_(
+        Notification.kind.in_(COMMENT_NOTIFICATION_KINDS),
+        or_(
+            comment_key == str(comment.id),
+            and_(
+                comment_key.is_(None),
+                Notification.payload["task_id"].astext == str(comment.task_id),
+                Notification.created_at == comment.created_at,
+            ),
+        ),
     )
 
 

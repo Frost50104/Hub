@@ -2,6 +2,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryClient,
   type UseQueryResult,
 } from '@tanstack/react-query'
 
@@ -18,6 +19,28 @@ export const threadKeys = {
   comments: (taskId: string) => ['task', taskId, 'comments'] as const,
   watchers: (taskId: string) => ['task', taskId, 'watchers'] as const,
   activity: (taskId: string) => ['task', taskId, 'activity'] as const,
+}
+
+/**
+ * Всё, что карточка показывает ПОД задачей: обсуждение, ленту, наблюдателей,
+ * вложения, напоминания (всё под префиксом `['task', id]`).
+ *
+ * Зовётся переходом из уведомления (пуш, «Входящие»): он обязан показать
+ * свежее обсуждение, а не кэш — `staleTime` 30 с, реалтайма нет, а клик по
+ * пушу с 25.09 на уже открытой карточке страницу не перезагружает (ОС 08.09,
+ * RH-23). Деталь задачи (`['tasks', 'detail', id]` — другой префикс) НЕ
+ * трогаем: карточка пересоздаёт заголовок и описание на каждый новый объект
+ * задачи, и незаконченная правка пропала бы.
+ */
+export function invalidateTaskThread(qc: QueryClient, taskId: string): Promise<void> {
+  return qc.invalidateQueries({ queryKey: ['task', taskId] })
+}
+
+/** «💬 N» в строке списка считает сервер — своя правка не ждёт staleTime. */
+function invalidateCommentCounters(qc: QueryClient, projectId: string): void {
+  void qc.invalidateQueries({ queryKey: ['tasks', projectId] })
+  void qc.invalidateQueries({ queryKey: ['me-tasks'] })
+  void qc.invalidateQueries({ queryKey: ['me-assigned-by-me'] })
 }
 
 export function useComments(taskId: string | undefined): UseQueryResult<Comment[]> {
@@ -44,7 +67,7 @@ export function useActivity(taskId: string | undefined): UseQueryResult<Activity
   })
 }
 
-export function useCreateComment(taskId: string) {
+export function useCreateComment(taskId: string, projectId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: string) => commentsApi.create(taskId, body),
@@ -53,16 +76,20 @@ export function useCreateComment(taskId: string) {
       qc.invalidateQueries({ queryKey: threadKeys.comments(taskId) })
       qc.invalidateQueries({ queryKey: threadKeys.activity(taskId) })
       qc.invalidateQueries({ queryKey: threadKeys.watchers(taskId) })
+      invalidateCommentCounters(qc, projectId)
     },
   })
 }
 
-export function useDeleteComment(taskId: string) {
+export function useDeleteComment(taskId: string, projectId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (commentId: string) => commentsApi.remove(commentId),
     meta: { errorMessage: 'Не удалось удалить комментарий' },
-    onSuccess: () => qc.invalidateQueries({ queryKey: threadKeys.comments(taskId) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: threadKeys.comments(taskId) })
+      invalidateCommentCounters(qc, projectId)
+    },
   })
 }
 

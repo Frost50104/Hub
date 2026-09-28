@@ -967,7 +967,7 @@ export function TaskDetailDrawer({
                     Комментариев в шаблоне нет: в проекты они не переносятся.
                   </p>
                 ) : (
-                  <TaskThread taskId={task.id} />
+                  <TaskThread taskId={task.id} projectId={taskProjectId} />
                 )}
               </>
             )}

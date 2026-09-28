@@ -91,14 +91,16 @@ function ActivityRow({ text, at }: { text: string; at: string }) {
 
 interface TaskThreadProps {
   taskId: string
+  /** Проект задачи: после своего комментария обновить «💬 N» в его списке. */
+  projectId: string
 }
 
-export function TaskThread({ taskId }: TaskThreadProps) {
+export function TaskThread({ taskId, projectId }: TaskThreadProps) {
   const me = useMe()
   const comments = useComments(taskId)
   const activity = useActivity(taskId)
-  const create = useCreateComment(taskId)
-  const del = useDeleteComment(taskId)
+  const create = useCreateComment(taskId, projectId)
+  const del = useDeleteComment(taskId, projectId)
   const [draft, setDraft] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
 

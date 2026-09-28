@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { locationWithoutTask, projectLocation, taskLocation } from './taskLinks'
+import { locationWithoutTask, projectLocation, taskIdFromHref, taskLocation } from './taskLinks'
 
 describe('taskLocation', () => {
   it('личная задача открывается на «Моих задачах», на вкладке «Личные»', () => {
@@ -107,5 +107,25 @@ describe('locationWithoutTask', () => {
     expect(projectLocation({ projectId: 'w', personalProjectId: 'p', ...here })).toBe(
       locationWithoutTask(here.pathname, here.search),
     )
+  })
+})
+
+describe('taskIdFromHref', () => {
+  const id = '2f597ed8-2c25-4a04-958d-2317b87f412f'
+
+  it('адрес уведомления о задаче — её номер', () => {
+    expect(taskIdFromHref(`/projects/d29e1f2c-636e-49d8-b477-2e32feedeec2?task=${id}`)).toBe(id)
+    expect(taskIdFromHref(`/my?tab=personal&task=${id}`)).toBe(id)
+    expect(taskIdFromHref(`https://hub.signaris.ru/projects/p?task=${id}#c`)).toBe(id)
+  })
+
+  it('не задача — null', () => {
+    expect(taskIdFromHref(null)).toBeNull()
+    expect(taskIdFromHref(undefined)).toBeNull()
+    expect(taskIdFromHref('')).toBeNull()
+    expect(taskIdFromHref('/learn/courses/c1')).toBeNull()
+    expect(taskIdFromHref('/projects/p?f_assignee=e1')).toBeNull()
+    expect(taskIdFromHref('/projects/p?task=')).toBeNull()
+    expect(taskIdFromHref('/projects/p?task=../../etc')).toBeNull()
   })
 })

@@ -8,6 +8,7 @@ import {
   CheckSquare,
   MessageSquare,
 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -23,9 +24,11 @@ import {
   useNotifications,
   useUnreadCount,
 } from '@/hooks/useNotifications'
+import { invalidateTaskThread } from '@/hooks/useThreads'
 import { cn } from '@/lib/cn'
 import { inboxCounter, inboxEmpty } from '@/lib/inboxView'
 import { type Notification } from '@/lib/notifications'
+import { taskIdFromHref } from '@/lib/taskLinks'
 import { useResolvedSpace } from '@/lib/workspace'
 
 const KIND_ICON: Record<string, typeof Bell> = {
@@ -72,6 +75,16 @@ function useInbox() {
   const notifications = useNotifications(unreadOnly)
   const markAll = useMarkAllRead()
   const markOne = useMarkRead()
+  const qc = useQueryClient()
+  // Переход из уведомления обязан показать СВЕЖЕЕ обсуждение: карточка
+  // монтируется заново, но обсуждение моложе 30 с (`staleTime`) берётся из
+  // кэша, и только что пришедший комментарий в нём отсутствует (ОС 08.09).
+  // Прочитанная строка — тоже переход, поэтому инвалидация вне условия.
+  const openNotification = (n: Notification) => {
+    const taskId = taskIdFromHref(n.url)
+    if (taskId) void invalidateTaskThread(qc, taskId)
+    if (!n.is_read) markOne.mutate(n.id)
+  }
   // useMemo на данных запроса, а не на `data ?? []`: литерал даёт новую
   // ссылку каждый рендер, и группировка пересчитывалась бы вхолостую.
   const items = useMemo(() => notifications.data ?? [], [notifications.data])
@@ -86,7 +99,7 @@ function useInbox() {
   return {
     notifications,
     markAll,
-    markOne,
+    openNotification,
     items,
     unread,
     groups,
@@ -266,8 +279,16 @@ function formatRelative(iso: string): string {
 // ─── Десктоп ────────────────────────────────────────────────────────────────
 
 function DesktopInbox() {
-  const { notifications, markAll, markOne, items, unread, groups, unreadOnly, setUnreadOnly } =
-    useInbox()
+  const {
+    notifications,
+    markAll,
+    openNotification,
+    items,
+    unread,
+    groups,
+    unreadOnly,
+    setUnreadOnly,
+  } = useInbox()
 
   return (
     <div className="mx-auto flex max-w-[800px] flex-col gap-[18px] px-6 pb-10 pt-7">
@@ -317,9 +338,7 @@ function DesktopInbox() {
                     <NotificationRow
                       key={n.id}
                       notification={n}
-                      onRead={() => {
-                        if (!n.is_read) markOne.mutate(n.id)
-                      }}
+                      onRead={() => openNotification(n)}
                     />
                   ))}
                 </section>
@@ -334,8 +353,16 @@ function DesktopInbox() {
 // ─── Мобильный ──────────────────────────────────────────────────────────────
 
 function MobileInbox() {
-  const { notifications, markAll, markOne, items, unread, groups, unreadOnly, setUnreadOnly } =
-    useInbox()
+  const {
+    notifications,
+    markAll,
+    openNotification,
+    items,
+    unread,
+    groups,
+    unreadOnly,
+    setUnreadOnly,
+  } = useInbox()
   const space = useResolvedSpace()
 
   return (
@@ -388,9 +415,7 @@ function MobileInbox() {
                 <NotificationRow
                   key={n.id}
                   notification={n}
-                  onRead={() => {
-                    if (!n.is_read) markOne.mutate(n.id)
-                  }}
+                  onRead={() => openNotification(n)}
                 />
               ))}
             </section>

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from signaris_auth import Principal
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -68,11 +68,16 @@ async def mark_read(
     principal: Principal = Depends(require_auth_any()),
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    """Идемпотентно: нет строки — отвечать нечего, 204 без действий.
+
+    Строку могло убрать удаление комментария или задачи, пока у человека были
+    открыты «Входящие»; 404 здесь превращался в тост «Не удалось отметить
+    прочитанным» поверх уже случившегося перехода в задачу. Чужой id получает
+    тот же 204 и ничего не узнаёт.
+    """
     n = await db.get(Notification, notification_id)
     if n is None or n.employee_id != principal.employee_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Уведомление не найдено"
-        )
+        return
     if not n.is_read:
         n.is_read = True
         n.read_at = datetime.now(UTC)

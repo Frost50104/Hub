@@ -12,8 +12,9 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.comments import create_comment
+from app.api.comments import create_comment, delete_comment
 from app.api.dependencies import add_dependency
+from app.api.me_tasks import list_my_tasks
 from app.api.projects import create_project, get_project, list_projects
 from app.api.tasks import archive_task, create_task, get_task, list_tasks, update_task
 from app.schemas.comment import CommentCreate
@@ -77,6 +78,38 @@ async def test_row_counts_are_per_task(db: AsyncSession, tenant_id: uuid.UUID):
     # Зависимость висит на successor'е, а не на предшественнике: строка списка
     # сообщает «зависит от задачи», а не «её ждут».
     assert rows["Блокирует"].blocker_count == 0
+
+
+async def test_deleted_comment_is_not_counted(db: AsyncSession, tenant_id: uuid.UUID):
+    """ОС 08.09 (RH-23): строка списка обещала «2 комментария», а карточка
+    показывала один — второй удалил автор, и счётчик считал удалённый.
+
+    Счётчик общий для списка проекта и `/me/tasks` — проверяем оба.
+    """
+    owner, project = await _seed(db, tenant_id, "cntdel")
+    task = await create_task(
+        project.id,
+        TaskCreate(title="Обсуждение", assignee_ids=[owner.employee_id]),
+        owner,
+        db,
+    )
+    await create_comment(task.id, CommentCreate(body="Живой"), owner, db)
+    gone = await create_comment(task.id, CommentCreate(body="Удалённый"), owner, db)
+    await delete_comment(gone.id, owner, db)
+
+    rows = {t.id: t for t in await _list(db, project.id, owner)}
+    assert rows[task.id].comment_count == 1
+
+    mine = await list_my_tasks(
+        done=None,
+        status_=None,
+        due_window=None,
+        include_archived=False,
+        include_personal=True,
+        principal=owner,
+        db=db,
+    )
+    assert {t.id: t for t in mine}[task.id].comment_count == 1
 
 
 async def test_single_task_handle_leaves_counts_unknown(
