@@ -29,6 +29,21 @@ def test_xlsx_extracts_all_sheets_as_tab_rows(tmp_path: Path) -> None:
     assert all(line.strip() for line in text.splitlines())
 
 
+def test_xlsx_without_extension_extracts(tmp_path: Path) -> None:
+    """Кириллическое имя теряет точку в `_sanitize_filename`: «ЛДМО.xlsx» лежит
+    на диске как `…/v1-xlsx`. По пути openpyxl такой файл не открывал вовсе
+    («does not support  file format»), и 47 файлов прода крутились в очереди."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.active.append(["Остатки на утро", 12])
+    saved = tmp_path / "t.xlsx"
+    wb.save(saved)
+    path = saved.rename(tmp_path / "v1-xlsx")
+
+    assert "Остатки на утро\t12" in _extract_text_sync(path, _XLSX_MIME)
+
+
 def test_docx_includes_tables(tmp_path: Path) -> None:
     import docx
 

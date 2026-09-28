@@ -22,6 +22,7 @@ from pathlib import Path
 
 import structlog
 from sqlalchemy import select, text
+from sqlalchemy.sql.expression import Exists
 
 from app import log as log_config
 from app.db import tenant_scoped_session
@@ -77,23 +78,29 @@ def _extract_xlsx(path: Path) -> str:
         raise ValueError("xlsx больше 20 МБ — текст не извлекаем")
     from openpyxl import load_workbook
 
-    wb = load_workbook(path, read_only=True, data_only=True)
-    parts: list[str] = []
-    rows_left = XLSX_MAX_ROWS
-    try:
-        for ws in wb.worksheets:
-            parts.append(f"## {ws.title}")
-            for row in ws.iter_rows(values_only=True):
+    # Файл отдаём ПОТОКОМ, а не путём: по пути openpyxl требует расширение,
+    # а `_sanitize_filename` теряет точку у кириллического имени («ЛДМО.xlsx»
+    # → ключ `…/v1-xlsx`). На проде 47 таких файлов с 16.08 падали «does not
+    # support  file format» и крутились в очереди; у потока расширение не
+    # проверяется. read_only читает лениво — весь обход внутри `with`.
+    with path.open("rb") as fh:
+        wb = load_workbook(fh, read_only=True, data_only=True)
+        parts: list[str] = []
+        rows_left = XLSX_MAX_ROWS
+        try:
+            for ws in wb.worksheets:
+                parts.append(f"## {ws.title}")
+                for row in ws.iter_rows(values_only=True):
+                    if rows_left <= 0:
+                        break
+                    cells = [_cell_text(v) for v in row]
+                    if any(cells):
+                        parts.append("\t".join(cells).rstrip("\t"))
+                        rows_left -= 1
                 if rows_left <= 0:
                     break
-                cells = [_cell_text(v) for v in row]
-                if any(cells):
-                    parts.append("\t".join(cells).rstrip("\t"))
-                    rows_left -= 1
-            if rows_left <= 0:
-                break
-    finally:
-        wb.close()
+        finally:
+            wb.close()
     return "\n".join(parts)
 
 
@@ -190,11 +197,37 @@ async def _process_extraction_batch() -> int:
     return done
 
 
-async def _enqueue_backfill() -> int:
-    """Стартовый шаг: поставить джобы версиям, которые воркер ещё не извлекал
+def _version_has_job(status: str) -> Exists:
+    """Есть ли у версии джоба в этом статусе (по storage_key — как ищет воркер)."""
+    return (
+        select(TextExtractionJob.id)
+        .where(
+            TextExtractionJob.storage_key == MaterialVersion.storage_key,
+            TextExtractionJob.status == status,
+        )
+        .exists()
+    )
+
+
+async def _enqueue_backfill(*, retry_failed: bool) -> int:
+    """Поставить джобы версиям, которые воркер ещё не извлекал
     (`extracted_at IS NULL`) и у которых нет pending-джобы — бэкфилл после 0041
-    и для форматов, которые раньше падали (xlsx). Старые failed/done джобы не
-    трогаем: новая встаёт в очередь с теми же storage_key/mime."""
+    и для форматов, которые раньше падали. Старые failed/done джобы не трогаем:
+    новая встаёт в очередь с теми же storage_key/mime.
+
+    `retry_failed=True` — только при СТАРТЕ процесса (выкат или рестарт): так
+    исправление доходит до файлов, которые на старом коде падали. В цикле —
+    `False`, упавшее не переставляется. До 28.09 цикл ставил его заново каждые
+    ~90 с (три попытки → failed → новая джоба), и 47 файлов, которые не
+    открывались, накопили по 335 тыс. строк в базах прода и staging. Цена:
+    версия, упавшая из-за временного сбоя, ждёт следующего запуска воркера."""
+    conditions = [
+        MaterialVersion.extracted_at.is_(None),
+        MaterialVersion.mime.in_(EXTRACTABLE_MIMES),
+        ~_version_has_job("pending"),
+    ]
+    if not retry_failed:
+        conditions.append(~_version_has_job("failed"))
     async with tenant_scoped_session(None, bypass_rls=True) as session:
         # extracted_at штампуется ВСЕГДА (и при пустом тексте) — иначе сканы
         # без текста вставали бы в очередь при каждом старте воркера.
@@ -202,16 +235,7 @@ async def _enqueue_backfill() -> int:
             (
                 await session.execute(
                     select(MaterialVersion)
-                    .where(
-                        MaterialVersion.extracted_at.is_(None),
-                        MaterialVersion.mime.in_(EXTRACTABLE_MIMES),
-                        ~select(TextExtractionJob.id)
-                        .where(
-                            TextExtractionJob.storage_key == MaterialVersion.storage_key,
-                            TextExtractionJob.status == "pending",
-                        )
-                        .exists(),
-                    )
+                    .where(*conditions)
                     .order_by(MaterialVersion.created_at)
                     .limit(300)
                 )
@@ -233,7 +257,16 @@ async def _enqueue_backfill() -> int:
         return len(rows)
 
 
+# Провайдер без /embeddings (DeepSeek) не научится им без смены конфигурации,
+# а она требует рестарта воркера — спрашивать каждые 30 с незачем (до 28.09 это
+# давало по 2,8 тыс. ответов 404 в сутки на каждом окружении).
+_embeddings_unsupported = False
+
+
 async def _process_rag() -> None:
+    global _embeddings_unsupported
+    if _embeddings_unsupported:
+        return
     try:
         provider = get_provider()
     except LLMNotConfigured:
@@ -251,7 +284,10 @@ async def _process_rag() -> None:
                 stats = await reconcile(session, provider, limit=5)
             except LLMEmbeddingsUnsupported:
                 # Провайдер без embeddings (DeepSeek): ассистент работает
-                # через лексический retrieval, вект-индекс не строим.
+                # через лексический retrieval, вект-индекс не строим — и до
+                # рестарта воркера больше не спрашиваем.
+                _embeddings_unsupported = True
+                log.info("rag.embeddings_unsupported", embed_model=provider.embed_model)
                 return
             await session.commit()
             if stats["docs"] or stats["orphans_deleted"]:
@@ -262,7 +298,7 @@ async def main() -> None:
     log_config.configure()
     log.info("extraction.worker_started", poll_sec=POLL_SEC)
     try:
-        queued = await _enqueue_backfill()
+        queued = await _enqueue_backfill(retry_failed=True)
         if queued:
             log.info("extraction.backfill_enqueued", jobs=queued)
     except Exception as e:  # noqa: BLE001 — бэкфилл не должен ронять старт
@@ -275,7 +311,8 @@ async def main() -> None:
             else:
                 # Очередь пуста — доставить версии без извлечённого текста (бэкфилл
                 # идёт порциями по 300, чтобы не раздувать очередь разом).
-                queued = await _enqueue_backfill()
+                # Упавшее здесь не переставляется — только при старте процесса.
+                queued = await _enqueue_backfill(retry_failed=False)
                 if queued:
                     log.info("extraction.backfill_enqueued", jobs=queued)
             await _process_rag()
