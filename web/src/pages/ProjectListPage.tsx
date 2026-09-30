@@ -114,7 +114,15 @@ function ProjectRow({
                 // На телефоне hover нет — контурная звезда у каждой строки
                 // превращалась в шум (QA-0821 #2): видна только у избранных,
                 // добавить в избранное можно из шапки проекта.
-                project.is_favorite ? 'text-amber' : 'text-text2 opacity-0 hover:text-text group-hover:opacity-100 focus-visible:opacity-100',
+                // `opacity-0` прячет кнопку, но НЕ снимает её с хит-теста: 28px
+                // сразу после названия ловили тап и молча делали проект
+                // избранным (30.09). Пока звезда невидима — `pointer-events-none`,
+                // тап уходит в строку и открывает проект; hover мыши возвращает
+                // и видимость, и кликабельность разом. Клавиатуре pointer-events
+                // не помеха: Enter/Space — не указатель.
+                project.is_favorite
+                  ? 'text-amber'
+                  : 'pointer-events-none text-text2 opacity-0 hover:text-text group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:opacity-100',
               )}
             >
               <Star className={cn('h-[15px] w-[15px]', project.is_favorite && 'fill-current')} />
