@@ -62,6 +62,7 @@ import { useTheme } from '@/lib/theme'
 import { ProjectKeyChip } from '@/components/project/ProjectKeyChip'
 import { cn } from '@/lib/cn'
 import { HubRoleChip } from '@/components/layout/HubRoleChip'
+import { favoriteProjects } from '@/lib/favoriteProjects'
 import {
   groupProjectsByFolder,
   UNFILED,
@@ -317,7 +318,7 @@ function ProjectsList({
   if (!data || data.length === 0) {
     return <p className="px-3 py-1 text-xs text-text2">Нет проектов</p>
   }
-  const favorites = data.filter((p) => p.is_favorite)
+  const favorites = favoriteProjects(data)
   return (
     <>
       {favorites.length > 0 && (

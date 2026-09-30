@@ -1,4 +1,4 @@
-import { LayoutGrid } from 'lucide-react'
+import { LayoutGrid, Star } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
@@ -19,6 +19,8 @@ import { useProjects } from '@/hooks/useProjects'
 import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { capitalizeFirst } from '@/lib/dates'
+import { favoriteProjects } from '@/lib/favoriteProjects'
+import { type Project } from '@/lib/projects'
 import { taskLocation } from '@/lib/taskLinks'
 import { taskProjectLabel } from '@/lib/taskProjectLabel'
 import { type Task } from '@/lib/tasks'
@@ -237,26 +239,60 @@ function DesktopHome() {
 
 function MobilePanel({
   title,
+  icon,
   href,
   children,
 }: {
   title: string
-  href: string
+  /** Иконка перед заголовком (амбер-звезда у «Избранного», как в сайдбаре). */
+  icon?: React.ReactNode
+  /** Без адреса шапка остаётся без «Все →»: у «Избранного» показано всё, что
+   *  есть, а на `/projects` группы избранного нет — ссылка вела бы в никуда.
+   *  Высота шапки при этом та же: `min-h-11` с `-my-[11px]` даёт 22px, как
+   *  line-height заголовка. */
+  href?: string
   children: React.ReactNode
 }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-glass-border bg-tint">
       <header className="flex items-center justify-between gap-2 px-4 pb-1 pt-3.5">
-        <h2 className="text-[17px] font-semibold leading-[1.3] text-text">{title}</h2>
-        <Link
-          to={href}
-          className="-mx-2.5 -my-[11px] inline-flex min-h-11 items-center px-2.5 text-[15px] font-semibold text-text"
-        >
-          Все →
-        </Link>
+        <h2 className="inline-flex items-center gap-1.5 text-[17px] font-semibold leading-[1.3] text-text">
+          {icon}
+          {title}
+        </h2>
+        {href && (
+          <Link
+            to={href}
+            className="-mx-2.5 -my-[11px] inline-flex min-h-11 items-center px-2.5 text-[15px] font-semibold text-text"
+          >
+            Все →
+          </Link>
+        )}
       </header>
       {children}
     </section>
+  )
+}
+
+/** Строка проекта в карточках «Избранное» и «Проекты» — одна на оба блока. */
+function MobileProjectRow({ project }: { project: Project }) {
+  return (
+    <li>
+      <Link
+        to={`/projects/${project.id}`}
+        className="flex min-h-14 items-center gap-3 px-4 py-2 active:bg-glass"
+      >
+        <ProjectKeyChip project={project} />
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="truncate text-[16px] font-medium leading-[1.3] text-text">
+            {project.name}
+          </span>
+          <span className="truncate text-[13px] leading-[1.35] text-text2">
+            {projectMeta(project) ?? project.key}
+          </span>
+        </span>
+      </Link>
+    </li>
   )
 }
 
@@ -264,6 +300,10 @@ function MobileHome() {
   const { greetingText, projects, myTasks, toggleDone, openTask, projectLabel } =
     useHomeData('upcoming')
   const recentProjects = (projects.data ?? []).slice(0, 6)
+  // Избранное — только на телефоне: на десктопе оно живёт в сайдбаре, а
+  // сайдбара ниже 1024px нет, и до 30.09 избранное на телефоне не было собрано
+  // нигде. Порядок и отбор — общий с сайдбаром хелпер.
+  const favorites = favoriteProjects(projects.data)
   const tasks = (myTasks.data ?? []).slice(0, 5)
 
   return (
@@ -318,6 +358,27 @@ function MobileHome() {
           )}
         </MobilePanel>
 
+        {/* Без избранных блока нет (решение владельца 30.09, прецедент
+            сайдбара): у большинства сотрудников избранного нет, а постоянная
+            пустая карточка сдвигала бы «Проекты» — единственный вход в
+            `/projects` с телефона. Гейт `isSuccess`, а не `data`: при упавшем
+            рефетче TanStack v5 держит старые данные с `isError`, и блок из
+            протухшего кэша стоял бы рядом с ошибкой в «Проектах». Своих
+            веток загрузки/ошибки у блока нет — их несёт «Проекты» ниже.
+            Избранный проект остаётся и в «Проектах», как в сайдбаре. */}
+        {projects.isSuccess && favorites.length > 0 && (
+          <MobilePanel
+            title="Избранное"
+            icon={<Star className="h-4 w-4 fill-amber text-amber" aria-hidden />}
+          >
+            <ul className="pb-1.5">
+              {favorites.map((p) => (
+                <MobileProjectRow key={p.id} project={p} />
+              ))}
+            </ul>
+          </MobilePanel>
+        )}
+
         <MobilePanel title="Проекты" href="/projects">
           {projects.isLoading ? (
             <SkeletonRows rows={3} className="p-4" />
@@ -335,22 +396,7 @@ function MobileHome() {
           ) : (
             <ul className="pb-1.5">
               {recentProjects.map((p) => (
-                <li key={p.id}>
-                  <Link
-                    to={`/projects/${p.id}`}
-                    className="flex min-h-14 items-center gap-3 px-4 py-2 active:bg-glass"
-                  >
-                    <ProjectKeyChip project={p} />
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="truncate text-[16px] font-medium leading-[1.3] text-text">
-                        {p.name}
-                      </span>
-                      <span className="truncate text-[13px] leading-[1.35] text-text2">
-                        {projectMeta(p) ?? p.key}
-                      </span>
-                    </span>
-                  </Link>
-                </li>
+                <MobileProjectRow key={p.id} project={p} />
               ))}
             </ul>
           )}
