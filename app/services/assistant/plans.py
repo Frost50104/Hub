@@ -29,6 +29,7 @@ from app.models.ai import AiPlan
 from app.schemas.comment import COMMENT_MAX_LENGTH
 from app.services.assistant.context import ToolContext
 from app.services.audit import record as audit_record
+from app.services.task_links import task_url
 
 # План живёт полчаса: за это время мир вокруг него ещё узнаваем. Права всё
 # равно перепроверяются, но исполнять вчерашнее предложение бессмысленно.
@@ -103,6 +104,8 @@ async def _exec_create_task(
 
     project_id = UUID(args["project_id"])
     due = args.get("due_at")
+    # Проект — ДО ручки: после её commit к базе не обращаемся (см. `execute`).
+    project = await db.get(Project, project_id)
     created = await api_create_task(
         project_id=project_id,
         body=TaskCreate(
@@ -115,11 +118,10 @@ async def _exec_create_task(
         principal=principal,
         db=db,
     )
-    project = await db.get(Project, project_id)
     key = f"{project.key}-{created.seq}" if project else str(created.seq)
     return {
         "text": f"Создана {key}",
-        "url": f"/projects/{project_id}?task={created.id}",
+        "url": task_url(project_id, created.id),
         "link_text": "Открыть задачу →",
     }
 
@@ -163,20 +165,26 @@ async def _exec_add_comment(
     db: AsyncSession, principal: Principal, args: dict[str, Any]
 ) -> dict[str, Any]:
     from app.api.comments import create_comment as api_create_comment
+    from app.models.task import Task
     from app.schemas.comment import CommentCreate
 
     task_id = UUID(args["task_id"])
+    # Задача — ДО ручки: ручка возьмёт этот же объект из identity map, а после
+    # её commit к базе не обращаемся (см. `execute`). Проект — на момент
+    # исполнения: план живёт 30 минут, задачу за это время могли перенести.
+    task = await db.get(Task, task_id)
     await api_create_comment(
         task_id=task_id,
         body=CommentCreate(body=args["text"]),
         principal=principal,
         db=db,
     )
-    return {
-        "text": "Комментарий добавлен",
-        "url": f"/tasks/{task_id}",
-        "link_text": "Открыть задачу →",
-    }
+    out: dict[str, Any] = {"text": "Комментарий добавлен"}
+    if task is not None:  # удалённую задачу ручка уже отвергла 404
+        # До 28.09 здесь был `/tasks/{id}` — маршрута нет, ссылка вела на главную.
+        out["url"] = task_url(task.project_id, task.id)
+        out["link_text"] = "Открыть задачу →"
+    return out
 
 
 EXECUTORS = {
@@ -209,6 +217,9 @@ async def execute(db: AsyncSession, plan: AiPlan, principal: Principal) -> AiPla
     # (MissingGreenlet). Ловилось тестом на перепроверку прав.
     plan_id, tenant_id, tool = plan.id, plan.tenant_id, plan.tool
 
+    # Исполнители НЕ обращаются к базе после commit ручки API: сбой в этом окне
+    # дал бы 500 при уже записанном действии и плане в `pending`, и повторное
+    # «Выполнить» задвоило бы задачу или комментарий.
     try:
         result = await executor(db, principal, plan.args)
     except HTTPException as e:

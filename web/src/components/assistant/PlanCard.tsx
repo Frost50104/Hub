@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
+import { isTrackerQueryKey } from '@/lib/trackerCache'
 import { assistantApi, type Plan } from '@/lib/assistant'
 
 /**
@@ -82,19 +83,30 @@ export function PlanCard({
 }) {
   const qc = useQueryClient()
   const [editing, setEditing] = useState(false)
-  const invalidate = () =>
-    void qc.invalidateQueries({ queryKey: ['assistant-messages', conversationId] })
+  // Промис журнала ВОЗВРАЩАЕТСЯ из колбэка мутации: TanStack ждёт его до
+  // смены статуса, и `busy` не гаснет раньше, чем карточка узнает итог. Без
+  // этого кнопки на мгновение снова оживали, и второй клик получал 409.
+  const refreshJournal = () =>
+    qc.invalidateQueries({ queryKey: ['assistant-messages', conversationId] })
 
   const execute = useMutation({
     mutationFn: () => assistantApi.executePlan(plan.id),
     meta: { suppressGlobalError: true },
-    onSuccess: invalidate,
     onError: (e) =>
       toast.error('Не удалось выполнить', { description: extractErrorDetail(e) }),
+    // И на ошибке: план уже помечен «не выполнен», а массовая правка могла
+    // успеть применить часть задач (каждая коммитится отдельно). Трекер —
+    // без ожидания: на этой странице карточек задач нет, запросы неактивны.
+    onSettled: () => {
+      void qc.invalidateQueries({ predicate: (q) => isTrackerQueryKey(q.queryKey) })
+      return refreshJournal()
+    },
   })
+  // На ошибке тоже: план могли выполнить в другой вкладке, и карточка обязана
+  // показать настоящий статус, а не висеть «ждёт» с кнопками.
   const reject = useMutation({
     mutationFn: () => assistantApi.rejectPlan(plan.id),
-    onSuccess: invalidate,
+    onSettled: refreshJournal,
   })
 
   const pending = plan.status === 'pending'

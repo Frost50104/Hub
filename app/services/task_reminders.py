@@ -50,6 +50,7 @@ from app.models.shadow import ShadowUser
 from app.models.task import Task, TaskAssignee, TaskReminder, TaskWatcher
 from app.services.notify_batch import queue_many
 from app.services.push_sender import send_to_employee
+from app.services.task_links import task_url
 from app.services.taskdates import at_local, due_day
 from app.services.timefmt import fmt_when
 
@@ -527,7 +528,7 @@ async def _process(
         kind=KIND,
         title="Напоминание",
         body=body,
-        url=f"/projects/{task.project_id}?task={r.task_id}",
+        url=task_url(task.project_id, r.task_id),
         payload={
             "task_id": str(r.task_id),
             "anchor": r.anchor,

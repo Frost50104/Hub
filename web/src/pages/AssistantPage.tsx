@@ -29,6 +29,7 @@ import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMe } from '@/hooks/useMe'
 import { cn } from '@/lib/cn'
 import { extractErrorDetail } from '@/lib/errors'
+import { isTrackerQueryKey } from '@/lib/trackerCache'
 import { plural } from '@/lib/typography'
 import {
   assistantApi,
@@ -202,6 +203,11 @@ export function AssistantPage() {
       setPending(null)
       void qc.invalidateQueries({ queryKey: ['assistant-messages', turn.conversation_id] })
       void qc.invalidateQueries({ queryKey: ['assistant-conversations'] })
+      // Правку ОДНОЙ задачи ассистент выполняет прямо в ответе, без плана, и
+      // признака «была запись» ответ не несёт. Перечитываем трекер после
+      // каждого ответа: на этой странице из его корней активен только список
+      // проектов сайдбара — один запрос, а вопросов на проде 5–44 в неделю.
+      void qc.invalidateQueries({ predicate: (q) => isTrackerQueryKey(q.queryKey) })
     },
     onError: (e) => {
       setPending(null)

@@ -20,11 +20,12 @@ from app.models.notification import Notification
 from app.models.task import Task, TaskComment
 from app.services.notification_dispatcher import dispatch
 from app.services.ru_plural import ru_plural
+from app.services.task_links import task_url
 from app.services.timefmt import fmt_due
 
 
 def _task_url(task: Task) -> str:
-    return f"/projects/{task.project_id}?task={task.id}"
+    return task_url(task.project_id, task.id)
 
 
 def _truncate(text: str, n: int = 80) -> str:

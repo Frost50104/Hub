@@ -18,6 +18,7 @@ import {
   type TaskUpdateBody,
 } from '@/lib/tasks'
 import type { TimelineResponse } from '@/lib/timeline'
+import { isTrackerQueryKey } from '@/lib/trackerCache'
 
 export const taskKeys = {
   all: ['tasks'] as const,
@@ -79,32 +80,6 @@ export type UpdateVars = TaskUpdateBody & {
   __optimistic?: Partial<Task>
 }
 
-/**
- * Корни кэша трекера, которые задевает переезд задачи.
- *
- * Перечислять ключи по одному тут нельзя: переезд меняет ДВА проекта разом и
- * трогает десять корней — списки и карточку (`tasks`), ленту, комментарии и
- * наблюдателей (`task`), счётчики проектов, колонки, метки, кастом-поля,
- * зависимости, «Мои задачи», статистику «Главной» и хронологию. Забытый корень
- * оставит экран со старыми данными, и выглядеть это будет как «перенос не
- * сработал», хотя сервер отработал.
- */
-const MOVE_TOUCHES = [
-  'tasks',
-  'task',
-  'projects',
-  'stages',
-  'labels',
-  'custom-fields',
-  'dependencies',
-  'me-tasks',
-  'me-stats',
-  'timeline',
-  // Переезд задачи между проектами меняет и «Назначенные мной»: вкладка
-  // кросс-проектная, но её выборка зависит от проекта задачи (архив, личное).
-  'me-assigned-by-me',
-]
-
 /** Перенос задачи в другой проект. Оптимистики нет сознательно: переезд меняет
  *  номер, колонку, метки и значения полей — угадать результат нечем, а
  *  соврать на секунду тут дороже, чем подождать ответ. */
@@ -113,10 +88,10 @@ export function useMoveTask() {
   return useMutation({
     mutationFn: ({ id, ...body }: MoveVars) => tasksApi.move(id, body),
     meta: { errorMessage: 'Не удалось перенести задачу' },
+    // Переезд меняет два проекта разом — перечитываем весь трекер
+    // (`lib/trackerCache.ts`), а не перечисляем ключи по одному.
     onSuccess: () => {
-      qc.invalidateQueries({
-        predicate: (q) => MOVE_TOUCHES.includes(String(q.queryKey[0])),
-      })
+      qc.invalidateQueries({ predicate: (q) => isTrackerQueryKey(q.queryKey) })
     },
   })
 }

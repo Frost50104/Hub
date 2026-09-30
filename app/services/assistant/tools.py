@@ -46,6 +46,7 @@ from app.services.task_assignees import (
     is_task_assignee,
     load_assignees,
 )
+from app.services.task_links import task_url
 from app.services.taskdates import (
     at_local,
     due_day,
@@ -249,7 +250,7 @@ async def serialize_task(ctx: ToolContext, task: Task, project_key: str) -> dict
         "assignees": [a.full_name or a.email or "—" for a in assignees],
         "due": fmt_due(task.due_at, task.due_has_time),
         "overdue_days": overdue_days or None,
-        "url": f"/projects/{task.project_id}?task={task.id}",
+        "url": task_url(task.project_id, task.id),
     }
 
 
@@ -667,7 +668,7 @@ async def t_update_task(ctx: ToolContext, a: UpdateTaskArgs) -> dict[str, Any]:
         "done": updated.done,
         "priority": PRIORITY_RU[updated.priority],
         "due": fmt_due(updated.due_at, updated.due_has_time),
-        "url": f"/projects/{updated.project_id}?task={updated.id}",
+        "url": task_url(updated.project_id, updated.id),
     }
 
 

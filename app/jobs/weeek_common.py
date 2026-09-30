@@ -15,6 +15,8 @@ import re
 from collections.abc import Sequence
 from uuid import UUID, uuid5
 
+from app.services.task_links import task_url
+
 # Сгенерирован один раз и прибит гвоздями: поменять его — значит потерять
 # связь со всем, что уже перенесено.
 WEEEK_NS = UUID("d3f2d640-0c0f-4b97-a33d-8664b5e61830")
@@ -122,7 +124,7 @@ def notes_for(row: dict, tenant_id: UUID) -> tuple[str | None, str | None]:
                 if ref["kind"] == "cross_project"
                 else "В WEEEK была подзадачей задачи"
             )
-            parent_note = f"{prefix} «{title}» — [открыть](/projects/{project}?task={target})."
+            parent_note = f"{prefix} «{title}» — [открыть]({task_url(project, target)})."
     names = row.get("attachment_names_only") or []
     attachments_note = f"Вложения в WEEEK: {', '.join(names)}." if names else None
     return parent_note, attachments_note

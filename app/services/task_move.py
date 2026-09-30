@@ -48,6 +48,7 @@ from app.services.custom_field_validator import CustomFieldValueError, validate
 from app.services.project_access import ensure_project_member
 from app.services.projects import assert_project_accepts_tasks
 from app.services.stages import get_stage_in_project, next_position
+from app.services.task_links import task_url
 from app.services.tasks import allocate_task_seq
 
 # Значения `select`/`multi_select` хранятся id'шниками опций, а id у одноимённых
@@ -601,7 +602,7 @@ async def apply_move(
         await db.execute(
             update(Notification)
             .where(Notification.url.like(f"%task={task.id}"))
-            .values(url=f"/projects/{target.id}?task={task.id}")
+            .values(url=task_url(target.id, task.id))
         )
 
     # Публичная ссылка выдавалась задаче на её прежнем месте: `_build_task_view`

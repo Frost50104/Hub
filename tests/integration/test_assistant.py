@@ -17,26 +17,29 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.projects import create_project
-from app.api.tasks import create_task
+from app.api.tasks import create_task, move_task
 from app.models.ai import AiPlan
 from app.models.project import ProjectMember
-from app.models.task import Task
+from app.models.task import Task, TaskComment
 from app.schemas.project import ProjectCreate
-from app.schemas.task import TaskCreate
+from app.schemas.task import TaskCreate, TaskMoveRequest
 from app.services.assistant import plans as plan_service
 from app.services.assistant.context import Ambiguous, NotFound, ToolContext
 from app.services.assistant.tools import (
+    CommentArgs,
     CreateTaskArgs,
     SearchTasksArgs,
     TaskRefArgs,
     UpdateTaskArgs,
     parse_due,
+    t_add_comment,
     t_create_task,
     t_search_tasks,
     t_update_task,
 )
 from tests.integration.conftest import make_principal
 from tests.integration.test_project_access import _add_member, _register
+from tests.integration.test_task_move import _pair
 
 pytestmark = pytest.mark.integration
 
@@ -170,7 +173,7 @@ async def test_update_single_task_is_immediate(db: AsyncSession, tenant_id: uuid
 # ─── Жизненный цикл плана ───────────────────────────────────────────────────
 
 
-async def _make_plan(db: AsyncSession, tenant_id, owner, project) -> AiPlan:
+async def _save_plan(db: AsyncSession, tenant_id, owner, proposal) -> AiPlan:
     from app.models.ai import AiConversation
 
     conversation = AiConversation(
@@ -181,12 +184,6 @@ async def _make_plan(db: AsyncSession, tenant_id, owner, project) -> AiPlan:
     )
     db.add(conversation)
     await db.flush()
-    proposal = (
-        await t_create_task(
-            _ctx(db, owner),
-            CreateTaskArgs(project=project.name, title="Из плана", priority="urgent"),
-        )
-    )["__plan__"]
     plan = plan_service.create(
         db,
         tenant_id=tenant_id,
@@ -196,6 +193,16 @@ async def _make_plan(db: AsyncSession, tenant_id, owner, project) -> AiPlan:
     )
     await db.commit()
     return plan
+
+
+async def _make_plan(db: AsyncSession, tenant_id, owner, project) -> AiPlan:
+    proposal = (
+        await t_create_task(
+            _ctx(db, owner),
+            CreateTaskArgs(project=project.name, title="Из плана", priority="urgent"),
+        )
+    )["__plan__"]
+    return await _save_plan(db, tenant_id, owner, proposal)
 
 
 async def test_plan_executes_exactly_once(db: AsyncSession, tenant_id: uuid.UUID):
@@ -211,6 +218,7 @@ async def test_plan_executes_exactly_once(db: AsyncSession, tenant_id: uuid.UUID
     ).scalars().all()
     assert len(tasks) == 1
     assert tasks[0].priority == "urgent"
+    assert done.result["url"] == f"/projects/{project.id}?task={tasks[0].id}"
 
     # Повторное нажатие «Выполнить» второй задачи не создаёт.
     with pytest.raises(plan_service.PlanError):
@@ -219,6 +227,49 @@ async def test_plan_executes_exactly_once(db: AsyncSession, tenant_id: uuid.UUID
         await db.execute(select(Task).where(Task.project_id == project.id))
     ).scalars().all()
     assert len(tasks_after) == 1
+
+
+async def test_add_comment_plan_links_to_task_card(db: AsyncSession, tenant_id: uuid.UUID):
+    """До 28.09 ссылка результата вела на `/tasks/{id}` — маршрута у фронта нет,
+    и «Открыть задачу →» уводила на главную."""
+    owner, project = await _seed(db, tenant_id, "acom1")
+    task = await create_task(project.id, TaskCreate(title="Обсудить"), owner, db)
+    proposal = (
+        await t_add_comment(
+            _ctx(db, owner),
+            CommentArgs(task=f"{project.key}-{task.seq}", text="Из плана"),
+        )
+    )["__plan__"]
+    plan = await _save_plan(db, tenant_id, owner, proposal)
+
+    done = await plan_service.execute(db, plan, owner)
+
+    assert done.status == "done"
+    assert done.result["url"] == f"/projects/{project.id}?task={task.id}"
+    bodies = (
+        await db.execute(select(TaskComment.body).where(TaskComment.task_id == task.id))
+    ).scalars().all()
+    assert bodies == ["Из плана"]
+
+
+async def test_add_comment_plan_links_to_project_at_execution(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """План живёт 30 минут: если задачу за это время перенесли, ссылка обязана
+    вести в НОВЫЙ проект — проект берётся при исполнении, а не при сборке."""
+    owner, source, target = await _pair(db, tenant_id, "acmv")
+    task = await create_task(source.id, TaskCreate(title="Переедет"), owner, db)
+    await db.commit()
+    proposal = (
+        await t_add_comment(_ctx(db, owner), CommentArgs(task=str(task.id), text="После"))
+    )["__plan__"]
+    plan = await _save_plan(db, tenant_id, owner, proposal)
+    await move_task(task.id, TaskMoveRequest(project_id=target.id), owner, db)
+
+    done = await plan_service.execute(db, plan, owner)
+
+    assert done.status == "done"
+    assert done.result["url"] == f"/projects/{target.id}?task={task.id}"
 
 
 async def test_expired_plan_is_refused(db: AsyncSession, tenant_id: uuid.UUID):
