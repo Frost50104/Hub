@@ -1,10 +1,10 @@
 import { useState } from 'react'
 
 import { QueryError } from '@/components/QueryError'
-import { MiniBarChart } from '@/components/ui/MiniBarChart'
 import { SegmentGroup, type SegmentOption } from '@/components/ui/SegmentGroup'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { StatTile } from '@/components/ui/StatTile'
+import { TrendChart } from '@/components/ui/TrendChart'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useMyStats } from '@/hooks/useMyStats'
 import { homeStatsView, type HomePeriod } from '@/lib/homeStats'
@@ -62,7 +62,7 @@ export function UserStatsCard({ className }: { className?: string }) {
       {isLoading && (
         <div className="flex flex-col gap-3">
           <Skeleton className="h-[74px]" />
-          <Skeleton className="h-[104px]" />
+          <Skeleton className="h-[180px]" />
         </div>
       )}
 
@@ -109,18 +109,16 @@ export function UserStatsCard({ className }: { className?: string }) {
             // Блок не схлопываем: форма экрана не должна прыгать от того,
             // была ли у человека закрытая задача.
             <p className="text-[14px] text-text2">
-              За этот период вы ещё ничего не закрыли.
+              За этот период вы ничего не закрывали и не заводили.
             </p>
           ) : (
-            <MiniBarChart
+            <TrendChart
               points={view.points}
-              // 104 / 88 — шкала самого компонента (её же держит дашборд).
-              height={isDesktop ? 104 : 88}
-              // На семи точках `flex-1` раздувает столбик до 44px — вместо
-              // динамики получается одна плашка. Тридцати точкам потолок не
-              // нужен, они и так узкие.
-              maxBarWidth={period === 7 ? 26 : undefined}
-              maxLabel={view.maxLabel}
+              max={view.max}
+              height={isDesktop ? 140 : 96}
+              // Семи точкам нужен потолок ширины столбика, иначе плашки;
+              // тридцать и так узкие.
+              maxBarW={period === 7 ? 20 : 14}
               startLabel={view.startLabel}
               endLabel={view.endLabel}
             />

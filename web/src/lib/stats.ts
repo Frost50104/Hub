@@ -2,7 +2,11 @@ import { api } from './api'
 
 export interface TrendPoint {
   day: string // YYYY-MM-DD
+  /** Выполнено за день (имя историческое). */
   count: number
+  /** Заведено за день — только у `/me/stats` (01.10). Optional: кэш старого
+   *  ответа и фикстуры стенда поля не несут. */
+  created?: number
 }
 
 export interface WorkloadEntry {
@@ -69,8 +73,34 @@ export interface MyStats {
   daily: TrendPoint[]
 }
 
+/** Строка колонки «Команды за 30 дней». Почты нет намеренно: фото — по id. */
+export interface Leader {
+  employee_id: string
+  full_name: string
+  count: number
+  rank: number
+}
+
+export interface LeaderMe {
+  rank: number
+  count: number
+}
+
+/**
+ * «Команда за 30 дней» на «Главной»: три колонки по организации, топ-3 в
+ * каждой и моё место, если я вне тройки (`null` — ноль).
+ */
+export interface Leaders {
+  window_days: number
+  completed: Leader[]
+  created: Leader[]
+  overdue: Leader[]
+  me: { completed: LeaderMe | null; created: LeaderMe | null; overdue: LeaderMe | null }
+}
+
 export const statsApi = {
   forProject: (projectId: string): Promise<ProjectStats> =>
     api.get<ProjectStats>(`/projects/${projectId}/stats`).then((r) => r.data),
   forMe: (): Promise<MyStats> => api.get<MyStats>('/me/stats').then((r) => r.data),
+  leaders: (): Promise<Leaders> => api.get<Leaders>('/stats/leaders').then((r) => r.data),
 }

@@ -6,6 +6,7 @@ import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
 import { MobilePageHeader } from '@/components/layout/MobilePageHeader'
 import { SpaceSwitcher } from '@/components/layout/SpaceSwitcher'
 import { ProjectKeyChip, projectMeta } from '@/components/project/ProjectKeyChip'
+import { TeamLeadersCard } from '@/components/home/TeamLeadersCard'
 import { UserStatsCard } from '@/components/home/UserStatsCard'
 import { PushPermissionPrompt } from '@/components/PushPermissionPrompt'
 import { QueryError } from '@/components/QueryError'
@@ -152,6 +153,7 @@ function DesktopHome() {
       </header>
 
       <UserStatsCard />
+      <TeamLeadersCard />
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
         <Panel title="Мои задачи" href="/my">
@@ -331,6 +333,7 @@ function MobileHome() {
         <PushPermissionPrompt />
 
         <UserStatsCard />
+        <TeamLeadersCard />
 
         <MobilePanel title="Недавние" href="/my">
           {myTasks.isLoading ? (

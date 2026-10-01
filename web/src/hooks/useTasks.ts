@@ -170,6 +170,8 @@ export function useUpdateTask(projectId: string) {
       // «Ваша статистика» на «Главной» считается на сервере — своей
       // оптимистики у неё нет, только пересчёт.
       qc.invalidateQueries({ queryKey: ['me-stats'] })
+      // «Команда за 30 дней»: свои цифры в топе — сразу, чужие протухают сами.
+      qc.invalidateQueries({ queryKey: ['leaders'] })
       qc.invalidateQueries({ queryKey: taskKeys.detail(vars.id) })
       qc.invalidateQueries({ queryKey: ['task', vars.id, 'activity'] })
       qc.invalidateQueries({ queryKey: ['timeline', projectId] })

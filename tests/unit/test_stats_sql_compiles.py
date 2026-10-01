@@ -15,7 +15,15 @@ from datetime import UTC, datetime
 
 from sqlalchemy.dialects import postgresql
 
-from app.api.stats import my_counters_stmt, my_created_stmt, my_daily_stmt
+from app.api.stats import (
+    leaders_completed_stmt,
+    leaders_created_stmt,
+    leaders_overdue_stmt,
+    my_counters_stmt,
+    my_created_stmt,
+    my_daily_created_stmt,
+    my_daily_stmt,
+)
 
 NOW = datetime(2026, 8, 25, 18, 0, tzinfo=UTC)
 EMPLOYEE = uuid.UUID("79c92fc0-3b0c-46ed-83a0-d40c53d660e3")
@@ -80,3 +88,53 @@ def test_my_created_excludes_template_copies():
     sql = _sql(my_created_stmt(EMPLOYEE, NOW))
     assert "tasks.template_copy IS false" in sql
     assert "tasks.recurrence_parent_id IS NULL" in sql
+
+
+def test_my_daily_created_compiles_like_daily():
+    """Второй ряд графика (01.10): та же сетка суток и те же исключения, что у
+    счётчика «создано» — иначе сумма ряда разойдётся с плиткой."""
+    sql = _sql(my_daily_created_stmt(EMPLOYEE, NOW))
+    assert "timezone" in sql
+    assert "date_trunc" in sql
+    assert "created_by" in sql
+    assert "tasks.template_copy IS false" in sql
+    assert "tasks.recurrence_parent_id IS NULL" in sql
+    assert sql.count(">=") >= 1 and sql.count("<") >= 1
+
+
+def test_leaders_exclude_personal_and_service_everywhere():
+    """Тенантный рейтинг (01.10): RLS прячет шаблоны, но не личные пространства
+    и не кассы — каждый из трёх запросов обязан исключать их сам."""
+    for stmt in (
+        leaders_completed_stmt(NOW),
+        leaders_created_stmt(NOW),
+        leaders_overdue_stmt(NOW),
+    ):
+        sql = _sql(stmt)
+        assert "projects.personal_owner_id IS NULL" in sql
+        assert "shadow_users.deleted_at IS NULL" in sql
+        assert "shadow_users.account_kind IS DISTINCT FROM" in sql
+        assert "GROUP BY" in sql
+
+
+def test_leaders_populations_differ():
+    """«Выполнили»/«Просрочено» — по исполнителю (фан-аут задуман), «Создали» —
+    по автору без джойна исполнителей: общий запрос размножил бы автора."""
+    assert "JOIN task_assignees" in _sql(leaders_completed_stmt(NOW))
+    assert "JOIN task_assignees" in _sql(leaders_overdue_stmt(NOW))
+    created = _sql(leaders_created_stmt(NOW))
+    assert "JOIN task_assignees" not in created
+    assert "tasks.created_by" in created
+    assert "tasks.template_copy IS false" in created
+    assert "tasks.recurrence_parent_id IS NULL" in created
+
+
+def test_leaders_archive_filter_only_on_overdue():
+    """Две истории считают архивные проекты как есть, состояние «сейчас» — нет
+    (половинчатое правило `_mine`, перенесённое на команду)."""
+    assert "projects.archived_at IS NULL" not in _sql(leaders_completed_stmt(NOW))
+    assert "projects.archived_at IS NULL" not in _sql(leaders_created_stmt(NOW))
+    overdue = _sql(leaders_overdue_stmt(NOW))
+    assert overdue.count("projects.archived_at IS NULL") == 1
+    assert "tasks.done IS false" in overdue
+

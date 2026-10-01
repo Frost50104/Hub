@@ -51,12 +51,14 @@ from app.models.task import Task, TaskAssignee
 from app.services.personal_projects import (
     assert_full_project_access,
     my_task_scope,
+    not_personal,
 )
 from app.services.project_access import require_project_role
 from app.services.projects import project_not_archived
 from app.services.task_assignees import has_no_assignees
 from app.services.taskdates import (
     display_today,
+    overdue_clause,
     start_of_today_utc,
     start_of_tomorrow_utc,
     start_of_window_utc,
@@ -70,6 +72,11 @@ _WORKLOAD_TOP = 10
 # Личная статистика на «Главной»: длинное окно и короткое.
 _MY_DAYS = 30
 _MY_SHORT_DAYS = 7
+
+# «Команда за 30 дней» на «Главной»: окно одно (владелец, 01.10), в ответе
+# `window_days` — задел на выбор периода; строк в колонке — три.
+_LEADERS_DAYS = 30
+_LEADERS_TOP = 3
 
 
 class TrendPoint(BaseModel):
@@ -484,7 +491,18 @@ class MyStatsResponse(BaseModel):
     # Состояние на сейчас, от периода НЕ зависит — фронт подписывает отдельно.
     overdue_now: int
     open_now: int
-    daily: list[TrendPoint]
+    daily: list[MyTrendPoint]
+
+
+class MyTrendPoint(TrendPoint):
+    """Точка ряда «Главной»: `count` — выполнено (имя историческое, старые
+    бандлы читают его), `created` — заведено за тот же день (01.10).
+
+    Подкласс, а не поле в `TrendPoint`: тот общий с `completed_trend` дашборда
+    проекта, и бессмысленный ноль утёк бы туда.
+    """
+
+    created: int = 0
 
 
 def _mine(employee_id: UUID):
@@ -650,6 +668,32 @@ def my_daily_stmt(employee_id: UUID, now: datetime):
     )
 
 
+def my_daily_created_stmt(employee_id: UUID, now: datetime):
+    """Заведённые мной по дням — второй ряд графика (01.10).
+
+    Та же сетка суток в display tz, что у `my_daily_stmt` (иначе столбик
+    «создано» уезжал бы на день от «выполнено» в той же точке), и те же
+    исключения, что у `my_created_stmt`: копии повторов и шаблонов не
+    «создавал руками». Сумма ряда обязана равняться `created_30`.
+    """
+    tz = bindparam("tz", get_settings().display_timezone, type_=String)
+    local_day = func.date_trunc("day", func.timezone(tz, Task.created_at))
+    return (
+        select(local_day.label("day"), func.count(Task.id))
+        .select_from(Task)
+        .where(
+            Task.created_by == employee_id,
+            Task.archived_at.is_(None),
+            Task.recurrence_parent_id.is_(None),
+            Task.template_copy.is_(False),
+            Task.created_at >= start_of_window_utc(_MY_DAYS, now),
+            Task.created_at < start_of_tomorrow_utc(now),
+        )
+        .group_by(text("day"))
+        .order_by(text("day"))
+    )
+
+
 async def _my_counters(
     session: AsyncSession, employee_id: UUID, now: datetime
 ) -> dict[str, int]:
@@ -669,21 +713,30 @@ async def _my_created(
     return {"created_7": int(row.created_7), "created_30": int(row.created_30)}
 
 
-async def _my_daily(
-    session: AsyncSession, employee_id: UUID, now: datetime
-) -> list[TrendPoint]:
-    """Ряд для графика: zero-padded, ровно `_MY_DAYS` точек, последняя — сегодня."""
-    rows = await session.execute(my_daily_stmt(employee_id, now))
+async def _daily_counts(session: AsyncSession, stmt) -> dict[date, int]:
     counts: dict[date, int] = {}
-    for raw_day, count in rows.all():
+    for raw_day, count in (await session.execute(stmt)).all():
         if raw_day is None:
             continue
         counts[raw_day.date()] = int(count)
+    return counts
+
+
+async def _my_daily(
+    session: AsyncSession, employee_id: UUID, now: datetime
+) -> list[MyTrendPoint]:
+    """Ряды для графика: zero-padded, ровно `_MY_DAYS` точек, последняя — сегодня.
+
+    Выполнено и создано — два запроса на одну сетку дней: сливаются по дате,
+    поэтому точка без событий несёт нули в обоих рядах, а не пропуск.
+    """
+    done = await _daily_counts(session, my_daily_stmt(employee_id, now))
+    made = await _daily_counts(session, my_daily_created_stmt(employee_id, now))
     first_day = display_today(now) - timedelta(days=_MY_DAYS - 1)
-    out: list[TrendPoint] = []
+    out: list[MyTrendPoint] = []
     for i in range(_MY_DAYS):
         d = first_day + timedelta(days=i)
-        out.append(TrendPoint(day=d, count=counts.get(d, 0)))
+        out.append(MyTrendPoint(day=d, count=done.get(d, 0), created=made.get(d, 0)))
     return out
 
 
@@ -705,3 +758,188 @@ async def get_my_stats(
     created = await _my_created(db, principal.employee_id, now)
     daily = await _my_daily(db, principal.employee_id, now)
     return MyStatsResponse(**counters, **created, daily=daily)
+
+
+# ─── «Команда за 30 дней» — топ-3 по организации ────────────────────────────
+
+
+class Leader(BaseModel):
+    """Строка колонки. Почты в ответе нет намеренно: на экране она не нужна,
+    фото аватара берётся по `employee_id`, инициалы — по имени."""
+
+    employee_id: UUID
+    full_name: str
+    count: int
+    rank: int
+
+
+class LeaderMe(BaseModel):
+    rank: int
+    count: int
+
+
+class LeadersMe(BaseModel):
+    """Моё место в каждой колонке; `None` — ноль, «вы пока не в рейтинге»."""
+
+    completed: LeaderMe | None = None
+    created: LeaderMe | None = None
+    overdue: LeaderMe | None = None
+
+
+class LeadersResponse(BaseModel):
+    window_days: int
+    completed: list[Leader]
+    created: list[Leader]
+    overdue: list[Leader]
+    me: LeadersMe
+
+
+def _person_on(employee_col):
+    """Условие джойна на тень человека: живой и НЕ сервисная учётка.
+
+    RLS прячет шаблоны, но не кассы и не удалённых: без этого условия 55
+    учёток точек с их задачами встали бы в рейтинг. `NULL` в `account_kind` =
+    синк ещё не видел строку = person (fail-open, как в `employees.py`).
+    """
+    return and_(
+        ShadowUser.employee_id == employee_col,
+        ShadowUser.deleted_at.is_(None),
+        ShadowUser.account_kind.is_distinct_from("service"),
+    )
+
+
+def _leader_rows(employee_col):
+    """Общие колонки трёх запросов: кто, как подписать, сколько."""
+    return select(
+        employee_col.label("employee_id"),
+        ShadowUser.full_name,
+        ShadowUser.email,
+        func.count().label("count"),
+    ).group_by(employee_col, ShadowUser.full_name, ShadowUser.email)
+
+
+def leaders_completed_stmt(now: datetime):
+    """«Выполнили»: исполнители задач, закрытых в окне — ПО ИСПОЛНИТЕЛЮ, а не по
+    тому, кто нажал галочку (`completed_by` у задачи нет, актор `done_changed`
+    из ленты неполон — импорт его не писал — и к тому же руководитель вправе
+    закрыть за исполнителя). Так же считает плитка «Выполнено» в «Вашей
+    статистике» — число «— это вы» обязано с ней сходиться. Задача с двумя
+    исполнителями считается обоим (фан-аут `_workload`), человеку — один раз
+    (PK `task_assignees`).
+
+    Личные пространства исключены целиком (`not_personal`): свои заметки в
+    рейтинг не идут. Архив ПРОЕКТА не фильтруем — история (как `_mine`).
+    """
+    return (
+        _leader_rows(TaskAssignee.employee_id)
+        .select_from(Task)
+        .join(TaskAssignee, TaskAssignee.task_id == Task.id)
+        .join(Project, Project.id == Task.project_id)
+        .join(ShadowUser, _person_on(TaskAssignee.employee_id))
+        .where(
+            Task.archived_at.is_(None),
+            not_personal(),
+            Task.completed_at >= start_of_window_utc(_LEADERS_DAYS, now),
+            Task.completed_at < start_of_tomorrow_utc(now),
+        )
+    )
+
+
+def leaders_created_stmt(now: datetime):
+    """«Создали»: по автору, с теми же исключениями, что `my_created_stmt`
+    (копии повторов и шаблонов — не «завёл руками»). Задачи, заведённые
+    импортом CSV, считаются автору — флага у задачи нет (названо в доке)."""
+    return (
+        _leader_rows(Task.created_by)
+        .select_from(Task)
+        .join(Project, Project.id == Task.project_id)
+        .join(ShadowUser, _person_on(Task.created_by))
+        .where(
+            Task.archived_at.is_(None),
+            Task.recurrence_parent_id.is_(None),
+            Task.template_copy.is_(False),
+            not_personal(),
+            Task.created_at >= start_of_window_utc(_LEADERS_DAYS, now),
+            Task.created_at < start_of_tomorrow_utc(now),
+        )
+    )
+
+
+def leaders_overdue_stmt(now: datetime):
+    """«Просрочено сейчас»: состояние на сейчас, не окно — поэтому здесь, в
+    отличие от двух историй выше, архивный проект исключён
+    (`project_not_archived`): запаркованный проект не должен «жечь» людей."""
+    return (
+        _leader_rows(TaskAssignee.employee_id)
+        .select_from(Task)
+        .join(TaskAssignee, TaskAssignee.task_id == Task.id)
+        .join(Project, Project.id == Task.project_id)
+        .join(ShadowUser, _person_on(TaskAssignee.employee_id))
+        .where(
+            Task.archived_at.is_(None),
+            overdue_clause(now),
+            project_not_archived(),
+            not_personal(),
+        )
+    )
+
+
+def rank_leaders(
+    rows: list[tuple[UUID, str | None, str | None, int]], me: UUID
+) -> tuple[list[Leader], LeaderMe | None]:
+    """Чистое ранжирование: ключ `(-count, имя без регистра)`, места 1..n без
+    дырок (как `/learn/rating` и `race/math.rank`); нули выпадают; имя —
+    `full_name or email or «—»` (тень до первого синка бывает без имени).
+    Возвращает топ и моё место по полному списку — людей ≤ 300, второй проход
+    по SQL не нужен.
+    """
+    people = [
+        (employee_id, (full_name or email or "—"), int(count))
+        for employee_id, full_name, email, count in rows
+        if int(count) > 0
+    ]
+    people.sort(key=lambda p: (-p[2], p[1].casefold()))
+    ranked = [
+        Leader(employee_id=e, full_name=n, count=c, rank=i + 1)
+        for i, (e, n, c) in enumerate(people)
+    ]
+    mine = next((lead for lead in ranked if lead.employee_id == me), None)
+    return ranked[:_LEADERS_TOP], (
+        LeaderMe(rank=mine.rank, count=mine.count) if mine else None
+    )
+
+
+@router.get("/stats/leaders", response_model=LeadersResponse)
+async def get_leaders(
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> LeadersResponse:
+    """«Команда за 30 дней» на «Главной»: три колонки по организации.
+
+    `require_auth()` (любая hub-роль), а не `_any`, как у `/me/stats`: цифры
+    про коллег — не для principal без роли в продукте. Видят все сотрудники
+    (решение владельца 01.10, прецеденты — `/tenant/members`, `/learn/rating`);
+    в ответе только имя и число — ни проектов, ни названий задач.
+
+    `now` один раз на три запроса (граница суток общая), ранг — в Python.
+    """
+    now = datetime.now(UTC)
+    me = principal.employee_id
+
+    async def column(stmt):
+        rows = [
+            (r.employee_id, r.full_name, r.email, r.count)
+            for r in (await db.execute(stmt)).all()
+        ]
+        return rank_leaders(rows, me)
+
+    completed, me_completed = await column(leaders_completed_stmt(now))
+    created, me_created = await column(leaders_created_stmt(now))
+    overdue, me_overdue = await column(leaders_overdue_stmt(now))
+    return LeadersResponse(
+        window_days=_LEADERS_DAYS,
+        completed=completed,
+        created=created,
+        overdue=overdue,
+        me=LeadersMe(completed=me_completed, created=me_created, overdue=me_overdue),
+    )

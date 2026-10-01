@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import { fmtDay, homeStatsView } from './homeStats'
+import { fmtDay, fmtDayWeekday, homeStatsView } from './homeStats'
 import type { MyStats } from './stats'
 
 function stats(over: Partial<MyStats> = {}): MyStats {
-  // 30 точек: по одной закрытой задаче в каждый из последних трёх дней.
+  // 30 точек: по одной закрытой задаче в каждый из последних трёх дней,
+  // по одной заведённой — в последние два.
   const daily = Array.from({ length: 30 }, (_, i) => ({
     day: `2026-08-${String(i + 1).padStart(2, '0')}`,
     count: i >= 27 ? 1 : 0,
+    created: i >= 28 ? 1 : 0,
   }))
   return {
     completed_7: 3,
@@ -41,8 +43,6 @@ describe('homeStatsView', () => {
   })
 
   it('«просрочено» и «в работе» от периода не зависят', () => {
-    // Эти два числа — состояние на сейчас, а не за окно: переключатель их
-    // менять не должен, иначе подпись врёт.
     for (const period of [7, 30] as const) {
       const view = homeStatsView(stats(), period)
       expect(view.overdue).toBe(2)
@@ -50,29 +50,40 @@ describe('homeStatsView', () => {
     }
   })
 
-  it('максимум и подписи краёв', () => {
+  it('два ряда в точке и максимумы по каждому', () => {
     const view = homeStatsView(stats(), 7)
-    expect(view.maxLabel).toBe('Максимум за день — 1')
+    expect(view.points[6]).toMatchObject({ completed: 1, created: 1 })
+    expect(view.points[3]).toMatchObject({ completed: 0, created: 0 })
+    expect(view.max).toEqual({ completed: 1, created: 1 })
     expect(view.startLabel).toBe('24 августа')
     expect(view.endLabel).toBe('30 августа')
   })
 
-  it('пустой период помечается — вместо графика будет строка', () => {
-    const quiet = stats({ daily: stats().daily.map((p) => ({ ...p, count: 0 })) })
-    expect(homeStatsView(quiet, 30).isEmpty).toBe(true)
-    expect(homeStatsView(stats(), 7).isEmpty).toBe(false)
+  it('старый ответ без `created` читается нулями, а не ломает график', () => {
+    const legacy = stats({ daily: stats().daily.map(({ day, count }) => ({ day, count })) })
+    const view = homeStatsView(legacy, 30)
+    expect(view.points.every((p) => p.created === 0)).toBe(true)
+    expect(view.max.created).toBe(0)
+    expect(view.isEmpty).toBe(false)
   })
 
-  it('подпись столбика склоняет число', () => {
+  it('пусто — только когда ОБА ряда нулевые', () => {
+    const quiet = stats({ daily: stats().daily.map((p) => ({ ...p, count: 0, created: 0 })) })
+    expect(homeStatsView(quiet, 30).isEmpty).toBe(true)
+    const onlyCreated = stats({ daily: stats().daily.map((p) => ({ ...p, count: 0 })) })
+    expect(homeStatsView(onlyCreated, 30).isEmpty).toBe(false)
+  })
+
+  it('подписи дня: короткая для оси, длинная с днём недели для тултипа', () => {
     const view = homeStatsView(stats(), 7)
-    expect(view.points[6]!.title).toContain('1 закрыта')
-    expect(view.points[0]!.title).toContain('0 закрыто')
+    expect(view.points[6]!.label).toBe('30 августа')
+    expect(view.points[6]!.labelLong).toBe('30 августа, вс')
   })
 })
 
 describe('fmtDay', () => {
   it('читает дату как локальную, а не как UTC', () => {
-    // Голая дата в minus-зонах уезжала бы на день назад.
     expect(fmtDay('2026-08-19')).toBe('19 августа')
+    expect(fmtDayWeekday('2026-08-19')).toBe('19 августа, ср')
   })
 })

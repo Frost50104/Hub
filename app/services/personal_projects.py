@@ -77,7 +77,9 @@ _CREATE_ATTEMPTS = 3
 
 
 def not_personal() -> ColumnElement[bool]:
-    """«Проект не личный» — для СПИСКОВ ПРОЕКТОВ (сайдбар, /projects, поиск)."""
+    """«Проект не личный» — для СПИСКОВ ПРОЕКТОВ (сайдбар, /projects, поиск)
+    и для тенантных агрегатов по людям (`stats.py::leaders_*_stmt`, 01.10):
+    рейтинг коллег не должен считать ничьи заметки, включая мои."""
     return Project.personal_owner_id.is_(None)
 
 
