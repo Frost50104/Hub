@@ -23,10 +23,17 @@ export interface MyTasksFilters {
  * `include_personal` не шлём: серверный дефолт с 16.09 `true`. Явный параметр в
  * queryKey развёл бы кэш «Главной» и `/my` на два запроса одного и того же.
  */
-export function useMyTasks(filters: MyTasksFilters = {}): UseQueryResult<Task[]> {
+export function useMyTasks(
+  filters: MyTasksFilters = {},
+  // `enabled: false` — вкладкам без окна («Личное», «Назначенные мной»):
+  // раньше они всё равно слали `GET /me/tasks` без фильтров и получали
+  // всё, включая выполненные, — ответ никто не читал.
+  options: { enabled?: boolean } = {},
+): UseQueryResult<Task[]> {
   return useQuery({
     queryKey: ['me-tasks', filters],
     queryFn: () =>
       api.get<Task[]>('/me/tasks', { params: filters }).then((r) => r.data),
+    enabled: options.enabled ?? true,
   })
 }

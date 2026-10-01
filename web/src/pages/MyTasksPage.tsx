@@ -26,6 +26,7 @@ import {
   isDueWindowTab,
   isGroupedTab,
   myTasksEmptyText,
+  myTasksWindowFilters,
   resolveMyTasksTab,
   setMyTasksTab,
   type MyTasksTab,
@@ -156,15 +157,15 @@ function GroupHeader({ label, count }: { label: string; count: number }) {
   )
 }
 
-/** Данные вкладок-окон. На «Личных» и «Назначенных мной» запрос не нужен. */
+/** Данные вкладок-окон. На «Личном» и «Назначенных мной» запроса нет вовсе. */
 function useWindowTasks(tab: MyTasksTab) {
-  const enabled = isDueWindowTab(tab)
-  const tasks = useMyTasks(enabled ? { due_window: tab } : {})
-  const toggleDoneWork = useToggleDone('')
+  const filters = myTasksWindowFilters(tab)
+  const enabled = filters !== null
+  const tasks = useMyTasks(filters ?? {}, { enabled })
   // Внутри дня — «весь день», потом по времени (0061): сервер сортирует по
   // мгновению, и срок без времени (условный полдень) вставал между 11:00 и 13:00.
   const sorted = useMemo(() => [...(tasks.data ?? [])].sort(compareDue), [tasks.data])
-  return { tasks, sorted, enabled, toggleDoneWork }
+  return { tasks, sorted, enabled }
 }
 
 function DesktopMyTasks({ pane }: { pane: MyTasksPane }) {

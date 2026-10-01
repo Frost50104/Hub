@@ -20,6 +20,7 @@ import { useToggleDone } from '@/hooks/useTasks'
 import { cn } from '@/lib/cn'
 import { capitalizeFirst } from '@/lib/dates'
 import { favoriteProjects } from '@/lib/favoriteProjects'
+import { myTasksWindowFilters } from '@/lib/myTasksTabs'
 import { type Project } from '@/lib/projects'
 import { taskLocation } from '@/lib/taskLinks'
 import { taskProjectLabel } from '@/lib/taskProjectLabel'
@@ -63,7 +64,10 @@ export function HomePage() {
 function useHomeData(tab: DueWindow) {
   const me = useMe()
   const projects = useProjects()
-  const myTasks = useMyTasks({ due_window: tab })
+  // Фильтры окна — те же, что у «Моих задач» (`myTasksWindowFilters`): «Все»
+  // без выполненных и с тем же ключом кэша, иначе панель и `/my` слали бы
+  // два запроса одного и того же.
+  const myTasks = useMyTasks(myTasksWindowFilters(tab) ?? { due_window: tab })
   const toggleDone = useToggleDone('')
   const navigate = useNavigate()
   const namesById = useMemo(

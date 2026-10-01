@@ -14,25 +14,44 @@
  * соседних экранах читаются как ошибка.
  */
 
-import { type DueWindow } from '@/hooks/useMyTasks'
+import { type DueWindow, type MyTasksFilters } from '@/hooks/useMyTasks'
 
 /** Окна дедлайнов + два «пространства»: мои личные и мои поручения. */
 export type MyTasksTab = DueWindow | 'personal' | 'assigned'
 
+// Порядок и дефолт — просьба владельца 01.10: «Все» первой (просроченные,
+// предстоящие, без срока и личные вперемешку, без выполненных), дальше по
+// убыванию срочности, «пространства» — в конце. Ключ `personal` не менять:
+// на `/my?tab=personal` ведут `taskLocation`, редирект личного проекта и FAB.
 export const MY_TASKS_TABS: { key: MyTasksTab; label: string }[] = [
-  { key: 'upcoming', label: 'Предстоит' },
+  { key: 'all', label: 'Все' },
   { key: 'today', label: 'Сегодня' },
   { key: 'overdue', label: 'Просрочено' },
-  { key: 'all', label: 'Все' },
-  { key: 'personal', label: 'Личные' },
+  { key: 'upcoming', label: 'Предстоит' },
+  { key: 'personal', label: 'Личное' },
   { key: 'assigned', label: 'Назначенные мной' },
 ]
 
-const DEFAULT_TAB: MyTasksTab = 'upcoming'
+const DEFAULT_TAB: MyTasksTab = 'all'
 
 /** Вкладка-окно (её обслуживает `/me/tasks`), а не отдельная выборка. */
 export function isDueWindowTab(tab: MyTasksTab): tab is DueWindow {
   return tab !== 'personal' && tab !== 'assigned'
+}
+
+/**
+ * Параметры `/me/tasks` для вкладки-окна; `null` — вкладке запрос не нужен
+ * («Личное» и «Назначенные мной» живут своими выборками).
+ *
+ * «Все» — без выполненных (владелец, 01.10): бэкенд принимает `done=false`,
+ * а клиент до этого не слал `done` вовсе, и выполненные шли вперемешку с
+ * живыми, зачёркнутые, причём выполненная с прошлым сроком уезжала в
+ * группу «Сегодня». Правило одно на `/my` и панель «Главной»: ключ кэша у
+ * них обязан совпадать, иначе два запроса одного и того же.
+ */
+export function myTasksWindowFilters(tab: MyTasksTab): MyTasksFilters | null {
+  if (!isDueWindowTab(tab)) return null
+  return tab === 'all' ? { due_window: 'all', done: false } : { due_window: tab }
 }
 
 /**
@@ -122,5 +141,6 @@ export function myTasksEmptyText(tab: MyTasksTab): string {
   if (tab === 'today') return 'На сегодня задач нет — и просроченных тоже.'
   if (tab === 'personal') return 'Личных задач пока нет.'
   if (tab === 'assigned') return 'Вы пока никому не ставили задач.'
+  if (tab === 'all') return 'Задач пока нет — ни рабочих, ни личных.'
   return 'Здесь пока пусто.'
 }
