@@ -45,7 +45,11 @@ async def _assign(db, task, principal, position=1):
     await db.flush()
 
 
-async def test_leaders_fanout_personal_service_and_me(db, tenant_id):
+# `rls_enforced`: запросы рейтинга — тенантные без ручного `tenant_id` (инвариант),
+# а дефолтная роль тестов — суперпользователь, для которого RLS не действует: без
+# фикстуры в выборку попадали бы закоммиченные люди соседних тестов из других
+# тенантов (так и упал первый прогон под pre-push).
+async def test_leaders_fanout_personal_service_and_me(rls_enforced, db, tenant_id):
     me = make_principal(tenant_id, role="member", email="me@test.ru", full_name="Яков Я")
     project, _ = await _seed_project(db, me)  # одна открытая задача, created_by=me
     now = datetime.now(UTC)
@@ -110,7 +114,7 @@ async def test_leaders_fanout_personal_service_and_me(db, tenant_id):
     assert "Касса 1" not in names
 
 
-async def test_me_none_when_zero_and_created_series_matches_counter(db, tenant_id):
+async def test_me_none_when_zero_and_created_series_matches_counter(rls_enforced, db, tenant_id):
     me = make_principal(tenant_id, role="member")
     project, _ = await _seed_project(db, me)
     await _add_task(db, me, project, seq=2, mine=False)  # ещё одна заведённая мной
