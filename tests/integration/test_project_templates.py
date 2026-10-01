@@ -52,6 +52,10 @@ from tests.integration.test_project_access import _register
 pytestmark = pytest.mark.integration
 
 NOW = datetime.now(UTC)
+# Точка отсчёта шаблона в фикстуре `_world`. Старты в тестах считаются ОТ НЕЁ, а
+# не от `date.today()`: сдвиг копии = старт − якорь, и «today − 30» давал
+# отрицательный сдвиг только до 30.09.2026 — с 01.10 тест падал сам по себе.
+ANCHOR = date(2026, 9, 1)
 
 
 def _req(principal, method: str = "GET", **path):
@@ -105,7 +109,7 @@ async def _world(tenant_id: uuid.UUID) -> World:
         w.live_task = t.id
     async with tenant_scoped_session(tenant_id) as s:
         tpl = await create_template(
-            TemplateCreate(name="Открытие точки", anchor_on=date(2026, 9, 1)), w.author, s
+            TemplateCreate(name="Открытие точки", anchor_on=ANCHOR), w.author, s
         )
         w.template_id, w.template_key = tpl.id, tpl.key
     async with tenant_scoped_session(tenant_id) as s:
@@ -385,7 +389,9 @@ async def test_start_in_past_is_allowed_and_counted(rls_enforced):
     # Решение владельца 21.09: задним числом можно. Предпросмотр обязан
     # назвать цену — сколько задач сразу окажутся просроченными.
     w = await _world(uuid.uuid4())
-    start = date.today() - timedelta(days=30)
+    # Старт на 30 дней раньше якоря: срок шаблонной задачи (NOW + 6 ч) уезжает
+    # на месяц назад и просрочен при любой сегодняшней дате.
+    start = ANCHOR - timedelta(days=30)
     async with tenant_scoped_session(w.tenant_id) as s:
         preview = await preview_project_from_template(w.template_id, start, w.other, s)
         assert preview.overdue_after_shift == 1
