@@ -273,6 +273,13 @@ describe('период тултипа', () => {
     expect(r.base).toMatch(new RegExp(`24${NBSP}авг${NBSP}—${NBSP}20${NBSP}сен`))
   })
 
+  it('данные упёрлись в конец заезда — обе даты вместо «сегодня» (последний день или незакрытый заезд)', () => {
+    const last = { ...active, day_index: 7, data_through: '2026-09-27' }
+    expect(plain(racePeriods(last, contest()).live)).toMatch(/^Заезд № 1 · 21 сент? — 27 сент?$/)
+    // RaceRef без data_through (история, карточка заезда) — правило «по сегодня».
+    expect(plain(racePeriods(race(), contest()).live)).toMatch(/сегодня$/)
+  })
+
   it('завершённый заезд — его даты целиком, запланированный — только старт', () => {
     expect(plain(racePeriods(race({ status: 'finished' }), contest()).live)).toMatch(/^Заезд № 1 · 21 сент? — 27 сент?$/)
     const next = race({ id: 'r2', seq: 2, status: 'scheduled', starts_on: '2026-09-28', ends_on: '2026-10-04' })

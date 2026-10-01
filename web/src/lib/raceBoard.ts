@@ -3,7 +3,7 @@
  * форматы чисел, страницы ТВ, URL-параметры. Чистый модуль под vitest —
  * формулы позиций и мест считает сервер, здесь только раскладка.
  */
-import type { Dynamics, RaceBoard, RaceContest, RaceParticipant, RaceRef } from '@/lib/race'
+import type { DisplayRace, Dynamics, RaceBoard, RaceContest, RaceParticipant, RaceRef } from '@/lib/race'
 import { laneOrder } from '@/lib/raceTrack'
 import { addDaysKey, dueDayToIso, shortDate } from '@/lib/taskDates'
 import { NBSP, plural } from '@/lib/typography'
@@ -147,20 +147,25 @@ const dayRange = (from: string, to: string) => `${dayLabel(from)}${NBSP}—${NBS
  * Живые числа активного заезда сервер суммирует за `[starts_on, сегодня]`
  * (`race/read.py::live_rows`, `data_through = min(today, ends_on)`), и
  * сегодняшний день всегда частичный — поэтому «по сегодня», а не дата:
- * `data_through` равен сегодняшней дате и при упавшей выгрузке. Завершённый
- * заезд заморожен за `starts_on..ends_on` (досрочное закрытие переписывает
- * `ends_on`), запланированный чисел не имеет — подписываем старт.
+ * `data_through` равен сегодняшней дате и при упавшей выгрузке. Исключение —
+ * `data_through` уже упёрся в `ends_on` (последний день заезда или заезд,
+ * который ночное закрытие ещё не завершило): тогда обе даты, иначе «сегодня»
+ * врало бы про дни после конца заезда. Завершённый заезд заморожен за
+ * `starts_on..ends_on` (досрочное закрытие переписывает `ends_on`),
+ * запланированный чисел не имеет — подписываем старт.
  *
  * Окно базы в ответе доски не приезжает — выводится по правилу конкурса
  * (`race/math.py::retro_period`): N дней, заканчивающихся накануне якоря;
  * якорь — старт конкурса в режиме `contest` и старт заезда в режиме `race`.
  * Ручная база окна не имеет и подписывается тем же правилом — см. tech-debt.
  */
-export function racePeriods(race: RaceRef | null | undefined, contest: RaceContest | null | undefined): RacePeriods {
+export function racePeriods(race: DisplayRace | RaceRef | null | undefined, contest: RaceContest | null | undefined): RacePeriods {
   let live: string | null = null
   if (race) {
     const head = `Заезд №${NBSP}${race.seq}`
-    if (race.status === 'active') live = `${head} · ${dayLabel(race.starts_on)}${NBSP}—${NBSP}сегодня`
+    const through = 'data_through' in race ? race.data_through : null
+    if (race.status === 'active' && through !== race.ends_on) live = `${head} · ${dayLabel(race.starts_on)}${NBSP}—${NBSP}сегодня`
+    else if (race.status === 'active') live = `${head} · ${dayRange(race.starts_on, race.ends_on)}`
     else if (race.status === 'finished') live = `${head} · ${dayRange(race.starts_on, race.ends_on)}`
     else live = `${head} · старт ${dayLabel(race.starts_on)}`
   }

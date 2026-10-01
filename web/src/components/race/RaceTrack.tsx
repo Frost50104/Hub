@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { useIsDesktop, useMediaQuery } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/cn'
-import type { RaceContest, RaceParticipant, RaceRef } from '@/lib/race'
+import type { DisplayRace, RaceContest, RaceParticipant } from '@/lib/race'
 import { pinMyLane, racePeriods, type RaceView } from '@/lib/raceBoard'
 import { laneOrder, lanePositions } from '@/lib/raceTrack'
 
@@ -24,7 +24,7 @@ interface RaceTrackProps {
   /** Высота дорожки (ТВ считает её от высоты экрана). */
   laneHeight?: number
   /** Заезд и конкурс — для подписи периода в тултипе (`racePeriods`). */
-  race?: RaceRef | null
+  race?: DisplayRace | null
   contest?: RaceContest | null
   className?: string
 }
