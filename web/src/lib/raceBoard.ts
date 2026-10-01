@@ -5,6 +5,7 @@
  */
 import type { Dynamics, RaceBoard, RaceContest, RaceParticipant, RaceRef } from '@/lib/race'
 import { laneOrder } from '@/lib/raceTrack'
+import { addDaysKey, dueDayToIso, shortDate } from '@/lib/taskDates'
 import { NBSP, plural } from '@/lib/typography'
 
 export const VIEW_ALL = 'all'
@@ -123,6 +124,56 @@ export function formatAvg(avg: number | null | undefined): string {
 
 export function formatCells(cells: number): string {
   return `${Math.round(cells)}`
+}
+
+// ─── период чисел тултипа ───────────────────────────────────────────────────
+
+export interface RacePeriods {
+  /** За какие дни посчитаны живые числа дорожки — или когда заезд стартует. */
+  live: string | null
+  /** За какое окно посчитана база — по правилу конкурса. */
+  base: string | null
+}
+
+/** «25 сент» без переноса между числом и месяцем (`nbsp()` сокращения не склеивает). */
+const dayLabel = (key: string) => shortDate(dueDayToIso(key)).replace(/ /g, NBSP)
+
+/** «21 авг — 17 сент» одним неразрывным куском: в 240px тултипа дата не должна рваться. */
+const dayRange = (from: string, to: string) => `${dayLabel(from)}${NBSP}—${NBSP}${dayLabel(to)}`
+
+/**
+ * Подписи периода для тултипа гуся (вопрос коллеги 01.10: «это за какой период?»).
+ *
+ * Живые числа активного заезда сервер суммирует за `[starts_on, сегодня]`
+ * (`race/read.py::live_rows`, `data_through = min(today, ends_on)`), и
+ * сегодняшний день всегда частичный — поэтому «по сегодня», а не дата:
+ * `data_through` равен сегодняшней дате и при упавшей выгрузке. Завершённый
+ * заезд заморожен за `starts_on..ends_on` (досрочное закрытие переписывает
+ * `ends_on`), запланированный чисел не имеет — подписываем старт.
+ *
+ * Окно базы в ответе доски не приезжает — выводится по правилу конкурса
+ * (`race/math.py::retro_period`): N дней, заканчивающихся накануне якоря;
+ * якорь — старт конкурса в режиме `contest` и старт заезда в режиме `race`.
+ * Ручная база окна не имеет и подписывается тем же правилом — см. tech-debt.
+ */
+export function racePeriods(race: RaceRef | null | undefined, contest: RaceContest | null | undefined): RacePeriods {
+  let live: string | null = null
+  if (race) {
+    const head = `Заезд №${NBSP}${race.seq}`
+    if (race.status === 'active') live = `${head} · ${dayLabel(race.starts_on)}${NBSP}—${NBSP}сегодня`
+    else if (race.status === 'finished') live = `${head} · ${dayRange(race.starts_on, race.ends_on)}`
+    else live = `${head} · старт ${dayLabel(race.starts_on)}`
+  }
+  let base: string | null = null
+  if (contest && contest.baseline_days > 0) {
+    const anchor = contest.baseline_mode === 'race' ? (race?.starts_on ?? null) : contest.starts_on
+    if (anchor) {
+      const window = dayRange(addDaysKey(anchor, -contest.baseline_days), addDaysKey(anchor, -1))
+      const what = contest.baseline_mode === 'race' ? 'заезда' : 'конкурса'
+      base = `${window} · ${plural(contest.baseline_days, 'день', 'дня', 'дней')} до старта ${what}`
+    }
+  }
+  return { live, base }
 }
 
 export const DYNAMICS_LABEL: Record<Dynamics, string> = {

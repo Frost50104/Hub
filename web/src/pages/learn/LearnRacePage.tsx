@@ -114,6 +114,8 @@ export function LearnRacePage() {
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 scrollInside={isDesktop && rows.length > 24}
+                race={data.race}
+                contest={data.contest}
               />
             </div>
             {state.kind === 'scheduled' ? (

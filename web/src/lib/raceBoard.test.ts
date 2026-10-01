@@ -10,6 +10,7 @@ import {
   leaderboardRows,
   leagueOptions,
   pinMyLane,
+  racePeriods,
   resolveRaceParams,
   resolveView,
   setRaceParams,
@@ -252,5 +253,41 @@ describe('ТВ и URL', () => {
     expect(viewAfter(null)).toBe('L2')
     expect(viewAfter('all')).toBe('all')
     expect(viewAfter('L1')).toBe('L1')
+  })
+})
+
+describe('период тултипа', () => {
+  // Месяц — как его сокращает ICU («сент»/«сен»), неразрывные пробелы сводим к обычным.
+  const plain = (s: string | null) => s?.replace(/\u00a0/g, ' ') ?? null
+  const active = { ...race(), days_total: 7, day_index: 4, data_through: '2026-09-24' }
+
+  it('активный заезд — с первого дня по сегодня; база — окно до старта конкурса', () => {
+    const r = racePeriods(active, contest())
+    expect(plain(r.live)).toMatch(/^Заезд № 1 · 21 сент? — сегодня$/)
+    expect(plain(r.base)).toMatch(/^24 авг — 20 сент? · 28 дней до старта конкурса$/)
+  })
+
+  it('дата и диапазон не рвутся: между числом и месяцем и вокруг тире — NBSP', () => {
+    const r = racePeriods(active, contest())
+    expect(r.live).toContain(`21${NBSP}сен`)
+    expect(r.base).toMatch(new RegExp(`24${NBSP}авг${NBSP}—${NBSP}20${NBSP}сен`))
+  })
+
+  it('завершённый заезд — его даты целиком, запланированный — только старт', () => {
+    expect(plain(racePeriods(race({ status: 'finished' }), contest()).live)).toMatch(/^Заезд № 1 · 21 сент? — 27 сент?$/)
+    const next = race({ id: 'r2', seq: 2, status: 'scheduled', starts_on: '2026-09-28', ends_on: '2026-10-04' })
+    expect(plain(racePeriods(next, contest()).live)).toMatch(/^Заезд № 2 · старт 28 сент?$/)
+  })
+
+  it('режим «база на каждый заезд» — окно до старта ЗАЕЗДА, а не конкурса', () => {
+    const next = race({ id: 'r2', seq: 2, status: 'scheduled', starts_on: '2026-09-28', ends_on: '2026-10-04' })
+    expect(plain(racePeriods(next, contest({ baseline_mode: 'race' })).base)).toMatch(/^31 авг — 27 сент? · 28 дней до старта заезда$/)
+    expect(racePeriods(null, contest({ baseline_mode: 'race' })).base).toBeNull()
+  })
+
+  it('без конкурса, без заезда и с нулевым окном подписи нет', () => {
+    expect(racePeriods(active, null)).toEqual({ live: expect.stringContaining('Заезд'), base: null })
+    expect(racePeriods(null, contest()).live).toBeNull()
+    expect(racePeriods(active, contest({ baseline_days: 0 })).base).toBeNull()
   })
 })

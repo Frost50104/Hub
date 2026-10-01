@@ -1,13 +1,27 @@
 import { Chip } from '@/components/ui/Chip'
 import { cn } from '@/lib/cn'
 import type { RaceParticipant } from '@/lib/race'
-import { formatAvg, formatCells, formatPct } from '@/lib/raceBoard'
+import { formatAvg, formatCells, formatPct, type RacePeriods } from '@/lib/raceBoard'
 import { nbsp } from '@/lib/typography'
 
 import { DynamicsMark } from './DynamicsMark'
 
-/** Цифры точки: процент к базе главным числом, средняя, база, чеки. */
-export function GooseTooltip({ p, variant = 'floating', className }: { p: RaceParticipant; variant?: 'floating' | 'card'; className?: string }) {
+/**
+ * Цифры точки: процент к базе главным числом, средняя, база, чеки.
+ * `periods` — за какие дни это посчитано (`racePeriods`): строка под именем —
+ * период живых чисел, строка под «Базой» — её окно.
+ */
+export function GooseTooltip({
+  p,
+  periods,
+  variant = 'floating',
+  className,
+}: {
+  p: RaceParticipant
+  periods?: RacePeriods | null
+  variant?: 'floating' | 'card'
+  className?: string
+}) {
   return (
     <div
       className={cn(
@@ -26,6 +40,7 @@ export function GooseTooltip({ p, variant = 'floating', className }: { p: RacePa
         )}
         <span className="min-w-0 truncate text-[14px] font-semibold text-text">{p.name}</span>
       </div>
+      {periods?.live && <p className="mt-1 text-[12px] text-text2">{periods.live}</p>}
       {p.needs_baseline ? (
         <p className="mt-2 text-[13px] text-text2">База не задана — точка вне зачёта. Администратор задаст базу в «Управлении».</p>
       ) : (
@@ -38,6 +53,7 @@ export function GooseTooltip({ p, variant = 'floating', className }: { p: RacePa
             <dd className="text-right tabular-nums text-text">{formatAvg(p.avg)}</dd>
             <dt className="text-text2">База</dt>
             <dd className="text-right tabular-nums text-text">{formatAvg(p.base)}</dd>
+            {periods?.base && <dd className="col-span-2 -mt-0.5 text-[12px] text-text2">{periods.base}</dd>}
             <dt className="text-text2">Клеток</dt>
             <dd className="text-right tabular-nums text-text">{formatCells(p.cells)}</dd>
             <dt className="text-text2">Чеков</dt>

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 
 import { cn } from '@/lib/cn'
 import type { RaceParticipant } from '@/lib/race'
-import { displayPlace, formatPct, laneAria, type RaceView } from '@/lib/raceBoard'
+import { displayPlace, formatPct, laneAria, type RacePeriods, type RaceView } from '@/lib/raceBoard'
 import { cellsToPercent, glowLevel, moveDurationMs } from '@/lib/raceTrack'
 
 import { GooseIcon } from './GooseIcon'
@@ -22,9 +22,11 @@ interface RaceLaneProps {
   /** Ниже lg подпись идёт над полосой, тултип — карточкой под треком. */
   stacked: boolean
   tv?: boolean
+  /** Подписи периода в тултипе — считает `RaceTrack` один раз на все дорожки. */
+  periods?: RacePeriods | null
 }
 
-export function RaceLane({ p, view, y, mounted, isMe, selected, onToggle, stacked, tv = false }: RaceLaneProps) {
+export function RaceLane({ p, view, y, mounted, isMe, selected, onToggle, stacked, tv = false, periods }: RaceLaneProps) {
   const targetX = mounted ? cellsToPercent(p.cells) : 0
   const prevX = useRef<number | null>(null)
   const [moving, setMoving] = useState(false)
@@ -147,7 +149,7 @@ export function RaceLane({ p, view, y, mounted, isMe, selected, onToggle, stacke
                       transform: flipLeft ? 'translate(-100%, -50%)' : 'translateY(-50%)',
                     }}
                   >
-                    <GooseTooltip p={p} />
+                    <GooseTooltip p={p} periods={periods} />
                   </div>,
                   document.body,
                 )}

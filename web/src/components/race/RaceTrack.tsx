@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { useIsDesktop, useMediaQuery } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/cn'
-import type { RaceParticipant } from '@/lib/race'
-import { pinMyLane, type RaceView } from '@/lib/raceBoard'
+import type { RaceContest, RaceParticipant, RaceRef } from '@/lib/race'
+import { pinMyLane, racePeriods, type RaceView } from '@/lib/raceBoard'
 import { laneOrder, lanePositions } from '@/lib/raceTrack'
 
 import { GooseTooltip } from './GooseTooltip'
@@ -23,6 +23,9 @@ interface RaceTrackProps {
   compactTicks?: boolean
   /** Высота дорожки (ТВ считает её от высоты экрана). */
   laneHeight?: number
+  /** Заезд и конкурс — для подписи периода в тултипе (`racePeriods`). */
+  race?: RaceRef | null
+  contest?: RaceContest | null
   className?: string
 }
 
@@ -32,10 +35,11 @@ interface RaceTrackProps {
  * стартовый выезд через `mounted` — только на первом кадре, рефетч и смена
  * лиги его не повторяют.
  */
-export function RaceTrack({ rows, view, myStoreId, selectedId, onSelect, tv = false, scrollInside = false, compactTicks = false, laneHeight, className }: RaceTrackProps) {
+export function RaceTrack({ rows, view, myStoreId, selectedId, onSelect, tv = false, scrollInside = false, compactTicks = false, laneHeight, className , race, contest }: RaceTrackProps) {
   const isDesktop = useIsDesktop()
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const stacked = !isDesktop && !tv
+  const periods = useMemo(() => racePeriods(race ?? null, contest ?? null), [race, contest])
   const [mounted, setMounted] = useState(reduceMotion)
   // Таймер, а не requestAnimationFrame: в неактивной вкладке rAF не бежит
   // вовсе, и гуси стояли бы на нуле до первого показа. Первый кадр всё равно
@@ -85,11 +89,12 @@ export function RaceTrack({ rows, view, myStoreId, selectedId, onSelect, tv = fa
               onToggle={onSelect}
               stacked={stacked}
               tv={tv}
+              periods={periods}
             />
           ))}
         </div>
       </div>
-      {stacked && selected && <GooseTooltip p={selected} variant="card" />}
+      {stacked && selected && <GooseTooltip p={selected} periods={periods} variant="card" />}
     </div>
   )
 }
