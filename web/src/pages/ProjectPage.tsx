@@ -7,7 +7,7 @@ import {
   Star,
   Tags,
 } from 'lucide-react'
-import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
 
 // `recharts` is ~370KB minified. Lazy-load the entire dashboard chunk so
@@ -83,27 +83,17 @@ import { projectTaskGrid } from '@/lib/taskGrid'
 import { dataAgeLabel } from '@/lib/dates'
 import { requestInlineCreate } from '@/lib/quickCreate'
 import { type Task, DONE_FILTER_LABEL, PRIORITY_LABEL } from '@/lib/tasks'
+import {
+  PROJECT_VIEWS,
+  resolveProjectView,
+  type ProjectView,
+} from '@/lib/projectView'
 import { plural } from '@/lib/typography'
 import { useViewConfig } from '@/stores/viewConfig'
 
-type TabKey =
-  | 'list'
-  | 'board'
-  | 'calendar'
-  | 'timeline'
-  | 'dashboard'
-  | 'members'
-  | 'about'
-
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'list', label: 'Список' },
-  { key: 'board', label: 'Доска' },
-  { key: 'calendar', label: 'Календарь' },
-  { key: 'timeline', label: 'Хронология' },
-  { key: 'dashboard', label: 'Дашборд' },
-  { key: 'members', label: 'Участники' },
-  { key: 'about', label: 'О проекте' },
-]
+// Вкладки и правило дефолта — `lib/projectView.ts` (чистый модуль под тестами).
+type TabKey = ProjectView
+const TABS: readonly { key: TabKey; label: string }[] = PROJECT_VIEWS
 
 // ─── Шапка проекта ──────────────────────────────────────────────────────────
 
@@ -676,17 +666,43 @@ export function ProjectPage() {
   const project = useProject(id)
   const myPersonalId = useMe().data?.personal_project_id
   // Вид живёт в URL рядом с фильтрами: ссылка на доску проекта должна
-  // открывать доску, а не список.
+  // открывать доску, а не список. Голый адрес (без `view`) — дефолт по
+  // правилу `resolveProjectView`: доска, если есть колонки, иначе список
+  // (01.10; до этого всегда список). Колонки нужны самому правилу, поэтому
+  // запрос стоит здесь, а не только в содержимом: ключ тот же, запрос один.
+  const stages = useStages(id)
   const tabParam = searchParams.get('view')
-  const tab: TabKey = TABS.some((t) => t.key === tabParam)
-    ? (tabParam as TabKey)
-    : 'list'
+  const isOwnPersonal = !!myPersonalId && id === myPersonalId
+  // Дашборд у шаблона недоступен — `?view=dashboard` там считается «не
+  // запрошено». Пока проект не загружен, гейта не знаем — не решаем.
+  const resolved: TabKey | null = project.data
+    ? resolveProjectView({
+        requested: tabParam,
+        stageCount: stages.data?.length,
+        stagesFailed: stages.isError,
+        showDashboard: templatePageGate(project.data).showDashboard,
+      })
+    : null
   const setTab = (next: TabKey) => {
     const sp = new URLSearchParams(searchParams)
-    if (next === 'list') sp.delete('view')
-    else sp.set('view', next)
+    // Вид пишется ВСЕГДА, и для списка тоже: голый адрес теперь значит
+    // «дефолт по колонкам», а «Список», выбранный человеком, обязан
+    // пережить фильтры и открытие карточки.
+    sp.set('view', next)
     setSearchParams(sp, { replace: true })
   }
+  // Дефолт применяется ОДИН раз: голый адрес канонизируется в `?view=…`,
+  // дальше вид читается только из URL. Иначе удаление последней колонки
+  // (инвалидация `['stages', id]`) переключало бы вкладку с доски на список
+  // под ногами, а «Колонок нет» на доске было бы недостижимо с голого
+  // адреса. Своё личное страница редиректит — параллельный `setSearchParams`
+  // здесь был бы гонкой с `<Navigate>`.
+  useEffect(() => {
+    if (tabParam !== null || resolved === null || isOwnPersonal) return
+    const sp = new URLSearchParams(searchParams)
+    sp.set('view', resolved)
+    setSearchParams(sp, { replace: true })
+  }, [tabParam, resolved, isOwnPersonal, searchParams, setSearchParams])
   const [fieldsOpen, setFieldsOpen] = useState(false)
   const [labelsOpen, setLabelsOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
@@ -747,12 +763,22 @@ export function ProjectPage() {
     )
   }
   if (!project.data) return null
+  // Вида в адресе нет, а колонки ещё грузятся: тот же скелет, что при
+  // загрузке проекта — список не должен мелькнуть перед доской.
+  if (resolved === null) {
+    return (
+      <div className="space-y-4 p-6">
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-8 w-96" />
+        <TaskListSkeleton />
+      </div>
+    )
+  }
 
   const p = project.data
   const isArchived = !!p.archived_at
   const gate = templatePageGate(p)
-  // Дашборд по ссылке `?view=dashboard` у шаблона — просто список.
-  const shownTab: TabKey = tab === 'dashboard' && !gate.showDashboard ? 'list' : tab
+  const shownTab: TabKey = resolved
   // «Правки закрыты» здесь стояло неправдой: сервер правку существующих задач
   // в архиве разрешает сознательно (тест
   // `test_editing_an_existing_task_in_archive_still_works`), закрыто только
@@ -814,9 +840,11 @@ export function ProjectPage() {
         onOpenLabels={() => setLabelsOpen(true)}
         onOpenShare={() => setShareOpen(true)}
         // «Задача» в шапке — та же точка входа, что «Новая задача» в сайдбаре:
-        // курсор в инлайн-поле списка; если поля нет (пустой проект, другая
-        // вкладка ещё не перерисовалась) — диалог создания.
+        // курсор в инлайн-поле ТЕКУЩЕГО вида (на доске оно в первой колонке);
+        // поля нет (доска без колонок, пусто под фильтрами, другая вкладка) —
+        // список, и уже там либо поле, либо диалог создания.
         onCreateTask={() => {
+          if (requestInlineCreate(id)) return
           setTab('list')
           setTimeout(() => {
             if (!requestInlineCreate(id)) setCreateTaskOpen(true)

@@ -70,7 +70,9 @@ export function resolveMyTasksTab(
   return known.key
 }
 
-/** Адрес новой вкладки. Дефолт в URL не пишем — приём `ProjectPage`. */
+/** Адрес новой вкладки. Дефолт в URL не пишем: у «Моих задач» он один и
+ *  известен без данных (у `ProjectPage` с 01.10 иначе — там голый адрес
+ *  значит «дефолт по колонкам», и вид пишется всегда). */
 export function setMyTasksTab(params: URLSearchParams, tab: MyTasksTab): URLSearchParams {
   const next = new URLSearchParams(params)
   if (tab === DEFAULT_TAB) next.delete('tab')
