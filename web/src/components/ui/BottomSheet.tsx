@@ -14,16 +14,29 @@ interface BottomSheetProps {
   trailing?: ReactNode
   children: ReactNode
   className?: string
+  /** Шторка «поле + список»: содержимое — flex-колонка, и список (`min-h-0`,
+   *  `shrink`) сжимается под потолок высоты и прокручивается сам, а поле
+   *  над ним стоит на месте. Opt-in: у длинных форм дети с `min-height: auto`
+   *  вылезли бы за сжатое тело и легли на футер. */
+  fill?: boolean
 }
 
 /**
  * Asana-style bottom sheet (iOS modal half-sheet). Slides in from the
  * bottom, rounded top corners, draggable visual handle (decorative —
  * tap-outside / overlay dismisses). Caps at 85vh and scrolls internally.
+ *
+ * Геометрия (`bottom`, `max-height`, нижний отступ) — inline-стилем через
+ * `--kb-inset`/`--vv-height` (их пишет `useKeyboardInset`): iOS не уменьшает
+ * layout viewport под клавиатуру, и `bottom: 0` держал бы шторку под ней;
+ * с переменными шторка садится на верх клавиатуры, потолок — видимая
+ * область, а safe-area-отступ исчезает, пока клавиатура закрывает
+ * индикатор «Домой». Inline, а не классами: `max-h-*` в `className`
+ * потребителя через twMerge выкинул бы потолок.
  */
 export const BottomSheet = forwardRef<HTMLDivElement, BottomSheetProps>(
   function BottomSheet(
-    { open, onOpenChange, title, subtitle, trailing, children, className },
+    { open, onOpenChange, title, subtitle, trailing, children, className, fill = false },
     ref,
   ) {
     return (
@@ -54,12 +67,18 @@ export const BottomSheet = forwardRef<HTMLDivElement, BottomSheetProps>(
               ;(e.target as HTMLElement | null)?.focus?.()
             }}
             className={cn(
-              'fixed inset-x-0 bottom-0 z-50 max-h-[85vh] overflow-y-auto rounded-t-2xl bg-bg-alt shadow-glass focus:outline-none',
+              'fixed inset-x-0 z-50 overflow-y-auto rounded-t-2xl bg-bg-alt shadow-glass focus:outline-none',
+              fill && 'flex flex-col',
               'data-[state=open]:animate-in data-[state=closed]:animate-out',
               'data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',
               className,
             )}
-            style={{ paddingBottom: 'env(safe-area-inset-bottom, 0)' }}
+            style={{
+              bottom: 'var(--kb-inset, 0px)',
+              maxHeight: 'min(85vh, calc(var(--vv-height, 100vh) - 24px))',
+              paddingBottom:
+                'max(0px, calc(env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px)))',
+            }}
           >
             {/* Decorative drag handle */}
             <div className="flex justify-center pt-2">
@@ -96,7 +115,13 @@ export const BottomSheet = forwardRef<HTMLDivElement, BottomSheetProps>(
               </DialogPrimitive.Title>
             )}
 
-            <div className={cn(!title && !subtitle && 'pt-2', 'px-1 pb-2')}>
+            <div
+              className={cn(
+                !title && !subtitle && 'pt-2',
+                'px-1 pb-2',
+                fill && 'flex min-h-0 flex-col',
+              )}
+            >
               {children}
             </div>
           </DialogPrimitive.Content>

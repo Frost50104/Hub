@@ -21,6 +21,9 @@ interface ResponsiveDialogProps {
   className?: string
   /** Класс области контента (обе раскладки). */
   bodyClassName?: string
+  /** Шторка «поле + список»: тело — сжимаемая flex-колонка, список внутри
+   *  прокручивается сам (`BottomSheet.fill`). Только для телефона. */
+  fill?: boolean
 }
 
 /**
@@ -43,6 +46,7 @@ export function ResponsiveDialog({
   dismissLabel = 'Отмена',
   className,
   bodyClassName,
+  fill = false,
 }: ResponsiveDialogProps) {
   const isDesktop = useIsDesktop()
   const frozen = useRef<boolean>(isDesktop)
@@ -68,8 +72,11 @@ export function ResponsiveDialog({
           </button>
         }
         className={className}
+        fill={fill}
       >
-        <div className={cn('flex flex-col gap-4 px-3 pb-2', bodyClassName)}>{children}</div>
+        <div className={cn('flex flex-col gap-4 px-3 pb-2', fill && 'min-h-0', bodyClassName)}>
+          {children}
+        </div>
         {footer && (
           <div className="mt-2 flex flex-wrap items-center justify-end gap-2 px-3 pb-2">
             {footer}

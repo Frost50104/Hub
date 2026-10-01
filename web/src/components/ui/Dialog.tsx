@@ -32,8 +32,14 @@ const MODAL_CLASS =
 // контура и мобильных пикеров): ручка 40×4, скруглённый верх, прокрутка
 // внутри. Раскладка фиксируется при монтировании контента (= открытии):
 // поворот планшета посреди формы не должен пересобирать её.
+//
+// `bottom`/`max-height`/нижний отступ — inline-стилем через `--kb-inset` и
+// `--vv-height` (`useKeyboardInset`): iOS не уменьшает layout viewport под
+// клавиатуру, и `bottom-0` держал бы шторку под ней. Inline, а не классом:
+// потребители передают `className="max-h-[85vh] …"`, twMerge выкинул бы
+// наш потолок — на телефоне `max-h-*` из `className` ничего не решает.
 const SHEET_CLASS =
-  'glass-solid fixed inset-x-0 bottom-0 z-50 mx-auto max-h-[88vh] w-full overflow-y-auto rounded-t-2xl p-5 pt-2 shadow-glass focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom'
+  'glass-solid fixed inset-x-0 z-50 mx-auto w-full overflow-y-auto rounded-t-2xl p-5 pt-2 shadow-glass focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom'
 
 export const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
@@ -49,7 +55,13 @@ export const DialogContent = forwardRef<
         className={cn(sheet ? SHEET_CLASS : MODAL_CLASS, className)}
         style={
           sheet
-            ? { paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 20px)', ...style }
+            ? {
+                bottom: 'var(--kb-inset, 0px)',
+                maxHeight: 'min(88vh, calc(var(--vv-height, 100vh) - 24px))',
+                paddingBottom:
+                  'max(calc(env(safe-area-inset-bottom, 0px) - var(--kb-inset, 0px)), 20px)',
+                ...style,
+              }
             : style
         }
         {...props}

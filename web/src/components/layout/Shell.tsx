@@ -4,6 +4,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/Button'
 import { SkeletonRows } from '@/components/ui/Skeleton'
+import { useKeyboardInset } from '@/hooks/useKeyboardInset'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { hasTaskReminders, useMe } from '@/hooks/useMe'
 import { usePushAutoRefresh } from '@/hooks/usePushAutoRefresh'
@@ -85,6 +86,8 @@ export function Shell() {
   useReminderToasts(hasTaskReminders(me.data))
   // Клик по push-уведомлению — SPA-переходом, а не навигацией документа (25.09).
   useSwOpenUrl()
+  // Экранная клавиатура: шторки садятся на её верх, а не под неё (01.10).
+  useKeyboardInset()
 
   // ЕДИНЫЙ эффект, boot-redirect строго ПЕРЕД remember: раздельные эффекты —
   // баг (remember успел бы перезаписать lastSpace='tasks' на первом маунте

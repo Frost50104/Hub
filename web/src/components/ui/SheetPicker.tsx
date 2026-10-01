@@ -94,6 +94,7 @@ export function SheetPicker({
       desktopWidth={400}
       bodyClassName="gap-2 px-2 lg:px-3"
       footer={footer}
+      fill={searchable}
     >
       {searchable && (
         <label className="relative block px-1">
@@ -109,7 +110,16 @@ export function SheetPicker({
           />
         </label>
       )}
-      <ul className="flex max-h-[min(60vh,420px)] flex-col overflow-y-auto">
+      {/* С поиском высота списка — `flex-basis`, а не потолок: шторка не
+          сжимается под 1–2 найденные строки (иначе на телефоне поле поиска
+          уезжало под клавиатуру, ОС 01.10), а под клавиатурой цепочка
+          `fill` сжимает список, и прокручивается он, а не вся шторка. */}
+      <ul
+        className={cn(
+          'flex flex-col overflow-y-auto',
+          searchable ? 'min-h-0 shrink basis-[min(60vh,420px)]' : 'max-h-[min(60vh,420px)]',
+        )}
+      >
         {visible.length === 0 && (
           <li className="px-3 py-4 text-center text-[14px] text-text2">
             {/* Молчащий экран читается как «справочник не работает» — ровно на
