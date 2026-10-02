@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { RaceBoard, RaceContest, RaceParticipant, RaceRef } from './race'
 import {
   boardState,
+  forcedRaceNotes,
   formatAvg,
   formatPct,
   freshnessLine,
@@ -183,6 +184,39 @@ describe('состояние экрана', () => {
     expect(between.kind).toBe('between')
     expect(boardState(board({ contest: contest({ status: 'finished' }) })).kind).toBe('finished')
   })
+
+  it('отменённый конкурс: показывается последний завершённый заезд, а не оставшийся scheduled', () => {
+    // 02.10: заезды 1–3 завершены (№3 досрочно за день), №4 остался scheduled и приезжал в `race`.
+    const r3 = race({ id: 'r3', seq: 3, status: 'finished', starts_on: '2026-10-02', ends_on: '2026-10-02', finish_reason: 'forced' })
+    const state = boardState(
+      board({
+        contest: contest({ status: 'cancelled' }),
+        race: { ...race({ id: 'r4', seq: 4, status: 'scheduled', starts_on: '2026-10-09', ends_on: '2026-10-15' }), days_total: 7, day_index: null, data_through: null },
+        finished_races: [
+          { ...race({ status: 'finished' }), winner_store_id: null },
+          { ...race({ id: 'r2', seq: 2, status: 'finished' }), winner_store_id: null },
+          { ...r3, winner_store_id: null },
+        ],
+      }),
+    )
+    expect(state).toMatchObject({ kind: 'finished', cancelled: true })
+    expect(state.kind === 'finished' && state.race?.seq).toBe(3)
+    // доигранный конкурс с завершённым заездом в `race` — он и остаётся
+    const done = boardState(board({ contest: contest({ status: 'finished' }), race: { ...race({ status: 'finished' }), days_total: 7, day_index: 7, data_through: '2026-09-27' } }))
+    expect(done).toMatchObject({ kind: 'finished', cancelled: false })
+    expect(done.kind === 'finished' && done.race?.seq).toBe(1)
+    // отменён до первого заезда — заезда нет
+    const none = boardState(board({ contest: contest({ status: 'cancelled' }), finished_races: [] , race: { ...race({ status: 'scheduled' }), days_total: 7, day_index: null, data_through: null } }))
+    expect(none.kind === 'finished' && none.race).toBeNull()
+  })
+
+  it('подпись зачёта называет досрочные заезды и их длину', () => {
+    const forced = race({ id: 'r3', seq: 3, status: 'finished', starts_on: '2026-10-02', ends_on: '2026-10-02', finish_reason: 'forced' })
+    const full = race({ status: 'finished', finish_reason: 'schedule' })
+    expect(forcedRaceNotes([full, forced]).map((s) => s.replace(/\u00a0/g, ' '))).toEqual(['Заезд № 3 завершён досрочно · 1 день'])
+    expect(forcedRaceNotes([{ ...forced, ends_on: '2026-10-04' }]).map((s) => s.replace(/\u00a0/g, ' '))).toEqual(['Заезд № 3 завершён досрочно · 3 дня'])
+    expect(forcedRaceNotes([full])).toEqual([])
+  })
 })
 
 describe('ТВ и URL', () => {
@@ -282,6 +316,8 @@ describe('период тултипа', () => {
 
   it('завершённый заезд — его даты целиком, запланированный — только старт', () => {
     expect(plain(racePeriods(race({ status: 'finished' }), contest()).live)).toMatch(/^Заезд № 1 · 21 сент? — 27 сент?$/)
+    // досрочно закрытый за день — одна дата, а не «2 окт — 2 окт»
+    expect(plain(racePeriods(race({ status: 'finished', starts_on: '2026-10-02', ends_on: '2026-10-02' }), contest()).live)).toMatch(/^Заезд № 1 · 2 окт$/)
     const next = race({ id: 'r2', seq: 2, status: 'scheduled', starts_on: '2026-09-28', ends_on: '2026-10-04' })
     expect(plain(racePeriods(next, contest()).live)).toMatch(/^Заезд № 2 · старт 28 сент?$/)
   })

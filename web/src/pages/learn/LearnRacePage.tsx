@@ -15,7 +15,7 @@ import { SkeletonRows } from '@/components/ui/Skeleton'
 import { useMe } from '@/hooks/useMe'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { useRaceBoard, useRaceChart, useRaceHistory } from '@/hooks/useRace'
-import { boardState, inView, leagueOptions, resolveRaceParams, resolveView, setRaceParams } from '@/lib/raceBoard'
+import { boardState, headerRace, inView, leagueOptions, resolveRaceParams, resolveView, setRaceParams } from '@/lib/raceBoard'
 import { dataAgeLabel } from '@/lib/dates'
 
 /**
@@ -103,7 +103,7 @@ export function LearnRacePage() {
             )}
             {state.kind === 'finished' && (
               <div className="mt-5">
-                <RaceStandings standings={data.standings} myStoreId={myStoreId} />
+                <RaceStandings standings={data.standings} myStoreId={myStoreId} finishedRaces={data.finished_races} />
               </div>
             )}
             <div className="mt-3">
@@ -114,7 +114,7 @@ export function LearnRacePage() {
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 scrollInside={isDesktop && rows.length > 24}
-                race={data.race}
+                race={headerRace(state, data.race)}
                 contest={data.contest}
               />
             </div>
@@ -147,7 +147,7 @@ export function LearnRacePage() {
                     rows={history.data?.races}
                     loading={history.isLoading}
                   />
-                  {state.kind !== 'finished' && <RaceStandings standings={data.standings} myStoreId={myStoreId} />}
+                  {state.kind !== 'finished' && <RaceStandings standings={data.standings} myStoreId={myStoreId} finishedRaces={data.finished_races} />}
                 </div>
               </>
             )}

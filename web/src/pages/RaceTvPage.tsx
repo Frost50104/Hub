@@ -12,7 +12,7 @@ import { usePublicRace } from '@/hooks/usePublicRace'
 import { shouldOfferUpdate } from '@/lib/appVersion'
 import { settleInFlightUpdate } from '@/lib/serviceWorker'
 import { INFLIGHT_SETTLE_MS } from '@/lib/swPolicy'
-import { boardState, leagueOptions, tvPageSize, tvRotation } from '@/lib/raceBoard'
+import { boardState, headerRace, leagueOptions, tvPageSize, tvRotation } from '@/lib/raceBoard'
 
 const PAGE_MS = 15_000
 const TICKS_H = 40
@@ -152,7 +152,7 @@ export function RaceTvPage() {
           <div className="grid min-h-0" style={{ gridTemplateColumns: 'minmax(0,1fr) clamp(380px, 31vw, 600px)', columnGap: 'clamp(16px, 2vw, 40px)' }}>
             <div ref={trackSlot} className="relative min-h-0">
               <div key={`${page.view}-${safeIdx}`} className="race-fade">
-                <RaceTrack rows={page.rows} view={page.view} myStoreId={null} selectedId={null} onSelect={() => undefined} tv compactTicks={viewportW < 1600} laneHeight={laneH} race={data.race} contest={data.contest} />
+                <RaceTrack rows={page.rows} view={page.view} myStoreId={null} selectedId={null} onSelect={() => undefined} tv compactTicks={viewportW < 1600} laneHeight={laneH} race={headerRace(state, data.race)} contest={data.contest} />
               </div>
               {waiting && data.race && (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">

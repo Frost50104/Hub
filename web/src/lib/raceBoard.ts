@@ -166,7 +166,8 @@ export function racePeriods(race: DisplayRace | RaceRef | null | undefined, cont
     const through = 'data_through' in race ? race.data_through : null
     if (race.status === 'active' && through !== race.ends_on) live = `${head} · ${dayLabel(race.starts_on)}${NBSP}—${NBSP}сегодня`
     else if (race.status === 'active') live = `${head} · ${dayRange(race.starts_on, race.ends_on)}`
-    else if (race.status === 'finished') live = `${head} · ${dayRange(race.starts_on, race.ends_on)}`
+    else if (race.status === 'finished')
+      live = `${head} · ${race.starts_on === race.ends_on ? dayLabel(race.starts_on) : dayRange(race.starts_on, race.ends_on)}`
     else live = `${head} · старт ${dayLabel(race.starts_on)}`
   }
   let base: string | null = null
@@ -198,12 +199,22 @@ export type BoardState =
   | { kind: 'scheduled'; race: RaceRef }
   | { kind: 'active'; race: RaceRef }
   | { kind: 'between'; race: RaceRef; lastFinished: RaceRef | null }
-  | { kind: 'finished'; race: RaceRef | null }
+  /** `cancelled` — конкурс отменён, а не доигран: другой текст в шапке. */
+  | { kind: 'finished'; race: RaceRef | null; cancelled: boolean }
+
+/** Последний завершённый заезд по номеру (или null). */
+export function lastFinishedRace(finished: RaceRef[]): RaceRef | null {
+  return finished.reduce<RaceRef | null>((acc, r) => (acc && acc.seq > r.seq ? acc : r), null)
+}
 
 export function boardState(board: RaceBoard): BoardState {
   if (!board.contest) return { kind: 'no-contest', iikoConfigured: board.configured }
   if (board.contest.status === 'finished' || board.contest.status === 'cancelled') {
-    return { kind: 'finished', race: board.race }
+    // Старый бэкенд отдавал у отменённого конкурса ещё не начатый заезд
+    // («Заезд № 4 · скоро» над «Соревнование завершено», 02.10) — показываем
+    // последний завершённый, что бы ни пришло в `race`.
+    const race = board.race?.status === 'finished' ? board.race : lastFinishedRace(board.finished_races)
+    return { kind: 'finished', race, cancelled: board.contest.status === 'cancelled' }
   }
   const race = board.race
   if (!race) return { kind: 'no-contest', iikoConfigured: board.configured }
@@ -211,10 +222,28 @@ export function boardState(board: RaceBoard): BoardState {
   if (race.status === 'scheduled') {
     const finished = board.finished_races
     if (finished.length === 0) return { kind: 'scheduled', race }
-    const last = finished.reduce<RaceRef | null>((acc, r) => (acc && acc.seq > r.seq ? acc : r), null)
-    return { kind: 'between', race, lastFinished: last }
+    return { kind: 'between', race, lastFinished: lastFinishedRace(finished) }
   }
-  return { kind: 'finished', race }
+  return { kind: 'finished', race, cancelled: false }
+}
+
+/** Заезд, который рисует шапка: при завершённом конкурсе — последний завершённый, не `data.race`. */
+export function headerRace(state: BoardState, race: RaceRef | null): RaceRef | null {
+  return state.kind === 'finished' ? state.race : race
+}
+
+/** Сколько календарных дней длился заезд (`ends_on` досрочного заезда переписан на день закрытия). */
+export function raceDays(r: Pick<RaceRef, 'starts_on' | 'ends_on'>): number {
+  const ms = Date.parse(`${r.ends_on}T00:00:00Z`) - Date.parse(`${r.starts_on}T00:00:00Z`)
+  return Math.round(ms / 86_400_000) + 1
+}
+
+/** Подписи к общему зачёту о заездах, закрытых досрочно: сумма мест считает их наравне с полными. */
+export function forcedRaceNotes(finished: RaceRef[]): string[] {
+  return finished
+    .filter((r) => r.finish_reason === 'forced')
+    .sort((a, b) => a.seq - b.seq)
+    .map((r) => `Заезд №${NBSP}${r.seq} завершён досрочно · ${plural(raceDays(r), 'день', 'дня', 'дней')}`)
 }
 
 /** «Обновлено 12 мин назад · следующее ~14:40»; null — данных ещё не было. */

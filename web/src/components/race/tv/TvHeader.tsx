@@ -1,15 +1,13 @@
-import { RaceCountdown } from '@/components/race/RaceHeader'
+import { RaceCountdown, raceEyebrow } from '@/components/race/RaceHeader'
 import { cn } from '@/lib/cn'
 import type { DisplayRace, RaceContest } from '@/lib/race'
-import type { BoardState } from '@/lib/raceBoard'
-import { humanDate } from '@/lib/taskDates'
+import { headerRace, type BoardState } from '@/lib/raceBoard'
 import { nbsp } from '@/lib/typography'
 
 /** Шапка ТВ: заезд и даты слева, отсчёт и прогресс дня справа. */
 export function TvHeader({ contest, race, state, pageLabel }: { contest: RaceContest | null; race: DisplayRace | null; state: BoardState; pageLabel: string | null }) {
-  const eyebrow = race
-    ? nbsp(`Заезд № ${race.seq} · ${humanDate(race.starts_on)} — ${humanDate(race.ends_on)}`)
-    : contest?.title ?? ''
+  // Та же шапка, что на экране сотрудника: у завершённого конкурса — последний завершённый заезд.
+  const eyebrow = raceEyebrow(headerRace(state, race), contest)
   const target = race ? (state.kind === 'active' ? race.ends_at : state.kind === 'scheduled' || state.kind === 'between' ? race.starts_at : null) : null
   const mode = state.kind === 'active' ? 'to-end' : 'to-start'
   const dayIndex = race?.day_index ?? null
@@ -37,7 +35,7 @@ export function TvHeader({ contest, race, state, pageLabel }: { contest: RaceCon
         )}
         {state.kind === 'finished' && (
           <p className="font-display font-bold text-text" style={{ fontSize: 'clamp(32px, 2.4vw, 56px)' }}>
-            Соревнование завершено
+            {state.cancelled ? 'Соревнование отменено' : 'Соревнование завершено'}
           </p>
         )}
         {state.kind === 'active' && dayIndex !== null && daysTotal > 0 && (

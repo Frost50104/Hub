@@ -200,8 +200,18 @@ async def current_contest(session: AsyncSession, tenant_id: UUID) -> RaceContest
     return min(rows, key=key)
 
 
-def pick_display_race(races: list[Race]) -> Race | None:
-    """Активный → ближайший запланированный → последний завершённый."""
+def pick_display_race(races: list[Race], contest_status: str | None = None) -> Race | None:
+    """Активный → ближайший запланированный → последний завершённый.
+
+    У завершённого или отменённого конкурса на экране не бывает «следующего»
+    заезда: отмена оставляет не начатые заезды `scheduled` (статуса `cancelled`
+    у заезда нет — CHECK `ck_races_status`), и доска показывала «Заезд № 4 ·
+    скоро» над «Соревнование завершено», а гуси стояли на старте (02.10).
+    Для таких конкурсов — последний завершённый заезд или ничего.
+    """
+    if contest_status in ("finished", "cancelled"):
+        finished = [r for r in races if r.status == "finished"]
+        return max(finished, key=lambda r: r.seq) if finished else None
     active = [r for r in races if r.status == "active"]
     if active:
         return active[0]
@@ -522,7 +532,7 @@ async def build_track(
     races = await load_races(session, contest)
     leagues = await load_leagues(session, contest)
     participants = await load_participants(session, contest)
-    race = pick_display_race(races)
+    race = pick_display_race(races, contest.status)
     payload["contest"] = contest_dict(contest, leagues, races)
     if race is not None:
         through = min(today, race.ends_on) if race.status != "scheduled" else None

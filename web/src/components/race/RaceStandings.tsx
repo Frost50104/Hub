@@ -1,15 +1,16 @@
 import { useState } from 'react'
 
 import { cn } from '@/lib/cn'
-import type { RaceStanding } from '@/lib/race'
-import { formatPct } from '@/lib/raceBoard'
+import type { RaceRef, RaceStanding } from '@/lib/race'
+import { forcedRaceNotes, formatPct } from '@/lib/raceBoard'
 import { plural } from '@/lib/typography'
 
 /** Общий зачёт: сумма мест по завершённым заездам — меньше лучше. */
 const LIMIT = 10
 
-export function RaceStandings({ standings, myStoreId, className }: { standings: RaceStanding[]; myStoreId: string | null | undefined; className?: string }) {
+export function RaceStandings({ standings, myStoreId, finishedRaces = [], className }: { standings: RaceStanding[]; myStoreId: string | null | undefined; finishedRaces?: RaceRef[]; className?: string }) {
   const [showAll, setShowAll] = useState(false)
+  const notes = forcedRaceNotes(finishedRaces)
   const visible = showAll ? standings : standings.slice(0, LIMIT)
   const mine = myStoreId ? standings.find((s) => s.store_id === myStoreId) : undefined
   const meOutside = mine !== undefined && !visible.some((s) => s.store_id === myStoreId)
@@ -19,6 +20,11 @@ export function RaceStandings({ standings, myStoreId, className }: { standings: 
         <h2 className="font-display text-[18px] font-bold text-text">Общий зачёт</h2>
         <span className="text-[12px] text-text2">чем меньше сумма мест, тем выше</span>
       </div>
+      {notes.map((n) => (
+        <p key={n} className="-mt-1 text-[12px] text-text2">
+          {n}
+        </p>
+      ))}
       {standings.length === 0 ? (
         <p className="rounded-xl border border-hair bg-tint p-4 text-[14px] text-text2">Зачёт появится после первого завершённого заезда.</p>
       ) : (
