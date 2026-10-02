@@ -183,6 +183,8 @@ export interface BaselineRow extends StoreRef {
   set_by_name: string | null
   set_at: string | null
   needs_baseline: boolean
+  /** Посчитана до закрытия ретро-окна — ночь перед стартом пересчитает её сама. */
+  preliminary?: boolean
 }
 
 export interface SyncState {

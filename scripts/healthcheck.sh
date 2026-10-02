@@ -15,6 +15,7 @@
 #   HEALTHCHECK_DISK_PATH=/
 #   HEALTHCHECK_DISK_MIN_GB=8
 #   HEALTHCHECK_HR_URLS="https://hub.signaris.ru/api/health/hr"
+#   HEALTHCHECK_RACE_URLS="https://hub.signaris.ru/api/health/race"
 set -euo pipefail
 
 URLS=${HEALTHCHECK_URLS:-"https://hub.signaris.ru/api/env https://hub-staging.signaris.ru/api/env"}
@@ -33,6 +34,10 @@ PUSH_URLS=${HEALTHCHECK_PUSH_URLS:-"https://hub.signaris.ru/api/health/push http
 # Кадровые данные из auth (16d). Только прод: на staging синк штата выключен
 # навсегда, строк состояния там нет.
 HR_URLS=${HEALTHCHECK_HR_URLS:-"https://hub.signaris.ru/api/health/hr"}
+# «Гусиная гонка» (02.10, перед боевым стартом 05.10). Только прод: на staging
+# обращения к iiko выключены флагом, ручка отвечает status=disabled. Дефолт
+# обязателен — под `set -u` пустая переменная уронила бы ВЕСЬ скрипт.
+RACE_URLS=${HEALTHCHECK_RACE_URLS:-"https://hub.signaris.ru/api/health/race"}
 DISK_PATH=${HEALTHCHECK_DISK_PATH:-/}
 DISK_MIN_GB=${HEALTHCHECK_DISK_MIN_GB:-8}
 EMAIL=${HEALTHCHECK_ALERT_EMAIL:-ops@signaris.ru}
@@ -169,5 +174,44 @@ for url in $HR_URLS; do
   else
     logger -t signaris-hub-health "HR ATTENTION $url ($problems)"
     send_telegram "🔴 [Hub] кадровые данные из auth: $(hr_text "$problems")— $url"
+  fi
+done
+
+# --- Гусиная гонка ----------------------------------------------------------
+# Ручка отдаёт {"status": "ok"|"attention"|"disabled", "problems": [...]}: коды
+# без названий тенантов и чисел. Джобы гонки ловят все исключения и выходят с
+# кодом 0, OnFailure у юнитов нет — без этой проверки сломавшуюся выгрузку
+# заметили бы только по «обновлено N часов назад» на доске. Триггер — по
+# СМЕНЕ набора проблем, как у HR.
+race_text() {
+  local out=""
+  for code in $(echo "$1" | tr ',' ' '); do
+    case "$code" in
+      activation_overdue) out+="конкурс запланирован, старт наступил, а он не активен (тик 00:40 не сработал — journalctl -u signaris-hub-race-sync, race.activate_blocked_by_active); " ;;
+      pull_stale) out+="успешной выгрузки iiko не было больше 2 часов (journalctl -u signaris-hub-race-sync: busy_skip / pull_failed); " ;;
+      pull_error) out+="последняя выгрузка iiko упала (текст ошибки — в админке «Гонка» → «Выгрузка iiko»); " ;;
+      close_stale) out+="ночное закрытие 03:45 не прошло (journalctl -u signaris-hub-race-close); " ;;
+      baseline_preliminary) out+="база активного конкурса осталась предварительной — пересчёт ночью не удался (кнопка «Пересчитать из iiko» в админке или следующий тик после 04:40); " ;;
+      *) out+="$code; " ;;
+    esac
+  done
+  echo "$out"
+}
+
+for url in $RACE_URLS; do
+  state_file="$STATE_DIR/race.$(slug "$url").state"
+  prev=$(cat "$state_file" 2>/dev/null || echo "")
+  body=$(curl -fs --max-time 10 "$url" 2>/dev/null || echo "")
+  # Недоступность самой ручки ловит проверка /api/env выше.
+  [[ -n "$body" ]] || continue
+  problems=$(echo "$body" | sed -n 's/.*"problems":[[:space:]]*\[\([^]]*\)\].*/\1/p' | tr -d '" ')
+  [[ "$problems" == "$prev" ]] && continue
+  echo "$problems" > "$state_file"
+  if [[ -z "$problems" ]]; then
+    logger -t signaris-hub-health "RACE RECOVERED $url"
+    send_telegram "✅ [Hub] гонка: выгрузка iiko и закрытие снова в порядке: $url"
+  else
+    logger -t signaris-hub-health "RACE ATTENTION $url ($problems)"
+    send_telegram "🔴 [Hub] Гусиная гонка: $(race_text "$problems")— $url"
   fi
 done

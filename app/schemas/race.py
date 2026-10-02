@@ -200,6 +200,8 @@ class BaselineOut(StoreRefOut):
     set_by_name: str | None = None
     set_at: datetime | None = None
     needs_baseline: bool = True
+    # База посчитана до закрытия своего окна — ночь перед стартом пересчитает её сама.
+    preliminary: bool = False
 
 
 class SyncStateOut(BaseModel):

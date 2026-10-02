@@ -2,6 +2,8 @@
 
 Порядок тика на тенант с scheduled/active конкурсом:
 1. `activate_due` — запланированное со стартом ≤ сегодня становится активным;
+1а. с 04:00 МСК — `finalize_baselines(through_day=вчера)`: самолечение, если
+   ночное закрытие не финализировало предварительные базы;
 2. при активном конкурсе — `pull_days([вчера, сегодня])` (одна сессия iiko под
    fenced-локом); `IikoBusy` — пропустить тик, следующий через час;
 3. commit;
@@ -29,7 +31,8 @@ from app.redis_client import close_redis
 from app.services.iiko import service as iiko_service
 from app.services.iiko.client import IikoError, IikoNotConfigured
 from app.services.notify_batch import drain
-from app.services.race import engine, gate, iiko_pull, read
+from app.services.race import engine, finalize, gate, iiko_pull, read
+from app.services.timefmt import display_tz
 
 log = structlog.get_logger("jobs.race_sync")
 
@@ -38,13 +41,17 @@ _TENANTS_SQL = text(
 )
 
 
-async def _tenant_tick(tenant_id, *, today) -> None:
+async def _tenant_tick(tenant_id, *, today, local_hour: int) -> None:
     async with tenant_scoped_session(tenant_id) as session:
         if not await gate.tenant_enabled(session, tenant_id):
             log.info("race_sync.tenant_disabled", tenant_id=str(tenant_id))
             return
         await engine.activate_due(session, tenant_id, today=today)
         await session.commit()
+        if local_hour >= finalize.BASELINE_FINALIZE_FROM_HOUR:
+            await finalize.finalize_baselines(
+                session, tenant_id=tenant_id, through_day=today - timedelta(days=1)
+            )
         active = await read.current_contest(session, tenant_id)
         if active is None or active.status != "active":
             return
@@ -83,6 +90,7 @@ async def main() -> int:
         log.info("race_sync.iiko_not_configured")
         return 0
     today = engine.today_local()
+    local_hour = datetime.now(display_tz()).hour
     try:
         async with tenant_scoped_session(None, bypass_rls=True) as scan:
             tenant_ids = [r[0] for r in await scan.execute(_TENANTS_SQL)]
@@ -90,7 +98,7 @@ async def main() -> int:
         sent_total = 0
         for tenant_id in tenant_ids:
             try:
-                await _tenant_tick(tenant_id, today=today)
+                await _tenant_tick(tenant_id, today=today, local_hour=local_hour)
                 sent_total += await engine.send_pending_notifications(
                     tenant_id, now=datetime.now(UTC)
                 )

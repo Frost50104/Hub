@@ -59,6 +59,7 @@ from app.services.org_scope import get_profile
 from app.services.race import engine, gate, iiko_pull, read, tv_token
 from app.services.race import math as race_math
 from app.services.race.baselines import load_baselines
+from app.services.timefmt import display_tz
 
 router = APIRouter(tags=["race"])
 
@@ -600,6 +601,9 @@ async def _baselines_out(
                 set_by_name=None if b is None or b.set_by is None else names.get(b.set_by),
                 set_at=None if b is None else b.set_at,
                 needs_baseline=b is None or b.value is None,
+                preliminary=b is not None
+                and b.source == "iiko"
+                and race_math.baseline_is_preliminary(b.set_at, b.period_to, tz=display_tz()),
             )
         )
     return out

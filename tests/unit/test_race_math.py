@@ -297,3 +297,52 @@ def test_joined_race_seq_only_for_late_joiners():
     assert m.joined_race_seq(races, d + timedelta(days=9)) == 2
     assert m.joined_race_seq(races, d + timedelta(days=30)) is None, "после конкурса"
     assert m.joined_race_seq([], d) is None
+
+
+# ─── предварительная база ───────────────────────────────────────────────────
+
+
+def _msk():
+    from zoneinfo import ZoneInfo
+
+    return ZoneInfo("Europe/Moscow")
+
+
+def test_baseline_is_preliminary_before_window_closes():
+    from datetime import datetime
+
+    tz = _msk()
+    # окно по 04.10, посчитано 02.10 днём — хвост окна ещё не наступил
+    assert m.baseline_is_preliminary(
+        datetime(2026, 10, 2, 16, 52, tzinfo=tz), date(2026, 10, 4), tz=tz
+    )
+    # посчитано 04.10 в 23:59 — последний день ещё идёт
+    assert m.baseline_is_preliminary(
+        datetime(2026, 10, 4, 23, 59, tzinfo=tz), date(2026, 10, 4), tz=tz
+    )
+
+
+def test_baseline_is_preliminary_false_once_window_closed():
+    from datetime import UTC, datetime
+
+    tz = _msk()
+    # ночное закрытие 05.10 03:45 МСК (00:45 UTC)
+    assert not m.baseline_is_preliminary(
+        datetime(2026, 10, 5, 0, 45, tzinfo=UTC), date(2026, 10, 4), tz=tz
+    )
+    # ровно полночь после окна — уже не предварительная (граница включительно)
+    assert not m.baseline_is_preliminary(
+        datetime(2026, 10, 5, 0, 0, tzinfo=tz), date(2026, 10, 4), tz=tz
+    )
+    # без окна (ручная строка) правило не применяется
+    assert not m.baseline_is_preliminary(datetime(2026, 10, 2, tzinfo=tz), None, tz=tz)
+
+
+def test_baseline_is_preliminary_respects_display_tz_not_utc():
+    from datetime import UTC, datetime
+
+    tz = _msk()
+    # 04.10 22:30 UTC = 05.10 01:30 МСК — в Москве окно уже закрылось
+    assert not m.baseline_is_preliminary(
+        datetime(2026, 10, 4, 22, 30, tzinfo=UTC), date(2026, 10, 4), tz=tz
+    )

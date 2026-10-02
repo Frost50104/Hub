@@ -8,7 +8,11 @@
    следующий заезд; commit;
 3. если следующему заезду нужна база (режим `race`) — `compute_baselines`
    ОТДЕЛЬНО, вне advisory-лока: расчёт ходит в iiko;
-4. `last_close_day` в `race_sync_state`.
+4. `activate_due` — конкурс со стартом сегодня становится активным;
+5. `finalize_baselines(through_day=close_day)` — базы, посчитанные до
+   закрытия своего окна (планирование заранее, ручной пересчёт), в ночь
+   перед стартом пересчитываются по полному окну; ручной шаг утром не нужен;
+6. `last_close_day` в `race_sync_state`.
 Пушей здесь нет — их шлёт часовая джоба после 09:00.
 
 Гейты те же, что у race_sync: без них staging тянул бы iiko и двигал
@@ -30,7 +34,7 @@ from app.models.race import Race, RaceContest
 from app.redis_client import close_redis
 from app.services.iiko import service as iiko_service
 from app.services.iiko.client import IikoError, IikoNotConfigured
-from app.services.race import engine, gate, iiko_pull
+from app.services.race import engine, finalize, gate, iiko_pull
 
 log = structlog.get_logger("jobs.race_close")
 
@@ -109,6 +113,8 @@ async def _tenant_close(tenant_id, *, close_day, today) -> None:
                 await session.rollback()
                 log.warning("race_close.baselines_failed", race_id=str(race_id), err=str(e))
         await engine.activate_due(session, tenant_id, today=today)
+        await session.commit()
+        await finalize.finalize_baselines(session, tenant_id=tenant_id, through_day=close_day)
         await iiko_pull.touch_sync_state(session, tenant_id, close_day=close_day)
         await session.commit()
 

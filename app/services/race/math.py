@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math as _math
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any, Literal
 from uuid import UUID
 
@@ -258,6 +258,23 @@ def generate_races(starts_on: date, weeks_total: int, race_length_days: int) -> 
 def retro_period(starts_on: date, baseline_days: int) -> tuple[date, date]:
     """Ретро-окно базы: N дней, заканчивающихся накануне старта."""
     return starts_on - timedelta(days=baseline_days), starts_on - timedelta(days=1)
+
+
+def baseline_is_preliminary(set_at: datetime, period_to: date | None, *, tz: tzinfo) -> bool:
+    """База посчитана РАНЬШЕ, чем закрылся последний день её окна.
+
+    Окно базы заканчивается накануне старта (`retro_period`), а считать её
+    можно и за неделю до старта — при `schedule()` и кнопкой «Пересчитать из
+    iiko». Тогда хвост окна в расчёт не попал: будущие дни пусты, текущий
+    частичный. Признака «окончательная» у строки нет и не нужно: достаточно
+    сравнить `set_at` с полуночью display tz после `period_to`. После
+    пересчёта `set_at` обновляется и правило само гаснет (02.10, запуск 05.10:
+    базы черновика были посчитаны 02.10 за окно по 04.10).
+    """
+    if period_to is None:
+        return False
+    closed_at = datetime.combine(period_to + timedelta(days=1), time.min, tzinfo=tz)
+    return set_at < closed_at
 
 
 def pending_snapshot_days(

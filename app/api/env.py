@@ -17,9 +17,15 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import tenant_scoped_session
 from app.models.hr_sync import HrSyncState
+from app.models.race import RaceContest, RaceSyncState
 from app.models.shadow import ShadowTenant
 from app.services import hr_state
+from app.services.iiko import service as iiko_service
 from app.services.push_sender import vapid_status
+from app.services.race import gate as race_gate
+from app.services.race import health as race_health
+from app.services.race.baselines import preliminary_scopes
+from app.services.timefmt import display_tz
 
 router = APIRouter(tags=["env"])
 
@@ -96,3 +102,68 @@ async def hr_health() -> HrHealthResponse:
             )
             problems.update(hr_state.health_problems(row, applying=applying, now=now))
     return HrHealthResponse(status="attention" if problems else "ok", problems=sorted(problems))
+
+
+class RaceHealthResponse(BaseModel):
+    """«Гусиная гонка» — выгрузка iiko, ночное закрытие, активация, базы.
+    Только коды: ручка анонимная, названий тенантов, чисел и текста ошибок
+    iiko здесь нет."""
+
+    status: str  # ok | attention | disabled
+    problems: list[str]
+    checked_at: datetime
+
+
+@router.get("/health/race", response_model=RaceHealthResponse)
+async def race_health_view() -> RaceHealthResponse:
+    """`scripts/healthcheck.sh` шлёт алерт при смене набора проблем.
+
+    `disabled` — обращения к iiko выключены (`SIGNARIS_HUB_RACE_SYNC_ENABLED`,
+    staging) или iiko не настроен: проверять нечего. Иначе — коды
+    `race_health.health_problems` по каждому тенанту с конкурсом
+    `scheduled|active` и включённым тумблером.
+    """
+    now = datetime.now(UTC)
+    if not race_gate.sync_enabled() or not iiko_service.is_configured():
+        return RaceHealthResponse(status="disabled", problems=[], checked_at=now)
+    tz = display_tz()
+    problems: set[str] = set()
+    async with tenant_scoped_session(None, bypass_rls=True) as db:
+        contests = list(
+            (
+                await db.execute(
+                    select(RaceContest).where(RaceContest.status.in_(("scheduled", "active")))
+                )
+            ).scalars()
+        )
+        by_tenant: dict = {}
+        for c in contests:
+            cur = by_tenant.get(c.tenant_id)
+            # активный важнее запланированного; из запланированных — ближайший
+            if cur is None or (c.status == "active") > (cur.status == "active") or (
+                c.status == cur.status and c.starts_on < cur.starts_on
+            ):
+                by_tenant[c.tenant_id] = c
+        for tenant_id, c in by_tenant.items():
+            if not await race_gate.tenant_enabled(db, tenant_id):
+                continue
+            state = await db.get(RaceSyncState, tenant_id)
+            last_close_day = None if state is None else state.last_close_day
+            preliminary = 0
+            if last_close_day is not None:
+                preliminary = len(
+                    await preliminary_scopes(db, c.id, through_day=last_close_day, tz=tz)
+                )
+            snapshot = race_health.TenantRaceHealth(
+                contest_status=c.status,
+                contest_starts_on=c.starts_on,
+                scheduled_at=c.scheduled_at,
+                last_success_at=None if state is None else state.last_success_at,
+                last_error=None if state is None else state.last_error,
+                last_close_day=last_close_day,
+                preliminary_closed=preliminary,
+            )
+            problems.update(race_health.health_problems(snapshot, now=now, tz=tz))
+    return RaceHealthResponse(
+        status="attention" if problems else "ok", problems=sorted(problems), checked_at=now
+    )

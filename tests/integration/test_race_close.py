@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
 from app.models.org import Store
-from app.models.race import RaceDailyStat, RaceParticipant, RaceResult, RaceSnapshot
+from app.models.race import RaceContest, RaceDailyStat, RaceParticipant, RaceResult, RaceSnapshot
 from app.models.shadow import ShadowSite
 from app.services.race import engine, read
 from app.services.race.baselines import upsert_baseline
@@ -376,3 +376,157 @@ async def test_late_joiner_gets_joined_race_seq_in_standings_and_admin(db: Async
     by_id = {s["store_id"]: s for s in standings}
     assert by_id[late.id]["joined_race_seq"] == 2 and by_id[late.id]["missed_races"] == 1
     assert by_id[net.A.id]["joined_race_seq"] is None
+
+
+# ─── финализация предварительных баз ────────────────────────────────────────
+
+
+async def _iiko_row(db, contest, store_id, *, race_id, period_to, set_at):
+    """iiko-строка с заданным моментом расчёта: `upsert_baseline` ставит now()."""
+    row = await upsert_baseline(
+        db,
+        contest=contest,
+        store_id=store_id,
+        race_id=race_id,
+        value=2.2,
+        source="iiko",
+        period_from=period_to - timedelta(days=27),
+        period_to=period_to,
+    )
+    row.set_at = set_at
+    await db.flush()
+    return row
+
+
+async def test_preliminary_scopes_only_iiko_rows_computed_before_window_closed(
+    db: AsyncSession, tenant_id
+):
+    from zoneinfo import ZoneInfo
+
+    from app.services.race.baselines import preliminary_scopes
+
+    tz = ZoneInfo("Europe/Moscow")
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net)  # A и C — ручные базы
+    early = datetime(2026, 5, 29, 12, 0, tzinfo=tz)  # окно по 31.05, посчитано 29.05
+    await _iiko_row(db, contest, net.B.id, race_id=None, period_to=_day(-1), set_at=early)
+    assert await preliminary_scopes(db, contest.id, through_day=_day(-1), tz=tz) == [None]
+    # окно ещё не закрылось по through_day — не трогаем
+    assert await preliminary_scopes(db, contest.id, through_day=_day(-2), tz=tz) == []
+    # посчитано после полуночи 01.06 — окончательная
+    late = datetime(2026, 6, 1, 3, 45, tzinfo=tz)
+    await _iiko_row(db, contest, net.B.id, race_id=None, period_to=_day(-1), set_at=late)
+    assert await preliminary_scopes(db, contest.id, through_day=_day(-1), tz=tz) == []
+
+
+async def test_finalize_recomputes_contest_baseline_once_and_keeps_manual(
+    db: AsyncSession, tenant_id, monkeypatch
+):
+    from zoneinfo import ZoneInfo
+
+    from app.services.race import finalize, iiko_pull
+    from app.services.race.baselines import load_baselines
+
+    tz = ZoneInfo("Europe/Moscow")
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net)
+    early = datetime(2026, 5, 29, 12, 0, tzinfo=tz)
+    await _iiko_row(db, contest, net.B.id, race_id=None, period_to=_day(-1), set_at=early)
+    await db.commit()
+    calls: list[tuple[str, object]] = []
+
+    async def stub(session, *, contest, race, force=False, pull=True, set_by=None):  # noqa: ARG001
+        calls.append((contest.title, None if race is None else race.id))
+        # «пересчёт» — та же строка с set_at = now(), как делает настоящий compute_baselines
+        await upsert_baseline(
+            session,
+            contest=contest,
+            store_id=net.B.id,
+            race_id=None,
+            value=2.4,
+            source="iiko",
+            period_from=_day(-28),
+            period_to=_day(-1),
+        )
+        return iiko_pull.BaselineReport(
+            period_from=_day(-28),
+            period_to=_day(-1),
+            computed=1,
+            skipped_manual=2,
+            empty=0,
+            pulled=True,
+        )
+
+    monkeypatch.setattr(iiko_pull, "compute_baselines", stub)
+    report = await finalize.finalize_baselines(db, tenant_id=tenant_id, through_day=_day(-1))
+    assert calls == [("Тест", None)]
+    assert report.finalized == [(contest.id, None)] and report.failed == []
+    rows = await load_baselines(db, contest, None)
+    assert rows[net.A.id].source == "manual" and rows[net.A.id].value == 2.0
+    assert rows[net.B.id].value == 2.4
+    # повторный прогон — set_at уже после полуночи 01.06, пересчитывать нечего
+    report2 = await finalize.finalize_baselines(db, tenant_id=tenant_id, through_day=_day(-1))
+    assert calls == [("Тест", None)] and report2.finalized == []
+
+
+async def test_finalize_race_mode_touches_only_races_whose_window_closed(
+    db: AsyncSession, tenant_id, monkeypatch
+):
+    from zoneinfo import ZoneInfo
+
+    from app.services.race import finalize, iiko_pull
+
+    tz = ZoneInfo("Europe/Moscow")
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net, baseline_mode="race")
+    races = sorted((await read.load_races(db, contest)), key=lambda r: r.seq)
+    early = datetime(2026, 5, 29, 12, 0, tzinfo=tz)
+    # заезд №1: окно по 31.05, посчитано при schedule — предварительная
+    await _iiko_row(db, contest, net.B.id, race_id=races[0].id, period_to=_day(-1), set_at=early)
+    # заезд №2: окно по 07.06, строка «заранее» — окно ещё не закрылось
+    await _iiko_row(db, contest, net.B.id, race_id=races[1].id, period_to=_day(6), set_at=early)
+    await db.commit()
+    seen: list = []
+
+    async def stub(session, *, contest, race, force=False, pull=True, set_by=None):  # noqa: ARG001
+        seen.append(None if race is None else race.seq)
+        return iiko_pull.BaselineReport(
+            period_from=_day(-28),
+            period_to=_day(-1),
+            computed=0,
+            skipped_manual=0,
+            empty=0,
+            pulled=True,
+        )
+
+    monkeypatch.setattr(iiko_pull, "compute_baselines", stub)
+    await finalize.finalize_baselines(db, tenant_id=tenant_id, through_day=_day(-1))
+    assert seen == [1]
+
+
+async def test_finalize_iiko_failure_rolls_back_and_reports(
+    db: AsyncSession, tenant_id, monkeypatch
+):
+    from zoneinfo import ZoneInfo
+
+    from app.services.iiko import service as iiko_service
+    from app.services.race import finalize, iiko_pull
+    from app.services.race.baselines import load_baselines
+
+    tz = ZoneInfo("Europe/Moscow")
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net)
+    early = datetime(2026, 5, 29, 12, 0, tzinfo=tz)
+    await _iiko_row(db, contest, net.B.id, race_id=None, period_to=_day(-1), set_at=early)
+    await db.commit()
+
+    async def boom(session, *, contest, race, force=False, pull=True, set_by=None):  # noqa: ARG001
+        raise iiko_service.IikoBusy("слот занят")
+
+    monkeypatch.setattr(iiko_pull, "compute_baselines", boom)
+    contest_id, b_id = contest.id, net.B.id  # rollback внутри finalize протухает ORM-объекты
+    report = await finalize.finalize_baselines(db, tenant_id=tenant_id, through_day=_day(-1))
+    assert report.failed == [(contest_id, None)] and report.finalized == []
+    contest = await db.get(RaceContest, contest_id)
+    rows = await load_baselines(db, contest, None)
+    assert rows[b_id].value == 2.2, "база осталась предварительной целиком, не половинчатой"

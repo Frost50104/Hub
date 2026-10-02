@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, tzinfo
 from decimal import Decimal
 from uuid import UUID
 
@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.race import RaceBaseline, RaceContest
+from app.services.race.math import baseline_is_preliminary
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,34 @@ async def upsert_baseline(
     row.set_at = datetime.now(UTC)
     await session.flush()
     return row
+
+
+async def preliminary_scopes(
+    session: AsyncSession, contest_id: UUID, *, through_day: date, tz: tzinfo
+) -> list[UUID | None]:
+    """Scope базы (None = весь конкурс, иначе заезд), где есть iiko-строка,
+    посчитанная до закрытия окна, а окно уже закрыто по `through_day`.
+
+    Ручные строки сюда не попадают: их никто не пересчитывает (решение
+    владельца 19.09 — база новичку только вручную). Уровень конкурса идёт
+    первым: в режиме `race` он фолбэк для всех заездов.
+    """
+    rows = (
+        await session.execute(
+            select(RaceBaseline.race_id, RaceBaseline.set_at, RaceBaseline.period_to).where(
+                RaceBaseline.contest_id == contest_id,
+                RaceBaseline.source == "iiko",
+                RaceBaseline.period_to.is_not(None),
+                RaceBaseline.period_to <= through_day,
+            )
+        )
+    ).all()
+    scopes = {
+        race_id
+        for race_id, set_at, period_to in rows
+        if baseline_is_preliminary(set_at, period_to, tz=tz)
+    }
+    return sorted(scopes, key=lambda r: (r is not None, str(r)))
 
 
 async def has_iiko_baseline(session: AsyncSession, race_id: UUID) -> bool:

@@ -605,6 +605,7 @@ function BaselineRowView({ b, editing, onEdit, onCancel, onSave, onClear, pendin
           <span className="truncate text-[14px] text-text">{b.name}</span>
           {b.source === 'manual' && <Badge>вручную</Badge>}
           {b.source === 'iiko' && <Badge variant="secondary">iiko</Badge>}
+          {b.preliminary && <Badge variant="secondary">предварительная</Badge>}
         </div>
         <p className="text-[12px] text-text2">
           {b.needs_baseline
