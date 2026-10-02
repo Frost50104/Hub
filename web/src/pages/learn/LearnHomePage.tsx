@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { SpaceSwitcher } from '@/components/layout/SpaceSwitcher'
+import { PushPermissionPrompt } from '@/components/PushPermissionPrompt'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -22,7 +23,7 @@ import { CourseCover, courseTypeBadgeClass } from '@/components/learn/CourseCove
 import { CoverTile } from '@/components/learn/CoverTile'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useLearnHome, useRecent } from '@/hooks/useLearn'
-import { useMe } from '@/hooks/useMe'
+import { hasRace, useMe } from '@/hooks/useMe'
 import { cn } from '@/lib/cn'
 import {
   CONTENT_TYPE_LABEL,
@@ -293,6 +294,10 @@ export function LearnHomePage() {
           </p>
         )}
       </header>
+
+      {/* Сотрудники точек живут в «Обучении», а промпт про уведомления до 02.10 был только
+          на главной трекера — отсюда 9 доставленных пушей из 152 при старте заезда. */}
+      <PushPermissionPrompt race={hasRace(me.data) && Boolean(me.data?.profile?.store_id)} className="mx-5 mt-5" />
 
       {(archived || needsRestore) && (
         <div className="mx-5 mt-5 flex items-start gap-3 rounded-[14px] border border-hair bg-tint p-4">

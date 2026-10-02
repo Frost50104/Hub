@@ -20,9 +20,11 @@ export const PER_USER_LOCAL_KEYS = [
   'hub-project-folders', // свёрнутые папки (stores/projectFolders.ts)
   'hub:push-last-sync', // троттл переподписки (lib/pushRefresh.ts)
   'hub:push-owner', // чей push-endpoint на сервере (там же)
+  'hub:push-nudge-dismissed-until', // «Позже» у карточки про уведомления (lib/pushNudge.ts)
 ] as const
 
-export const PER_USER_SESSION_KEYS = ['hub:push-prompt-dismissed'] as const
+/** Сессионных ключей человека не осталось: «Позже» у промпта с 02.10 живёт неделю в localStorage. */
+export const PER_USER_SESSION_KEYS = [] as const
 
 /**
  * Чего в списках НЕТ и почему:

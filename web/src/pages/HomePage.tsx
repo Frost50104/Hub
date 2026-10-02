@@ -14,7 +14,7 @@ import { SkeletonRows } from '@/components/ui/Skeleton'
 import { MobileTaskRow } from '@/components/task/MobileTaskRow'
 import { CompactTaskRow } from '@/components/task/CompactTaskRow'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
-import { useMe } from '@/hooks/useMe'
+import { hasRace, useMe } from '@/hooks/useMe'
 import { useMyTasks, type DueWindow } from '@/hooks/useMyTasks'
 import { useProjects } from '@/hooks/useProjects'
 import { useToggleDone } from '@/hooks/useTasks'
@@ -75,7 +75,11 @@ function useHomeData(tab: DueWindow) {
     () => new Map((projects.data ?? []).map((p) => [p.id, p.name])),
     [projects.data],
   )
+  // Нудж про уведомления говорит про гонку только людям точек-участниц:
+  // пуши гонки идут им (`engine._recipients`), офису и людям без точки — нет.
+  const raceNudge = hasRace(me.data) && Boolean(me.data?.profile?.store_id)
   return {
+    raceNudge,
     // Перенос строки в приветствии обязан идти по запятой: на 390px «Добрый
     // день, Ирина» ломалось после «Добрый» и оставляло «день, Ирина».
     greetingText: `${greeting().replace(' ', NBSP)}, ${me.data?.full_name?.split(/\s+/)[0] ?? 'друг'}`,
@@ -130,7 +134,7 @@ function Panel({
 
 function DesktopHome() {
   const [taskTab, setTaskTab] = useState<DueWindow>('upcoming')
-  const { greetingText, projects, myTasks, toggleDone, openTask, projectLabel } =
+  const { greetingText, projects, myTasks, toggleDone, openTask, projectLabel, raceNudge } =
     useHomeData(taskTab)
 
   const today = capitalizeFirst(
@@ -144,7 +148,7 @@ function DesktopHome() {
 
   return (
     <div className="mx-auto flex max-w-[1080px] flex-col gap-[26px] px-6 pb-10 pt-8">
-      <PushPermissionPrompt />
+      <PushPermissionPrompt race={raceNudge} />
       <header className="flex flex-col gap-1.5 text-center">
         <p className="text-[15px] text-text2">{today}</p>
         <h1 className="font-display text-[30px] font-bold leading-[1.18] text-text">
@@ -303,7 +307,7 @@ function MobileProjectRow({ project }: { project: Project }) {
 }
 
 function MobileHome() {
-  const { greetingText, projects, myTasks, toggleDone, openTask, projectLabel } =
+  const { greetingText, projects, myTasks, toggleDone, openTask, projectLabel, raceNudge } =
     useHomeData('upcoming')
   const recentProjects = (projects.data ?? []).slice(0, 6)
   // Избранное — только на телефоне: на десктопе оно живёт в сайдбаре, а
@@ -330,7 +334,7 @@ function MobileHome() {
       />
 
       <div className="flex flex-col gap-3.5 px-3 py-3.5">
-        <PushPermissionPrompt />
+        <PushPermissionPrompt race={raceNudge} />
 
         <UserStatsCard />
         <TeamLeadersCard />

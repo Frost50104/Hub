@@ -6,6 +6,7 @@ import {
   CalendarClock,
   CheckCircle2,
   CheckSquare,
+  Flag,
   MessageSquare,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -39,6 +40,9 @@ const KIND_ICON: Record<string, typeof Bell> = {
   'task.due_soon': CalendarClock,
   'task.overdue': CalendarClock,
   'task.reminder': AlarmClock,
+  'race.started': Flag,
+  'race.record': Flag,
+  'race.push_reminder': Bell,
 }
 
 /**
@@ -54,6 +58,9 @@ const KIND_TONE: Record<string, string> = {
   'task.due_soon': 'bg-amber text-on-amber',
   'task.overdue': 'bg-red text-bg',
   'task.reminder': 'bg-amber text-on-amber',
+  'race.started': 'bg-amber text-on-amber',
+  'race.record': 'bg-green-deep text-bg',
+  'race.push_reminder': 'bg-amber text-on-amber',
 }
 
 const DEFAULT_TONE = 'bg-surface text-text2'

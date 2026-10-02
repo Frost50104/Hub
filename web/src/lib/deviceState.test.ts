@@ -18,8 +18,9 @@ describe('чистка устройства при выходе', () => {
       'hub-project-folders',
       'hub:push-last-sync',
       'hub:push-owner',
+      'hub:push-nudge-dismissed-until',
     ])
-    expect([...PER_USER_SESSION_KEYS]).toEqual(['hub:push-prompt-dismissed'])
+    expect([...PER_USER_SESSION_KEYS]).toEqual([])
   })
 
   it('НЕ трогает разрешение на уведомления — иначе вернувшемуся включать заново', () => {

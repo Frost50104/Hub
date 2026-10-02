@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
+import { PushPermissionPrompt } from '@/components/PushPermissionPrompt'
 import { QueryError } from '@/components/QueryError'
 import { LeagueSegment } from '@/components/race/LeagueSegment'
 import { RaceBoard } from '@/components/race/RaceBoard'
@@ -77,6 +78,7 @@ export function LearnRacePage() {
             Не удалось обновить данные{asOfMs ? ` — ${dataAgeLabel(asOfMs)?.toLowerCase() ?? ''}` : ''}.
           </p>
         )}
+        {myStoreId && state.kind !== 'no-contest' && <PushPermissionPrompt race className="mt-4" />}
 
         {state.kind === 'no-contest' ? (
           <div className="mt-5">

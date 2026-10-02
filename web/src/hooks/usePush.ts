@@ -19,6 +19,8 @@ export interface UsePushResult {
   permission: Permission
   /** True when a subscription already exists for this browser. */
   subscribed: boolean
+  /** Ответ `pushManager.getSubscription()` получен — до него `subscribed` ничего не значит. */
+  checked: boolean
   /** Request permission + register subscription. Must be called from a user gesture. */
   subscribe: () => Promise<boolean>
   /** Unsubscribe locally and remove from backend. */
@@ -36,14 +38,29 @@ export function usePush(): UsePushResult {
     return Notification.permission as Permission
   })
   const [subscribed, setSubscribed] = useState(false)
+  const [checked, setChecked] = useState(false)
 
-  // Check existing subscription on mount.
+  // Check existing subscription on mount. На iOS `serviceWorker.ready` может не
+  // прийти вовсе (usePushAutoRefresh) — тогда `checked` остаётся false, и нудж
+  // «Подписаться» не рисуется подписанному человеку по ложному `subscribed=false`.
   useEffect(() => {
     if (permission === 'unsupported') return
+    let alive = true
     navigator.serviceWorker.ready
       .then((reg) => reg.pushManager.getSubscription())
-      .then((sub) => setSubscribed(!!sub))
-      .catch(() => setSubscribed(false))
+      .then((sub) => {
+        if (!alive) return
+        setSubscribed(!!sub)
+        setChecked(true)
+      })
+      .catch(() => {
+        if (!alive) return
+        setSubscribed(false)
+        setChecked(true)
+      })
+    return () => {
+      alive = false
+    }
   }, [permission])
 
   const subscribe = useCallback(async (): Promise<boolean> => {
@@ -108,5 +125,5 @@ export function usePush(): UsePushResult {
     setSubscribed(false)
   }, [permission])
 
-  return { permission, subscribed, subscribe, unsubscribe }
+  return { permission, subscribed, checked, subscribe, unsubscribe }
 }
