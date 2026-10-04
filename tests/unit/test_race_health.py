@@ -36,6 +36,13 @@ def test_scheduled_contest_is_fine_until_its_start_day():
     assert h.health_problems(tomorrow, now=NOW, tz=TZ) == []
     overdue = _snap(contest_status="scheduled", contest_starts_on=S)
     assert h.health_problems(overdue, now=NOW, tz=TZ) == ["activation_overdue"]
+    # 00:20 МСК дня старта — тик активации ещё не прошёл (00:40), это не тревога;
+    # 05.10 в 00:01 именно так ушла ложная тревога в Telegram.
+    just_after_midnight = datetime(2026, 10, 4, 21, 20, tzinfo=UTC)
+    assert h.health_problems(overdue, now=just_after_midnight, tz=TZ) == []
+    # а вчерашний старт — тревога в любое время суток
+    yesterday = _snap(contest_status="scheduled", contest_starts_on=S - timedelta(days=1))
+    assert h.health_problems(yesterday, now=just_after_midnight, tz=TZ) == ["activation_overdue"]
     # у запланированного остальные проверки не применяются: выгрузок ещё нет
     assert (
         h.health_problems(
