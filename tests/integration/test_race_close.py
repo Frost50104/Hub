@@ -49,7 +49,10 @@ async def _stat(db, tenant_id, dept, day, receipts, items):
     await db.flush()
 
 
-async def _scheduled_contest(db, net, **kw):
+async def _scheduled_contest(db, net, *, manual_stores=("A", "C"), **kw):
+    """Запланированный конкурс; `manual_stores` — кому поставить ручную базу
+    уровня конкурса (строка `(store, NULL)` одна на точку — тест, которому нужна
+    iiko-строка на C, убирает C отсюда)."""
     contest = await engine.create_contest(
         db,
         tenant_id=net.A.tenant_id,
@@ -62,11 +65,11 @@ async def _scheduled_contest(db, net, **kw):
     await engine.schedule(
         db, contest, today=D0, actor_id=net.admin.employee_id, compute_baselines=None
     )
-    for store in (net.A, net.C):
+    for key in manual_stores:
         await engine.set_baseline(
             db,
             contest,
-            store_id=store.id,
+            store_id=getattr(net, key).id,
             race_id=None,
             value=2.0,
             note=None,
@@ -407,16 +410,62 @@ async def test_preliminary_scopes_only_iiko_rows_computed_before_window_closed(
 
     tz = ZoneInfo("Europe/Moscow")
     net = await seed_network(db, tenant_id)
-    contest = await _scheduled_contest(db, net)  # A и C — ручные базы
+    contest = await _scheduled_contest(db, net, manual_stores=("A",))  # A — ручная база
     early = datetime(2026, 5, 29, 12, 0, tzinfo=tz)  # окно по 31.05, посчитано 29.05
-    await _iiko_row(db, contest, net.B.id, race_id=None, period_to=_day(-1), set_at=early)
+    await _iiko_row(db, contest, net.C.id, race_id=None, period_to=_day(-1), set_at=early)
     assert await preliminary_scopes(db, contest.id, through_day=_day(-1), tz=tz) == [None]
     # окно ещё не закрылось по through_day — не трогаем
     assert await preliminary_scopes(db, contest.id, through_day=_day(-2), tz=tz) == []
     # посчитано после полуночи 01.06 — окончательная
     late = datetime(2026, 6, 1, 3, 45, tzinfo=tz)
-    await _iiko_row(db, contest, net.B.id, race_id=None, period_to=_day(-1), set_at=late)
+    await _iiko_row(db, contest, net.C.id, race_id=None, period_to=_day(-1), set_at=late)
     assert await preliminary_scopes(db, contest.id, through_day=_day(-1), tz=tz) == []
+
+
+async def test_preliminary_scopes_ignore_excluded_store_until_reincluded(
+    db: AsyncSession, tenant_id
+):
+    """Инцидент 05–17.10: «Витебский 101» исключили через 25 минут после расчёта
+    базы, `compute_baselines` исключённых не переписывает — и её строка держала
+    scope предварительным 21 финализацию в сутки. Строка исключённой точки не
+    считается; возврат точки в состав снова вводит её в правило."""
+    from zoneinfo import ZoneInfo
+
+    from app.services.race.baselines import preliminary_scopes
+
+    tz = ZoneInfo("Europe/Moscow")
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net, manual_stores=("A",))
+    early = datetime(2026, 5, 29, 12, 0, tzinfo=tz)
+    await _iiko_row(db, contest, net.C.id, race_id=None, period_to=_day(-1), set_at=early)
+    assert await preliminary_scopes(db, contest.id, through_day=_day(-1), tz=tz) == [None]
+
+    await engine.set_participant(
+        db, contest, store_id=net.C.id, included=False, actor_id=net.admin.employee_id
+    )
+    assert await preliminary_scopes(db, contest.id, through_day=_day(-1), tz=tz) == []
+    await engine.set_participant(
+        db, contest, store_id=net.C.id, included=True, actor_id=net.admin.employee_id
+    )
+    assert await preliminary_scopes(db, contest.id, through_day=_day(-1), tz=tz) == [None]
+
+    # дубль B исключён сидом (делит подразделение с A): его строка не считается,
+    # пока B не вернут в состав — тогда A вытесняется, а строка B снова в правиле
+    await _iiko_row(
+        db,
+        contest,
+        net.C.id,
+        race_id=None,
+        period_to=_day(-1),
+        set_at=datetime(2026, 6, 1, 3, 45, tzinfo=tz),
+    )
+    await _iiko_row(db, contest, net.B.id, race_id=None, period_to=_day(-1), set_at=early)
+    assert await preliminary_scopes(db, contest.id, through_day=_day(-1), tz=tz) == []
+    replaced = await engine.set_participant(
+        db, contest, store_id=net.B.id, included=True, actor_id=net.admin.employee_id
+    )
+    assert replaced == net.A.id
+    assert await preliminary_scopes(db, contest.id, through_day=_day(-1), tz=tz) == [None]
 
 
 async def test_finalize_recomputes_contest_baseline_once_and_keeps_manual(
@@ -429,9 +478,9 @@ async def test_finalize_recomputes_contest_baseline_once_and_keeps_manual(
 
     tz = ZoneInfo("Europe/Moscow")
     net = await seed_network(db, tenant_id)
-    contest = await _scheduled_contest(db, net)
+    contest = await _scheduled_contest(db, net, manual_stores=("A",))
     early = datetime(2026, 5, 29, 12, 0, tzinfo=tz)
-    await _iiko_row(db, contest, net.B.id, race_id=None, period_to=_day(-1), set_at=early)
+    await _iiko_row(db, contest, net.C.id, race_id=None, period_to=_day(-1), set_at=early)
     await db.commit()
     calls: list[tuple[str, object]] = []
 
@@ -441,7 +490,7 @@ async def test_finalize_recomputes_contest_baseline_once_and_keeps_manual(
         await upsert_baseline(
             session,
             contest=contest,
-            store_id=net.B.id,
+            store_id=net.C.id,
             race_id=None,
             value=2.4,
             source="iiko",
@@ -452,7 +501,7 @@ async def test_finalize_recomputes_contest_baseline_once_and_keeps_manual(
             period_from=_day(-28),
             period_to=_day(-1),
             computed=1,
-            skipped_manual=2,
+            skipped_manual=1,
             empty=0,
             pulled=True,
         )
@@ -463,7 +512,7 @@ async def test_finalize_recomputes_contest_baseline_once_and_keeps_manual(
     assert report.finalized == [(contest.id, None)] and report.failed == []
     rows = await load_baselines(db, contest, None)
     assert rows[net.A.id].source == "manual" and rows[net.A.id].value == 2.0
-    assert rows[net.B.id].value == 2.4
+    assert rows[net.C.id].value == 2.4
     # повторный прогон — set_at уже после полуночи 01.06, пересчитывать нечего
     report2 = await finalize.finalize_baselines(db, tenant_id=tenant_id, through_day=_day(-1))
     assert calls == [("Тест", None)] and report2.finalized == []
@@ -482,9 +531,9 @@ async def test_finalize_race_mode_touches_only_races_whose_window_closed(
     races = sorted((await read.load_races(db, contest)), key=lambda r: r.seq)
     early = datetime(2026, 5, 29, 12, 0, tzinfo=tz)
     # заезд №1: окно по 31.05, посчитано при schedule — предварительная
-    await _iiko_row(db, contest, net.B.id, race_id=races[0].id, period_to=_day(-1), set_at=early)
+    await _iiko_row(db, contest, net.C.id, race_id=races[0].id, period_to=_day(-1), set_at=early)
     # заезд №2: окно по 07.06, строка «заранее» — окно ещё не закрылось
-    await _iiko_row(db, contest, net.B.id, race_id=races[1].id, period_to=_day(6), set_at=early)
+    await _iiko_row(db, contest, net.C.id, race_id=races[1].id, period_to=_day(6), set_at=early)
     await db.commit()
     seen: list = []
 
@@ -515,18 +564,18 @@ async def test_finalize_iiko_failure_rolls_back_and_reports(
 
     tz = ZoneInfo("Europe/Moscow")
     net = await seed_network(db, tenant_id)
-    contest = await _scheduled_contest(db, net)
+    contest = await _scheduled_contest(db, net, manual_stores=("A",))
     early = datetime(2026, 5, 29, 12, 0, tzinfo=tz)
-    await _iiko_row(db, contest, net.B.id, race_id=None, period_to=_day(-1), set_at=early)
+    await _iiko_row(db, contest, net.C.id, race_id=None, period_to=_day(-1), set_at=early)
     await db.commit()
 
     async def boom(session, *, contest, race, force=False, pull=True, set_by=None):  # noqa: ARG001
         raise iiko_service.IikoBusy("слот занят")
 
     monkeypatch.setattr(iiko_pull, "compute_baselines", boom)
-    contest_id, b_id = contest.id, net.B.id  # rollback внутри finalize протухает ORM-объекты
+    contest_id, c_id = contest.id, net.C.id  # rollback внутри finalize протухает ORM-объекты
     report = await finalize.finalize_baselines(db, tenant_id=tenant_id, through_day=_day(-1))
     assert report.failed == [(contest_id, None)] and report.finalized == []
     contest = await db.get(RaceContest, contest_id)
     rows = await load_baselines(db, contest, None)
-    assert rows[b_id].value == 2.2, "база осталась предварительной целиком, не половинчатой"
+    assert rows[c_id].value == 2.2, "база осталась предварительной целиком, не половинчатой"

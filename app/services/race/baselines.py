@@ -15,7 +15,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.race import RaceBaseline, RaceContest
+from app.models.race import RaceBaseline, RaceContest, RaceParticipant
 from app.services.race.math import baseline_is_preliminary
 
 
@@ -132,20 +132,35 @@ async def upsert_baseline(
 async def preliminary_scopes(
     session: AsyncSession, contest_id: UUID, *, through_day: date, tz: tzinfo
 ) -> list[UUID | None]:
-    """Scope базы (None = весь конкурс, иначе заезд), где есть iiko-строка,
-    посчитанная до закрытия окна, а окно уже закрыто по `through_day`.
+    """Scope базы (None = весь конкурс, иначе заезд), где у ЖИВОГО участника
+    есть iiko-строка, посчитанная до закрытия окна, а окно уже закрыто по
+    `through_day`.
 
     Ручные строки сюда не попадают: их никто не пересчитывает (решение
-    владельца 19.09 — база новичку только вручную). Уровень конкурса идёт
-    первым: в режиме `race` он фолбэк для всех заездов.
+    владельца 19.09 — база новичку только вручную). Строки исключённых точек
+    тоже не считаются: `compute_baselines` переписывает только участников с
+    `excluded_at IS NULL`, и предварительная строка исключённой точки держала
+    бы scope «предварительным» вечно — так с 05.10 по 17.10 финализация
+    заново тянула 28 дней базы по всей сети каждый час (точку исключили через
+    25 минут после расчёта базы). Возврат точки в состав (`set_participant`)
+    снова вводит её строку в правило — и первая финализация пересчитает базу
+    всем живым, включая её. Уровень конкурса идёт первым: в режиме `race` он
+    фолбэк для всех заездов.
     """
     rows = (
         await session.execute(
-            select(RaceBaseline.race_id, RaceBaseline.set_at, RaceBaseline.period_to).where(
+            select(RaceBaseline.race_id, RaceBaseline.set_at, RaceBaseline.period_to)
+            .join(
+                RaceParticipant,
+                (RaceParticipant.contest_id == RaceBaseline.contest_id)
+                & (RaceParticipant.store_id == RaceBaseline.store_id),
+            )
+            .where(
                 RaceBaseline.contest_id == contest_id,
                 RaceBaseline.source == "iiko",
                 RaceBaseline.period_to.is_not(None),
                 RaceBaseline.period_to <= through_day,
+                RaceParticipant.excluded_at.is_(None),
             )
         )
     ).all()
