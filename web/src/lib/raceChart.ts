@@ -1,9 +1,10 @@
 /**
  * Геометрия SVG-графика «позиция по дням заезда» — чистые функции в пикселях.
- * X — все дни заезда (будущие дни остаются пустыми), Y — фиксированно 0..400,
+ * X — все дни заезда (будущие дни остаются пустыми), Y — фиксированно 0..TRACK_MAX,
  * пунктир базы на 100. Единственная серия: точка за день.
  */
 import type { RaceChart, RaceChartPoint } from '@/lib/race'
+import { TICKS, TRACK_MAX } from '@/lib/raceTrack'
 import { addDaysKey, dueDayToIso, shortDate } from '@/lib/taskDates'
 
 export interface ChartPad {
@@ -33,7 +34,7 @@ export interface ChartGeometry {
 }
 
 export const DEFAULT_PAD: ChartPad = { l: 36, r: 12, t: 12, b: 24 }
-const Y_MAX = 400
+const Y_MAX = TRACK_MAX
 
 export function raceDays(startsOn: string, endsOn: string): string[] {
   const out: string[] = []
@@ -94,7 +95,7 @@ export function chartGeometry(
     .map((day, i) => ({ x: xOf(i), label: raceDayLabel(day), day, i }))
     .filter((t) => t.i % step === 0 || t.i === n - 1)
     .map(({ x, label, day }) => ({ x, label, day }))
-  const yTicks = [0, 100, 200, 300, 400].map((v) => ({ y: yOf(v), label: String(v) }))
+  const yTicks = TICKS.map((v) => ({ y: yOf(v), label: String(v) }))
 
   return { width: opts.width, height: opts.height, plot: { x0, x1, y0, y1 }, days, path, area, dots, xTicks, yTicks, baselineY: yOf(100) }
 }

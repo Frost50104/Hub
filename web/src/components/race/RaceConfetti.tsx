@@ -1,6 +1,6 @@
 const COLORS = ['rgb(var(--race-gold))', 'rgb(var(--race-primary))', 'rgb(var(--green))', 'rgb(var(--text))']
 
-/** 12 частиц CSS-конфетти для гуся на 400 клетках. */
+/** 12 частиц CSS-конфетти для гуся на максимуме трека (`glowLevel === 'max'`). */
 export function RaceConfetti() {
   return (
     <span className="race-confetti pointer-events-none absolute inset-0" aria-hidden="true">

@@ -1,23 +1,31 @@
 import { describe, expect, it } from 'vitest'
 
-import { cellsToPercent, glowLevel, laneOrder, lanePositions, moveDurationMs, trackTicks } from './raceTrack'
+import { TICKS, TRACK_MAX, cellsToPercent, glowLevel, laneOrder, lanePositions, moveDurationMs, trackTicks } from './raceTrack'
 
 const row = (name: string, cells: number, place: number | null) => ({ store_id: name, name, cells, place })
 
 describe('геометрия трека', () => {
+  it('потолок трека — 300 (решение владельца 17.10, зеркало math.py::TRACK_MAX)', () => {
+    expect(TRACK_MAX).toBe(300)
+    expect(TICKS).toEqual([0, 100, 200, 300])
+  })
+
   it('клетки линейно ложатся в проценты и обрезаются по краям', () => {
     expect(cellsToPercent(0)).toBe(0)
-    expect(cellsToPercent(100)).toBe(25)
-    expect(cellsToPercent(400)).toBe(100)
+    expect(cellsToPercent(100)).toBeCloseTo(100 / 3, 5)
+    expect(cellsToPercent(TRACK_MAX)).toBe(100)
     expect(cellsToPercent(-5)).toBe(0)
-    expect(cellsToPercent(450)).toBe(100)
+    expect(cellsToPercent(TRACK_MAX + 50)).toBe(100)
   })
 
   it('тики совпадают со шкалой гусей и подписаны старт/максимум', () => {
     const ticks = trackTicks()
-    expect(ticks.map((t) => t.pct)).toEqual([0, 25, 50, 75, 100])
+    expect(ticks.map((t) => t.cell)).toEqual([...TICKS])
+    ticks.forEach((t) => expect(t.pct).toBeCloseTo((t.cell / TRACK_MAX) * 100, 5))
     expect(ticks.find((t) => t.cell === 100)?.kind).toBe('start')
-    expect(ticks.find((t) => t.cell === 400)?.label).toContain('максимум')
+    const max = ticks.find((t) => t.cell === TRACK_MAX)
+    expect(max?.kind).toBe('max')
+    expect(max?.label).toBe(`максимум · ${TRACK_MAX}`)
   })
 
   it('порядок дорожек: по месту, без места — последними, затем клетки и имя', () => {
@@ -33,13 +41,14 @@ describe('геометрия трека', () => {
   it('длительность переезда: 100 клеток → 800 мс, границы 600 и 2400', () => {
     expect(moveDurationMs(100, 200)).toBe(800)
     expect(moveDurationMs(100, 101)).toBe(600)
-    expect(moveDurationMs(null, 400)).toBe(2400)
+    expect(moveDurationMs(null, TRACK_MAX)).toBe(2400)
+    expect(moveDurationMs(null, 1000)).toBe(2400)
   })
 
-  it('сияние: 200 — нет, 201 — золото, 400 — максимум', () => {
+  it('сияние: 200 — нет, 201 — золото, потолок — максимум', () => {
     expect(glowLevel(200)).toBe('none')
     expect(glowLevel(201)).toBe('gold')
-    expect(glowLevel(399)).toBe('gold')
-    expect(glowLevel(400)).toBe('max')
+    expect(glowLevel(TRACK_MAX - 1)).toBe('gold')
+    expect(glowLevel(TRACK_MAX)).toBe('max')
   })
 })

@@ -37,8 +37,9 @@ def _row(name: str, cells: int, pct: float | None = None, *, avg=None, league=No
 def test_cells_scale_and_clamp():
     assert m.compute_cells(2.0, 2.0) == (100, False)
     assert m.compute_cells(3.0, 2.0) == (150, False)
-    assert m.compute_cells(8.0, 2.0) == (400, False)
-    assert m.compute_cells(9.0, 2.0) == (400, False), "потолок 400"
+    assert m.compute_cells(6.0, 2.0) == (300, False), "граница потолка"
+    assert m.compute_cells(8.0, 2.0) == (300, False), "потолок 300 (решение владельца 17.10)"
+    assert m.compute_cells(9.0, 2.0) == (m.TRACK_MAX, False)
     assert m.compute_cells(0.0, 2.0) == (0, False), "ниже старта возможно, пол — 0"
     assert m.compute_cells(1.0, 2.0) == (50, False)
 

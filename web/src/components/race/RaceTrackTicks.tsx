@@ -1,13 +1,13 @@
 import { cn } from '@/lib/cn'
-import { trackTicks } from '@/lib/raceTrack'
+import { TRACK_MAX, trackTicks } from '@/lib/raceTrack'
 
 /**
- * Вертикальные отметки 0/100/200/300/400 поверх дорожек. Стартовая линия
- * (100) — лента в цветах бренда, 400 — «максимум». Геометрия та же, что у
- * гусей: контейнер с `padding-inline: goose/2`.
+ * Вертикальные отметки через каждые 100 клеток (0 … `TRACK_MAX`) поверх
+ * дорожек. Стартовая линия (100) — лента в цветах бренда, потолок —
+ * «максимум». Геометрия та же, что у гусей: контейнер с `padding-inline: goose/2`.
  */
 /** `compact` — узкий трек (телефон): подписи только у старта и максимума,
- *  иначе «300» наезжает на «максимум · 400». */
+ *  иначе предпоследний тик наезжает на «максимум · N». */
 export function RaceTrackTicks({ labels = false, compact = false, className }: { labels?: boolean; compact?: boolean; className?: string }) {
   return (
     <div className={cn('pointer-events-none absolute inset-0', className)} aria-hidden="true">
@@ -33,7 +33,7 @@ export function RaceTrackTicks({ labels = false, compact = false, className }: {
                 )}
                 style={{ fontSize: 'max(12px, calc(var(--race-fs) * 0.8))' }}
               >
-                {compact && t.kind === 'max' ? 'макс. 400' : compact && t.kind === 'start' ? 'старт' : t.label}
+                {compact && t.kind === 'max' ? `макс. ${TRACK_MAX}` : compact && t.kind === 'start' ? 'старт' : t.label}
               </span>
             )}
           </div>

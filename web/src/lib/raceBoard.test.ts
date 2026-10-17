@@ -232,7 +232,7 @@ describe('ТВ и URL', () => {
 
   it('ротация ТВ: пустых страниц нет, лига — одна страница, без состава — одна пустая', () => {
     const many = Array.from({ length: 61 }, (_, i) =>
-      p({ name: `Т${i}`, store_id: `s${i}`, place: i + 1, cells: 400 - i }),
+      p({ name: `Т${i}`, store_id: `s${i}`, place: i + 1, cells: 300 - i }),
     )
     // Прод: пустая лига + все точки без лиги → только страницы общего забега.
     const prodViews = leagueOptions(contest({ leagues: [{ id: 'L1', name: 'Территория ИВАН' }] }), many)

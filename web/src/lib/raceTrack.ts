@@ -5,9 +5,15 @@
  */
 import type { RaceParticipant } from '@/lib/race'
 
-export const TRACK_MAX = 400
+/**
+ * Потолок трека — зеркало `app/services/race/math.py::TRACK_MAX`, меняются ПАРОЙ.
+ * ТЗ размечало 0..400; с 17.10 — 300 (решение владельца по просьбе коллег
+ * UPPETIT: на 0..400 гуси сбивались у стартовой ленты).
+ */
+export const TRACK_MAX = 300
 export const START_CELL = 100
-export const TICKS = [0, 100, 200, 300, 400] as const
+/** Тики через каждые 100 клеток от 0 до потолка — общие для трека и оси Y графика. */
+export const TICKS: readonly number[] = Array.from({ length: TRACK_MAX / 100 + 1 }, (_, i) => i * 100)
 
 export type TickKind = 'zero' | 'start' | 'plain' | 'max'
 
@@ -22,14 +28,14 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v))
 }
 
-/** 0..400 клеток → 0..100 % ширины дорожки (линейно, с обрезкой). */
+/** 0..TRACK_MAX клеток → 0..100 % ширины дорожки (линейно, с обрезкой). */
 export function cellsToPercent(cells: number): number {
   return clamp(cells, 0, TRACK_MAX) / (TRACK_MAX / 100)
 }
 
 export function tickLabel(cell: number): string {
   if (cell === START_CELL) return 'старт · 100'
-  if (cell === TRACK_MAX) return 'максимум · 400'
+  if (cell === TRACK_MAX) return `максимум · ${TRACK_MAX}`
   return String(cell)
 }
 
@@ -70,7 +76,7 @@ export function lanePositions<T extends { store_id: string }>(rows: T[], laneHei
 export const MOVE_MS_MIN = 600
 export const MOVE_MS_MAX = 2400
 
-/** 100 клеток — 800 мс; стартовый выезд на 400 — 2,4 с. */
+/** 100 клеток — 800 мс; стартовый выезд на максимум (300) — 2,4 с. */
 export function moveDurationMs(prevCells: number | null, nextCells: number): number {
   const from = prevCells ?? 0
   return clamp(Math.abs(nextCells - from) * 8, MOVE_MS_MIN, MOVE_MS_MAX)

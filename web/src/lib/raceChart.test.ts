@@ -15,20 +15,21 @@ describe('геометрия графика', () => {
     const empty = chartGeometry({ starts_on: '2026-09-21', ends_on: '2026-09-27', points: [] }, { width: 400, height: 200 })
     expect(empty.path).toBe('')
     expect(empty.xTicks.length).toBe(7)
-    expect(empty.yTicks.map((t) => t.label)).toEqual(['0', '100', '200', '300', '400'])
+    expect(empty.yTicks.map((t) => t.label)).toEqual(['0', '100', '200', '300'])
     const one = chartGeometry({ starts_on: '2026-09-21', ends_on: '2026-09-27', points: [pt('2026-09-21', 120)] }, { width: 400, height: 200 })
     expect(one.dots.length).toBe(1)
     expect(one.path.startsWith('M')).toBe(true)
   })
 
-  it('y инвертирован: 400 — верхний отступ, 0 — нижний; база на 100', () => {
+  it('y инвертирован: потолок 300 — верхний отступ, 0 — нижний; база на трети; выше потолка — обрезка', () => {
     const g = chartGeometry(
-      { starts_on: '2026-09-21', ends_on: '2026-09-22', points: [pt('2026-09-21', 400), pt('2026-09-22', 0)] },
+      { starts_on: '2026-09-21', ends_on: '2026-09-23', points: [pt('2026-09-21', 300), pt('2026-09-22', 0), pt('2026-09-23', 400)] },
       { width: 400, height: 200, pad: { l: 30, r: 10, t: 10, b: 20 } },
     )
     expect(g.dots[0]?.y).toBe(10)
     expect(g.dots[1]?.y).toBe(180)
-    expect(g.baselineY).toBeCloseTo(180 - 170 / 4, 5)
+    expect(g.dots[2]?.y).toBe(10)
+    expect(g.baselineY).toBeCloseTo(180 - 170 / 3, 5)
   })
 
   it('пропущенный день оставляет разрыв (новая подкривая), 14 дней — подписи через одну', () => {
