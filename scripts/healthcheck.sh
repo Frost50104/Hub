@@ -190,7 +190,7 @@ race_text() {
       activation_overdue) out+="конкурс запланирован, старт наступил, а он не активен (тик 00:40 не сработал — journalctl -u signaris-hub-race-sync, race.activate_blocked_by_active); " ;;
       pull_stale) out+="успешной выгрузки iiko не было больше 2 часов (journalctl -u signaris-hub-race-sync: busy_skip / pull_failed); " ;;
       pull_error) out+="последняя выгрузка iiko упала (текст ошибки — в админке «Гонка» → «Выгрузка iiko»); " ;;
-      close_stale) out+="ночное закрытие 03:45 не прошло (journalctl -u signaris-hub-race-close); " ;;
+      close_stale) out+="ночное закрытие 03:45 не прошло или прошло без выгрузки iiko (journalctl -u signaris-hub-race-close: pull_failed / close_deferred); снимки и итоги догонит первое закрытие с выгрузкой; " ;;
       baseline_preliminary) out+="база активного конкурса осталась предварительной — пересчёт ночью не удался (кнопка «Пересчитать из iiko» в админке или следующий тик после 04:40); " ;;
       *) out+="$code; " ;;
     esac

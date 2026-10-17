@@ -13,7 +13,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import tenant_scoped_session
@@ -40,7 +40,7 @@ from app.services.race.baselines import (
     load_baselines,
     upsert_baseline,
 )
-from app.services.race.iiko_pull import lock_tenant
+from app.services.race.iiko_pull import MAX_MANUAL_PULL_DAYS, lock_tenant
 from app.services.timefmt import display_tz, fmt_day, fmt_day_range
 
 log = structlog.get_logger("race.engine")
@@ -643,6 +643,127 @@ async def _write_snapshots(
     return written
 
 
+@dataclass
+class RebuildReport:
+    """Итог `rebuild_snapshots`: что удалили в окне и что записали заново."""
+
+    race_id: UUID
+    day_from: date
+    day_to: date
+    deleted: int
+    kept_excluded: int
+    written: int
+    records_before: int
+    records_after: int
+
+
+async def rebuild_snapshots(
+    session: AsyncSession,
+    contest: RaceContest,
+    race: Race,
+    *,
+    day_from: date,
+    day_to: date,
+    today: date,
+) -> RebuildReport:
+    """Переписать хвост суточных снимков активного заезда по текущим
+    `race_daily_stats` — ровно то, что написало бы ночное закрытие, будь
+    выгрузка полной. Единственное место, где снимки переписываются (инцидент
+    14–17.10: iiko отклонял логин, и закрытие три ночи подряд писало снимки по
+    устаревшим данным — три одинаковых дня).
+
+    Окно обязано упираться в последний снимок заезда: `_write_snapshots` берёт
+    `prev_max` по ВСЕМ строкам заезда, строки позже окна испортили бы
+    `is_record` переписанных дней, а дыру в середине ряда ночное закрытие не
+    видит (`pending_snapshot_days` смотрит только `max(day)`). Строки точек,
+    исключённых после этих дней, не трогаются — их история остаётся.
+    `record_notified_at` новых строк пуст: рекорды переписанных дней уйдут
+    ближайшим тиком как обычные (решение владельца 17.10). Коммитит вызывающий.
+    """
+    if race.status != "active":
+        raise RaceConflictError("Заезд завершён — итоги заморожены, снимки не переписываются")
+    if day_to < day_from:
+        raise RaceValidationError("Конец окна раньше начала")
+    if day_from < race.starts_on:
+        raise RaceValidationError(f"Окно раньше старта заезда ({race.starts_on})")
+    if day_to > today - timedelta(days=1):
+        raise RaceValidationError("Переписывать можно только закрытые дни — по вчера")
+    await lock_tenant(session, contest.tenant_id)
+    last_day = (
+        await session.execute(
+            select(func.max(RaceSnapshot.day)).where(RaceSnapshot.race_id == race.id)
+        )
+    ).scalar_one()
+    if last_day != day_to:
+        raise RaceConflictError(
+            "Конец окна обязан совпадать с последним снимком заезда "
+            f"({last_day if last_day is not None else 'снимков нет'})"
+        )
+    participants = await read.load_participants(session, contest)
+    live_ids = [p.store_id for p in participants]
+    in_window = (
+        RaceSnapshot.race_id == race.id,
+        RaceSnapshot.day >= day_from,
+        RaceSnapshot.day <= day_to,
+    )
+
+    async def _records() -> int:
+        return (
+            await session.execute(
+                select(func.count())
+                .select_from(RaceSnapshot)
+                .where(
+                    *in_window,
+                    RaceSnapshot.store_id.in_(live_ids),
+                    RaceSnapshot.is_record.is_(True),
+                )
+            )
+        ).scalar_one()
+
+    records_before = await _records()
+    kept_excluded = (
+        await session.execute(
+            select(func.count())
+            .select_from(RaceSnapshot)
+            .where(*in_window, RaceSnapshot.store_id.not_in(live_ids))
+        )
+    ).scalar_one()
+    result = await session.execute(
+        delete(RaceSnapshot)
+        .where(*in_window, RaceSnapshot.store_id.in_(live_ids))
+        .execution_options(synchronize_session=False)
+    )
+    deleted = int(result.rowcount or 0)
+    await session.flush()
+    days = [day_from + timedelta(days=i) for i in range((day_to - day_from).days + 1)]
+    written = await _write_snapshots(session, contest, race, days, participants)
+    records_after = await _records()
+    log.info(
+        "race.snapshots_rebuilt",
+        tenant_id=str(contest.tenant_id),
+        contest_id=str(contest.id),
+        race_id=str(race.id),
+        seq=race.seq,
+        day_from=str(day_from),
+        day_to=str(day_to),
+        deleted=deleted,
+        kept_excluded=kept_excluded,
+        written=written,
+        records_before=records_before,
+        records_after=records_after,
+    )
+    return RebuildReport(
+        race_id=race.id,
+        day_from=day_from,
+        day_to=day_to,
+        deleted=deleted,
+        kept_excluded=kept_excluded,
+        written=written,
+        records_before=records_before,
+        records_after=records_after,
+    )
+
+
 async def finish_race(
     session: AsyncSession,
     contest: RaceContest,
@@ -718,11 +839,31 @@ class CloseReport:
     # Заезды, которым нужна база (режим `race`) — считает ВЫЗЫВАЮЩИЙ после
     # commit'а, вне advisory-лока: расчёт ходит в iiko.
     races_needing_baseline: list[UUID] = field(default_factory=list)
+    # Закрытие отложено (`sales_complete=False`): снимки и итоги не писались,
+    # `deferred_days` — сколько дней ждут первого закрытия с полной выгрузкой.
+    deferred: bool = False
+    deferred_days: int = 0
 
 
-async def close_day(session: AsyncSession, contest: RaceContest, *, close_day: date) -> CloseReport:
+async def close_day(
+    session: AsyncSession,
+    contest: RaceContest,
+    *,
+    close_day: date,
+    sales_complete: bool = True,
+) -> CloseReport:
     """Ночное закрытие: снимки за пропущенные дни, итоги заезда по `ends_on`,
-    следующий заезд. Идемпотентно — повторный вызов ничего не дописывает."""
+    следующий заезд. Идемпотентно — повторный вызов ничего не дописывает.
+
+    `sales_complete=False` — выгрузка iiko за день упала: снимки и итоги
+    откладываются до первого закрытия с полной выгрузкой (`pending_snapshot_days`
+    догонит все дни). Иначе снимок записал бы вчерашние накопленные числа как
+    сегодняшние, а `finish_race` заморозил бы итоги по неполным данным —
+    инцидент 14–17.10: три одинаковых снимка подряд. Активация конкурса и
+    заезда по датам идёт как обычно; следующий заезд ждёт завершения
+    предыдущего (`activate_due`), то есть отказ на границе заездов задерживает
+    старт следующего на дни отказа — сигнал даёт `close_stale` хелсчека.
+    """
     await lock_tenant(session, contest.tenant_id)
     report = CloseReport()
     races = await read.load_races(session, contest)
@@ -735,6 +876,20 @@ async def close_day(session: AsyncSession, contest: RaceContest, *, close_day: d
             )
         ).scalar_one()
         days = m.pending_snapshot_days(race.starts_on, race.ends_on, last_day, close_day)
+        if not sales_complete:
+            report.deferred = True
+            report.deferred_days += len(days)
+            log.warning(
+                "race.close_deferred",
+                tenant_id=str(contest.tenant_id),
+                contest_id=str(contest.id),
+                race_id=str(race.id),
+                seq=race.seq,
+                close_day=str(close_day),
+                pending_days=len(days),
+                finish_due=race.ends_on <= close_day,
+            )
+            continue
         report.snapshots += await _write_snapshots(session, contest, race, days, participants)
         if race.ends_on <= close_day:
             await finish_race(session, contest, race, through_day=race.ends_on, reason="schedule")
@@ -761,6 +916,41 @@ async def close_day(session: AsyncSession, contest: RaceContest, *, close_day: d
     after = {r.id for r in await read.load_races(session, contest) if r.status == "active"}
     report.activated_race_ids = sorted(after - before, key=str)
     return report
+
+
+async def pull_window(
+    session: AsyncSession, contest: RaceContest, *, through: date
+) -> tuple[date, date]:
+    """Окно выгрузки iiko для конкурса (`math.catch_up_window`): от первого дня
+    без снимка — штатно вчера — по `through`, не длиннее `MAX_MANUAL_PULL_DAYS`.
+    Одно правило на ночное закрытие и часовой тик: пропущенные после отказа
+    iiko дни дотягиваются сами, а не ждут ручного `POST /learn/race/admin/sync`."""
+    races = await read.load_races(session, contest)
+    last = (
+        await session.execute(
+            select(func.max(RaceSnapshot.day))
+            .select_from(RaceSnapshot)
+            .join(Race, Race.id == RaceSnapshot.race_id)
+            .where(Race.contest_id == contest.id)
+        )
+    ).scalar_one()
+    pending = next((r for r in races if r.status == "active"), None) or next(
+        (r for r in races if r.status == "scheduled"), None
+    )
+    floor = pending.starts_on if pending is not None else contest.starts_on
+    day_from, day_to, capped = m.catch_up_window(
+        through=through, last_snapshot_day=last, floor=floor, max_days=MAX_MANUAL_PULL_DAYS
+    )
+    if capped:
+        log.warning(
+            "race.pull_window_capped",
+            tenant_id=str(contest.tenant_id),
+            contest_id=str(contest.id),
+            last_snapshot_day=None if last is None else str(last),
+            day_from=str(day_from),
+            through=str(through),
+        )
+    return day_from, day_to
 
 
 async def force_finish(

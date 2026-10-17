@@ -579,3 +579,153 @@ async def test_finalize_iiko_failure_rolls_back_and_reports(
     contest = await db.get(RaceContest, contest_id)
     rows = await load_baselines(db, contest, None)
     assert rows[c_id].value == 2.2, "база осталась предварительной целиком, не половинчатой"
+
+
+# ─── закрытие без полной выгрузки и окно дотяжки (17.10) ────────────────────
+
+
+async def test_close_day_without_complete_sales_defers_snapshots_and_finish(
+    db: AsyncSession, tenant_id
+):
+    """Инцидент 14–17.10: выгрузка iiko упала, а закрытие писало снимки по
+    устаревшим данным и заморозило бы итоги. Теперь день откладывается, первое
+    закрытие с полной выгрузкой дописывает всё и завершает заезд."""
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net, weeks_total=1)
+    race = (await read.load_races(db, contest))[0]
+    for n in range(0, 7):
+        await _stat(db, tenant_id, "dep-1", _day(n), 100, 300 if n == 1 else 220)
+        await _stat(db, tenant_id, "dep-2", _day(n), 100, 200)
+
+    r = await engine.close_day(db, contest, close_day=_day(6), sales_complete=False)
+    assert r.snapshots == 0 and r.deferred and r.deferred_days == 7
+    assert not r.finished_race_ids and not r.contest_finished
+    await db.refresh(race)
+    assert race.status == "active" and contest.status == "active"
+    assert await _snaps(db, race.id, net.A.id) == []
+    assert (await db.execute(select(RaceResult).where(RaceResult.race_id == race.id))).all() == []
+
+    r2 = await engine.close_day(db, contest, close_day=_day(6))
+    assert r2.snapshots == 14 and not r2.deferred
+    assert r2.finished_race_ids == [race.id] and r2.contest_finished
+    a = await _snaps(db, race.id, net.A.id)
+    assert len(a) == 7 and a[1].is_record and not a[0].is_record
+
+
+async def test_close_day_deferred_still_activates_and_requests_baseline(
+    db: AsyncSession, tenant_id
+):
+    from zoneinfo import ZoneInfo
+
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net, weeks_total=2, baseline_mode="race")
+    races = await read.load_races(db, contest)
+    # у идущего заезда база из iiko есть (посчитана при планировании)
+    await _iiko_row(
+        db,
+        contest,
+        net.A.id,
+        race_id=races[0].id,
+        period_to=_day(-1),
+        set_at=datetime(2026, 6, 1, 3, 45, tzinfo=ZoneInfo("Europe/Moscow")),
+    )
+    r = await engine.close_day(db, contest, close_day=_day(6), sales_complete=False)
+    assert r.deferred and r.snapshots == 0 and not r.finished_race_ids
+    assert r.races_needing_baseline == [races[1].id], "список по датам, от выгрузки не зависит"
+    await db.refresh(races[1])
+    assert races[1].status == "scheduled", "следующий заезд ждёт завершения предыдущего"
+
+    r2 = await engine.close_day(db, contest, close_day=_day(7))
+    assert r2.finished_race_ids == [races[0].id] and r2.activated_race_ids == [races[1].id]
+    assert len(await _snaps(db, races[0].id, net.A.id)) == 7
+    r3 = await engine.close_day(db, contest, close_day=_day(8))
+    assert r3.snapshots == 4, "заезд 2: D7 и D8 по двум точкам"
+
+
+async def test_pull_window_follows_last_snapshot(db: AsyncSession, tenant_id):
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net, weeks_total=1)
+    # снимков нет, заезд стартует D0 — штатное «вчера + сегодня»
+    assert await engine.pull_window(db, contest, through=_day(0)) == (_day(-1), _day(0))
+    for n in range(0, 3):
+        await _stat(db, tenant_id, "dep-1", _day(n), 100, 220)
+    await engine.close_day(db, contest, close_day=_day(2))
+    # норма: закрытие D3 и дневной тик D3 — [D2, D3]
+    assert await engine.pull_window(db, contest, through=_day(3)) == (_day(2), _day(3))
+    # две ночи без выгрузки (снимков за D3, D4 нет): тик D5 догоняет от D3
+    assert await engine.pull_window(db, contest, through=_day(5)) == (_day(3), _day(5))
+
+
+# ─── ремонт снимков ──────────────────────────────────────────────────────────
+
+
+async def test_rebuild_snapshots_rewrites_tail_and_recomputes_records(db: AsyncSession, tenant_id):
+    """Три одинаковых снимка после отказа iiko → дотяжка данных → ремонт хвоста
+    тем же кодом, что ночное закрытие."""
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net, weeks_total=1)
+    race = (await read.load_races(db, contest))[0]
+    await _stat(db, tenant_id, "dep-1", _day(0), 100, 220)  # 110
+    for n in range(0, 3):
+        await _stat(db, tenant_id, "dep-2", _day(n), 100, 200)  # 100
+    await engine.close_day(db, contest, close_day=_day(0))
+    # «до 17.10»: ночи D1 и D2 закрылись, хотя данных dep-1 за D1–D2 не было
+    await engine.close_day(db, contest, close_day=_day(2))
+    a = await _snaps(db, race.id, net.A.id)
+    assert [(int(s.cells), s.is_record) for s in a] == [(110, False)] * 3
+    d0_id = a[0].id
+
+    await _stat(db, tenant_id, "dep-1", _day(1), 100, 300)  # cum 2,6 → 130
+    await _stat(db, tenant_id, "dep-1", _day(2), 100, 150)  # cum 2,233 → 112
+    report = await engine.rebuild_snapshots(
+        db, contest, race, day_from=_day(1), day_to=_day(2), today=_day(3)
+    )
+    assert (report.deleted, report.written, report.kept_excluded) == (4, 4, 0)
+    assert (report.records_before, report.records_after) == (0, 1)
+    a = await _snaps(db, race.id, net.A.id)
+    assert [(s.day, int(s.cells), s.is_record) for s in a] == [
+        (_day(0), 110, False),
+        (_day(1), 130, True),
+        (_day(2), 112, False),
+    ]
+    assert a[0].id == d0_id, "строки до окна не тронуты"
+    assert a[1].record_notified_at is None, "рекорд уйдёт обычным тиком"
+
+    again = await engine.rebuild_snapshots(
+        db, contest, race, day_from=_day(1), day_to=_day(2), today=_day(3)
+    )
+    assert again.written == 4
+    assert [int(s.cells) for s in await _snaps(db, race.id, net.A.id)] == [110, 130, 112]
+
+    with pytest.raises(engine.RaceConflictError):  # окно не упирается в последний снимок
+        await engine.rebuild_snapshots(
+            db, contest, race, day_from=_day(1), day_to=_day(1), today=_day(3)
+        )
+    with pytest.raises(engine.RaceValidationError):  # раньше старта заезда
+        await engine.rebuild_snapshots(
+            db, contest, race, day_from=_day(-1), day_to=_day(2), today=_day(3)
+        )
+    with pytest.raises(engine.RaceValidationError):  # сегодняшний день ещё не закрыт
+        await engine.rebuild_snapshots(
+            db, contest, race, day_from=_day(2), day_to=_day(2), today=_day(2)
+        )
+
+    # исключённая точка: её строки в окне остаются, переписываются только живые
+    await engine.set_participant(
+        db, contest, store_id=net.C.id, included=False, actor_id=net.admin.employee_id
+    )
+    rep = await engine.rebuild_snapshots(
+        db, contest, race, day_from=_day(1), day_to=_day(2), today=_day(3)
+    )
+    assert (rep.deleted, rep.written, rep.kept_excluded) == (2, 2, 2)
+    assert len(await _snaps(db, race.id, net.C.id)) == 3
+
+    # завершённый заезд — итоги заморожены, снимки не переписываются
+    for n in range(3, 7):
+        await _stat(db, tenant_id, "dep-1", _day(n), 100, 300)
+    await engine.close_day(db, contest, close_day=_day(6))
+    await db.refresh(race)
+    with pytest.raises(engine.RaceConflictError):
+        await engine.rebuild_snapshots(
+            db, contest, race, day_from=_day(5), day_to=_day(6), today=_day(7)
+        )

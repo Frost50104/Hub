@@ -347,3 +347,68 @@ def test_baseline_is_preliminary_respects_display_tz_not_utc():
     assert not m.baseline_is_preliminary(
         datetime(2026, 10, 4, 22, 30, tzinfo=UTC), date(2026, 10, 4), tz=tz
     )
+
+
+# ─── окно дотяжки выгрузки iiko (17.10) ─────────────────────────────────────
+
+
+def test_catch_up_window_degenerates_in_normal_operation():
+    d = date(2026, 10, 18)
+    floor = date(2026, 10, 5)
+    yesterday = d - timedelta(days=1)
+    # ночное закрытие: последний снимок = close_day − 1; тик после 03:45 — вчера
+    assert m.catch_up_window(through=d, last_snapshot_day=yesterday, floor=floor, max_days=31) == (
+        yesterday,
+        d,
+        False,
+    )
+    # тик до закрытия (00:40–02:40): последний снимок — позавчера, окно всё равно «вчера+сегодня»
+    assert m.catch_up_window(
+        through=d, last_snapshot_day=d - timedelta(days=2), floor=floor, max_days=31
+    ) == (yesterday, d, False)
+    # первый день заезда: снимков нет, пол = сегодня
+    assert m.catch_up_window(through=d, last_snapshot_day=None, floor=d, max_days=31) == (
+        yesterday,
+        d,
+        False,
+    )
+    # запланированный конкурс: пол в будущем
+    assert m.catch_up_window(
+        through=d, last_snapshot_day=None, floor=d + timedelta(days=3), max_days=31
+    ) == (yesterday, d, False)
+
+
+def test_catch_up_window_catches_up_from_first_day_without_snapshot():
+    # инцидент 14–17.10: последний снимок 13.10 (ночи 15–17.10 закрыты без выгрузки)
+    assert m.catch_up_window(
+        through=date(2026, 10, 18),
+        last_snapshot_day=date(2026, 10, 13),
+        floor=date(2026, 10, 5),
+        max_days=31,
+    ) == (date(2026, 10, 14), date(2026, 10, 18), False)
+    # снимков нет вовсе, заезд идёт с 05.10 — от старта
+    assert m.catch_up_window(
+        through=date(2026, 10, 18), last_snapshot_day=None, floor=date(2026, 10, 5), max_days=31
+    ) == (date(2026, 10, 5), date(2026, 10, 18), False)
+
+
+def test_catch_up_window_floor_skips_gap_between_races():
+    # заезд 1 завершён досрочно 10.10 (последний снимок), заезд 2 стартует 15.10:
+    # тик 16.10 не тянет 11–14.10 — эти дни никому не нужны
+    assert m.catch_up_window(
+        through=date(2026, 10, 16),
+        last_snapshot_day=date(2026, 10, 10),
+        floor=date(2026, 10, 15),
+        max_days=31,
+    ) == (date(2026, 10, 15), date(2026, 10, 16), False)
+
+
+def test_catch_up_window_caps_at_max_days_and_flags():
+    day_from, day_to, capped = m.catch_up_window(
+        through=date(2026, 10, 18),
+        last_snapshot_day=date(2026, 8, 31),
+        floor=date(2026, 8, 1),
+        max_days=31,
+    )
+    assert (day_from, day_to, capped) == (date(2026, 9, 18), date(2026, 10, 18), True)
+    assert (day_to - day_from).days + 1 == 31

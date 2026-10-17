@@ -296,6 +296,34 @@ def pending_snapshot_days(
     return [first + timedelta(days=i) for i in range((last - first).days + 1)]
 
 
+def catch_up_window(
+    *, through: date, last_snapshot_day: date | None, floor: date, max_days: int
+) -> tuple[date, date, bool]:
+    """Окно выгрузки iiko, которое само дотягивает пропущенные дни.
+
+    `[min(through − 1, первый день без снимка), through]`, не длиннее
+    `max_days`. Первый день без снимка — `last_snapshot_day + 1`, но не раньше
+    `floor` (старт заезда, чьи дни ещё не закрыты): без пола после досрочного
+    завершения заезда каждый тик тянул бы окно от его последнего снимка до
+    старта следующего. Снимков нет — от `floor`.
+
+    В штатном режиме вырождается в прежнее «вчера + сегодня»: у ночного
+    закрытия последний снимок = close_day − 1, у часового тика после 03:45 —
+    вчера, до закрытия (00:40–02:40) — позавчера, и `min(through − 1, …)` всё
+    равно даёт вчера. После отказа iiko закрытие снимков не пишет
+    (`close_day(sales_complete=False)`), и первый день без снимка — это первый
+    недовыгруженный день: окно покрывает весь пробел, включая день, выгруженный
+    частично до отказа. Третий элемент — срезано ли окно потолком (остаток
+    догоняют руками: `POST /learn/race/admin/sync`, затем ремонт снимков).
+    """
+    first_pending = (
+        floor if last_snapshot_day is None else max(floor, last_snapshot_day + timedelta(days=1))
+    )
+    day_from = min(through - timedelta(days=1), first_pending)
+    cap = through - timedelta(days=max_days - 1)
+    return max(day_from, cap), through, day_from < cap
+
+
 def chunk_period(date_from: date, date_to: date, max_days: int = 14) -> list[tuple[date, date]]:
     """Разбить период на окна ≤ max_days: один OLAP «подразделение × день»
     за 92 дня — это тысячи групп и таймаут без частичного прогресса."""

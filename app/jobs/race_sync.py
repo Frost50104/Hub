@@ -4,7 +4,9 @@
 1. `activate_due` — запланированное со стартом ≤ сегодня становится активным;
 1а. с 04:00 МСК — `finalize_baselines(through_day=вчера)`: самолечение, если
    ночное закрытие не финализировало предварительные базы;
-2. при активном конкурсе — `pull_days([вчера, сегодня])` (одна сессия iiko под
+2. при активном конкурсе — выгрузка окна `engine.pull_window(through=сегодня)`:
+   штатно `[вчера, сегодня]`, после отказа iiko — от первого дня без снимка
+   (кусками ≤ 14 дней, commit после каждого; одна сессия iiko на кусок под
    fenced-локом); `IikoBusy` — пропустить тик, следующий через час;
 3. commit;
 4. `send_pending_notifications` — в отдельной сессии, метки дедупа коммитятся
@@ -32,6 +34,7 @@ from app.services.iiko import service as iiko_service
 from app.services.iiko.client import IikoError, IikoNotConfigured
 from app.services.notify_batch import drain
 from app.services.race import engine, finalize, gate, iiko_pull, read
+from app.services.race.math import chunk_period
 from app.services.timefmt import display_tz
 
 log = structlog.get_logger("jobs.race_sync")
@@ -59,20 +62,22 @@ async def _tenant_tick(tenant_id, *, today, local_hour: int) -> None:
         # и закрытая всё равно обновляются в этот час.
         await engine.reconcile_participants(session, active)
         await session.commit()
+        day_from, day_to = await engine.pull_window(session, active, through=today)
         try:
-            report = await iiko_pull.pull_days(
-                session,
-                tenant_id=tenant_id,
-                day_from=today - timedelta(days=1),
-                day_to=today,
-            )
-            log.info(
-                "race_sync.pulled",
-                tenant_id=str(tenant_id),
-                rows=report.rows,
-                departments=report.departments,
-                skipped_empty=report.skipped_empty,
-            )
+            for a, b in chunk_period(day_from, day_to, iiko_pull.BASELINE_WINDOW_DAYS):
+                report = await iiko_pull.pull_days(
+                    session, tenant_id=tenant_id, day_from=a, day_to=b
+                )
+                await session.commit()
+                log.info(
+                    "race_sync.pulled",
+                    tenant_id=str(tenant_id),
+                    day_from=str(a),
+                    day_to=str(b),
+                    rows=report.rows,
+                    departments=report.departments,
+                    skipped_empty=report.skipped_empty,
+                )
         except iiko_service.IikoBusy:
             log.info("race_sync.busy_skip", tenant_id=str(tenant_id))
         except (IikoError, IikoNotConfigured) as e:
