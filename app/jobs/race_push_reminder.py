@@ -159,7 +159,8 @@ async def main() -> int:
         targets = [emp for emp in ids if emp not in subscribed and emp not in notified]
 
         _say(
-            f"конкурс: «{contest.title}» · {contest.status} · {contest.starts_on} — {contest.ends_on}"
+            f"конкурс: «{contest.title}» · {contest.status} · "
+            f"{contest.starts_on} — {contest.ends_on}"
         )
         _say(f"точек-участниц: {len(store_ids)}")
         _say(f"людей в популяции: {len(people)} (+{no_login} без входа в Hub — недостижимы)")
