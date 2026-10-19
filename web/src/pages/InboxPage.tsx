@@ -629,19 +629,16 @@ function DesktopInbox() {
 
 function HeaderAction({
   onClick,
-  disabled,
   children,
 }: {
   onClick: () => void
-  disabled?: boolean
   children: React.ReactNode
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
-      className="inline-flex min-h-11 items-center px-2.5 text-[15px] font-semibold text-text active:opacity-70 disabled:opacity-50"
+      className="inline-flex min-h-11 items-center px-2.5 text-[15px] font-semibold text-text active:opacity-70"
     >
       {children}
     </button>
@@ -651,7 +648,6 @@ function HeaderAction({
 function MobileInbox() {
   const {
     notifications,
-    markAll,
     openNotification,
     items,
     unread,
@@ -662,6 +658,10 @@ function MobileInbox() {
   } = useInbox()
   const space = useResolvedSpace()
 
+  // В шапке телефона — ОДНА кнопка (решение владельца 19.10): рядом с
+  // «Выбрать» «Прочитать всё» переносилась на две строки на iPhone. Массово
+  // читать с телефона — «Выбрать» → «Выбрать все (N)» → «Прочитано»;
+  // «Прочитать всё» осталась только на десктопе.
   let trailing: React.ReactNode
   if (selection.selecting) {
     trailing = (
@@ -669,15 +669,10 @@ function MobileInbox() {
         <HeaderAction onClick={selection.exit}>Отмена</HeaderAction>
       </div>
     )
-  } else if (items.length > 0 || unread > 0) {
+  } else if (items.length > 0) {
     trailing = (
       <div className="-mr-2.5 flex items-center">
-        {items.length > 0 && <HeaderAction onClick={selection.start}>Выбрать</HeaderAction>}
-        {unread > 0 && (
-          <HeaderAction onClick={() => markAll.mutate()} disabled={markAll.isPending}>
-            Прочитать всё
-          </HeaderAction>
-        )}
+        <HeaderAction onClick={selection.start}>Выбрать</HeaderAction>
       </div>
     )
   }
