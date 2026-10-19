@@ -46,6 +46,9 @@ from app.services.timefmt import display_tz, fmt_day, fmt_day_range
 log = structlog.get_logger("race.engine")
 
 NOTIFY_FROM_HOUR = 9
+# Рекорды рассылаются и завершённому конкурсу (снимок последнего дня пишется
+# той же транзакцией, что его завершает); зеркало — `jobs.race_sync._TENANTS_SQL`.
+NOTIFYING_CONTEST_STATUSES = ("active", "finished")
 KIND_STARTED = "race.started"
 KIND_RECORD = "race.record"
 
@@ -1277,7 +1280,14 @@ async def send_pending_notifications(
     tenant_id: UUID, *, now: datetime, session_factory: Any = tenant_scoped_session
 ) -> int:
     """Пуши «заезд стартовал» и «рекорд» — не раньше 09:00 MSK, метки дедупа
-    коммитятся ДО отправки (иначе откат = повторная рассылка всей сети)."""
+    коммитятся ДО отправки (иначе откат = повторная рассылка всей сети).
+
+    Рекорды уходят и у ЗАВЕРШЁННОГО конкурса: снимок последнего дня пишется той
+    же транзакцией `close_day`, что завершает заезд и конкурс, и правило «только
+    активный» оставляло его без пуша (19.10: два рекорда 18.10 так и не ушли).
+    «Заезд стартовал» — по-прежнему только в активном конкурсе; отменённый
+    конкурс не рассылает ничего — на экране «Соревнование отменено».
+    """
     if not gate.sync_enabled():
         return 0
     if now.astimezone(display_tz()).hour < NOTIFY_FROM_HOUR:
@@ -1292,28 +1302,32 @@ async def send_pending_notifications(
             for c in (
                 await session.execute(
                     select(RaceContest).where(
-                        RaceContest.tenant_id == tenant_id, RaceContest.status == "active"
+                        RaceContest.tenant_id == tenant_id,
+                        RaceContest.status.in_(NOTIFYING_CONTEST_STATUSES),
                     )
                 )
             ).scalars()
         }
         if not contests:
             return 0
-        # заезд стартовал
-        claimed = list(
-            (
-                await session.execute(
-                    update(Race)
-                    .where(
-                        Race.contest_id.in_(contests),
-                        Race.status == "active",
-                        Race.started_notified_at.is_(None),
+        active_ids = [cid for cid, c in contests.items() if c.status == "active"]
+        # заезд стартовал — только в активном конкурсе
+        claimed: list[Race] = []
+        if active_ids:
+            claimed = list(
+                (
+                    await session.execute(
+                        update(Race)
+                        .where(
+                            Race.contest_id.in_(active_ids),
+                            Race.status == "active",
+                            Race.started_notified_at.is_(None),
+                        )
+                        .values(started_notified_at=now)
+                        .returning(Race)
                     )
-                    .values(started_notified_at=now)
-                    .returning(Race)
-                )
-            ).scalars()
-        )
+                ).scalars()
+            )
         for race in claimed:
             contest = contests[race.contest_id]
             participants = await read.load_participants(session, contest)

@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import race as race_api
 from app.api.public import get_public_race
 from app.config import get_settings
+from app.db import tenant_scoped_session
+from app.jobs import race_sync
 from app.models.notification import Notification
 from app.models.race import RaceDailyStat, RaceSnapshot
 from app.schemas.race import RaceSettingsPut
@@ -218,3 +220,84 @@ async def test_notifications_go_once_after_nine_to_people_of_included_stores(
     assert record == {"emp_a"}
     assert await engine.send_pending_notifications(tenant_id, now=later) == 0, "дедуп"
     await drain(timeout_sec=5)
+
+
+def _record_yesterday(tenant_id, race_id, store_id, today) -> RaceSnapshot:
+    return RaceSnapshot(
+        tenant_id=tenant_id,
+        race_id=race_id,
+        store_id=store_id,
+        day=today - timedelta(days=1),
+        receipts_cum=100,
+        items_cum=260,
+        avg=2.6,
+        base=2.0,
+        pct=30.0,
+        cells=130,
+        is_record=True,
+    )
+
+
+async def _scanned_tenants() -> set:
+    async with tenant_scoped_session(None, bypass_rls=True) as scan:
+        return {r[0] for r in await scan.execute(race_sync._TENANTS_SQL)}
+
+
+async def _finish(db, contest, race, status: str) -> None:
+    """Как `close_day` в последнюю ночь: заезд и конкурс закрываются одной транзакцией."""
+    now = datetime.now(UTC)
+    race.status = "finished"
+    race.finished_at = now
+    race.finish_reason = "schedule"
+    contest.status = status
+    if status == "finished":
+        contest.finished_at = now
+    else:
+        contest.cancelled_at = now
+    await db.commit()
+
+
+async def test_record_of_last_day_is_pushed_after_contest_finished(db: AsyncSession, tenant_id):
+    """Снимок последнего дня пишется той же транзакцией, что завершает конкурс,
+    и тик 09:40 обязан разослать его рекорды; «заезд стартовал» — нет."""
+    net = await seed_network(db, tenant_id)
+    contest, today = await _active_contest_today(db, net)
+    race = (await read.load_races(db, contest))[0]
+    db.add(_record_yesterday(tenant_id, race.id, net.A.id, today))
+    await _finish(db, contest, race, "finished")
+    assert tenant_id in await _scanned_tenants(), "обход видит завершённый с рекордом"
+
+    later = datetime.combine(today, datetime.min.time(), tzinfo=UTC).replace(hour=7)
+    assert await engine.send_pending_notifications(tenant_id, now=later) > 0
+    rows = (
+        await db.execute(
+            select(Notification.employee_id, Notification.kind).where(
+                Notification.tenant_id == tenant_id
+            )
+        )
+    ).all()
+    assert {kind for _, kind in rows} == {"race.record"}, (
+        "«заезд стартовал» завершённому конкурсу не шлётся"
+    )
+    assert {emp for emp, _ in rows} == {net.emp_a.employee_id}
+    assert await engine.send_pending_notifications(tenant_id, now=later) == 0, "дедуп"
+    assert tenant_id not in await _scanned_tenants(), "после рассылки тенант выпадает"
+    await drain(timeout_sec=5)
+
+
+async def test_cancelled_contest_sends_nothing(db: AsyncSession, tenant_id):
+    net = await seed_network(db, tenant_id)
+    contest, today = await _active_contest_today(db, net)
+    race = (await read.load_races(db, contest))[0]
+    db.add(_record_yesterday(tenant_id, race.id, net.A.id, today))
+    await _finish(db, contest, race, "cancelled")
+    assert tenant_id not in await _scanned_tenants()
+
+    later = datetime.combine(today, datetime.min.time(), tzinfo=UTC).replace(hour=7)
+    assert await engine.send_pending_notifications(tenant_id, now=later) == 0
+    kinds = (
+        (await db.execute(select(Notification.kind).where(Notification.tenant_id == tenant_id)))
+        .scalars()
+        .all()
+    )
+    assert kinds == []

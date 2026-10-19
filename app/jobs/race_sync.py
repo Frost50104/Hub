@@ -1,6 +1,7 @@
 """«Гусиная гонка»: часовая дотяжка чеков iiko + пуши (systemd timer, *:40).
 
-Порядок тика на тенант с scheduled/active конкурсом:
+Порядок тика на тенант с scheduled/active конкурсом (а также с завершённым,
+пока у него есть неразосланные рекорды — ему нужен только шаг 4):
 1. `activate_due` — запланированное со стартом ≤ сегодня становится активным;
 1а. с 04:00 МСК — `finalize_baselines(through_day=вчера)`: самолечение, если
    ночное закрытие не финализировало предварительные базы;
@@ -39,8 +40,20 @@ from app.services.timefmt import display_tz
 
 log = structlog.get_logger("jobs.race_sync")
 
+# Вторая ветка — тенанты с завершённым конкурсом и неразосланными рекордами:
+# снимок последнего дня пишется той же транзакцией, что завершает конкурс, и
+# обход «только scheduled/active» оставлял его без пуша (19.10). Зеркало
+# правила — `engine.NOTIFYING_CONTEST_STATUSES`; после рассылки тенант выпадает.
 _TENANTS_SQL = text(
-    "SELECT DISTINCT tenant_id FROM race_contests WHERE status IN ('scheduled', 'active')"
+    """
+    SELECT DISTINCT tenant_id FROM race_contests WHERE status IN ('scheduled', 'active')
+    UNION
+    SELECT DISTINCT c.tenant_id
+      FROM race_snapshots s
+      JOIN races r ON r.id = s.race_id
+      JOIN race_contests c ON c.id = r.contest_id
+     WHERE c.status = 'finished' AND s.is_record AND s.record_notified_at IS NULL
+    """
 )
 
 
