@@ -4,13 +4,15 @@ import {
   Bell,
   BookOpen,
   CalendarClock,
+  Check,
   CheckCircle2,
   CheckSquare,
   Flag,
   MessageSquare,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 
 import { FloatingActionButton } from '@/components/layout/FloatingActionButton'
@@ -23,10 +25,19 @@ import {
   useMarkAllRead,
   useMarkRead,
   useNotifications,
+  useSetReadState,
   useUnreadCount,
 } from '@/hooks/useNotifications'
 import { invalidateTaskThread } from '@/hooks/useThreads'
 import { cn } from '@/lib/cn'
+import { bucketByAge, flattenPages } from '@/lib/inboxPaging'
+import {
+  allIds,
+  pruneSelection,
+  selectAllLabel,
+  selectionLabel,
+  toggleId,
+} from '@/lib/inboxSelection'
 import { inboxCounter, inboxEmpty } from '@/lib/inboxView'
 import { type Notification } from '@/lib/notifications'
 import { taskIdFromHref } from '@/lib/taskLinks'
@@ -70,6 +81,19 @@ export function InboxPage() {
   return isDesktop ? <DesktopInbox /> : <MobileInbox />
 }
 
+/** Режим выбора: состояние и действия панели, одно на обе раскладки. */
+interface Selection {
+  selecting: boolean
+  selected: ReadonlySet<number>
+  allSelected: boolean
+  pending: boolean
+  start: () => void
+  exit: () => void
+  toggle: (id: number) => void
+  toggleAll: () => void
+  apply: (isRead: boolean) => void
+}
+
 function useInbox() {
   // Чип — выбор одного из двух окон выборки (unread_only на сервере), а не
   // декоративная вкладка: клик по уже активному ничего не меняет.
@@ -78,10 +102,11 @@ function useInbox() {
   // список дел, а не архив, и у активного пользователя прочитанное измеряется
   // сотнями. Состояние локальное и живёт до ухода со страницы: это ДЕФОЛТ, а не
   // сохранённая настройка — вернувшись, человек снова видит то, что не разобрал.
-  const [unreadOnly, setUnreadOnly] = useState(true)
+  const [unreadOnly, setUnreadOnlyState] = useState(true)
   const notifications = useNotifications(unreadOnly)
   const markAll = useMarkAllRead()
   const markOne = useMarkRead()
+  const setReadState = useSetReadState()
   const qc = useQueryClient()
   // Переход из уведомления обязан показать СВЕЖЕЕ обсуждение: карточка
   // монтируется заново, но обсуждение моложе 30 с (`staleTime`) берётся из
@@ -92,17 +117,56 @@ function useInbox() {
     if (taskId) void invalidateTaskThread(qc, taskId)
     if (!n.is_read) markOne.mutate(n.id)
   }
-  // useMemo на данных запроса, а не на `data ?? []`: литерал даёт новую
-  // ссылку каждый рендер, и группировка пересчитывалась бы вхолостую.
-  const items = useMemo(() => notifications.data ?? [], [notifications.data])
+  // Страницы склеиваются в один список (дедуп по id — `lib/inboxPaging.ts`).
+  // useMemo на данных запроса, а не на `?? []`: литерал даёт новую ссылку
+  // каждый рендер, и группировка пересчитывалась бы вхолостую.
+  const items = useMemo(
+    () => flattenPages(notifications.data?.pages ?? []),
+    [notifications.data],
+  )
   // Число непрочитанных — из того же источника, что бейдж в сайдбаре, а НЕ из
-  // длины списка: ручка отдаёт максимум 50 строк, и у человека со 160
-  // непрочитанными подпись говорила «50 непрочитанных». Ключ запроса общий с
-  // бейджем, так что лишнего похода в сеть нет, а `useMarkRead`/`useMarkAllRead`
-  // инвалидируют весь префикс `['notifications']` — число обновляется само.
+  // длины списка: список постраничный, и у человека со 160 непрочитанными
+  // подпись говорила бы «50 непрочитанных». Ключ запроса общий с бейджем, так
+  // что лишнего похода в сеть нет, а мутации инвалидируют весь префикс
+  // `['notifications']` — число обновляется само.
   const unreadCount = useUnreadCount()
   const unread = unreadCount.data?.count ?? items.filter((n) => !n.is_read).length
-  const groups = useMemo(() => bucketByAge(items), [items])
+  const groups = useMemo(() => bucketByAge(items, Date.now()), [items])
+
+  // Режим выбора (19.10): вход кнопкой «Выбрать», выбор — локальное множество
+  // id. `selected` — ПРОИЗВОДНОЕ от `picked` и загруженного: строки, ушедшие
+  // при фоновом перезапросе (прочитаны с другого устройства), выпадают сами, и
+  // серверу их id не уходят (`pruneSelection`).
+  const [selecting, setSelecting] = useState(false)
+  const [picked, setPicked] = useState<ReadonlySet<number>>(() => new Set())
+  const selected = useMemo(() => pruneSelection(picked, items), [picked, items])
+  const allSelected = items.length > 0 && selected.size === items.length
+  const exitSelection = useCallback(() => {
+    setSelecting(false)
+    setPicked(new Set())
+  }, [])
+  // Смена окна выборки сбрасывает выбор: id «Всех» и «Непрочитанных» — разные
+  // множества, и слать серверу выбор из другого окна нельзя.
+  const setUnreadOnly = (next: boolean) => {
+    if (next === unreadOnly) return
+    exitSelection()
+    setUnreadOnlyState(next)
+  }
+  const selection: Selection = {
+    selecting,
+    selected,
+    allSelected,
+    pending: setReadState.isPending,
+    start: () => setSelecting(true),
+    exit: exitSelection,
+    toggle: (id) => setPicked((prev) => toggleId(prev, id)),
+    // «Выбрать все» = все ЗАГРУЖЕННЫЕ; число в подписи кнопки это и говорит.
+    toggleAll: () => setPicked(allSelected ? new Set() : allIds(items)),
+    apply: (isRead) => {
+      if (selected.size === 0) return
+      setReadState.mutate({ ids: [...selected], is_read: isRead }, { onSuccess: exitSelection })
+    },
+  }
   return {
     notifications,
     markAll,
@@ -112,6 +176,7 @@ function useInbox() {
     groups,
     unreadOnly,
     setUnreadOnly,
+    selection,
   }
 }
 
@@ -173,23 +238,28 @@ function InboxFilters({
   )
 }
 
+const ROW_CLASS =
+  'flex w-full items-start gap-3 border-b border-hair px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-glass focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber'
+
 function NotificationRow({
   notification,
-  onRead,
+  onOpen,
+  selectable,
+  selected,
+  onToggle,
 }: {
   notification: Notification
-  onRead: () => void
+  onOpen: () => void
+  selectable: boolean
+  selected: boolean
+  onToggle: () => void
 }) {
   const Icon = KIND_ICON[notification.kind] ?? (notification.kind.startsWith('task.') ? Bell : BookOpen)
   const tone = KIND_TONE[notification.kind] ?? DEFAULT_TONE
   const unread = !notification.is_read
 
-  return (
-    <Link
-      to={notification.url ?? '#'}
-      onClick={onRead}
-      className="flex w-full items-start gap-3 border-b border-hair px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-glass focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber"
-    >
+  const content = (
+    <>
       <span
         className={cn(
           'flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
@@ -220,7 +290,191 @@ function NotificationRow({
       {unread && (
         <span className="mt-1.5 block h-2 w-2 shrink-0 rounded-full bg-amber" />
       )}
+    </>
+  )
+
+  if (selectable) {
+    // В режиме выбора строка — чекбокс, а не ссылка: тап выбирает, не открывает.
+    // Элемент другой (`<button>`), классы, раскладка и дети те же; слева —
+    // квадрат-чекбокс по образцу `CustomFieldEditor`, выбранная строка — рамка
+    // амбером внутрь, как у выделенной задачи (`ui/ListRow`).
+    return (
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={selected}
+        onClick={onToggle}
+        className={cn(
+          ROW_CLASS,
+          selected && 'bg-surface shadow-[inset_0_0_0_1px_rgb(var(--amber))]',
+        )}
+      >
+        <span
+          aria-hidden
+          className={cn(
+            'mt-1.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-glass-border',
+            selected ? 'bg-amber text-on-amber' : 'bg-glass text-transparent',
+          )}
+        >
+          <Check className="h-3.5 w-3.5" />
+        </span>
+        {content}
+      </button>
+    )
+  }
+
+  return (
+    <Link to={notification.url ?? '#'} onClick={onOpen} className={ROW_CLASS}>
+      {content}
     </Link>
+  )
+}
+
+/**
+ * Панель режима выбора. На десктопе липнет под чипами (скролл-порт — `<main>`),
+ * на телефоне — фиксированная полоса над таб-баром, порталом в `body`: `.glass`
+ * с `backdrop-filter` делает containing block для `position: fixed`, и внутри
+ * стеклянной панели полоса встала бы не там (образец — `MobileViewControlBar`).
+ * Подложка непрозрачная — в светлой теме стекло просвечивало бы список.
+ */
+function SelectionBar({
+  selection,
+  loaded,
+  mobile,
+}: {
+  selection: Selection
+  loaded: number
+  mobile: boolean
+}) {
+  const count = selection.selected.size
+  const disabled = count === 0 || selection.pending
+  const label = (
+    <span className="text-[13px] font-semibold text-text">{selectionLabel(count)}</span>
+  )
+  const all = (
+    <button
+      type="button"
+      onClick={selection.toggleAll}
+      disabled={loaded === 0}
+      className={cn(
+        'text-[13px] font-semibold text-text2 hover:text-text',
+        mobile ? 'min-h-11 px-2' : 'min-h-8',
+      )}
+    >
+      {selectAllLabel(loaded, selection.allSelected)}
+    </button>
+  )
+
+  if (!mobile) {
+    return (
+      <div
+        className="sticky z-10 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[12px] border border-glass-border bg-bg-alt px-3 py-2"
+        style={{ top: 'var(--safe-top, 0px)' }}
+      >
+        {label}
+        {all}
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={disabled}
+            onClick={() => selection.apply(true)}
+          >
+            Прочитано
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={disabled}
+            onClick={() => selection.apply(false)}
+          >
+            Непрочитано
+          </Button>
+          <Button size="sm" variant="ghost" onClick={selection.exit}>
+            Отмена
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  if (typeof document === 'undefined') return null
+  return createPortal(
+    <div
+      className="fixed inset-x-0 z-30 border-t border-glass-border px-4 pb-2 pt-1 lg:hidden"
+      style={{
+        // Таб-бар — 56px + свой safe-area; панель садится ровно на него.
+        bottom: 'calc(env(safe-area-inset-bottom, 0px) + 3.5rem)',
+        background: 'color-mix(in srgb, rgb(var(--bg-alt)) 95%, transparent)',
+      }}
+    >
+      <div className="-mr-2 flex items-center justify-between">
+        {label}
+        {all}
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <Button
+          size="lg"
+          variant="secondary"
+          className="min-h-11 px-2"
+          disabled={disabled}
+          onClick={() => selection.apply(true)}
+        >
+          Прочитано
+        </Button>
+        <Button
+          size="lg"
+          variant="secondary"
+          className="min-h-11 px-2"
+          disabled={disabled}
+          onClick={() => selection.apply(false)}
+        >
+          Непрочитано
+        </Button>
+        <Button size="lg" variant="ghost" className="min-h-11 px-2" onClick={selection.exit}>
+          Отмена
+        </Button>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+/**
+ * «Показать ещё» — страницы по 50 (`lib/inboxPaging.ts`). Ошибка ДОГРУЗКИ —
+ * компактно на месте кнопки, а не вместо всего списка: уже показанное остаётся.
+ */
+function LoadMore({
+  query,
+  className,
+}: {
+  query: ReturnType<typeof useNotifications>
+  className?: string
+}) {
+  if (query.isFetchNextPageError) {
+    return (
+      <QueryError
+        error={query.error}
+        onRetry={() => void query.fetchNextPage()}
+        title="Не удалось загрузить ещё"
+        className={className}
+      />
+    )
+  }
+  if (!query.hasNextPage) return null
+  return (
+    <div className={className}>
+      {/* `disabled` на ЛЮБОМ `isFetching`, не только на догрузке: `fetchNextPage`
+          обрывает фоновый перезапрос и взял бы курсор из устаревшей страницы. */}
+      <button
+        type="button"
+        onClick={() => void query.fetchNextPage()}
+        disabled={query.isFetching}
+        className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-hair text-sm font-semibold text-text2 hover:text-text disabled:opacity-60"
+      >
+        {query.isFetchingNextPage ? 'Загружаем…' : 'Показать ещё'}
+      </button>
+    </div>
   )
 }
 
@@ -249,23 +503,6 @@ function EmptyInbox({ unreadOnly }: { unreadOnly: boolean }) {
   )
 }
 
-function bucketByAge(items: Notification[]) {
-  const now = Date.now()
-  const WEEK = 7 * 24 * 60 * 60 * 1000
-  return [
-    {
-      key: '7d',
-      label: 'Последние 7 дней',
-      items: items.filter((n) => now - new Date(n.created_at).getTime() <= WEEK),
-    },
-    {
-      key: 'older',
-      label: 'Раньше',
-      items: items.filter((n) => now - new Date(n.created_at).getTime() > WEEK),
-    },
-  ]
-}
-
 function formatRelative(iso: string): string {
   const now = Date.now()
   const t = new Date(iso).getTime()
@@ -283,6 +520,39 @@ function formatRelative(iso: string): string {
   })
 }
 
+function NotificationGroups({
+  groups,
+  selection,
+  onOpen,
+}: {
+  groups: ReturnType<typeof bucketByAge<Notification>>
+  selection: Selection
+  onOpen: (n: Notification) => void
+}) {
+  return (
+    <>
+      {groups.map(
+        (g) =>
+          g.items.length > 0 && (
+            <section key={g.key}>
+              <GroupLabel>{g.label}</GroupLabel>
+              {g.items.map((n) => (
+                <NotificationRow
+                  key={n.id}
+                  notification={n}
+                  onOpen={() => onOpen(n)}
+                  selectable={selection.selecting}
+                  selected={selection.selected.has(n.id)}
+                  onToggle={() => selection.toggle(n.id)}
+                />
+              ))}
+            </section>
+          ),
+      )}
+    </>
+  )
+}
+
 // ─── Десктоп ────────────────────────────────────────────────────────────────
 
 function DesktopInbox() {
@@ -295,6 +565,7 @@ function DesktopInbox() {
     groups,
     unreadOnly,
     setUnreadOnly,
+    selection,
   } = useInbox()
 
   return (
@@ -308,22 +579,32 @@ function DesktopInbox() {
             Уведомления о задачах, упоминаниях и дедлайнах.
           </p>
         </div>
-        {unread > 0 && (
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => markAll.mutate()}
-            disabled={markAll.isPending}
-          >
-            Прочитать всё
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {items.length > 0 && !selection.selecting && (
+            <Button size="sm" variant="ghost" onClick={selection.start}>
+              Выбрать
+            </Button>
+          )}
+          {unread > 0 && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => markAll.mutate()}
+              disabled={markAll.isPending}
+            >
+              Прочитать всё
+            </Button>
+          )}
+        </div>
       </header>
 
       <InboxFilters unreadOnly={unreadOnly} onChange={setUnreadOnly} unread={unread} />
+      {selection.selecting && (
+        <SelectionBar selection={selection} loaded={items.length} mobile={false} />
+      )}
 
       {notifications.isLoading && <SkeletonRows rows={5} />}
-      {notifications.isError && (
+      {notifications.isError && !notifications.isFetchNextPageError && (
         <QueryError
           error={notifications.error}
           onRetry={() => void notifications.refetch()}
@@ -336,21 +617,8 @@ function DesktopInbox() {
 
       {items.length > 0 && (
         <div className="overflow-hidden rounded-[14px] border border-glass-border bg-tint">
-          {groups.map(
-            (g) =>
-              g.items.length > 0 && (
-                <section key={g.key}>
-                  <GroupLabel>{g.label}</GroupLabel>
-                  {g.items.map((n) => (
-                    <NotificationRow
-                      key={n.id}
-                      notification={n}
-                      onRead={() => openNotification(n)}
-                    />
-                  ))}
-                </section>
-              ),
-          )}
+          <NotificationGroups groups={groups} selection={selection} onOpen={openNotification} />
+          <LoadMore query={notifications} className="p-3" />
         </div>
       )}
     </div>
@@ -358,6 +626,27 @@ function DesktopInbox() {
 }
 
 // ─── Мобильный ──────────────────────────────────────────────────────────────
+
+function HeaderAction({
+  onClick,
+  disabled,
+  children,
+}: {
+  onClick: () => void
+  disabled?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex min-h-11 items-center px-2.5 text-[15px] font-semibold text-text active:opacity-70 disabled:opacity-50"
+    >
+      {children}
+    </button>
+  )
+}
 
 function MobileInbox() {
   const {
@@ -369,26 +658,33 @@ function MobileInbox() {
     groups,
     unreadOnly,
     setUnreadOnly,
+    selection,
   } = useInbox()
   const space = useResolvedSpace()
 
+  let trailing: React.ReactNode
+  if (selection.selecting) {
+    trailing = (
+      <div className="-mr-2.5 flex items-center">
+        <HeaderAction onClick={selection.exit}>Отмена</HeaderAction>
+      </div>
+    )
+  } else if (items.length > 0 || unread > 0) {
+    trailing = (
+      <div className="-mr-2.5 flex items-center">
+        {items.length > 0 && <HeaderAction onClick={selection.start}>Выбрать</HeaderAction>}
+        {unread > 0 && (
+          <HeaderAction onClick={() => markAll.mutate()} disabled={markAll.isPending}>
+            Прочитать всё
+          </HeaderAction>
+        )}
+      </div>
+    )
+  }
+
   return (
     <>
-      <MobilePageHeader
-        title="Входящие"
-        trailing={
-          unread > 0 ? (
-            <button
-              type="button"
-              onClick={() => markAll.mutate()}
-              disabled={markAll.isPending}
-              className="-mx-2.5 inline-flex min-h-11 items-center px-2.5 text-[15px] font-semibold text-text active:opacity-70"
-            >
-              Прочитать всё
-            </button>
-          ) : undefined
-        }
-      />
+      <MobilePageHeader title="Входящие" trailing={trailing} />
 
       {/* Чипы появились и здесь (31.08). Прежде их не было по макету, и это
           было безобидно, пока список открывался на «Все»; с дефолтом
@@ -401,7 +697,7 @@ function MobileInbox() {
       />
 
       {notifications.isLoading && <SkeletonRows rows={5} className="p-4" />}
-      {notifications.isError && (
+      {notifications.isError && !notifications.isFetchNextPageError && (
         <QueryError
           error={notifications.error}
           onRetry={() => void notifications.refetch()}
@@ -413,24 +709,18 @@ function MobileInbox() {
         <EmptyInbox unreadOnly={unreadOnly} />
       )}
 
-      {groups.map(
-        (g) =>
-          g.items.length > 0 && (
-            <section key={g.key}>
-              <GroupLabel>{g.label}</GroupLabel>
-              {g.items.map((n) => (
-                <NotificationRow
-                  key={n.id}
-                  notification={n}
-                  onRead={() => openNotification(n)}
-                />
-              ))}
-            </section>
-          ),
+      <NotificationGroups groups={groups} selection={selection} onOpen={openNotification} />
+      <LoadMore query={notifications} className="px-4 py-3" />
+
+      {/* Под фиксированной панелью выбора последняя строка иначе недостижима. */}
+      {selection.selecting && <div aria-hidden className="h-28" />}
+      {selection.selecting && (
+        <SelectionBar selection={selection} loaded={items.length} mobile />
       )}
 
-      {/* FAB «Создать» — задачный; из learn-пространства его не показываем. */}
-      {space === 'tasks' && <FloatingActionButton />}
+      {/* FAB «Создать» — задачный; из learn-пространства и из режима выбора его
+          не показываем: он сидел бы на панели. */}
+      {space === 'tasks' && !selection.selecting && <FloatingActionButton />}
     </>
   )
 }

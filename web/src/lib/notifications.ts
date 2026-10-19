@@ -1,4 +1,5 @@
 import { api } from './api'
+import { chunkIds } from './inboxSelection'
 
 export interface Notification {
   id: number
@@ -14,6 +15,11 @@ export interface Notification {
 
 export interface UnreadCount {
   count: number
+}
+
+/** Сколько строк реально изменила массовая отметка (чужие и уже стоящие в нужном состоянии не считаются). */
+export interface ReadStateResult {
+  updated: number
 }
 
 export interface PushSubscribeBody {
@@ -55,6 +61,21 @@ export const notificationsApi = {
     api.post(`/notifications/${id}/read`).then(() => undefined),
   markAllRead: (): Promise<void> =>
     api.post('/notifications/read-all').then(() => undefined),
+  /**
+   * Массовая отметка выбранных. Выбор больше `READ_STATE_MAX` режется чанками
+   * и шлётся последовательно; сумма `updated` идёт в тост.
+   */
+  setReadState: async (ids: number[], is_read: boolean): Promise<ReadStateResult> => {
+    let updated = 0
+    for (const chunk of chunkIds(ids)) {
+      const r = await api.post<ReadStateResult>('/notifications/read-state', {
+        ids: chunk,
+        is_read,
+      })
+      updated += r.data.updated
+    }
+    return { updated }
+  },
   getPreferences: (): Promise<NotificationPrefs> =>
     api.get<NotificationPrefs>('/notifications/preferences').then((r) => r.data),
   setPreferences: (prefs: PreferencesMap): Promise<NotificationPrefs> =>

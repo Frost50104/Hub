@@ -44,6 +44,26 @@ class UnreadCount(BaseModel):
     count: int
 
 
+# Потолок id в одном запросе массовой отметки — зеркало
+# `web/src/lib/inboxSelection.ts::READ_STATE_MAX` (клиент режет выбор чанками),
+# меняется ПАРОЙ; сторож — `tests/unit/test_notification_schemas.py`.
+READ_STATE_MAX_IDS = 500
+
+
+class ReadStateUpdate(BaseModel):
+    """Тело `POST /notifications/read-state`: выбранные id и целевое состояние."""
+
+    ids: list[int] = Field(min_length=1, max_length=READ_STATE_MAX_IDS)
+    is_read: bool
+
+
+class ReadStateResult(BaseModel):
+    """Сколько строк реально изменилось: чужие, исчезнувшие и уже стоящие в
+    нужном состоянии не считаются — число идёт в тост."""
+
+    updated: int
+
+
 # ─── Preferences ────────────────────────────────────────────────────────────
 
 

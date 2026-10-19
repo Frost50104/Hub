@@ -17,6 +17,8 @@ from app.schemas.notification import (
     NotificationResponse,
     PreferencesResponse,
     PreferencesUpdate,
+    ReadStateResult,
+    ReadStateUpdate,
     UnreadCount,
 )
 from app.services.notification_prefs import normalize_prefs
@@ -32,10 +34,21 @@ async def list_notifications(
     principal: Principal = Depends(require_auth_any()),
     db: AsyncSession = Depends(get_db),
 ) -> list[NotificationResponse]:
+    """Страница «Входящих»: новейшие первыми, keyset-курсор `before_id`.
+
+    Порядок — по `id`, а не по `created_at`: курсор сравнивает `id`, и при
+    сортировке по времени строка перекрывшейся транзакции (`created_at` —
+    начало транзакции, `id` — момент INSERT; на проде 7 таких пар, 19.10)
+    на границе страницы пропадала или дублировалась. Расхождение осей —
+    секунды, глазом не видно; группы «Последние 7 дней / Раньше» клиент
+    считает построчно по `created_at`, от порядка они не зависят. `has_more`
+    ручка не отдаёт: клиент просит `limit = 51` и по 51-й строке узнаёт, что
+    следующая страница есть (`web/src/lib/inboxPaging.ts`).
+    """
     stmt = (
         select(Notification)
         .where(Notification.employee_id == principal.employee_id)
-        .order_by(Notification.created_at.desc(), Notification.id.desc())
+        .order_by(Notification.id.desc())
         .limit(limit)
     )
     if unread_only:
@@ -60,9 +73,7 @@ async def unread_count(
     return UnreadCount(count=int(row.scalar_one()))
 
 
-@router.post(
-    "/notifications/{notification_id}/read", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.post("/notifications/{notification_id}/read", status_code=status.HTTP_204_NO_CONTENT)
 async def mark_read(
     notification_id: int,
     principal: Principal = Depends(require_auth_any()),
@@ -98,6 +109,39 @@ async def mark_all_read(
         .values(is_read=True, read_at=datetime.now(UTC))
     )
     await db.commit()
+
+
+@router.post("/notifications/read-state", response_model=ReadStateResult)
+async def set_read_state(
+    body: ReadStateUpdate,
+    principal: Principal = Depends(require_auth_any()),
+    db: AsyncSession = Depends(get_db),
+) -> ReadStateResult:
+    """Массово «прочитано»/«непрочитано» для выбранных во «Входящих» (19.10).
+
+    Правила те же, что у `mark_read`: чужие и уже исчезнувшие id молча
+    пропускаются (`employee_id` в WHERE), считаются только реально
+    изменённые строки, повтор даёт 0. `read_at` при «непрочитано»
+    сбрасывается в NULL: состояние хранится дважды, и рассинхрон ломал бы
+    фильтр «Непрочитанные» (`is_read`) и подпись времени прочтения.
+    `synchronize_session=False` — строки в сессию не грузились, а `rowcount`
+    под asyncpg и так берётся из command tag.
+    """
+    result = await db.execute(
+        update(Notification)
+        .where(
+            Notification.employee_id == principal.employee_id,
+            Notification.id.in_(set(body.ids)),
+            Notification.is_read.is_(not body.is_read),
+        )
+        .values(
+            is_read=body.is_read,
+            read_at=datetime.now(UTC) if body.is_read else None,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+    return ReadStateResult(updated=int(result.rowcount or 0))
 
 
 # ─── Preferences ────────────────────────────────────────────────────────────
@@ -140,6 +184,4 @@ async def put_preferences(
         )
     )
     await db.commit()
-    return PreferencesResponse(
-        prefs={k: KindPreference(**v) for k, v in normalised.items()}
-    )
+    return PreferencesResponse(prefs={k: KindPreference(**v) for k, v in normalised.items()})
