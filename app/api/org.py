@@ -144,10 +144,11 @@ async def org_snapshot(
     stores = (await db.execute(select(Store).order_by(Store.name))).scalars().all()
     franchisees = (await db.execute(select(Franchisee).order_by(Franchisee.name))).scalars().all()
     departments = (await db.execute(select(Department).order_by(Department.name))).scalars().all()
+    suspended = await _suspended_sites(db)
     return OrgSnapshotResponse(
         positions=[RefResponse.model_validate(x) for x in positions],
         position_groups=await _load_groups(db, PositionGroup, PositionGroupMember, "position_id"),
-        stores=[StoreResponse.model_validate(x) for x in stores],
+        stores=[_store_out(x, suspended) for x in stores],
         store_groups=await _load_groups(db, StoreGroup, StoreGroupMember, "store_id"),
         franchisees=[RefResponse.model_validate(x) for x in franchisees],
         franchisee_groups=await _load_groups(
@@ -348,6 +349,28 @@ async def delete_franchisee(
 # --- Магазины ----------------------------------------------------------------
 
 
+async def _suspended_sites(db: AsyncSession) -> dict[UUID, datetime]:
+    """Приостановленные объекты реестра тенанта (0065): `site_id → suspended_at`.
+
+    Состояние живёт в зеркале, а не на карточке: `stores` по приостановке не
+    меняется, и `suspended_at → null` в реестре обязан снимать метку сам.
+    Архивный объект сюда не входит — оси взаимоисключающие, архив важнее.
+    """
+    rows = await db.execute(
+        select(ShadowSite.site_id, ShadowSite.suspended_at).where(
+            ShadowSite.suspended_at.is_not(None), ShadowSite.archived_at.is_(None)
+        )
+    )
+    return dict(rows.tuples().all())
+
+
+def _store_out(store: Store, suspended: dict[UUID, datetime]) -> StoreResponse:
+    out = StoreResponse.model_validate(store)
+    if store.site_id is not None and store.site_id in suspended:
+        out = out.model_copy(update={"suspended_at": suspended[store.site_id]})
+    return out
+
+
 async def _validate_site_link(
     db: AsyncSession, site_id: UUID, *, exclude_store_id: UUID | None
 ) -> None:
@@ -361,6 +384,12 @@ async def _validate_site_link(
         )
     if site.archived_at is not None:
         raise HTTPException(status_code=422, detail="Объект закрыт в реестре — привязать нельзя")
+    if site.suspended_at is not None:
+        # 0065: на точку на паузе новое не назначается — привязка тоже новая.
+        raise HTTPException(
+            status_code=422,
+            detail="Объект приостановлен в реестре — привязать можно после возобновления",
+        )
     stmt = select(Store.name).where(Store.site_id == site_id, Store.archived_at.is_(None))
     if exclude_store_id is not None:
         stmt = stmt.where(Store.id != exclude_store_id)
@@ -414,7 +443,7 @@ async def create_store(
     )
     await db.commit()
     await db.refresh(store)
-    return StoreResponse.model_validate(store)
+    return _store_out(store, await _suspended_sites(db))
 
 
 @router.patch("/learn/org/stores/{ref_id}", response_model=StoreResponse)
@@ -443,7 +472,10 @@ async def update_store(
         # Окно каткатa: объект точки и её разархивация меняют перевод точек
         # в карточках — копия в auth разошлась бы с выгрузкой.
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=hr_state.HR_WINDOW_DETAIL)
-    if fields.get("site_id") is not None:
+    if fields.get("site_id") is not None and fields["site_id"] != store.site_id:
+        # Проверяется только НОВАЯ привязка: форма шлёт `site_id` целиком, и
+        # сохранение карточки, уже стоящей на объекте (дубль из пары, объект
+        # на паузе), упиралось бы в 409/422 по собственной привязке.
         await _validate_site_link(db, fields["site_id"], exclude_store_id=store.id)
     diff = {}
     franchisee_changed = False
@@ -487,7 +519,7 @@ async def update_store(
         await notify_new_audience_members(db, diffs)
     await db.commit()
     await db.refresh(store)
-    return StoreResponse.model_validate(store)
+    return _store_out(store, await _suspended_sites(db))
 
 
 @router.delete("/learn/org/stores/{ref_id}", status_code=204)

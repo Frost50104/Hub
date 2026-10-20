@@ -505,6 +505,7 @@ function ParticipantsCard({ rows, unlinked, editable, pending, onToggle, onRefre
                 )}
                 {!p.included && p.exclude_reason === 'manual' && <Badge variant="secondary">исключена</Badge>}
                 {!p.included && p.exclude_reason === 'closed' && <Badge variant="secondary">закрыта</Badge>}
+                {!p.included && p.exclude_reason === 'suspended' && <Badge variant="secondary">приостановлена</Badge>}
                 {p.joined_race_seq != null && (
                   <Chip variant="outline" size="sm">
                     с заезда №{p.joined_race_seq}
@@ -513,10 +514,13 @@ function ParticipantsCard({ rows, unlinked, editable, pending, onToggle, onRefre
               </div>
               <p className="text-[12px] text-text2">
                 iiko {p.department_id.slice(0, 8)}…{p.department_shared_with.length > 0 && ' · делит подразделение с другой точкой — чеки считаются одной'}
+                {p.exclude_reason === 'suspended' && ' · на паузе в реестре — вернётся в состав сама'}
               </p>
             </div>
             <div className="flex h-11 w-11 items-center justify-center">
-              <Switch checked={p.included} disabled={!editable || pending} aria-label={`Участие: ${p.name}`} onCheckedChange={(v) => onToggle(p.store_id, v)} />
+              {/* Паузу снимает реестр, а не тумблер: включённую руками точку
+                  часовая сверка вывела бы снова (сервер отвечает 409). */}
+              <Switch checked={p.included} disabled={!editable || pending || p.exclude_reason === 'suspended'} aria-label={`Участие: ${p.name}`} onCheckedChange={(v) => onToggle(p.store_id, v)} />
             </div>
           </div>
         ))}

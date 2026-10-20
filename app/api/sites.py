@@ -102,6 +102,7 @@ async def trigger_sites_sync(
         "total_mismatch": report.total_mismatch,
         "sites": report.sites,
         "archived_sites": report.archived_sites,
+        "suspended_sites": report.suspended_sites,
         "busy_tenants": report.busy_tenants,
         "tenants": len(report.tenants),
         "applied": applied,

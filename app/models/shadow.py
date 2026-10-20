@@ -129,6 +129,13 @@ class ShadowSite(Base):
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Приостановка (0065, 19.10): точка ВРЕМЕННО не работает. С `archived_at`
+    # взаимоисключающа; магазин по ней НЕ архивируется — `registry_apply` не
+    # заводит карточку, пикеры гасят точку, гонка выводит участника до
+    # возобновления (`race.engine.reconcile_participants`).
+    suspended_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     refs: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )

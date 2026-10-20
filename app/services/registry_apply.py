@@ -22,7 +22,12 @@
   (иначе `uq_stores_active_name` уронил бы вставку) или непривязанная живая
   с тем же кодом → в «ожидающие» с кандидатом на привязку (кандидат — только
   непривязанная карточка);
-- архивный объект без магазина — ничего.
+- архивный объект без магазина — ничего;
+- **приостановленный объект (`suspended_at`, 0065, 19.10) — временно не
+  работает**: магазин НЕ архивируется (архив — только по `archived_at`), зеркало
+  полей живой карточки идёт как обычно; без магазина — ни создания, ни
+  «ожидающих»: запускать можно только работающую точку, а `suspended_at → null`
+  вернёт объект в план следующим прогоном сам.
 
 Запись каждой карточки — под savepoint: одно столкновение имён не должно
 откатывать весь прогон тенанта (архивы и создания остальных).
@@ -61,6 +66,7 @@ class SiteRow:
     address: str | None
     archived_at: datetime | None
     iiko_ref: str | None
+    suspended_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -157,6 +163,9 @@ def plan_apply(sites: list[SiteRow], stores: list[StoreRow]) -> ApplyPlan:
             continue
         if site.archived_at is not None:
             continue
+        if site.suspended_at is not None:
+            # Приостановлена: точку на паузе не заводят и не предлагают завести.
+            continue
         if site.iiko_ref is None:
             plan.pending.append(PendingSite(site, "no_iiko_ref"))
             continue
@@ -181,6 +190,7 @@ def _site_row(s: ShadowSite) -> SiteRow:
         address=s.address,
         archived_at=s.archived_at,
         iiko_ref=iiko_ref(s.refs),
+        suspended_at=s.suspended_at,
     )
 
 

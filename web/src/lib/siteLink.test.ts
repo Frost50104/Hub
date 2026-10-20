@@ -72,6 +72,13 @@ describe('привязка к объекту реестра (19.09)', () => {
     expect(sitePickerOptions([s1], stores, { storeId: 'a', siteId: 'x1' })[0]).toMatchObject({ label: 'А1 · Арсенальная', meta: 'СПб, Приморская 14' })
   })
 
+  it('приостановленный объект не предлагается, кроме текущего — тот с пометкой (0065)', () => {
+    const paused = { ...site, site_id: 'x4', name: 'Пауза', code: null, suspended_at: '2026-10-19T10:00:00Z' }
+    expect(sitePickerOptions([s1, paused], [], { storeId: 'c', siteId: null }).map((o) => o.value)).toEqual(['x1'])
+    expect(sitePickerOptions([paused], [], { storeId: 'c', siteId: 'x4' })[0]?.label).toBe('Пауза (приостановлен)')
+    expect(sitePickerOptions([s3], [], { storeId: 'c', siteId: 'x3' })[0]?.label).toBe('П14 · Закрытая (архив)')
+  })
+
   it('подсказка называет кандидата', () => {
     const base = { site_id: 'x', code: null, name: 'Смоленка 35', address: null, iiko_ref: null, candidate_store_id: null, candidate_store_name: null }
     expect(pendingHint({ ...base, reason: 'no_iiko_ref' })).toContain('нет подразделения iiko')

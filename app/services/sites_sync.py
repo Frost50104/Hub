@@ -14,6 +14,10 @@
   строка может только вместе с реестром. Тенант, целиком пропавший из ответа,
   НЕ вычищается (подтверждено auth: снимок сообщает состояние, вычистка по
   отсутствию — вывод о событии).
+- **`suspended_at` (0065, 19.10) — вторая ось состояния**: точка ВРЕМЕННО не
+  работает. Читается `row.get` — до выката auth поля в ответе не было, и
+  старый снимок обязан ложиться как «работает». Что из неё следует для
+  магазинов и гонки, решает не этот модуль (`registry_apply`, `race.engine`).
 - **Модуль не касается `stores`** — ни импортом, ни запросом (grep — пункт
   приёмки auth). `stores.site_id` пишет только разовый бэкфилл (выкат 2),
   `stores.archived_at` принадлежит Hub и реестр её не отражает.
@@ -55,6 +59,7 @@ class SitesSyncReport:
     total_mismatch: bool = False
     sites: int = 0
     archived_sites: int = 0
+    suspended_sites: int = 0
     busy_tenants: int = 0
     tenants: set[str] = field(default_factory=set)
     # Занятые try-локом тенанты — применение реестра по ним пропускается
@@ -155,6 +160,8 @@ async def sync_sites(*, dry_run: bool = False) -> SitesSyncReport:
                 report.sites += 1
                 if row.get("archived_at"):
                     report.archived_sites += 1
+                if row.get("suspended_at"):
+                    report.suspended_sites += 1
                 if dry_run:
                     continue
                 db.add(
@@ -169,6 +176,7 @@ async def sync_sites(*, dry_run: bool = False) -> SitesSyncReport:
                         email=(row.get("email") or None),
                         phone=(row.get("phone") or None),
                         archived_at=_parse_dt(row.get("archived_at")),
+                        suspended_at=_parse_dt(row.get("suspended_at")),
                         refs=row.get("refs") or [],
                         synced_at=now,
                     )
@@ -182,6 +190,7 @@ async def sync_sites(*, dry_run: bool = False) -> SitesSyncReport:
         tenants=len(report.tenants),
         sites=report.sites,
         archived=report.archived_sites,
+        suspended=report.suspended_sites,
         busy=report.busy_tenants,
     )
     return report

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import httpx
@@ -76,6 +77,29 @@ async def test_replace_snapshot_and_archived_rows_survive(
     assert len(rows) == 1
     assert rows[0].site_id == keep and rows[0].archived_at is not None
     assert rows[0].refs and rows[0].refs[0]["system"] == "hub"
+
+
+async def test_suspended_at_is_mirrored_and_missing_key_means_working(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """0065: `suspended_at` едет в зеркало; у снимка до выката auth ключа нет
+    вовсе — это «работает», а не ошибка разбора."""
+    paused, old = uuid.uuid4(), uuid.uuid4()
+    _mock_fetch(
+        monkeypatch,
+        [
+            _site(tenant_id, site_id=paused, suspended_at="2026-10-19T10:00:00Z"),
+            _site(tenant_id, site_id=old, name="Снимок без поля"),
+        ],
+    )
+    await db.commit()
+    report = await sync_sites()
+    assert report.sites == 2 and report.suspended_sites == 1 and report.archived_sites == 0
+
+    rows = {r.site_id: r for r in (await db.execute(select(ShadowSite))).scalars()}
+    assert rows[paused].suspended_at == datetime(2026, 10, 19, 10, tzinfo=UTC)
+    assert rows[paused].archived_at is None
+    assert rows[old].suspended_at is None
 
 
 async def test_total_mismatch_leaves_mirror_untouched(

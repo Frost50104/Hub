@@ -23,6 +23,7 @@ import {
 } from '@/lib/audienceHints'
 import { cn } from '@/lib/cn'
 import { emptyRule, ORG_ROLE_LABEL, type AudienceRuleDraft } from '@/lib/learn'
+import { storeAssignable, storeLabel } from '@/lib/storeState'
 
 export interface AudienceValue {
   is_all: boolean
@@ -168,7 +169,8 @@ export function AudiencePicker({
       case 'position_group_ids':
         return org.data.position_groups.map((g) => ({ id: g.id, label: g.name }))
       case 'store_ids':
-        return org.data.stores.filter((s) => !s.archived_at).map((s) => ({ id: s.id, label: s.name }))
+        // Точка на паузе в реестре (0065) — как архивная: нового не назначаем.
+        return org.data.stores.filter(storeAssignable).map((s) => ({ id: s.id, label: s.name }))
       case 'store_group_ids':
         return org.data.store_groups.map((g) => ({ id: g.id, label: g.name }))
       case 'franchisee_ids':
@@ -187,14 +189,18 @@ export function AudiencePicker({
   // Подпись уже выбранного условия ищется по ВСЕМ строкам справочника, включая
   // архивные: иначе правило со ссылкой на заархивированную (в том числе в auth,
   // 16d) должность читалось бы «…». Новые варианты архивных не предлагают.
+  // Точка, приостановленная в реестре (0065), — так же, с «(приостановлена)»:
+  // правило живёт и аудитория не пересчитывается, гаснет только выбор нового.
   const archivedLabel = (key: DimensionKey, id: string): string | null => {
     if (!org.data) return null
+    if (key === 'store_ids') {
+      const s = org.data.stores.find((r) => r.id === id)
+      return s && !storeAssignable(s) ? storeLabel(s) : null
+    }
     const rows: ReadonlyArray<{ id: string; name: string; archived_at?: string | null }> =
       key === 'position_ids'
         ? org.data.positions
-        : key === 'store_ids'
-          ? org.data.stores
-          : key === 'franchisee_ids'
+        : key === 'franchisee_ids'
             ? org.data.franchisees
             : key === 'department_ids'
               ? org.data.departments

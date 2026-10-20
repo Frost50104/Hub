@@ -351,6 +351,87 @@ async def test_reconcile_closes_archived_store_and_adds_new_linked_store(
     assert (await _participant(db, contest, net.C.id)).exclude_reason == "closed"
 
 
+async def _reasons(db, store_id):
+    rows = await db.execute(
+        select(AuditLog.diff)
+        .where(AuditLog.object_type == "race_participant", AuditLog.object_id == store_id)
+        .order_by(AuditLog.id)
+    )
+    return [d["reason"] for d in rows.scalars()]
+
+
+async def test_reconcile_suspends_and_resumes_by_registry(db: AsyncSession, tenant_id):
+    """0065: пауза в реестре выводит участника на время, снятие паузы
+    возвращает его САМ; руками вернуть, пока объект на паузе, нельзя."""
+    net = await seed_network(db, tenant_id)
+    contest = await _scheduled_contest(db, net)
+    site_c = await db.get(ShadowSite, net.C.site_id)
+    site_c.suspended_at = datetime.now(UTC)
+    await db.flush()
+
+    report = await engine.reconcile_participants(db, contest)
+    assert report.suspended == [net.C.id] and not report.closed and not report.resumed
+    paused = await _participant(db, contest, net.C.id)
+    assert paused.exclude_reason == "suspended" and paused.excluded_at is not None
+    assert paused.excluded_by is None
+    again = await engine.reconcile_participants(db, contest)
+    assert not again.suspended and not again.resumed, "идемпотентно"
+    with pytest.raises(engine.RaceConflictError):
+        await engine.set_participant(
+            db, contest, store_id=net.C.id, included=True, actor_id=net.admin.employee_id
+        )
+
+    site_c.suspended_at = None
+    await db.flush()
+    report = await engine.reconcile_participants(db, contest)
+    assert report.resumed == [net.C.id] and not report.suspended
+    back = await _participant(db, contest, net.C.id)
+    assert back.excluded_at is None and back.exclude_reason is None
+    await db.refresh(net.C)
+    assert net.C.archived_at is None, "карточку пауза не трогает"
+    assert await _reasons(db, net.C.id) == [
+        {"old": None, "new": "suspended"},
+        {"old": "suspended", "new": None},
+    ]
+    assert not (await engine.reconcile_participants(db, contest)).resumed
+
+
+async def test_suspended_at_creation_resumes_one_of_twins_and_closed_stays_closed(
+    db: AsyncSession, tenant_id
+):
+    """Объект на паузе в момент создания конкурса: участники рождаются
+    `suspended` и подразделение не держат. Снятие паузы: из пары дублей одного
+    объекта возвращается первая, вторая — `duplicate`; карточку, закрытую за
+    время паузы, сверка закрывает навсегда."""
+    net = await seed_network(db, tenant_id)
+    site_a = await db.get(ShadowSite, net.A.site_id)
+    site_a.suspended_at = datetime.now(UTC)
+    await db.flush()
+    contest = await _scheduled_contest(db, net)
+    for store in (net.A, net.B):
+        assert (await _participant(db, contest, store.id)).exclude_reason == "suspended"
+    assert (await _participant(db, contest, net.C.id)).excluded_at is None
+    site_c = await db.get(ShadowSite, net.C.site_id)
+    site_c.suspended_at = datetime.now(UTC)
+    await db.flush()
+    assert (await engine.reconcile_participants(db, contest)).suspended == [net.C.id]
+
+    net.C.archived_at = datetime.now(UTC)
+    site_a.suspended_at = site_c.suspended_at = None
+    await db.flush()
+    report = await engine.reconcile_participants(db, contest)
+    assert report.resumed == [net.A.id] and report.closed == [net.C.id]
+    assert (await _participant(db, contest, net.A.id)).excluded_at is None
+    assert (await _participant(db, contest, net.B.id)).exclude_reason == "duplicate"
+    closed = await _participant(db, contest, net.C.id)
+    assert closed.exclude_reason == "closed" and closed.excluded_at is not None
+    assert await _reasons(db, net.B.id) == [{"old": "suspended", "new": "duplicate"}]
+    assert await _reasons(db, net.C.id) == [
+        {"old": None, "new": "suspended"},
+        {"old": "suspended", "new": "closed"},
+    ]
+
+
 async def test_late_joiner_gets_joined_race_seq_in_standings_and_admin(db: AsyncSession, tenant_id):
     net = await seed_network(db, tenant_id)
     contest = await _scheduled_contest(db, net)

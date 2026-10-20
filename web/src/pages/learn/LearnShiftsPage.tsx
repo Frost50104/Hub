@@ -29,6 +29,7 @@ import {
   type ShiftPostingCreate,
   type ShiftPostingUpdate,
 } from '@/lib/learn'
+import { storeAssignable, storeLabel } from '@/lib/storeState'
 import { nbsp, plural } from '@/lib/typography'
 
 /**
@@ -658,8 +659,10 @@ function ShiftFormDialog({ shift, onClose }: { shift: ShiftPosting | null; onClo
               onChange={(v) => setStoreId(v ?? '')}
               className={FIELD}
               options={(org.data?.stores ?? [])
-                .filter((s) => !s.archived_at || s.id === storeId)
-                .map((s) => ({ value: s.id, label: s.name }))}
+                // Смена — новое назначение: точку на паузе в реестре (0065)
+                // не предлагаем, как архивную; текущую показываем с подписью.
+                .filter((s) => storeAssignable(s) || s.id === storeId)
+                .map((s) => ({ value: s.id, label: storeLabel(s) }))}
             />
           </div>
           <div className="flex flex-col gap-1.5">

@@ -37,6 +37,7 @@ import {
   rowFilterCounts,
 } from '@/lib/employeeRows'
 import { filterOptions } from '@/lib/selectOptions'
+import { storeAssignable, storeLabel } from '@/lib/storeState'
 
 import { EmployeeListNote } from '@/components/learn/EmployeeListNote'
 import { HrNotice } from '@/components/learn/HrNotice'
@@ -632,12 +633,16 @@ function EmployeeCardDialog({
                     disabled={locked}
                     onChange={(v) => set('store_id', v)}
                     options={org.stores
-                      .filter((s) => !s.archived_at)
+                      .filter(storeAssignable)
                       .map((s) => ({ value: s.id, label: s.name }))}
-                    // Архивный магазин из списка отфильтрован, а в карточке он
-                    // мог остаться выбранным — без подписи поле выглядело бы
-                    // пустым, и его перезаписали бы, не заметив.
-                    currentLabel={org.stores.find((s) => s.id === form.store_id)?.name ?? null}
+                    // Архивный (или приостановленный в реестре, 0065) магазин из
+                    // списка отфильтрован, а в карточке он мог остаться
+                    // выбранным — без подписи поле выглядело бы пустым, и его
+                    // перезаписали бы, не заметив.
+                    currentLabel={(() => {
+                      const s = org.stores.find((x) => x.id === form.store_id)
+                      return s ? storeLabel(s) : null
+                    })()}
                   />
                 </div>
               )}
@@ -718,7 +723,7 @@ function EmployeeCardDialog({
                       .filter((s) => tuStores?.has(s.id))
                       .map((s) => (
                         <Badge key={s.id} variant="outline" className="text-text2">
-                          {s.archived_at ? `${s.name} (архив)` : s.name}
+                          {storeLabel(s)}
                         </Badge>
                       ))}
                   </div>
@@ -743,8 +748,10 @@ function EmployeeCardDialog({
                 <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-glass-border p-2">
                   {filterOptions(
                     org.stores
-                      .filter((s) => !s.archived_at)
-                      .map((s) => ({ value: s.id, label: s.name })),
+                      // Приостановленную (0065) новой не закрепляют, но уже
+                      // отмеченную видно — иначе снять галочку было бы нельзя.
+                      .filter((s) => storeAssignable(s) || (!s.archived_at && tuStores?.has(s.id)))
+                      .map((s) => ({ value: s.id, label: storeLabel(s) })),
                     tuQuery,
                   )
                     .map((o) => ({ id: o.value, name: o.label }))

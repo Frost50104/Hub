@@ -20,6 +20,8 @@ class SiteMirrorResponse(BaseModel):
     email: str | None
     phone: str | None
     archived_at: datetime | None
+    # 0065: точка временно не работает (ось рядом с архивом, обратима).
+    suspended_at: datetime | None = None
     synced_at: datetime
 
 

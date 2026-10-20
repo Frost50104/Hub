@@ -107,10 +107,32 @@ async def department_ids_by_store(
     return {sid: dept_by_site[site] for sid, site in site_by_store.items() if site in dept_by_site}
 
 
+async def suspended_store_ids(session: AsyncSession, store_ids: list[UUID]) -> set[UUID]:
+    """Магазины, чей объект реестра приостановлен (0065, 19.10).
+
+    Состояние живёт в зеркале (`shadow_sites.suspended_at`), а не на карточке:
+    снятие паузы в реестре обязано возвращать точку само. Архивный объект сюда
+    не входит — оси взаимоисключающие, архив закрывает точку навсегда.
+    """
+    if not store_ids:
+        return set()
+    rows = await session.execute(
+        select(Store.id)
+        .join(ShadowSite, ShadowSite.site_id == Store.site_id)
+        .where(
+            Store.id.in_(store_ids),
+            ShadowSite.suspended_at.is_not(None),
+            ShadowSite.archived_at.is_(None),
+        )
+    )
+    return set(rows.scalars())
+
+
 @dataclass
 class ParticipantsReport:
     included: list[UUID] = field(default_factory=list)
     duplicates: list[UUID] = field(default_factory=list)
+    suspended: list[UUID] = field(default_factory=list)
     unlinked_store_ids: list[UUID] = field(default_factory=list)
 
 
@@ -118,7 +140,9 @@ async def materialize_participants(
     session: AsyncSession, contest: RaceContest, *, actor_id: UUID | None = None
 ) -> ParticipantsReport:
     """Неархивные точки с подразделением iiko → участники; один живой на
-    подразделение (первый по имени), остальные `excluded (duplicate)`.
+    подразделение (первый по имени), остальные `excluded (duplicate)`; точка,
+    приостановленная в реестре, — `excluded (suspended)` и подразделение не
+    держит (вернётся сама, `reconcile_participants`).
     Повторный вызов добавляет только новых, существующие строки не трогает."""
     stores = list(
         (
@@ -130,6 +154,7 @@ async def materialize_participants(
     dept_by_store = await department_ids_by_store(
         session, contest.tenant_id, [s.id for s in stores]
     )
+    paused = await suspended_store_ids(session, [s.id for s in stores])
     existing = {
         p.store_id: p
         for p in (
@@ -153,7 +178,12 @@ async def materialize_participants(
             store_id=store.id,
             department_id=dept,
         )
-        if dept in held:
+        if store.id in paused:
+            row.excluded_at = _now()
+            row.excluded_by = actor_id
+            row.exclude_reason = "suspended"
+            report.suspended.append(store.id)
+        elif dept in held:
             row.excluded_at = _now()
             row.excluded_by = actor_id
             row.exclude_reason = "duplicate"
@@ -170,6 +200,28 @@ async def materialize_participants(
 class ReconcileReport:
     added: list[UUID] = field(default_factory=list)
     closed: list[UUID] = field(default_factory=list)
+    suspended: list[UUID] = field(default_factory=list)
+    resumed: list[UUID] = field(default_factory=list)
+
+
+def _audit_participant(
+    session: AsyncSession,
+    contest: RaceContest,
+    p: RaceParticipant,
+    name: str,
+    actor_id: UUID | None,
+    diff: dict[str, Any],
+) -> None:
+    audit.record(
+        session,
+        tenant_id=contest.tenant_id,
+        actor_id=actor_id,
+        action="update",
+        object_type="race_participant",
+        object_id=p.store_id,
+        object_label=f"{contest.title} · {name}",
+        diff=diff,
+    )
 
 
 async def reconcile_participants(
@@ -177,14 +229,22 @@ async def reconcile_participants(
 ) -> ReconcileReport:
     """Состав против Оргструктуры (решение владельца 19.09): новые привязанные
     точки входят сами, точки с архивной карточкой выводятся с `closed`.
-    Зовут часовая джоба и кнопка «Обновить из реестра». Возврат в состав —
-    только руками (`set_participant`): `manual` не переписывается, а
-    разархивированная карточка сама не возвращается."""
+    Зовут часовая джоба и кнопка «Обновить из реестра». Возврат закрытой в
+    состав — только руками (`set_participant`): `manual` не переписывается, а
+    разархивированная карточка сама не возвращается.
+
+    Приостановка в реестре (0065, 19.10) — другое дело: она временная. Живой
+    участник с приостановленным объектом выходит с `suspended`, а когда реестр
+    снимает паузу — возвращается САМ. Подразделение за это время занял двойник
+    → `duplicate` (так решил бы и `materialize_participants`); карточку за
+    время паузы закрыли → `closed`, навсегда. `manual` и `duplicate` пауза не
+    трогает — они уже вне состава. Рассылок нет ни в одну сторону."""
     report = ReconcileReport()
     if contest.status in ("finished", "cancelled"):
         return report
     added = await materialize_participants(session, contest, actor_id=actor_id)
     report.added = list(added.included)
+    report.suspended = list(added.suspended)
     rows = (
         await session.execute(
             select(RaceParticipant, Store.name)
@@ -200,29 +260,141 @@ async def reconcile_participants(
         p.excluded_at = _now()
         p.excluded_by = actor_id
         p.exclude_reason = "closed"
-        audit.record(
+        _audit_participant(
             session,
-            tenant_id=contest.tenant_id,
-            actor_id=actor_id,
-            action="update",
-            object_type="race_participant",
-            object_id=p.store_id,
-            object_label=f"{contest.title} · {name}",
-            diff={
-                "included": {"old": True, "new": False},
-                "reason": {"old": None, "new": "closed"},
-            },
+            contest,
+            p,
+            name,
+            actor_id,
+            {"included": {"old": True, "new": False}, "reason": {"old": None, "new": "closed"}},
         )
         report.closed.append(p.store_id)
+    paused = (
+        await session.execute(
+            select(RaceParticipant, Store.name)
+            .join(Store, Store.id == RaceParticipant.store_id)
+            .join(ShadowSite, ShadowSite.site_id == Store.site_id)
+            .where(
+                RaceParticipant.contest_id == contest.id,
+                RaceParticipant.excluded_at.is_(None),
+                Store.archived_at.is_(None),
+                ShadowSite.suspended_at.is_not(None),
+                ShadowSite.archived_at.is_(None),
+            )
+            .order_by(Store.name, Store.id)
+        )
+    ).all()
+    for p, name in paused:
+        p.excluded_at = _now()
+        p.excluded_by = actor_id
+        p.exclude_reason = "suspended"
+        _audit_participant(
+            session,
+            contest,
+            p,
+            name,
+            actor_id,
+            {"included": {"old": True, "new": False}, "reason": {"old": None, "new": "suspended"}},
+        )
+        report.suspended.append(p.store_id)
     await session.flush()
-    if report.added or report.closed:
+    await _resume_participants(session, contest, report, actor_id=actor_id)
+    await session.flush()
+    if report.added or report.closed or report.suspended or report.resumed:
         log.info(
             "race.reconciled",
             contest_id=str(contest.id),
             added=len(report.added),
             closed=len(report.closed),
+            suspended=len(report.suspended),
+            resumed=len(report.resumed),
         )
     return report
+
+
+async def _resume_participants(
+    session: AsyncSession,
+    contest: RaceContest,
+    report: ReconcileReport,
+    *,
+    actor_id: UUID | None,
+) -> None:
+    """Участники `suspended`, чей объект больше не на паузе: вернуть в состав.
+
+    Порядок — по имени, как в `materialize_participants`: у пары дублей одного
+    объекта подразделение достаётся первой, вторая уходит в `duplicate`.
+    Объект в архиве реестра, а карточка ещё жива (применение реестра не
+    дошло — окно каткатa) — ждём: архив карточки превратит участника в
+    `closed` следующим прогоном."""
+    waiting = (
+        await session.execute(
+            select(
+                RaceParticipant,
+                Store.name,
+                Store.archived_at,
+                ShadowSite.suspended_at,
+                ShadowSite.archived_at,
+            )
+            .join(Store, Store.id == RaceParticipant.store_id)
+            .outerjoin(ShadowSite, ShadowSite.site_id == Store.site_id)
+            .where(
+                RaceParticipant.contest_id == contest.id,
+                RaceParticipant.exclude_reason == "suspended",
+            )
+            .order_by(Store.name, Store.id)
+        )
+    ).all()
+    if not waiting:
+        return
+    held = set(
+        (
+            await session.execute(
+                select(RaceParticipant.department_id).where(
+                    RaceParticipant.contest_id == contest.id,
+                    RaceParticipant.excluded_at.is_(None),
+                )
+            )
+        ).scalars()
+    )
+    for p, name, store_archived_at, site_suspended_at, site_archived_at in waiting:
+        if store_archived_at is not None:
+            p.exclude_reason = "closed"
+            _audit_participant(
+                session,
+                contest,
+                p,
+                name,
+                actor_id,
+                {"reason": {"old": "suspended", "new": "closed"}},
+            )
+            report.closed.append(p.store_id)
+            continue
+        if site_suspended_at is not None or site_archived_at is not None:
+            continue
+        if p.department_id in held:
+            p.exclude_reason = "duplicate"
+            _audit_participant(
+                session,
+                contest,
+                p,
+                name,
+                actor_id,
+                {"reason": {"old": "suspended", "new": "duplicate"}},
+            )
+            continue
+        held.add(p.department_id)
+        p.excluded_at = None
+        p.excluded_by = None
+        p.exclude_reason = None
+        _audit_participant(
+            session,
+            contest,
+            p,
+            name,
+            actor_id,
+            {"included": {"old": False, "new": True}, "reason": {"old": "suspended", "new": None}},
+        )
+        report.resumed.append(p.store_id)
 
 
 async def apply_leagues(
@@ -1223,6 +1395,11 @@ async def set_participant(
         raise RaceValidationError("Точка не участвует в конкурсе")
     replaced: UUID | None = None
     if included and row.excluded_at is not None:
+        if await suspended_store_ids(session, [store_id]):
+            # Часовая сверка вывела бы точку снова через час: решает реестр.
+            raise RaceConflictError(
+                "Точка приостановлена в реестре — вернётся в состав сама после возобновления"
+            )
         twin = (
             await session.execute(
                 select(RaceParticipant).where(

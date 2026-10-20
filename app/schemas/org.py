@@ -120,6 +120,10 @@ class StoreResponse(BaseModel):
     archived_at: datetime | None
     # Ссылка на объект реестра auth (0053); с 19.09 пишется и через API.
     site_id: UUID | None = None
+    # 0065: объект реестра приостановлен — точка временно не работает. Не поле
+    # карточки, а вывод из зеркала (`shadow_sites.suspended_at`): снятие в
+    # реестре обязано снимать его само. Новое на такую точку не назначается.
+    suspended_at: datetime | None = None
 
 
 class DepartmentResponse(BaseModel):

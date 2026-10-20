@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.org import create_store, update_store
+from app.api.org import create_store, org_snapshot, update_store
 from app.models.audit import AuditLog
 from app.models.org import Store
 from app.models.shadow import ShadowSite
@@ -125,6 +125,56 @@ async def test_manual_link_validation(db: AsyncSession, tenant_id):
     assert out.site_id is None
     created = await create_store(StoreCreate(name="Ещё одна", site_id=free.site_id), net.admin, db)
     assert created.site_id == free.site_id
+
+
+async def test_suspended_site_keeps_store_live_and_blocks_only_new_links(
+    db: AsyncSession, tenant_id
+):
+    """0065: приостановка — временно. Карточка не архивируется и не заводится,
+    `org_snapshot` несёт метку, новая привязка к объекту на паузе — 422, а
+    сохранение карточки, уже стоящей на объекте, проходит."""
+    net = await seed_network(db, tenant_id)
+    now = datetime.now(UTC)
+    site_c = await db.get(ShadowSite, net.C.site_id)
+    site_c.suspended_at = now
+    paused = _site(tenant_id, "Витебский 101", code="В101", iiko="dep-7")
+    paused.suspended_at = now
+    db.add(paused)
+    await db.flush()
+
+    rep = await apply_registry(db, tenant_id)
+    assert not rep.created and not rep.archived and rep.pending == 0
+    assert not await pending_sites(db), "точку на паузе не предлагают завести"
+    await db.refresh(net.C)
+    assert net.C.archived_at is None
+
+    marks = {s.id: s.suspended_at for s in (await org_snapshot(net.admin, db)).stores}
+    assert marks[net.C.id] == now
+    assert marks[net.A.id] is None and marks[net.D.id] is None
+
+    with pytest.raises(HTTPException) as e:
+        await update_store(net.D.id, StoreUpdate(site_id=paused.site_id), net.admin, db)
+    assert e.value.status_code == 422 and "приостановлен" in e.value.detail
+    # форма шлёт site_id целиком: собственная привязка проверку не проходит заново
+    out = await update_store(
+        net.C.id, StoreUpdate(name="Ветеранов 185", site_id=net.C.site_id), net.admin, db
+    )
+    assert out.name == "Ветеранов 185" and out.suspended_at == now
+    # и карточка из пары дублей правится, не упираясь в 409 по своему объекту
+    out = await update_store(
+        net.A.id, StoreUpdate(name="Арсенальная 1", site_id=net.A.site_id), net.admin, db
+    )
+    assert out.name == "Арсенальная 1" and out.suspended_at is None
+
+    # реестр снял паузу — метка ушла сама, объект без карточки заводится
+    site_c.suspended_at = None
+    paused.suspended_at = None
+    await db.flush()
+    marks = {s.id: s.suspended_at for s in (await org_snapshot(net.admin, db)).stores}
+    assert marks[net.C.id] is None
+    rep = await apply_registry(db, tenant_id)
+    assert len(rep.created) == 1
+    assert (await db.get(Store, rep.created[0])).site_id == paused.site_id
 
 
 async def test_refresh_follows_registry_for_born_cards_and_only_fills_legacy_address(

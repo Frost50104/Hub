@@ -182,7 +182,7 @@ class AdminParticipantOut(StoreRefOut):
     department_id: str
     league_id: UUID | None = None
     included: bool
-    exclude_reason: str | None = None  # duplicate | manual | closed
+    exclude_reason: str | None = None  # duplicate | manual | closed | suspended
     department_shared_with: list[UUID] = []
     joined_race_seq: int | None = None
 

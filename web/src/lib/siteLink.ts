@@ -53,7 +53,8 @@ export interface SiteOption {
 
 /** Варианты для привязки карточки к объекту (19.09): живые объекты, не занятые
  *  другой ЖИВОЙ карточкой, плюс текущий выбор — иначе снять привязку, не
- *  видя её, было бы нельзя. Сервер повторяет проверку (422/409). */
+ *  видя её, было бы нельзя. Приостановленный объект (0065) не предлагается:
+ *  привязка — тоже новое назначение. Сервер повторяет проверку (422/409). */
 export function sitePickerOptions(
   sites: SiteMirror[],
   stores: Pick<OrgStore, 'id' | 'site_id' | 'archived_at'>[],
@@ -65,13 +66,23 @@ export function sitePickerOptions(
       .map((s) => s.site_id as string),
   )
   return sites
-    .filter((s) => s.site_id === current.siteId || (!s.archived_at && !taken.has(s.site_id)))
+    .filter(
+      (s) =>
+        s.site_id === current.siteId || (!s.archived_at && !s.suspended_at && !taken.has(s.site_id)),
+    )
     .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
     .map((s) => ({
       value: s.site_id,
-      label: s.code ? `${s.code} · ${s.name}` : s.name,
+      label: (s.code ? `${s.code} · ${s.name}` : s.name) + siteStateSuffix(s),
       meta: s.address ?? undefined,
     }))
+}
+
+/** Пометка у объекта, который остался в списке только как текущий выбор. */
+function siteStateSuffix(s: Pick<SiteMirror, 'archived_at' | 'suspended_at'>): string {
+  if (s.archived_at) return ' (архив)'
+  if (s.suspended_at) return ' (приостановлен)'
+  return ''
 }
 
 /** Почему объект ждёт человека, а не заведён автоматикой. */

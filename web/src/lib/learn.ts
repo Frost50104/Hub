@@ -25,6 +25,10 @@ export interface OrgStore {
   archived_at: string | null
   // Ссылка на объект реестра auth (0053); с 19.09 пишется через POST/PATCH.
   site_id: string | null
+  /** 0065: объект реестра приостановлен — точка временно не работает, новое на
+   *  неё не назначается (`lib/storeState.ts`). Сервер выводит из зеркала;
+   *  необязательное — старый бэкенд поля не шлёт. */
+  suspended_at?: string | null
 }
 
 /** Строка зеркала реестра объектов (shadow_sites); только чтение, только admin. */
@@ -38,6 +42,8 @@ export interface SiteMirror {
   email: string | null
   phone: string | null
   archived_at: string | null
+  /** 0065: временно не работает (вторая ось рядом с архивом, обратима). */
+  suspended_at?: string | null
   synced_at: string
 }
 

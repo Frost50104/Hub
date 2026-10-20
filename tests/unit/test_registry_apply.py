@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -22,7 +23,15 @@ from app.services.registry_apply import (
 NOW = datetime(2026, 9, 19, 12, tzinfo=UTC)
 
 
-def _site(name="Витебский 101", *, code="В101", iiko="dep-1", archived=False, site_id=None):
+def _site(
+    name="Витебский 101",
+    *,
+    code="В101",
+    iiko="dep-1",
+    archived=False,
+    suspended=False,
+    site_id=None,
+):
     return SiteRow(
         site_id=site_id or uuid4(),
         code=code,
@@ -30,6 +39,7 @@ def _site(name="Витебский 101", *, code="В101", iiko="dep-1", archived
         address="СПб",
         archived_at=NOW if archived else None,
         iiko_ref=iiko,
+        suspended_at=NOW if suspended else None,
     )
 
 
@@ -48,6 +58,23 @@ def test_live_site_with_iiko_and_no_store_is_created():
     site = _site()
     plan = plan_apply([site], [_store("Другая", code="Д1")])
     assert plan.create == [site] and not plan.archive and not plan.pending
+
+
+def test_suspended_site_keeps_its_store_and_is_never_created_or_pending():
+    """Приостановка (0065, 19.10) — временно: магазин не архивируется, его поля
+    идут за реестром как обычно, а объект без магазина не заводится и не ждёт
+    человека — запускать можно только работающую точку."""
+    linked = _site("Приморская 14", code="П14", suspended=True)
+    store = _store("Приморская", code="П14", site_id=linked.site_id)
+    orphan = _site("Витебский 101", code="В101", suspended=True)
+    no_ref = _site("Смоленка 35", code=None, iiko=None, suspended=True)
+    twin_name = _site("Дальняя", code="Д1", suspended=True)
+    plan = plan_apply([linked, orphan, no_ref, twin_name], [store, _store("Дальняя")])
+    assert not plan.archive and not plan.create and not plan.pending
+    assert [(c.store_id, c.field) for c in plan.refresh] == [(store.id, "address")]
+    # пауза снята — объект без магазина снова в плане, как любой живой
+    resumed = dataclasses.replace(orphan, suspended_at=None)
+    assert plan_apply([resumed], [store]).create == [resumed]
 
 
 def test_site_without_iiko_ref_waits_for_a_human():

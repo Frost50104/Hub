@@ -473,6 +473,7 @@ function StoresTab({ org }: { org: OrgSnapshot }) {
                   </span>
                 )}
               </span>
+              {s.suspended_at && !s.archived_at && <SuspendedLine at={s.suspended_at} />}
               <SiteLine state={siteDisplay(s, siteById.get(s.site_id ?? ''), snapshotFresh)} />
               <AccountLine account={accountByStore.get(s.id)} />
             </span>
@@ -585,6 +586,20 @@ function HomelessAccounts({ accounts }: { accounts: PointAccount[] }) {
         ))}
       </ul>
     </div>
+  )
+}
+
+/** Пауза точки в реестре (0065, 19.10): карточка живая, новое на неё не
+ *  назначается, метку снимает реестр — здесь её не выключить. Берётся из
+ *  `org_snapshot` (сервер выводит из зеркала), а не из `/learn/sites`: метка
+ *  не должна пропадать вместе со свежестью снимка. */
+function SuspendedLine({ at }: { at: string }) {
+  return (
+    // Без truncate: статус важнее адреса, на телефоне строке ~110px, и
+    // обрезанное «приостановлена …» теряло бы, откуда пауза и с какого дня.
+    <span className="block text-xs text-amber" title="Объект приостановлен в реестре объектов auth">
+      приостановлена (реестр) с {shortDate(at)}
+    </span>
   )
 }
 
@@ -740,6 +755,12 @@ function SiteCard({ site }: { site: SiteMirror }) {
       {site.archived_at && (
         <p className="font-semibold text-amber">
           Объект в архиве реестра — точка при этом живёт своей жизнью
+        </p>
+      )}
+      {!site.archived_at && site.suspended_at && (
+        <p className="font-semibold text-amber">
+          Объект приостановлен в реестре с {shortDate(site.suspended_at)} — новое на
+          точку не назначается; метка снимется сама, когда реестр её возобновит
         </p>
       )}
       <p>{[site.code, site.name].filter(Boolean).join(' · ')}</p>

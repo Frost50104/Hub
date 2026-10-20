@@ -159,7 +159,8 @@ export interface AdminParticipant {
   department_id: string
   league_id: string | null
   included: boolean
-  exclude_reason: 'duplicate' | 'manual' | 'closed' | null
+  /** `suspended` (0065) — объект на паузе в реестре: вернётся в состав сам. */
+  exclude_reason: 'duplicate' | 'manual' | 'closed' | 'suspended' | null
   department_shared_with: string[]
   joined_race_seq?: number | null
 }
