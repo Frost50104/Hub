@@ -31,6 +31,7 @@ from app.schemas.project_folder import ProjectFolderCreate
 from app.services.project_access import (
     CREATE_PROJECT_DENIED,
     can_create_project,
+    can_view_templates,
 )
 from tests.integration.conftest import make_principal
 from tests.integration.test_courses import _mk_course
@@ -141,11 +142,18 @@ async def test_group_members_replace_recalcs_audience(db: AsyncSession, tenant_i
 # ─── #21 кто создаёт проекты и папки ────────────────────────────────────────
 
 
-async def _member(db: AsyncSession, tenant_id: uuid.UUID, tag: str, org_role: str | None):
+async def _member(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    tag: str,
+    org_role: str | None,
+    *,
+    account_kind: str = "person",
+):
     p = make_principal(
         tenant_id, email=f"m-{tag}@t.ru", role="member", tenant_slug=_slug(tenant_id, tag)
     )
-    await _register(db, p, org_role=org_role)
+    await _register(db, p, org_role=org_role, account_kind=account_kind)
     return p
 
 
@@ -165,6 +173,25 @@ async def test_org_roles_can_create_project_and_folder(
     )
     assert folder.name == f"Папка {org_role}"
     await delete_project_folder(folder.id, p, db)
+
+
+@pytest.mark.parametrize("org_role", ["office", "tu", "franchisee_owner"])
+async def test_kiosk_with_person_contour_cannot_create_project_or_folder(
+    db: AsyncSession, tenant_id: uuid.UUID, org_role: str
+):
+    """HUB_TASK_account_kind_switch: касса с копией контура человека — как
+    линейный сотрудник: ни проекта, ни папки, ни шаблонов."""
+    p = await _member(db, tenant_id, f"kiosk-{org_role}", org_role, account_kind="service")
+    assert await can_create_project(db, p) is False
+    assert await can_view_templates(db, p) is False
+    with pytest.raises(HTTPException) as exc:
+        await create_project(ProjectCreate(name="Нельзя"), p, db)
+    assert exc.value.status_code == 403
+    assert exc.value.detail == CREATE_PROJECT_DENIED
+    with pytest.raises(HTTPException) as exc2:
+        await create_project_folder(ProjectFolderCreate(name="Нельзя"), p, db)
+    assert exc2.value.status_code == 403
+    assert (await list_project_folders(p, db)).can_manage is False
 
 
 async def test_line_employee_cannot_create_project_or_folder(

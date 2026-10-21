@@ -29,7 +29,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.employee_profile import EmployeeProfile
+from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
 from app.models.shadow import ShadowUser
 from app.services import audit
 from app.services.audience_resolver import recalc_profile
@@ -267,6 +267,72 @@ StaffRowOutcome = Literal[
 ]
 
 
+def access_grant_fields(profile: EmployeeProfile, tu_stores: int) -> list[str]:
+    """Какие права-данные лежат на карточке: контур, франчайзи, точки ТУ,
+    контент-роль. У кассы они бездействуют (`org_scope.card_grants_rights`),
+    у человека — действуют; список нужен журналу смены вида."""
+    out: list[str] = []
+    if profile.org_role != "employee":
+        out.append("org_role")
+    if profile.franchisee_id is not None:
+        out.append("franchisee_id")
+    if tu_stores:
+        out.append("tu_stores")
+    if profile.content_role != "none":
+        out.append("content_role")
+    return out
+
+
+async def _on_kind_change(
+    db: AsyncSession, profile: EmployeeProfile, old: str, new: str
+) -> None:
+    """Вид карточки сменила выгрузка штата (T2): пересчёт, аудит, журнал.
+
+    Зовётся из ОБЕИХ веток, где синк пишет вид: у привязанной карточки и при
+    привязке. До 21.10 вторая писала вид молча — без пересчёта, и касса
+    оставалась в аудиториях человека, включая расширение по точкам ТУ.
+
+    Копию кадров НЕ стираем (решение владельца 21.10): под
+    `card_grants_rights` она прав не даёт. Но журнал называет, что на
+    карточке лежит: при `→ person` эти права снова оживают, а T3 перепишет
+    только кадровые поля — и только в тенанте, где кадры применяются.
+    В журнал — имена полей и числа, без ФИО и почты.
+    """
+    await recalc_profile(db, profile)
+    tu_stores = (
+        await db.execute(
+            select(func.count())
+            .select_from(TuStoreAssignment)
+            .where(TuStoreAssignment.profile_id == profile.id)
+        )
+    ).scalar_one()
+    fields = access_grant_fields(profile, tu_stores)
+    diff: dict[str, dict[str, str | None]] = {"account_kind": {"old": old, "new": new}}
+    if fields:
+        diff["access_fields"] = {"old": None, "new": ",".join(fields)}
+    audit.record(
+        db,
+        tenant_id=profile.tenant_id,
+        actor_id=None,  # инициатор — auth (выгрузка штата), а не человек в Hub
+        action="update",
+        object_type="employee_profile",
+        object_id=profile.id,
+        object_label=profile.full_name,
+        diff=diff,
+    )
+    log.info("staff_sync.account_kind_synced", profile_id=str(profile.id), account_kind=new)
+    if fields and profile.status == "active":
+        log.warning(
+            "staff_sync.kind_switch_access_restored"
+            if new == "person"
+            else "staff_sync.kind_switch_inert_access",
+            profile_id=str(profile.id),
+            fields=fields,
+            org_role=profile.org_role,
+            tu_stores=tu_stores,
+        )
+
+
 async def ensure_profile_for_staff_row(
     db: AsyncSession,
     *,
@@ -324,6 +390,7 @@ async def ensure_profile_for_staff_row(
         # ветка возвращала бы `already_linked` до любой записи. Так синк лечит
         # себя сам, а разовый бэкфилл нужен только тем, у кого тени нет.
         if existing.account_kind != account_kind:
+            old_kind = existing.account_kind
             await db.execute(
                 update(EmployeeProfile)
                 .where(EmployeeProfile.id == existing.id)
@@ -337,18 +404,16 @@ async def ensure_profile_for_staff_row(
             # полного пересчёта по расписанию у нас нет. Пересчёт точечный
             # (`recalc_profile`), и он срабатывает только при СМЕНЕ вида:
             # на обычном прогоне, где ничего не поменялось, лишнего lock'а нет.
-            await recalc_profile(db, existing)
-            log.info(
-                "staff_sync.account_kind_synced",
-                profile_id=str(existing.id),
-                account_kind=account_kind,
-            )
+            await _on_kind_change(db, existing, old_kind, account_kind)
         return "already_linked"
 
     norm = normalize_email(email)
     active = await _find_by_email(db, norm, status="active")
     if active is not None:
         if active.employee_id is None:
+            # Вид запоминаем ДО записи: ORM-update синхронизирует объект в
+            # сессии (`synchronize_session`), и после него сравнивать нечего.
+            old_kind = active.account_kind
             result = await db.execute(
                 update(EmployeeProfile)
                 .where(EmployeeProfile.id == active.id, EmployeeProfile.employee_id.is_(None))
@@ -356,6 +421,12 @@ async def ensure_profile_for_staff_row(
             )
             if result.rowcount:
                 log.info("staff_sync.profile_linked", profile_id=str(active.id))
+                if old_kind != account_kind:
+                    # Привязка той же записью сменила вид — тот же путь, что
+                    # у привязанной карточки: без него касса держала бы
+                    # членство человека, а `visible_filter` популяцию не смотрит.
+                    active.account_kind = account_kind
+                    await _on_kind_change(db, active, old_kind, account_kind)
                 return "linked"
             return "already_linked"
         # Активная карточка с этим email привязана к другому auth-аккаунту —

@@ -296,6 +296,7 @@ async def trigger_staff_sync(
         "roles_cleared": report.roles_cleared,
         "archived": report.archived,
         "invitations": report.invitations,
+        "kind_switched": report.kind_switched,
         # Кадровые данные из auth (16d) — отчёт только своей организации:
         # числа и id, без ПДн. None — потребитель выключен или тенанта нет.
         "hr": report.hr.get(str(principal.tenant_id)),

@@ -2,9 +2,15 @@
 
 hub:admin эквивалентен publisher во всех проверках. Роль хранится в
 employee_profiles.content_role, назначает её админ в карточке сотрудника.
+
+Как и контур, контент-роль даёт права только активной карточке человека
+(`org_scope.card_grants_rights`): публикатор, чья учётка стала кассой, не
+публикует и не видит отчёты сети (HUB_TASK_account_kind_switch, 21.10).
 """
 
 from __future__ import annotations
+
+from typing import cast
 
 from fastapi import HTTPException, status
 from signaris_auth import Principal
@@ -13,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.employee_profile import EmployeeProfile
 from app.services.lifecycle import ContentRole, can
+from app.services.org_scope import effective_content_role
 
 
 async def resolve_content_role(db: AsyncSession, principal: Principal) -> ContentRole:
@@ -20,14 +27,14 @@ async def resolve_content_role(db: AsyncSession, principal: Principal) -> Conten
         return "admin"
     row = (
         await db.execute(
-            select(EmployeeProfile.content_role, EmployeeProfile.status).where(
-                EmployeeProfile.employee_id == principal.employee_id
-            )
+            select(
+                EmployeeProfile.content_role,
+                EmployeeProfile.status,
+                EmployeeProfile.account_kind,
+            ).where(EmployeeProfile.employee_id == principal.employee_id)
         )
     ).one_or_none()
-    if row is None or row[1] != "active":
-        return "none"
-    return row[0] if row[0] in ("author", "publisher") else "none"
+    return cast(ContentRole, effective_content_role(row, principal))
 
 
 async def require_content_role(

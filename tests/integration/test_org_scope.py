@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.employee_profile import EmployeeProfile, TuStoreAssignment
 from app.models.org import Franchisee, Store
 from app.services.employee_profiles import archive_profile
-from app.services.org_scope import resolve_scope
+from app.services.org_scope import Scope, resolve_scope
 from tests.integration.conftest import make_principal
 
 pytestmark = pytest.mark.integration
@@ -115,3 +115,40 @@ async def test_archived_profile_scope_is_self(db: AsyncSession, tenant_id: uuid.
     await archive_profile(db, profile, reason="manual", actor_id=None)
     scope = await resolve_scope(db, principal)
     assert scope.kind == "self"
+
+
+async def test_kiosk_with_person_contour_scope_is_self(db: AsyncSession, tenant_id: uuid.UUID):
+    """HUB_TASK_account_kind_switch: касса с копией контура ТУ (со строками ТУ),
+    владельца франчайзи или офиса скоупа руководителя не получает. Своя
+    карточка — своя: `profile_id` на месте, как у любой кассы сегодня."""
+    franchisee = Franchisee(tenant_id=tenant_id, name="Касса-франчайзи")
+    db.add(franchisee)
+    await db.flush()
+    store = Store(tenant_id=tenant_id, name="К1", franchisee_id=franchisee.id)
+    db.add(store)
+    await db.flush()
+    p_tu, tu = await _profile_for(
+        db, tenant_id, email="kiosk-tu@t.ru", org_role="tu", account_kind="service"
+    )
+    db.add(TuStoreAssignment(tenant_id=tenant_id, profile_id=tu.id, store_id=store.id))
+    p_fr, fr = await _profile_for(
+        db,
+        tenant_id,
+        email="kiosk-fr@t.ru",
+        org_role="franchisee_owner",
+        franchisee_id=franchisee.id,
+        account_kind="service",
+    )
+    p_of, of = await _profile_for(
+        db, tenant_id, email="kiosk-of@t.ru", org_role="office", account_kind="service"
+    )
+    await db.flush()
+    for principal, profile in ((p_tu, tu), (p_fr, fr), (p_of, of)):
+        assert await resolve_scope(db, principal) == Scope(kind="self", profile_id=profile.id)
+
+    # Контроль: те же данные у человека дают магазины.
+    tu.account_kind = "person"
+    fr.account_kind = "person"
+    await db.flush()
+    assert (await resolve_scope(db, p_tu)).store_ids == frozenset({store.id})
+    assert (await resolve_scope(db, p_fr)).store_ids == frozenset({store.id})

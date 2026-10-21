@@ -46,6 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import set_template_scope
 from app.models.employee_profile import EmployeeProfile
 from app.models.project import Project, ProjectMember
+from app.services.org_scope import effective_org_role
 
 ProjectRole = Literal["owner", "editor", "viewer"]
 HUB_ADMIN_ROLE = "admin"
@@ -89,20 +90,26 @@ async def can_create_project(db: AsyncSession, principal: Principal) -> bool:
     Профиль ищется по `employee_id` (как `org_scope.resolve_scope`); у member
     без профиля (API-клиент, не заходивший в UI — `/api/me` связывает профиль
     по email при первом входе) — False. hub:viewer — всегда False.
+
+    Контур — только действующий (`effective_org_role`: активная карточка
+    человека): касса с копией контура «Офис» проектов не создаёт. Статус
+    проверяется там же, а не в WHERE — `employee_id` уникален, исход тот же.
     """
     role = principal.role_for("hub")
     if role == HUB_ADMIN_ROLE:
         return True
     if role != "member":
         return False
-    row = await db.execute(
-        select(EmployeeProfile.org_role).where(
-            EmployeeProfile.employee_id == principal.employee_id,
-            EmployeeProfile.status == "active",
+    row = (
+        await db.execute(
+            select(
+                EmployeeProfile.org_role,
+                EmployeeProfile.status,
+                EmployeeProfile.account_kind,
+            ).where(EmployeeProfile.employee_id == principal.employee_id)
         )
-    )
-    org_role = row.scalars().first()
-    return org_role in PROJECT_CREATOR_ORG_ROLES
+    ).first()
+    return effective_org_role(row, principal) in PROJECT_CREATOR_ORG_ROLES
 
 
 async def can_manage_project_folders(db: AsyncSession, principal: Principal) -> bool:

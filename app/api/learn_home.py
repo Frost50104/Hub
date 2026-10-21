@@ -40,7 +40,7 @@ from app.schemas.product import (
 )
 from app.services.audience_resolver import visible_filter
 from app.services.content_access import resolve_content_role
-from app.services.org_scope import get_profile
+from app.services.org_scope import effective_org_role, get_profile
 from app.services.taskdates import display_today
 
 router = APIRouter(tags=["learn-home"])
@@ -354,7 +354,9 @@ async def learn_profile(
         position_name=position_name,
         store_name=store_name,
         department_name=department_name,
-        org_role=profile.org_role,
+        # Действующий контур: у кассы — «Сотрудник», как и в /api/me
+        # (контент-роль рядом уже действующая — resolve_content_role).
+        org_role=effective_org_role(profile, principal),
         content_role=role,
         status_text=profile.status_text,
         hired_at=profile.hired_at,

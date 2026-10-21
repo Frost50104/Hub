@@ -53,7 +53,7 @@ from app.services.content_access import require_content_role, resolve_content_ro
 from app.services.learn_notify import _employee_ids
 from app.services.learn_settings import get_settings_dict
 from app.services.notify_batch import notify_many
-from app.services.org_scope import get_profile
+from app.services.org_scope import effective_org_role, get_profile
 from app.services.points import award
 from app.services.survey_stats import QuestionStats, participants_count, question_stats
 
@@ -537,7 +537,9 @@ async def submit_survey(
         store_id=profile.store_id,
         franchisee_id=profile.franchisee_id,
         department_id=profile.department_id,
-        org_role=profile.org_role,
+        # Срез «По контурам» — по действующему контуру: ответ кассы с копией
+        # контура человека не должен считаться ответом ТУ или офиса.
+        org_role=effective_org_role(profile, principal),
     )
     db.add(answer_set)
     await db.flush()

@@ -93,6 +93,10 @@ class StaffSyncReport:
     roles_cleared: int = 0
     archived: int = 0
     invitations: int = 0
+    # Привязанные карточки, у которых выгрузка сменила вид (person ↔ service;
+    # с 21.10 auth меняет его галочкой). Смену при ПРИВЯЗКЕ счётчик не видит —
+    # её видно по аудиту (`_on_kind_change`).
+    kind_switched: int = 0
     # Строки, которые не удалось применить (savepoint откатился), и тенанты,
     # чья транзакция упала целиком: сбой одного больше не обрывает остальных.
     failed_rows: int = 0
@@ -277,6 +281,7 @@ async def sync_staff(
         roles_cleared=report.roles_cleared,
         archived=report.archived,
         invitations=report.invitations,
+        kind_switched=report.kind_switched,
         failed_rows=report.failed_rows,
         failed_tenants=report.failed_tenants,
         skipped_tenants=report.skipped_tenants,
@@ -444,6 +449,7 @@ async def _apply_tenant(
                 link_only=True,
                 dry_run=dry_run,
                 pushes=pushes,
+                report=report,
             )
             if outcome == "linked":
                 report.profiles_linked += 1
@@ -472,6 +478,7 @@ async def _apply_tenant(
                 link_only=True,
                 dry_run=dry_run,
                 pushes=pushes,
+                report=report,
             )
             if outcome == "linked":
                 report.profiles_linked += 1
@@ -492,6 +499,7 @@ async def _apply_tenant(
             link_only=False,
             dry_run=dry_run,
             pushes=pushes,
+            report=report,
         )
         if outcome == "created":
             report.profiles_created += 1
@@ -651,6 +659,7 @@ async def _card_outcome(
     link_only: bool,
     dry_run: bool,
     pushes: list[PushBatch],
+    report: StaffSyncReport,
 ) -> str:
     """Исход строки для карточки; живой путь — в своём savepoint.
 
@@ -666,7 +675,10 @@ async def _card_outcome(
     if linked_kinds.get(employee_id) == account_kind:
         # Привязана и вид тот же — обе функции ниже вернули бы already_linked.
         return "already_linked"
+    # Привязана, а вид другой — выгрузка его сменит (в dry-run — предсказание).
+    kind_switch = employee_id in linked_kinds
     if dry_run:
+        report.kind_switched += int(kind_switch)
         return await classify_staff_row(
             db, employee_id=employee_id, email=email, link_only=link_only
         )
@@ -691,6 +703,7 @@ async def _card_outcome(
             error=type(exc.orig).__name__ if exc.orig is not None else type(exc).__name__,
         )
         return "row_failed"
+    report.kind_switched += int(kind_switch)
     pushes.extend(row_pushes)
     return outcome
 

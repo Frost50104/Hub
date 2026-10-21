@@ -43,7 +43,12 @@ from app.services.content_access import resolve_content_role
 from app.services.iiko import service as iiko_service
 from app.services.iiko.client import IikoError, IikoNotConfigured
 from app.services.iiko.reports import REPORT_ORDER, SPECS
-from app.services.org_scope import get_profile, resolve_scope
+from app.services.org_scope import (
+    card_grants_rights,
+    effective_org_role,
+    get_profile,
+    resolve_scope,
+)
 from app.services.project_access import is_hub_admin
 
 router = APIRouter(tags=["iiko-reports"])
@@ -57,6 +62,9 @@ MAX_PERIOD_DAYS = 92
 # Роли оргструктуры, которым отчёты положены. Линейного сотрудника здесь нет
 # намеренно: выручка и списания сети не входят в его работу.
 REPORT_ORG_ROLES = frozenset({"office", "tu", "franchisee_owner"})
+KIOSK_REPORTS_DENIED = (
+    "Учётке точки (кассы) отчёты iiko не выдаются — войдите своей учёткой"
+)
 
 
 async def _require_report_access(db: AsyncSession, principal: Principal) -> str:
@@ -65,17 +73,23 @@ async def _require_report_access(db: AsyncSession, principal: Principal) -> str:
     `"full"` — вся сеть (publisher/hub-admin/офис/ТУ), `"franchisee"` — только
     свои точки. Порядок веток важен: франчайзи с content_role=publisher
     допущен КАК publisher и видит сеть — скоуп не меняет это молча
-    (правило показано владельцу вместе с таблицей выручки 05.09)."""
+    (правило показано владельцу вместе с таблицей выручки 05.09).
+
+    Контур — только ДЕЙСТВУЮЩИЙ (`effective_org_role`): касса с копией
+    контура человека отчётов не получает (HUB_TASK_account_kind_switch)."""
     role = await resolve_content_role(db, principal)
     if lifecycle.can(role, "publisher") or is_hub_admin(principal):
         return "full"
     profile = await get_profile(db, principal)
+    org_role = effective_org_role(profile, principal)
+    if org_role in REPORT_ORG_ROLES:
+        return "franchisee" if org_role == "franchisee_owner" else "full"
     if (
         profile is not None
         and profile.status == "active"
-        and profile.org_role in REPORT_ORG_ROLES
+        and not card_grants_rights(profile, principal)
     ):
-        return "franchisee" if profile.org_role == "franchisee_owner" else "full"
+        raise HTTPException(status_code=403, detail=KIOSK_REPORTS_DENIED)
     raise HTTPException(
         status_code=403,
         detail=(

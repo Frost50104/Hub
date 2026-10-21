@@ -146,6 +146,12 @@ async def test_attempt_lifecycle_and_limit(db: AsyncSession, tenant_id: uuid.UUI
 
 async def test_review_flow_blocks_and_finalizes(db: AsyncSession, tenant_id: uuid.UUID):
     hr, _hr_profile = await _mk_publisher(db, tenant_id)
+    # Касса с копией контент-роли человека рецензентом не считается
+    # (HUB_TASK_account_kind_switch): пуш привёл бы её в 403.
+    kiosk, kiosk_profile = await _mk_member(db, tenant_id, email="kiosk-hr@t.ru")
+    kiosk_profile.content_role = "publisher"
+    kiosk_profile.account_kind = "service"
+    await db.flush()
     member, profile = await _mk_member(db, tenant_id, email="seller2@t.ru")
     _course, lessons = await _mk_course(db, tenant_id, lesson_count=1)
 
@@ -193,6 +199,15 @@ async def test_review_flow_blocks_and_finalizes(db: AsyncSession, tenant_id: uui
         )
     ).scalars().all()
     assert len(review_notif) == 1
+    kiosk_notif = (
+        await db.execute(
+            select(Notification).where(
+                Notification.kind == "quiz.review_needed",
+                Notification.employee_id == kiosk.employee_id,
+            )
+        )
+    ).scalars().all()
+    assert kiosk_notif == []
 
     # Проверка: 2 из 2 баллов за open → (1+2)/3 = 100%.
     reviewed = await review_attempt(

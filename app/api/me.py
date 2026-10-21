@@ -21,6 +21,7 @@ from app.config import get_settings
 from app.deps import get_db, require_auth, require_auth_any
 from app.services.employee_profiles import ensure_profile_for_principal
 from app.services.guides import GuideLink, guides_for_role
+from app.services.org_scope import effective_content_role, effective_org_role
 from app.services.personal_projects import ensure_personal_project
 from app.services.project_access import can_create_project, is_hub_admin
 from app.services.project_templates import gate as templates_gate
@@ -32,6 +33,9 @@ router = APIRouter(tags=["me"])
 
 class MeProfile(BaseModel):
     id: UUID
+    # ДЕЙСТВУЮЩИЕ роли, а не данные карточки: у кассы и архивной карточки —
+    # employee/none (`org_scope.card_grants_rights`). Гейты фронта читают их,
+    # поэтому вкладки и кнопки гаснут вместе с серверными гейтами.
     org_role: str
     content_role: str
     status: str
@@ -121,8 +125,10 @@ async def get_me(
         elif result.profile is not None:
             profile_payload = MeProfile(
                 id=result.profile.id,
-                org_role=result.profile.org_role,
-                content_role=result.profile.content_role,
+                org_role=effective_org_role(result.profile, principal),
+                # Маска, а не resolve_content_role: тот отдал бы «admin»
+                # hub-админам, а поле всегда было ролью КАРТОЧКИ.
+                content_role=effective_content_role(result.profile, principal),
                 status=result.profile.status,
                 position_id=result.profile.position_id,
                 store_id=result.profile.store_id,

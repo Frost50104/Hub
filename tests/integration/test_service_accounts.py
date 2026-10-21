@@ -232,6 +232,112 @@ async def test_sync_reclassification_drops_membership_immediately(
     assert await _members(db, [till.id]) == [], "членство не должно ждать пересчёта"
 
 
+async def test_kind_switch_keeps_copy_grants_nothing_and_is_audited(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """HUB_TASK_account_kind_switch (21.10): человек-ТУ со строкой ТУ и
+    контент-ролью стал кассой. Копия на месте (решение владельца — не
+    стирать), но прав по ней нет; смена вида в аудите и в журнале. Обратно в
+    человека — права вернулись, и это тоже видно предупреждением."""
+    from fastapi import HTTPException
+    from structlog.testing import capture_logs
+
+    from app.api.reports import KIOSK_REPORTS_DENIED, _require_report_access
+    from app.models.audit import AuditLog
+    from app.models.employee_profile import TuStoreAssignment
+    from app.models.org import Store
+    from app.services.content_access import resolve_content_role
+    from app.services.employee_profiles import ensure_profile_for_staff_row
+    from app.services.org_scope import Scope, resolve_scope
+
+    store = Store(tenant_id=tenant_id, name="Т-1")
+    db.add(store)
+    await db.flush()
+    card = await _profile(db, tenant_id, name="Тест ТУ", email="tu-kiosk@t.ru")
+    card.org_role = "tu"
+    card.content_role = "publisher"
+    db.add(TuStoreAssignment(tenant_id=tenant_id, profile_id=card.id, store_id=store.id))
+    await db.flush()
+    principal = _principal(tenant_id, card.employee_id, "tu-kiosk@t.ru", "Тест ТУ")
+    assert (await resolve_scope(db, principal)).store_ids == frozenset({store.id})
+    assert await resolve_content_role(db, principal) == "publisher"
+
+    async def _switch(kind: str) -> list[dict]:
+        with capture_logs() as logs:
+            outcome = await ensure_profile_for_staff_row(
+                db,
+                tenant_id=tenant_id,
+                employee_id=card.employee_id,
+                email="tu-kiosk@t.ru",
+                full_name="Тест ТУ",
+                link_only=kind != "person",
+                account_kind=kind,
+            )
+        assert outcome == "already_linked"
+        return [e for e in logs if e.get("log_level") == "warning"]
+
+    warnings = await _switch("service")
+    assert [w["event"] for w in warnings] == ["staff_sync.kind_switch_inert_access"]
+    assert warnings[0]["fields"] == ["org_role", "tu_stores", "content_role"]
+    assert warnings[0]["tu_stores"] == 1
+    await db.refresh(card)
+    assert (card.account_kind, card.org_role, card.content_role) == (
+        "service",
+        "tu",
+        "publisher",
+    )
+    assert await resolve_scope(db, principal) == Scope(kind="self", profile_id=card.id)
+    assert await resolve_content_role(db, principal) == "none"
+    with pytest.raises(HTTPException) as exc:
+        await _require_report_access(db, principal)
+    assert exc.value.detail == KIOSK_REPORTS_DENIED
+    await db.flush()  # autoflush выключен; в синке строку сбрасывает savepoint
+    rows = (
+        (await db.execute(select(AuditLog).where(AuditLog.object_id == card.id)))
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1 and rows[0].actor_id is None
+    assert rows[0].diff == {
+        "account_kind": {"old": "person", "new": "service"},
+        "access_fields": {"old": None, "new": "org_role,tu_stores,content_role"},
+    }
+
+    warnings = await _switch("person")
+    assert [w["event"] for w in warnings] == ["staff_sync.kind_switch_access_restored"]
+    assert (await resolve_scope(db, principal)).store_ids == frozenset({store.id})
+    assert await resolve_content_role(db, principal) == "publisher"
+
+
+async def test_me_reports_effective_roles_of_kiosk(db: AsyncSession, tenant_id: uuid.UUID):
+    """/api/me отдаёт ДЕЙСТВУЮЩИЕ роли: гейты фронта (вкладки «Аналитика»,
+    «Прогресс», «Отчёт», кнопки курсов) гаснут у кассы вместе с серверными."""
+    from sqlalchemy import update
+
+    from app.api.me import get_me
+    from tests.integration.test_project_access import _register
+
+    slug = f"kme-{tenant_id.hex[:12]}"
+    kiosk = make_principal(tenant_id, email="kiosk-me@t.ru", tenant_slug=slug)
+    await _register(db, kiosk, org_role="office", account_kind="service")
+    person = make_principal(tenant_id, email="office-me@t.ru", tenant_slug=slug)
+    await _register(db, person, org_role="office")
+    await db.execute(
+        update(EmployeeProfile)
+        .where(EmployeeProfile.tenant_id == tenant_id)
+        .values(content_role="publisher")
+    )
+
+    me = await get_me(principal=kiosk, db=db)
+    assert me.profile is not None
+    assert (me.profile.org_role, me.profile.content_role) == ("employee", "none")
+    assert me.can_create_projects is False
+    me = await get_me(principal=person, db=db)
+    assert me.profile is not None
+    assert (me.profile.org_role, me.profile.content_role) == ("office", "publisher")
+    assert me.can_create_projects is True
+
+
 # ─── Списки ──────────────────────────────────────────────────────────────────
 
 

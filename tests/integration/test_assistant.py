@@ -581,6 +581,37 @@ async def test_archived_office_profile_loses_access(db: AsyncSession, tenant_id:
     assert exc.value.status_code == 403
 
 
+@pytest.mark.parametrize("org_role", ["office", "tu", "franchisee_owner"])
+async def test_kiosk_with_person_contour_loses_access(
+    db: AsyncSession, tenant_id: uuid.UUID, org_role: str
+):
+    """HUB_TASK_account_kind_switch: касса (общий логин точки) с копией
+    контура человека отчётов не получает. Ассистент зовёт тот же гейт."""
+    from app.api.reports import KIOSK_REPORTS_DENIED, _require_report_access
+    from app.models.employee_profile import EmployeeProfile
+
+    principal = make_principal(
+        tenant_id, email=f"kiosk-{org_role}@t.ru", role="member", tenant_slug=f"arep8{org_role}"
+    )
+    await _register(db, principal)
+    db.add(
+        EmployeeProfile(
+            tenant_id=tenant_id,
+            employee_id=principal.employee_id,
+            email=f"kiosk-{org_role}@t.ru",
+            full_name="Касса",
+            org_role=org_role,
+            account_kind="service",
+        )
+    )
+    await db.flush()
+
+    with pytest.raises(HTTPException) as exc:
+        await _require_report_access(db, principal)
+    assert exc.value.status_code == 403
+    assert exc.value.detail == KIOSK_REPORTS_DENIED
+
+
 async def test_tu_and_franchisee_get_reports(db: AsyncSession, tenant_id: uuid.UUID):
     """ТУ и владелец франчайзи видят отчёты. Сузить их до «своих» точек нечем
     и не нужно: сущности Hub и iiko сознательно не связаны — следствие,

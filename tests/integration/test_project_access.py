@@ -33,7 +33,11 @@ pytestmark = pytest.mark.integration
 
 
 async def _register(
-    db: AsyncSession, principal, *, org_role: str | None = None
+    db: AsyncSession,
+    principal,
+    *,
+    org_role: str | None = None,
+    account_kind: str = "person",
 ) -> None:
     """shadow_users/-tenants: доменные FK ссылаются на employee_id.
 
@@ -41,6 +45,9 @@ async def _register(
     hub:member создаёт проекты/папки ТОЛЬКО как офис/ТУ/франчайзи
     (`project_access.can_create_project`), поэтому владельцы проектов в тестах
     регистрируются с `org_role="office"`.
+
+    account_kind — вид карточки: касса (`service`) прав по контуру не
+    получает (HUB_TASK_account_kind_switch).
     """
     await upsert_shadow_tenant(db, principal, table="shadow_tenants")
     await upsert_shadow_user(db, principal, table="shadow_users")
@@ -52,6 +59,7 @@ async def _register(
                 email=principal.email,
                 full_name=principal.full_name,
                 org_role=org_role,
+                account_kind=account_kind,
             )
         )
         await db.flush()

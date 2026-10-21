@@ -288,6 +288,103 @@ async def test_service_account_gets_shadow_and_link_but_no_new_profile(
     assert prepared.last_activity_at is None
 
 
+async def test_linking_card_as_kiosk_drops_membership_and_is_audited(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """Ветка привязки тоже меняет вид (21.10, HUB_TASK_account_kind_switch).
+    До правки она писала `account_kind` молча — без пересчёта, и касса
+    держала членство человека. Теперь членство снято сразу, смена вида в
+    аудите; копия контура на месте. Счётчик `kind_switched` такую смену не
+    видит — карточка не была привязана, видно по аудиту."""
+    from app.models.audience import AudienceMember
+    from app.models.audit import AuditLog
+    from app.services.audience_resolver import recalc_profile
+
+    audience = Audience(tenant_id=tenant_id, is_all=True)
+    prepared = EmployeeProfile(
+        tenant_id=tenant_id,
+        email="kiosk-link@t.ru",
+        full_name="Садовая 5",
+        org_role="office",
+    )
+    db.add_all([audience, prepared])
+    await db.flush()
+    await recalc_profile(db, prepared)
+    await db.commit()
+
+    rows = [
+        _staff_row(
+            tenant_id,
+            email="kiosk-link@t.ru",
+            full_name="Садовая 5",
+            role="viewer",
+            account_kind="service",
+        )
+    ]
+    _mock_fetch(monkeypatch, rows)
+    report = await sync_staff()
+    assert report.profiles_linked == 1
+    assert report.kind_switched == 0
+
+    await db.refresh(prepared)
+    assert prepared.account_kind == "service"
+    assert prepared.org_role == "office"
+    members = (
+        await db.execute(
+            select(AudienceMember).where(AudienceMember.profile_id == prepared.id)
+        )
+    ).scalars().all()
+    assert members == []
+    audit = (
+        await db.execute(select(AuditLog).where(AuditLog.object_id == prepared.id))
+    ).scalars().all()
+    assert [a.diff for a in audit] == [
+        {
+            "account_kind": {"old": "person", "new": "service"},
+            "access_fields": {"old": None, "new": "org_role"},
+        }
+    ]
+
+
+async def test_sync_counts_kind_switch_of_linked_card(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """`kind_switched`: смена вида привязанной карточки видна в отчёте кнопки
+    и в `staff_sync.done` — и в dry-run (предсказание), и в живом прогоне,
+    а повторный прогон её уже не считает."""
+    employee_id = uuid.uuid4()
+    db.add(
+        ShadowUser(
+            employee_id=employee_id,
+            tenant_id=tenant_id,
+            email="flip@t.ru",
+            full_name="Флип",
+        )
+    )
+    await db.flush()
+    db.add(
+        EmployeeProfile(
+            tenant_id=tenant_id,
+            employee_id=employee_id,
+            email="flip@t.ru",
+            full_name="Флип",
+        )
+    )
+    await db.commit()
+    row = _staff_row(
+        tenant_id,
+        employee_id=employee_id,
+        email="flip@t.ru",
+        full_name="Флип",
+        role="viewer",
+        account_kind="service",
+    )
+    _mock_fetch(monkeypatch, [row])
+    assert (await sync_staff(dry_run=True)).kind_switched == 1
+    assert (await sync_staff()).kind_switched == 1
+    assert (await sync_staff()).kind_switched == 0
+
+
 async def test_inactive_account_gets_shadow_but_no_profile(
     db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
 ):

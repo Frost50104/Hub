@@ -612,12 +612,15 @@ async def submit_attempt(
     if scored.open_question_ids:
         # Открытые вопросы → ручная проверка HR; финализация — в review.
         attempt.needs_review = True
+        # Рецензент — publisher-ЧЕЛОВЕК: у кассы контент-роль прав не даёт
+        # (`card_grants_rights`), и пуш «Нужна проверка» привёл бы её в 403.
         reviewers = (
             (
                 await db.execute(
                     select(EmployeeProfile.id).where(
                         EmployeeProfile.content_role == "publisher",
                         EmployeeProfile.status == "active",
+                        EmployeeProfile.account_kind == "person",
                     )
                 )
             )

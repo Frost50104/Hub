@@ -11,9 +11,15 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
+from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.reports import _franchisee_department_ids, _require_report_access
+from app.api.reports import (
+    KIOSK_REPORTS_DENIED,
+    _franchisee_department_ids,
+    _require_report_access,
+)
 from app.models.employee_profile import EmployeeProfile
 from app.models.org import Franchisee, Store
 from app.models.shadow import ShadowSite, ShadowUser
@@ -92,3 +98,40 @@ async def test_basis_full_vs_franchisee(db: AsyncSession, tenant_id: uuid.UUID):
 
     admin = make_principal(tenant_id=tenant_id, role="admin", email="adm@t.ru")
     assert await _require_report_access(db, admin) == "full"
+
+
+async def test_kiosk_franchisee_gets_no_reports_and_no_points(
+    db: AsyncSession, tenant_id: uuid.UUID
+):
+    """HUB_TASK_account_kind_switch: учётка владельца франчайзи стала кассой —
+    копия контура на карточке осталась, но отчётов нет (403 с текстом про
+    кассу), и точек франчайзи для фильтра тоже нет."""
+    principal, fr = await _seed_franchisee_owner(db, tenant_id)
+    site = uuid.uuid4()
+    db.add(
+        ShadowSite(
+            site_id=site,
+            tenant_id=tenant_id,
+            name="Точка",
+            refs=[{"system": "iiko", "external_id": "dep-k"}],
+            synced_at=datetime.now(UTC),
+        )
+    )
+    db.add(Store(tenant_id=tenant_id, name="Своя К", franchisee_id=fr.id, site_id=site))
+    await db.flush()
+    assert await _require_report_access(db, principal) == "franchisee"
+    assert await _franchisee_department_ids(db, principal) == ["dep-k"]
+
+    card = (
+        await db.execute(
+            select(EmployeeProfile).where(EmployeeProfile.employee_id == principal.employee_id)
+        )
+    ).scalar_one()
+    card.account_kind = "service"
+    await db.flush()
+    with pytest.raises(HTTPException) as exc:
+        await _require_report_access(db, principal)
+    assert exc.value.status_code == 403
+    assert exc.value.detail == KIOSK_REPORTS_DENIED
+    assert await _franchisee_department_ids(db, principal) == []
+    assert card.org_role == "franchisee_owner"  # копию не трогаем
