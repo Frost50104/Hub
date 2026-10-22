@@ -410,6 +410,7 @@ export function AssistantPage() {
             busy={ask.isPending}
             showHints={!empty}
             voice={status.data?.voice ?? false}
+            voiceMaxSec={status.data?.voice_max_sec ?? null}
           />
           </>
           )}

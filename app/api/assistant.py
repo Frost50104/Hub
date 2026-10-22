@@ -93,6 +93,10 @@ class StatusResponse(BaseModel):
     # Голосовой ввод настроен. Неактивный микрофон выглядит как сломанный,
     # поэтому кнопки просто нет, пока STT не подключён.
     voice: bool = False
+    # Предел длины записи (`stt_max_audio_sec`): микрофон останавливает запись
+    # сам чуть раньше, иначе длинная диктовка пропадала бы в 413. None — без
+    # предела (провайдер openai считает не у нас).
+    voice_max_sec: int | None = None
     # Отчёты iiko подключены. Без этого пустой экран предлагал бы спросить
     # выручку там, где спрашивать не у кого.
     reports: bool = False
@@ -124,6 +128,13 @@ async def _ctx(db: AsyncSession, principal: Principal) -> ToolContext:
     return ToolContext(db=db, principal=principal, profile=await get_profile(db, principal))
 
 
+def _voice_max_sec() -> int | None:
+    settings = get_settings()
+    if not settings.stt_enabled or settings.stt_provider != "local":
+        return None
+    return int(settings.stt_max_audio_sec)
+
+
 @router.get("/ai/status", response_model=StatusResponse)
 async def status(_principal: Principal = Depends(require_auth())) -> StatusResponse:
     try:
@@ -132,6 +143,7 @@ async def status(_principal: Principal = Depends(require_auth())) -> StatusRespo
         return StatusResponse(
             configured=False,
             voice=get_settings().stt_enabled,
+            voice_max_sec=_voice_max_sec(),
             reports=iiko_service.is_configured(),
         )
     return StatusResponse(
@@ -139,6 +151,7 @@ async def status(_principal: Principal = Depends(require_auth())) -> StatusRespo
         provider=provider.name,
         can_act=getattr(provider, "supports_tools", False),
         voice=get_settings().stt_enabled,
+        voice_max_sec=_voice_max_sec(),
         reports=iiko_service.is_configured(),
     )
 
@@ -390,17 +403,34 @@ async def transcribe(
                 headers={"Content-Type": content_type},
             )
     except httpx.HTTPError as e:
-        log.warning("stt.unreachable", error=str(e))
+        # `kind` обязателен: у таймаута httpx пустой текст, и 09.09 строка
+        # журнала `error=""` ничего не сказала о шести неделях зависания.
+        log.warning("stt.unreachable", kind=type(e).__name__, error=str(e))
         raise HTTPException(
             status_code=503,
             detail="Распознавание речи сейчас недоступно — наберите команду текстом",
         ) from None
     if resp.status_code != 200:
+        # 4xx и 503 сервис распознавания формулирует для человека сам:
+        # «запись длиннее минуты», «запускается». Остальное — сбой, наружу
+        # общая фраза, подробности — в журнале юнита.
+        passthrough = resp.status_code < 500 or resp.status_code == 503
+        detail = _stt_detail(resp) if passthrough else None
         raise HTTPException(
-            status_code=502 if resp.status_code >= 500 else resp.status_code,
-            detail="Не удалось распознать запись — попробуйте ещё раз или наберите текстом",
+            status_code=resp.status_code if passthrough else 502,
+            detail=detail
+            or "Не удалось распознать запись — попробуйте ещё раз или наберите текстом",
         )
     return TranscriptResponse(text=str(resp.json().get("text") or "").strip())
+
+
+def _stt_detail(resp: httpx.Response) -> str | None:
+    try:
+        data = resp.json()
+    except ValueError:
+        return None
+    detail = data.get("detail") if isinstance(data, dict) else None
+    return detail if isinstance(detail, str) and detail else None
 
 
 # ─── Диалоги ────────────────────────────────────────────────────────────────

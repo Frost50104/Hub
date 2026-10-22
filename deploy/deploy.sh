@@ -176,6 +176,27 @@ deploy_backend() {
   echo "==> Restarting ${SERVICE}-extraction (if enabled)..."
   $SSH_CMD "if systemctl list-unit-files ${SERVICE}-extraction.service --no-legend | grep -q .; then \
     systemctl restart ${SERVICE}-extraction && sleep 2 && systemctl is-active ${SERVICE}-extraction; fi"
+
+  # Распознавание речи — третий процесс с тем же кодом и venv (app.stt_service).
+  # До 22.10 деплой его не трогал: юнит жил на коде 01.09 и шесть недель висел
+  # незамеченным (docs/tech-debt/incidents.md). Рестарт — только запущенного
+  # юнита (на staging он выключен навсегда), и под проверкой «юнит установлен»:
+  # у try-restart без файла юнита ненулевой код, и `set -e` оборвал бы деплой.
+  # Юнит ставится руками (scp), поэтому расхождение с репозиторием — WARNING.
+  echo "==> Restarting ${SERVICE}-stt (if running) + smoke..."
+  if [[ "$ENV" == "prod" ]]; then
+    $SSH_CMD "if systemctl is-active --quiet ${SERVICE}-stt; then \
+      cmp -s ${REMOTE_BASE}/ops/systemd/${SERVICE}-stt.service /etc/systemd/system/${SERVICE}-stt.service \
+      || echo 'WARNING: /etc/systemd/system/${SERVICE}-stt.service расходится с ops/systemd/ — поставьте юнит (docs/DEPLOY.md)'; fi"
+  fi
+  $SSH_CMD "if systemctl list-unit-files ${SERVICE}-stt.service --no-legend | grep -q .; then \
+    systemctl try-restart ${SERVICE}-stt; fi" \
+    || echo "WARNING: рестарт ${SERVICE}-stt не удался — journalctl -u ${SERVICE}-stt -n 50"
+  # Провал проверки деплой не обрывает: бэкенд уже перезапущен, а фронт,
+  # не доехавший из-за голосового ввода, хуже. Громко — и дальше.
+  $SSH_CMD "if systemctl is-active --quiet ${SERVICE}-stt; then \
+    cd ${REMOTE_BASE} && ./.venv/bin/python -m app.jobs.stt_smoke --unit ${SERVICE}-stt.service; fi" \
+    || echo "WARNING: распознавание речи не прошло проверку после деплоя — journalctl -u ${SERVICE}-stt -n 50"
   echo "==> Backend deployed."
 }
 

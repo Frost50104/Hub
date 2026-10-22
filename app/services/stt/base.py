@@ -23,6 +23,16 @@ class STTNotConfigured(RuntimeError):
     """Голосовой ввод выключен или не настроен — API мапит в 503."""
 
 
+class STTTooLong(STTError):
+    """Запись длиннее `stt_max_audio_sec` — сервис отвечает 413 с текстом
+    для человека, основное приложение передаёт его как есть."""
+
+
+class STTUnavailable(STTError):
+    """Модель не готова (грузится, не скачана, не загрузилась) или основное
+    приложение уже бросило запрос — 503 с текстом для человека."""
+
+
 @dataclass
 class Transcript:
     text: str

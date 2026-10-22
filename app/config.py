@@ -220,10 +220,11 @@ class Settings(BaseSettings):
     iiko_cache_ttl_sec: int = Field(default=900)
 
     # Голосовой ввод ассистента (волна 3). `local` — faster-whisper в
-    # ОТДЕЛЬНОМ systemd-юните: замерено на VPS 2026-08-20, модель `small`
-    # даёт пик 759 МБ и ~5.5с на команду, поэтому её вес не должен жить в
-    # API-процессе. `base` вдвое легче, но слышит «на пятницу» как «на 5
-    # ниццу» — неверный срок задачи дороже трёх секунд ожидания.
+    # ОТДЕЛЬНОМ systemd-юните: модель `small` держит ~640 МБ и на пике
+    # расшифровки доходит до 741 МБ anon (замер на VPS 22.10,
+    # `scripts/stt_measure.py`), поэтому её вес не должен жить в API-процессе.
+    # `base` вдвое легче, но слышит «на пятницу» как «на 5 ниццу» — неверный
+    # срок задачи дороже трёх секунд ожидания.
     stt_enabled: bool = Field(default=False)
     stt_provider: str = Field(default="local")
     stt_model: str = Field(default="small")
@@ -232,14 +233,24 @@ class Settings(BaseSettings):
     stt_cpu_threads: int = Field(default=2)
     # Куда основное приложение проксирует запись при provider=local.
     stt_url: str = Field(default="http://127.0.0.1:5071")
-    # Выгрузка модели по простою — на этой машине держать 759 МБ занятыми
-    # круглые сутки нельзя.
-    stt_idle_unload_sec: float = Field(default=300.0)
-    # 2 МБ ≈ десять минут opus: команда голосом — это секунды.
+    # Кэш весов модели — ОДИН для юнита и для `app.jobs.stt_fetch_model`.
+    # Юнит грузит модель только из кэша (`HF_HUB_OFFLINE=1`), и задание,
+    # скачавшее веса в другой каталог, оставило бы сервис со «не скачана».
+    # None — каталог по умолчанию huggingface_hub (`HF_HOME`).
+    stt_cache_dir: str | None = Field(default=None)
+    # 2 МБ ≈ восемь минут opus — это потолок тела; длину режет stt_max_audio_sec.
     stt_max_bytes: int = Field(default=2 * 1024 * 1024)
-    # Ниже nginx-потолка /api/ai/ (120с): первый запрос после простоя платит
-    # ~9с за загрузку модели плюс ~6с на расшифровку.
-    stt_timeout_sec: float = Field(default=60.0)
+    # Длиннее — 413 «скажите короче», микрофон останавливает запись сам на
+    # 5 с раньше (`/ai/status.voice_max_sec`). Замер 22.10: 0,41 с работы на
+    # секунду звука, минута — ~25 с, две минуты — 49,5 с.
+    stt_max_audio_sec: float = Field(default=60.0)
+    # Порог сторожа: работа под замком (загрузка или расшифровка) дольше — и
+    # юнит перестаёт пинговать systemd, тот его перезапускает. Самая долгая
+    # законная работа — ~25 с минуты звука; запас кратный.
+    stt_max_busy_sec: float = Field(default=180.0)
+    # Ниже nginx-потолка /api/ai/ (120 с): своя расшифровка минуты звука —
+    # ~25 с, плюс одна такая же в очереди на замке, плюс занятые ядра.
+    stt_timeout_sec: float = Field(default=90.0)
     # Платная альтернатива (provider=openai).
     stt_api_key: str | None = Field(default=None)
     stt_base_url: str | None = Field(default=None)

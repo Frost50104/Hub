@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 
 import { cn } from '@/lib/cn'
 import { assistantApi } from '@/lib/assistant'
+import { voiceAutoStopMs, voiceErrorText } from '@/lib/voiceInput'
 
 /**
  * Микрофон 44×44, радиус 11 — удержание записывает, отпускание расшифровывает.
@@ -14,7 +15,10 @@ import { assistantApi } from '@/lib/assistant'
  *
  * Ошибки не глушим. Отказ в доступе к микрофону и «распознавание недоступно» —
  * разные ситуации с разными действиями пользователя, и молчащая кнопка хуже
- * обеих.
+ * обеих. Текст сбоя расшифровки — от сервера (`voiceErrorText`).
+ *
+ * Запись останавливается сама у предела длины (`maxSec` из `/ai/status`):
+ * длиннее сервер отвечает 413, и диктовка пропала бы целиком.
  */
 export type MicState = 'idle' | 'recording' | 'working'
 type State = MicState
@@ -30,16 +34,20 @@ export function MicButton({
   onText,
   onStateChange,
   disabled,
+  maxSec,
 }: {
   onText: (text: string) => void
   /** Композер показывает «Слушаю…» — на телефоне цвета кнопки мало. */
   onStateChange?: (state: State) => void
   disabled?: boolean
+  /** Предел длины записи с сервера; null — без предела. */
+  maxSec?: number | null
 }) {
   const [state, setState] = useState<State>('idle')
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
+  const stopTimerRef = useRef<number | null>(null)
 
   useEffect(() => onStateChange?.(state), [state, onStateChange])
 
@@ -49,7 +57,27 @@ export function MicButton({
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
   }
-  useEffect(() => stopStream, [])
+  const clearStopTimer = () => {
+    if (stopTimerRef.current !== null) {
+      window.clearTimeout(stopTimerRef.current)
+      stopTimerRef.current = null
+    }
+  }
+  useEffect(
+    () => () => {
+      clearStopTimer()
+      stopStream()
+    },
+    [],
+  )
+
+  // Без проверки `state`: таймер автостопа вызывает это из замыкания старого
+  // рендера, где `state` ещё 'idle'.
+  const finishRecording = () => {
+    clearStopTimer()
+    recorderRef.current?.stop()
+    recorderRef.current = null
+  }
 
   const start = async () => {
     if (state !== 'idle' || disabled) return
@@ -67,6 +95,7 @@ export function MicButton({
         if (e.data.size) chunksRef.current.push(e.data)
       }
       rec.onstop = () => {
+        clearStopTimer()
         stopStream()
         const blob = new Blob(chunksRef.current, { type: rec.mimeType })
         if (blob.size < 1200) {
@@ -81,19 +110,19 @@ export function MicButton({
             if (text.trim()) onText(text.trim())
             else toast.error('Ничего не расслышал — попробуйте ещё раз')
           })
-          .catch((e: unknown) => {
-            const status = (e as { response?: { status?: number } })?.response?.status
-            toast.error(
-              status === 503
-                ? 'Распознавание речи не подключено — наберите команду текстом'
-                : 'Не удалось распознать запись',
-            )
-          })
+          .catch((e: unknown) => toast.error(voiceErrorText(e)))
           .finally(() => setState('idle'))
       }
       recorderRef.current = rec
       rec.start()
       setState('recording')
+      const stopAfter = voiceAutoStopMs(maxSec)
+      if (stopAfter !== null) {
+        stopTimerRef.current = window.setTimeout(() => {
+          finishRecording()
+          toast(`Записано ${Math.round(stopAfter / 1000)} с — это предел, остальное продиктуйте отдельно`)
+        }, stopAfter)
+      }
     } catch {
       stopStream()
       // NotAllowedError приходит и при отказе пользователя, и когда микрофон
@@ -107,8 +136,7 @@ export function MicButton({
 
   const stop = () => {
     if (state !== 'recording') return
-    recorderRef.current?.stop()
-    recorderRef.current = null
+    finishRecording()
   }
 
   const recording = state === 'recording'

@@ -28,6 +28,7 @@ export function Composer({
   busy,
   showHints,
   voice,
+  voiceMaxSec,
 }: {
   value: string
   onChange: (v: string) => void
@@ -35,6 +36,8 @@ export function Composer({
   busy: boolean
   showHints: boolean
   voice: boolean
+  /** Предел длины записи с сервера (`/ai/status.voice_max_sec`). */
+  voiceMaxSec?: number | null
 }) {
   const isDesktop = useIsDesktop()
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -106,6 +109,7 @@ export function Composer({
         {voice && (
           <MicButton
             disabled={busy}
+            maxSec={voiceMaxSec}
             onStateChange={setMic}
             onText={(text) => onChange(value ? `${value} ${text}` : text)}
           />

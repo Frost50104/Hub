@@ -16,6 +16,8 @@
 #   HEALTHCHECK_DISK_MIN_GB=8
 #   HEALTHCHECK_HR_URLS="https://hub.signaris.ru/api/health/hr"
 #   HEALTHCHECK_RACE_URLS="https://hub.signaris.ru/api/health/race"
+#   HEALTHCHECK_STT_UNIT=signaris-hub-stt.service   (проверяется, только если включён)
+#   HEALTHCHECK_STT_URL=http://127.0.0.1:5071/health
 set -euo pipefail
 
 URLS=${HEALTHCHECK_URLS:-"https://hub.signaris.ru/api/env https://hub-staging.signaris.ru/api/env"}
@@ -215,3 +217,81 @@ for url in $RACE_URLS; do
     send_telegram "🔴 [Hub] Гусиная гонка: $(race_text "$problems")— $url"
   fi
 done
+
+# --- Распознавание речи (STT) ------------------------------------------------
+# Юнит слушает только 127.0.0.1, поэтому опрос — прямо на хосте, а не через
+# публичный адрес; проверяется только включённый юнит (на staging он выключен
+# навсегда). До 22.10 этой проверки не было, и STT шесть недель висел, не
+# отвечая даже на /health (docs/tech-debt/incidents.md).
+#
+# /health отвечает 200 `ready`, 503 `loading` | `missing` | `error`. Сообщение
+# уходит, когда тот же набор держится ДВА прогона подряд (10 минут): рестарт
+# при деплое длится секунды и будить не должен. Восстановление — сразу.
+STT_UNIT=${HEALTHCHECK_STT_UNIT:-signaris-hub-stt.service}
+STT_HEALTH_URL=${HEALTHCHECK_STT_URL:-http://127.0.0.1:5071/health}
+
+stt_text() {
+  case "$1" in
+    unreachable) echo "сервис не отвечает (systemctl status ${STT_UNIT})" ;;
+    loading) echo "модель грузится дольше обычного (journalctl -u ${STT_UNIT})" ;;
+    missing) echo "модели нет в кэше — скачать: python -m app.jobs.stt_fetch_model (docs/DEPLOY.md)" ;;
+    error) echo "модель не загрузилась (journalctl -u ${STT_UNIT}: stt.model_failed)" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+if systemctl is-enabled --quiet "$STT_UNIT" 2>/dev/null; then
+  stt_state="$STATE_DIR/stt.health.state"
+  # Строка состояния: «проблема|сколько прогонов подряд».
+  stt_prev=$(cat "$stt_state" 2>/dev/null || echo "|0")
+  stt_prev_problem=${stt_prev%|*}
+  stt_prev_count=${stt_prev##*|}
+  # Без -f: при 503 нужен ответ, а не код возврата.
+  stt_body=$(curl -s --max-time 10 "$STT_HEALTH_URL" 2>/dev/null || true)
+  stt_status=$(echo "$stt_body" | sed -n 's/.*"status":[[:space:]]*"\([a-z]*\)".*/\1/p' || true)
+  case "$stt_status" in
+    ready|disabled) stt_problem="" ;;
+    loading|missing|error) stt_problem="$stt_status" ;;
+    *) stt_problem="unreachable" ;;
+  esac
+  # Метка «сообщение о сбое ушло»: о восстановлении пишем, только если
+  # писали о сбое, — даже если проблема по дороге сменилась.
+  stt_alerted="$STATE_DIR/stt.health.alerted"
+  if [[ -z "$stt_problem" ]]; then
+    if [[ -f "$stt_alerted" ]]; then
+      logger -t signaris-hub-health "STT RECOVERED"
+      send_telegram "✅ [Hub] распознавание речи снова работает"
+      rm -f "$stt_alerted"
+    fi
+    echo "|0" > "$stt_state"
+  else
+    if [[ "$stt_problem" == "$stt_prev_problem" ]]; then
+      stt_count=$((stt_prev_count + 1))
+    else
+      stt_count=1
+    fi
+    echo "$stt_problem|$stt_count" > "$stt_state"
+    logger -t signaris-hub-health "STT ATTENTION $stt_problem (consecutive=$stt_count)"
+    if [[ "$stt_count" -eq 2 ]]; then
+      send_telegram "🔴 [Hub] распознавание речи: $(stt_text "$stt_problem")"
+      touch "$stt_alerted"
+    fi
+  fi
+
+  # Перезапуски сторожем или OOM-killer'ом: к следующему опросу юнит снова
+  # здоров, и без этой проверки сбой прошёл бы молча. Журнал читается с
+  # курсора прошлого прогона; первый прогон — за последние 6 минут. Счётчик
+  # NRestarts не годится: его обнуляет любой ручной рестарт, в том числе
+  # деплой. «Scheduled restart job» systemd пишет только при автоматическом
+  # перезапуске (Restart=), причину — строкой «Failed with result '…'».
+  stt_log=$(journalctl -u "$STT_UNIT" --cursor-file="$STATE_DIR/stt.journal.cursor" \
+    --since "-6 min" -o cat --no-pager 2>/dev/null || true)
+  stt_restarts=$(printf '%s\n' "$stt_log" | grep -c 'Scheduled restart job' || true)
+  if [[ "${stt_restarts:-0}" -gt 0 ]]; then
+    stt_reasons=$(printf '%s\n' "$stt_log" \
+      | sed -n "s/.*Failed with result '\([a-z-]*\)'.*/\1/p" | sort -u | tr '\n' ' ' || true)
+    stt_reasons=${stt_reasons% }
+    logger -t signaris-hub-health "STT RESTARTED ${stt_restarts} (${stt_reasons:-?})"
+    send_telegram "🔴 [Hub] распознавание речи перезапускалось: ${stt_restarts} раз(а), причина: ${stt_reasons:-не записана} — journalctl -u ${STT_UNIT}"
+  fi
+fi

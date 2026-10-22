@@ -116,7 +116,7 @@
 | Юнит | Что | Где включён |
 |---|---|---|
 | `signaris-hub[-staging]-extraction.service` | long-running воркер `app/workers/extraction.py` (извлечение текста + RAG-reconcile) | оба env |
-| `signaris-hub-stt.service` | faster-whisper `small` для голосового ввода ассистента (`app/stt_service.py`), `MemoryHigh=800M`+`MemoryMax=1100M`, выгрузка модели по 5 мин | **только прод** — одна STT-машина на хост, staging-юнит disable-нут |
+| `signaris-hub-stt.service` | faster-whisper `small` для голосового ввода ассистента (`app/stt_service.py`): модель грузится при старте и не выгружается, только из кэша (`HF_HUB_OFFLINE=1`), `MemoryMax=1100M` без `MemoryHigh`, сторож `WatchdogSec=60` — см. §«Распознавание речи» | **только прод** — одна STT-машина на хост, staging-юнит disable-нут, на staging `STT_ENABLED=false` |
 | `signaris-hub[-staging]-{due-soon,overdue,course-due-soon,review-due,inactivity,automations,race-sync,race-close,sites-sync}.timer` | cron-джобы `app/jobs/*` (расписание — `docs/PUSH.md`); `race-*` на staging стоят, но выходят по `RACE_SYNC_ENABLED=false`; `sites-sync` на staging — dry-run по `SITES_SYNC_ENABLED=false` | оба env |
 | `signaris-hub-backup.timer` / `backup-cleanup.timer` / `backup-files.timer` / `healthcheck.timer` | общие для двух env | прод-хост |
 
@@ -161,7 +161,37 @@ Staging-копии юнитов генерируются `ops/systemd/make-stagi
 
 Машина — **4 ГБ без swap** (замер 16.09: `free -h` 3.8Gi, ядро `Memory: 3970312K/4193764K available`, `swapon --show` пуст; владелец подтвердил 4 ГБ). До 15.09 здесь и в CLAUDE.md значилось «2 ГБ» — неверно. Расширяли ли машину и когда — не установлено и не важно: планировать надо от нынешних 4 ГБ. Августовские записи про OOM сборки оставлены как есть — они описывают реальный отказ, и решение «собирать фронт локально» в силе.
 
-STT-юнит — пара `MemoryHigh=800M` + `MemoryMax=1100M` (одиночный `MemoryMax` ловит OOM на странице кэша весов) + выгрузка модели по 5 мин простоя; **одна STT-машина на хост** — включён ПРОД, staging-юнит disable-нут; staging-юниты собирать `ops/systemd/make-staging-unit.py`. `vite build` на VPS больше не запускается — `deploy.sh` собирает фронт локально и заливает `web/dist` (сборка на сервере росла до ~970 МБ RSS и падала по OOM).
+STT-юнит — **только `MemoryMax=1100M`, без `MemoryHigh`** (без swap `MemoryHigh` — ловушка: так юнит простоял 09.09–21.10, `docs/tech-debt/incidents.md`), модель держится загруженной постоянно (~640 МБ); **одна STT-машина на хост** — включён ПРОД, staging-юнит disable-нут; staging-юниты собирать `ops/systemd/make-staging-unit.py`. Устройство и процедуры — §«Распознавание речи». `vite build` на VPS больше не запускается — `deploy.sh` собирает фронт локально и заливает `web/dist` (сборка на сервере росла до ~970 МБ RSS и падала по OOM).
+
+## Распознавание речи (STT, 22.10)
+
+Устройство — `docs/tech-debt/assistant.md` §«Ассистент, волна 3», разбор зависания 09.09–21.10 — `docs/tech-debt/incidents.md`. Здесь — процедуры.
+
+**Установка или обновление юнита — СТРОГО после деплоя кода.** В юните сторож `WatchdogSec=60`: systemd ждёт `WATCHDOG=1` сразу после старта, а код до 22.10 его не шлёт — юнит убивали бы каждые 60 с. Код с пингами без нового юнита безвреден: без `WATCHDOG_USEC` пинги ничего не делают. Порядок:
+1. `./deploy/deploy.sh prod` — деплой сам перезапустит запущенный юнит (`try-restart` под проверкой «юнит установлен») и прогонит `app.jobs.stt_smoke`. Провал — WARNING, деплой не прерывается. Деплой же предупреждает, если `/etc/systemd/system/signaris-hub-stt.service` расходится с `ops/systemd/`.
+2. `scp ops/systemd/signaris-hub-stt.service root@100.104.237.105:/etc/systemd/system/`, затем на сервере `systemd-analyze verify /etc/systemd/system/signaris-hub-stt.service && systemctl daemon-reload && systemctl restart signaris-hub-stt`.
+3. `cd /opt/signaris-hub && .venv/bin/python -m app.jobs.stt_smoke` → `stt.smoke_ok` с временем и памятью; `systemctl show signaris-hub-stt -p WatchdogUSec -p MemoryHigh -p MemoryMax -p LimitCORE -p OOMScoreAdjust`.
+
+**Откат — в обратном порядке:** сначала юнит (`git show <коммит до 22.10>:ops/systemd/signaris-hub-stt.service` → `/etc/systemd/system/`, или `systemctl edit signaris-hub-stt` с `[Service]` / `WatchdogSec=0`), `daemon-reload`, потом код. Спрятать голос у людей — `SIGNARIS_HUB_STT_ENABLED=false` в `.env` и рестарт основного сервиса: микрофон перестаёт рисоваться.
+
+**Скачать модель** — новый сервер, смена `SIGNARIS_HUB_STT_MODEL`, битый кэш; юнит сам больше не скачивает (`HF_HUB_OFFLINE=1`):
+```
+systemd-run --wait --pipe --uid=signaris -p MemoryMax=1G \
+  -p EnvironmentFile=/opt/signaris-hub/.env -p WorkingDirectory=/opt/signaris-hub \
+  /opt/signaris-hub/.venv/bin/python -m app.jobs.stt_fetch_model
+systemctl restart signaris-hub-stt
+```
+Каталог — `SIGNARIS_HUB_STT_CACHE_DIR` из `.env` (прод: `/opt/signaris-hub/stt-cache/hub`), без него задание отказывается работать. Скачивание идёт без hf_xet: внутри процесса xet держал до десяти кусков по ~61 МБ.
+
+**Поднять версии `[stt]`** (`pyproject.toml`, они точные): `MemoryMax`, `stt_max_audio_sec` и `stt_max_busy_sec` откалиброваны замером на этих версиях. Порядок:
+1. Поставить новые версии в venv.
+2. Повторить замер во временном юните: `scripts/stt_measure.py`, команда запуска — в его докстринге. Образцы — синтетическая речь: `say -v Milena -o x.aiff "…"` → `ffmpeg -i x.aiff -ac 1 -ar 48000 -c:a libopus -b:a 32k x.webm`, плюс m4a/aac для Safari. Проверить 120 с сплошной речи и запись на 2 МБ.
+3. Пересчитать: `MemoryMax` = пик anon + 300 МБ; предел записи — чтобы минута звука укладывалась в треть таймаута.
+4. Каталог образцов на сервере удалить.
+
+**Учения сторожа** (после установки юнита):
+- `kill -STOP $(systemctl show -p MainPID --value signaris-hub-stt)`. Ждём ≤ 80 с: `Watchdog timeout`, стеки faulthandler, новый PID. Ближайший прогон healthcheck (`systemctl start signaris-hub-healthcheck`) шлёт сообщение о перезапуске с причиной `watchdog`.
+- Путь «занято»: `systemctl edit signaris-hub-stt` → `Environment=SIGNARIS_HUB_STT_MAX_BUSY_SEC=20` и `SIGNARIS_HUB_STT_MAX_AUDIO_SEC=130`, рестарт, затем 120-секундный образец → `stt.stuck` и перезапуск. Drop-in убрать: `systemctl revert signaris-hub-stt`.
 
 ## Offsite-бэкап (Timeweb S3, 01.09)
 
@@ -249,6 +279,8 @@ TELEGRAM_CHAT_ID=-100123456789
 **Кадровые данные из auth (25.09).** Тот же скрипт читает `HEALTHCHECK_HR_URLS` (default — только прод: на staging синк штата выключен) → `GET /api/health/hr` отдаёт `{"status", "problems": [...]}` с кодами без названий организаций: `window_open` (окно каткатa открыто > 6 ч — закрыть `hr_cutover --window close`), `blocked` (предохранитель держит изменения > 1 ч — hub-admin: «Сотрудники» → «Посмотреть и применить»), `paused` (организация заморожена, но не в `HR_APPLY_TENANTS` > 1 ч), `stale` (применения не было > 1 ч). Триггер — по СМЕНЕ набора проблем (состояние в `/var/lib/signaris-hub/hr.*.state`).
 
 **Гусиная гонка (02.10).** `HEALTHCHECK_RACE_URLS` (default — только прод: на staging обращения к iiko выключены флагом, ручка отвечает `status: disabled`) → `GET /api/health/race` отдаёт `{"status": ok|attention|disabled, "problems": [...]}` с кодами без тенантов и чисел: `activation_overdue` (конкурс запланирован, старт наступил, не активен — в день старта только после 01:00 МСК, активирует тик 00:40; ложная тревога 05.10 00:01 до этой поправки), `pull_stale` (успешной выгрузки iiko нет > 2 ч), `pull_error` (последняя выгрузка упала — текст в админке «Гонка»), `close_stale` (после 05:00 МСК `last_close_day` не «вчера» у конкурса, стоявшего на учёте к ночи: закрытие не прошло ИЛИ прошло без полной выгрузки iiko — с 17.10 `last_close_day` двигается только после неё, снимки и итоги отложены `race.close_deferred` и догонятся первым полным закрытием), `baseline_preliminary` (закрытие прошло, а предварительная база не пересчитана — `finalize_baselines` упала; лечит тик после 04:40 или кнопка «Пересчитать из iiko»; строки исключённых точек с 17.10 не считаются — такая строка держала код и перевыгрузку базы 21 раз в сутки с 05.10). Триггер — по СМЕНЕ набора проблем (`/var/lib/signaris-hub/race.*.state`). Джобы гонки ловят все исключения и выходят с кодом 0, `OnFailure` у юнитов нет — до этой проверки сломавшуюся выгрузку заметили бы только по «обновлено N часов назад» на доске. Проверка руками: `curl -s https://hub.signaris.ru/api/health/race`. **Ремонт снимков после отказа iiko (17.10):** `systemd-run --wait --pipe --uid=signaris -p EnvironmentFile=/opt/signaris-hub/.env -p WorkingDirectory=/opt/signaris-hub /opt/signaris-hub/.venv/bin/python -m app.jobs.race_rebuild_snapshots --tenant uppetit --from 2026-10-14 --to 2026-10-16 [--apply]` — без `--apply` считает и откатывает, окно — хвост ряда по последний снимок заезда, запускать до ночного закрытия (иначе переписка вчерашнего дня повторит пуш рекорда); сначала дотянуть суточные данные `POST /learn/race/admin/sync`.
+
+**Распознавание речи (22.10).** Только хост прода и только включённый юнит (`HEALTHCHECK_STT_UNIT`, default `signaris-hub-stt.service`): опрос `HEALTHCHECK_STT_URL` (default `http://127.0.0.1:5071/health` — юнит наружу не публикуется) → `ready` | `loading` | `missing` | `error`, недоступность — `unreachable`. Сообщение — когда тот же код держится ДВА прогона подряд (рестарт при деплое длится секунды), восстановление — сразу и только если о сбое писали (`/var/lib/signaris-hub/stt.health.{state,alerted}`). Вторая проверка — автоматические перезапуски: `journalctl -u signaris-hub-stt --cursor-file=/var/lib/signaris-hub/stt.journal.cursor`, строка `Scheduled restart job` (её пишет только `Restart=`, не ручной рестарт) и причина из `Failed with result '…'` (`watchdog`, `oom-kill`). `NRestarts` не годится — его обнуляет любой ручной рестарт, в том числе деплой. До 22.10 STT не проверялся вовсе и шесть недель висел незамеченным.
 
 После правки env-файла ничего перезапускать не нужно (oneshot-сервис читает его при каждом запуске). Проверка: временно вписать несуществующий URL в `HEALTHCHECK_URLS` → через ~10 минут придёт DOWN-сообщение, после удаления — OK-сообщение.
 
@@ -341,7 +373,7 @@ INTEGRATED_PRODUCTS: frozenset[str] = frozenset({"net", "sonar", "hub"})
 | `AI_PROVIDER` / `AI_API_KEY` / `AI_BASE_URL` / `AI_CHAT_MODEL` / `AI_EMBED_MODEL` / `AI_FOLDER_ID` | LLM-провайдер Ф6 (yandex\|gigachat\|openai-compatible). Без ключа `/api/ai/ask` → 503, extraction-воркер пропускает RAG-шаг |
 | `AI_ENABLED` / `AI_TOOL_MODEL` | выключатель ассистента и отдельная модель для tool-calling (по умолчанию = chat-модель) |
 | `IIKO_BASE_URL` / `IIKO_LOGIN` / `IIKO_PASSWORD` / `IIKO_VERIFY_SSL` / `IIKO_TIMEOUT_SEC` / `IIKO_CACHE_TTL_SEC` | отчёты ассистента поверх iiko OLAP. **Слот лицензии сети общий с продуктом Listen** — стоит отдельная учётка под Hub; без переменных экран отчётов показывает «не подключены» |
-| `STT_ENABLED` / `STT_PROVIDER` / `STT_MODEL` / `STT_LANGUAGE` / `STT_COMPUTE_TYPE` / `STT_CPU_THREADS` / `STT_URL` / `STT_IDLE_UNLOAD_SEC` / `STT_MAX_BYTES` / `STT_TIMEOUT_SEC` / `STT_API_KEY` / `STT_BASE_URL` | голосовой ввод: backend ходит в отдельный юнит `signaris-hub-stt` по `STT_URL`; без `STT_ENABLED` микрофон в UI не рисуется |
+| `STT_ENABLED` / `STT_PROVIDER` / `STT_MODEL` / `STT_LANGUAGE` / `STT_COMPUTE_TYPE` / `STT_CPU_THREADS` / `STT_URL` / `STT_CACHE_DIR` / `STT_MAX_BYTES` / `STT_MAX_AUDIO_SEC` / `STT_MAX_BUSY_SEC` / `STT_TIMEOUT_SEC` / `STT_API_KEY` / `STT_BASE_URL` | голосовой ввод: backend ходит в отдельный юнит `signaris-hub-stt` по `STT_URL`; без `STT_ENABLED` микрофон в UI не рисуется; `STT_CACHE_DIR` — кэш весов, общий для юнита и `app.jobs.stt_fetch_model` (прод: `/opt/signaris-hub/stt-cache/hub`); предел записи 60 с, порог сторожа 180 с, таймаут основного приложения 90 с |
 | `SID_SYNC_ENABLED` / `SID_SYNC_POLL_SEC` | воркер ревокаций SSO-сессий (блокирует `--workers > 1`) |
 | `DELETION_SYNC_ENABLED` / `SIGNARIS_SERVICE_KEY` | deletion-sync из auth (тот же общий ключ — у sid-sync) |
 | `STAFF_SERVICE_KEY` | **отдельный** ключ метки hub (штат + реестр объектов): ошибка в общем ключе молча отняла бы отзыв SSO-сессий. Значение — CLAUDE.md → СЕКРЕТЫ |

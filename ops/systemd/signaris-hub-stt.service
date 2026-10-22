@@ -1,12 +1,16 @@
 # Распознавание речи для ассистента (волна 3).
 #
-# Отдельный юнит, а не поток в API: модель `small` даёт пик 759 МБ на машине
-# с ~1.1 ГБ свободных (замерено 2026-08-20). MemoryMax превращает нехватку
-# памяти в перезапуск ОДНОЙ фичи вместо выбора жертвы OOM-killer'ом среди
-# Postgres, Redis и двух приложений.
+# Отдельный юнит, а не поток в API: модель `small` держит ~640 МБ и на пике
+# расшифровки доходит до 741 МБ anon (замер 22.10, scripts/stt_measure.py).
+# MemoryMax превращает нехватку памяти в перезапуск ОДНОЙ фичи вместо выбора
+# жертвы OOM-killer'ом среди Postgres, Redis и двух приложений.
 #
-# staging: скопировать как signaris-hub-staging-stt.service, заменив пути
-# /opt/signaris-hub → /opt/signaris-hub-staging и порт 5071 → 5072.
+# Устанавливать СТРОГО после деплоя кода с пингами сторожа (app/services/stt/
+# watchdog.py): старый код WATCHDOG=1 не шлёт, и systemd убивал бы юнит каждые
+# 60 с. Откат — в обратном порядке: сначала этот файл, потом код.
+#
+# staging: собирать ops/systemd/make-staging-unit.py signaris-hub-stt.service 5071 5072
+# (пути /opt/signaris-hub → /opt/signaris-hub-staging и порт), не sed'ом.
 [Unit]
 Description=Signaris Hub — распознавание речи (faster-whisper)
 After=network.target
@@ -19,20 +23,41 @@ WorkingDirectory=/opt/signaris-hub
 EnvironmentFile=/opt/signaris-hub/.env
 # Кэш весов — рядом с приложением, а не в /root: юнит бежит от signaris.
 Environment=HF_HOME=/opt/signaris-hub/stt-cache
+# Модель — только из кэша. 09.09 первая команда скачала веса прямо в этом
+# процессе (hf_xet), сверху осталось ~230 МБ, и юнит шесть недель простоял за
+# memory.high (docs/tech-debt/incidents.md). Скачивает app.jobs.stt_fetch_model.
+Environment=HF_HUB_OFFLINE=1
 Environment=OMP_NUM_THREADS=2
+# Стеки всех потоков в журнал на SIGABRT сторожа — даже когда цикл событий встал.
+Environment=PYTHONFAULTHANDLER=1
+# --workers 1 обязателен: пинги сторожа принимаются только от главного
+# процесса (NotifyAccess=main), у воркеров-детей их бы отбрасывали.
 ExecStart=/opt/signaris-hub/.venv/bin/uvicorn app.stt_service:app \
-  --host 127.0.0.1 --port 5071 --workers 1
+  --host 127.0.0.1 --port 5071 --workers 1 --timeout-graceful-shutdown 5
 Restart=always
-RestartSec=10
+RestartSec=5
+# Сторож: юнит пингует systemd из цикла событий раз в 20 с и перестаёт, если
+# работа под замком идёт дольше stt_max_busy_sec. Нет пинга 60 с — SIGABRT,
+# через TimeoutAbortSec — SIGKILL, затем Restart. Дамп ядра не нужен
+# (обработчик дампов — apport): LimitCORE=0.
+WatchdogSec=60
+NotifyAccess=main
+TimeoutAbortSec=10
+LimitCORE=0
+# Стоп: незавершённая расшифровка держит выход интерпретатора — без короткого
+# потолка рестарт ждал 90 с (21.10).
+TimeoutStopSec=15
 # Расшифровка занимает оба ядра на несколько секунд — не даём ей душить API.
 CPUWeight=30
-# Память. RSS модели small — 759 МБ (замерено), но cgroup считает ЕЩЁ и
-# страничный кэш от чтения 500-мегабайтного файла весов: одного MemoryMax=900M
-# хватило ровно на то, чтобы OOM-killer снёс юнит сразу после загрузки.
-# MemoryHigh — мягкий порог: ядро сначала вытесняет кэш и тормозит процесс,
-# и только MemoryMax убивает. Разрыв между ними и есть место под кэш.
-MemoryHigh=800M
+# Память — ТОЛЬКО жёсткий потолок. MemoryHigh без swap — ловушка: anon выше
+# него ядро не вытесняет, а тормозит процесс бесконечно, и до MemoryMax дело
+# не доходит (так было 09.09–21.10). У MemoryMax ядро сначала вытесняет
+# страничный кэш весов и код, а убивает, только если не помещается anon, —
+# тогда Restart. 1100M = пик 741 МБ anon + запас под кэш и код; даже путь со
+# скачиванием в процессе (914 МБ, замер 22.10) помещается.
 MemoryMax=1100M
+# При общей нехватке памяти на машине первой жертвой станет STT, а не Postgres.
+OOMScoreAdjust=500
 
 [Install]
 WantedBy=multi-user.target

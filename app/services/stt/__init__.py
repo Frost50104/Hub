@@ -7,10 +7,20 @@ from app.services.stt.base import (
     STTError,
     STTNotConfigured,
     STTProvider,
+    STTTooLong,
+    STTUnavailable,
     Transcript,
 )
 
-__all__ = ["STTError", "STTNotConfigured", "STTProvider", "Transcript", "get_stt"]
+__all__ = [
+    "STTError",
+    "STTNotConfigured",
+    "STTProvider",
+    "STTTooLong",
+    "STTUnavailable",
+    "Transcript",
+    "get_stt",
+]
 
 
 def get_stt() -> STTProvider:

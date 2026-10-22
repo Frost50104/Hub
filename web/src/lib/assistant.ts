@@ -101,6 +101,8 @@ export interface AssistantStatus {
   can_act: boolean
   /** Голосовой ввод настроен на сервере. */
   voice: boolean
+  /** Предел длины записи в секундах; null или нет поля — без предела. */
+  voice_max_sec?: number | null
   /** Отчёты iiko подключены. */
   reports: boolean
 }

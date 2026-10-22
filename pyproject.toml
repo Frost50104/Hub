@@ -46,8 +46,16 @@ sentry = [
 # отдельным юнитом `app.stt_service` — веса модели не должны попадать в
 # API-процесс. Тянет ctranslate2 + PyAV (декодер webm/opus и mp4/aac), torch
 # НЕ требуется.
+#
+# Версии ТОЧНЫЕ: MemoryMax юнита и пределы длины откалиброваны замером на
+# этих версиях (scripts/stt_measure.py, 22.10), а деплой ставит пакеты с
+# --upgrade. Поднимать — вместе с повторным замером (docs/DEPLOY.md
+# §«Распознавание речи»). numpy не пиним: он нужен и pgvector.
 stt = [
-    "faster-whisper>=1.0",
+    "faster-whisper==1.2.1",
+    "ctranslate2==4.8.1",
+    "onnxruntime==1.29.0",
+    "av==18.1.0",
 ]
 
 [build-system]
