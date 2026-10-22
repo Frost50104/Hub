@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ctypes
+import sys
 from collections.abc import AsyncIterator
 
 import structlog
@@ -40,8 +42,25 @@ def _local_enabled() -> bool:
     return settings.stt_enabled and settings.stt_provider == "local"
 
 
+_PR_SET_DUMPABLE = 4
+
+
+def _forbid_core_dumps() -> None:
+    """Процесс держит в памяти записи и расшифровки сотрудников — дампу ядра на
+    диске им не место. `LimitCORE=0` в юните не спасает: обработчик дампов на
+    сервере — apport через pipe, а для pipe ядро этот лимит игнорирует. Учения
+    22.10: SIGABRT сторожа оставил в /var/crash отчёт на 175 МБ с дампом, и
+    процесс не успел умереть за `TimeoutAbortSec`. Флаг «не дампить» ядро
+    проверяет раньше, чем зовёт обработчик."""
+    if sys.platform != "linux":
+        return
+    with contextlib.suppress(OSError, AttributeError):
+        ctypes.CDLL(None, use_errno=True).prctl(_PR_SET_DUMPABLE, 0, 0, 0, 0)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    _forbid_core_dumps()
     tasks: list[asyncio.Task[None]] = []
     if _local_enabled():
         tasks.append(asyncio.create_task(local.preload()))

@@ -190,7 +190,7 @@ systemctl restart signaris-hub-stt
 4. Каталог образцов на сервере удалить.
 
 **Учения сторожа** (после установки юнита):
-- `kill -STOP $(systemctl show -p MainPID --value signaris-hub-stt)`. Ждём ≤ 80 с: `Watchdog timeout`, стеки faulthandler, новый PID. Ближайший прогон healthcheck (`systemctl start signaris-hub-healthcheck`) шлёт сообщение о перезапуске с причиной `watchdog`.
+- `kill -STOP $(systemctl show -p MainPID --value signaris-hub-stt)`. Ждём ≤ 80 с: `Watchdog timeout`, стеки faulthandler, новый PID. В `/var/crash` при этом не появляется ничего: процесс ставит себе `PR_SET_DUMPABLE=0`. До этой правки на учениях 22.10 apport записал отчёт на 175 МБ с дампом — `LimitCORE=0` для обработчика через pipe ядро игнорирует. Ближайший прогон healthcheck (`systemctl start signaris-hub-healthcheck`) шлёт сообщение о перезапуске с причиной `watchdog`.
 - Путь «занято»: `systemctl edit signaris-hub-stt` → `Environment=SIGNARIS_HUB_STT_MAX_BUSY_SEC=20` и `SIGNARIS_HUB_STT_MAX_AUDIO_SEC=130`, рестарт, затем 120-секундный образец → `stt.stuck` и перезапуск. Drop-in убрать: `systemctl revert signaris-hub-stt`.
 
 ## Offsite-бэкап (Timeweb S3, 01.09)

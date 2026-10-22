@@ -446,3 +446,18 @@ async def test_status_reports_voice_limit_only_for_local_stt(monkeypatch):
     monkeypatch.setenv("SIGNARIS_HUB_STT_ENABLED", "false")
     get_settings.cache_clear()
     assert (await status(_principal=None)).voice_max_sec is None
+
+
+async def test_service_forbids_core_dumps_before_anything_else(monkeypatch):
+    """Дамп процесса STT — это записи и расшифровки сотрудников на диске. Учения
+    22.10 показали, что `LimitCORE=0` при apport не работает, поэтому процесс
+    помечает себя «не дампить» сам, первым делом в lifespan."""
+    import app.stt_service as svc
+
+    monkeypatch.setenv("SIGNARIS_HUB_STT_ENABLED", "false")
+    monkeypatch.delenv("WATCHDOG_USEC", raising=False)
+    get_settings.cache_clear()
+    calls = []
+    monkeypatch.setattr(svc, "_forbid_core_dumps", lambda: calls.append(1))
+    async with svc.lifespan(svc.app):
+        assert calls == [1]

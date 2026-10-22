@@ -37,9 +37,11 @@ ExecStart=/opt/signaris-hub/.venv/bin/uvicorn app.stt_service:app \
 Restart=always
 RestartSec=5
 # Сторож: юнит пингует systemd из цикла событий раз в 20 с и перестаёт, если
-# работа под замком идёт дольше stt_max_busy_sec. Нет пинга 60 с — SIGABRT,
-# через TimeoutAbortSec — SIGKILL, затем Restart. Дамп ядра не нужен
-# (обработчик дампов — apport): LimitCORE=0.
+# работа под замком идёт дольше stt_max_busy_sec. Нет пинга 60 с — SIGABRT
+# (стеки faulthandler в журнал), через TimeoutAbortSec — SIGKILL, затем
+# Restart. Дампа ядра нет: процесс сам ставит себе PR_SET_DUMPABLE=0
+# (app/stt_service.py) — обработчик дампов здесь apport через pipe, и для
+# pipe ядро LimitCORE игнорирует. LimitCORE=0 — для хостов без pipe.
 WatchdogSec=60
 NotifyAccess=main
 TimeoutAbortSec=10
