@@ -949,6 +949,7 @@ export interface HomeData {
 export const CONTENT_TYPE_LABEL: Record<string, string> = {
   course: 'Курс',
   lesson: 'Урок',
+  course_lesson: 'Урок',
   material: 'Документ',
   library_material: 'Документ',
   news: 'Новость',

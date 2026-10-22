@@ -218,6 +218,57 @@ for url in $RACE_URLS; do
   fi
 done
 
+# ─── Конвейер видео (0066): GET /api/health/media ──────────────────────────
+#
+# `disabled` — env-рубильник выключен (прод до go-live), проверять нечего.
+# `attention` несёт коды (`ffmpeg_missing`, `stt_unconfigured`, `queue_stale`,
+# `lease_expired`, `failed_burst`, `hedra_key_missing`, `hedra_auth`).
+# Сообщение — когда тот же НАБОР кодов держится два прогона подряд (деплой с
+# рестартом воркера длится секунды), восстановление — сразу и только если о
+# сбое писали. Дефолт под `set -u` — ЯВНЫЙ.
+MEDIA_URLS=${HEALTHCHECK_MEDIA_URLS:-"https://hub.signaris.ru/api/health/media https://hub-staging.signaris.ru/api/health/media"}
+
+for url in $MEDIA_URLS; do
+  media_key=$(echo "$url" | sed -E 's#https?://##; s#[^A-Za-z0-9._-]+#_#g')
+  media_state="$STATE_DIR/media.$media_key.state"
+  media_alerted="$STATE_DIR/media.$media_key.alerted"
+  media_prev=$(cat "$media_state" 2>/dev/null || echo "|0")
+  media_prev_problem=${media_prev%|*}
+  media_prev_count=${media_prev##*|}
+  media_body=$(curl -s --max-time 15 "$url" 2>/dev/null || true)
+  media_status=$(echo "$media_body" | sed -n 's/.*"status":[[:space:]]*"\([a-z]*\)".*/\1/p' || true)
+  case "$media_status" in
+    ok|disabled) media_problem="" ;;
+    attention)
+      media_problem=$(echo "$media_body" | sed -n 's/.*"problems":[[:space:]]*\[\([^]]*\)\].*/\1/p' \
+        | tr -d '" ' | tr ',' '+')
+      [[ -n "$media_problem" ]] || media_problem="attention" ;;
+    # Старый код без ручки (404 на проде до go-live) — не сбой.
+    "") media_problem=$(echo "$media_body" | grep -q "Not Found" && echo "" || echo "unreachable") ;;
+    *) media_problem="unreachable" ;;
+  esac
+  if [[ -z "$media_problem" ]]; then
+    if [[ -f "$media_alerted" ]]; then
+      logger -t signaris-hub-health "MEDIA RECOVERED $url"
+      send_telegram "✅ [Hub] конвейер видео снова в порядке: $url"
+      rm -f "$media_alerted"
+    fi
+    echo "|0" > "$media_state"
+  else
+    if [[ "$media_problem" == "$media_prev_problem" ]]; then
+      media_count=$((media_prev_count + 1))
+    else
+      media_count=1
+    fi
+    echo "$media_problem|$media_count" > "$media_state"
+    logger -t signaris-hub-health "MEDIA ATTENTION $url $media_problem (consecutive=$media_count)"
+    if [[ "$media_count" -eq 2 ]]; then
+      send_telegram "🔴 [Hub] конвейер видео: $media_problem — $url (journalctl -u signaris-hub*-media)"
+      touch "$media_alerted"
+    fi
+  fi
+done
+
 # --- Распознавание речи (STT) ------------------------------------------------
 # Юнит слушает только 127.0.0.1, поэтому опрос — прямо на хосте, а не через
 # публичный адрес; проверяется только включённый юнит (на staging он выключен

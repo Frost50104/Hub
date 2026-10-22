@@ -48,7 +48,7 @@ from app.schemas.course import (
     VideoProgressBody,
 )
 from app.schemas.library import AudienceBody, StatusBody
-from app.services import audit, lifecycle
+from app.services import audit, course_index, lifecycle
 from app.services.audience_resolver import (
     learning_population_filter,
     set_object_audience,
@@ -64,6 +64,7 @@ from app.services.lesson_content import (
     collect_gate_blocks,
     collect_required_videos,
     collect_survey_ids,
+    collect_video_ids,
     estimate_reading_minutes,
     extract_lesson_text,
     has_check_question,
@@ -71,6 +72,7 @@ from app.services.lesson_content import (
     prepare_for_consumer,
     validate_lesson_content,
 )
+from app.services.media.lesson_media import video_tracks, videos_not_ready
 from app.services.notify_batch import notify_many
 from app.services.org_scope import get_profile
 from app.services.points import award
@@ -90,8 +92,6 @@ from app.services.video_progress import (
 router = APIRouter(tags=["learn-courses"])
 
 _OBJECT_TYPE = "course"
-
-
 
 
 async def _get_course_or_404(db: AsyncSession, course_id: UUID) -> Course:
@@ -269,11 +269,12 @@ async def _reindex(db: AsyncSession, course: Course) -> None:
         )
     else:
         await delete_document(db, object_type=_OBJECT_TYPE, object_id=course.id)
+    # Документы уроков с транскриптами видео (0066): живут только у
+    # опубликованных уроков опубликованного курса, без `published_at`.
+    await course_index.reindex_course_lessons(db, course)
 
 
-async def _update_course_progress(
-    db: AsyncSession, course: Course, profile_id: UUID
-) -> None:
+async def _update_course_progress(db: AsyncSession, course: Course, profile_id: UUID) -> None:
     lessons = await _published_lessons(db, course.id)
     total = len(lessons)
     completed = 0
@@ -333,10 +334,7 @@ async def list_courses(
     elif manage and role == "author":
         stmt = select(Course).where(
             (Course.created_by == principal.employee_id)
-            | (
-                (Course.status == "published")
-                & visible_filter(Course, profile_id or UUID(int=0))
-            )
+            | ((Course.status == "published") & visible_filter(Course, profile_id or UUID(int=0)))
         )
     else:
         stmt = select(Course).where(
@@ -654,9 +652,7 @@ async def create_course(
     return CourseResponse.model_validate(course)
 
 
-@router.post(
-    "/learn/courses/{course_id}/duplicate", response_model=CourseResponse, status_code=201
-)
+@router.post("/learn/courses/{course_id}/duplicate", response_model=CourseResponse, status_code=201)
 async def duplicate_course(
     course_id: UUID,
     principal: Principal = Depends(require_auth()),
@@ -674,9 +670,7 @@ async def duplicate_course(
     ):
         raise HTTPException(status_code=403, detail="Дублировать может автор курса или публикатор")
 
-    max_pos = (
-        await db.execute(select(func.coalesce(func.max(Course.position), 0)))
-    ).scalar_one()
+    max_pos = (await db.execute(select(func.coalesce(func.max(Course.position), 0)))).scalar_one()
     copy = Course(
         tenant_id=principal.tenant_id,
         title=f"{source.title} (копия)"[:255],
@@ -845,9 +839,7 @@ async def change_course_status(
     course = await _get_course_or_404(db, course_id)
     _require_manage(course, principal, role)
     if body.status == "published" and not await _published_lessons(db, course_id):
-        raise HTTPException(
-            status_code=422, detail="Опубликуйте хотя бы один урок внутри курса"
-        )
+        raise HTTPException(status_code=422, detail="Опубликуйте хотя бы один урок внутри курса")
 
     was_published = course.status == "published"
     lifecycle.transition(
@@ -865,9 +857,7 @@ async def change_course_status(
     if course.status == "published" and not was_published:
         # Уведомляем аудиторию (mandatory — особенно) о новом курсе.
         if course.audience_id is None:
-            rows = await db.execute(
-                select(EmployeeProfile.id).where(learning_population_filter())
-            )
+            rows = await db.execute(select(EmployeeProfile.id).where(learning_population_filter()))
         else:
             rows = await db.execute(
                 select(AudienceMember.profile_id).where(
@@ -997,9 +987,7 @@ async def create_lesson(
     _require_manage(course, principal, role)
     max_pos = (
         await db.execute(
-            select(func.max(CourseLesson.position)).where(
-                CourseLesson.course_id == course_id
-            )
+            select(func.max(CourseLesson.position)).where(CourseLesson.course_id == course_id)
         )
     ).scalar_one()
     lesson = CourseLesson(
@@ -1054,6 +1042,20 @@ async def update_lesson(
         and not (fields.get("pdf_media_id") or lesson.pdf_media_id)
     ):
         raise HTTPException(status_code=422, detail="Загрузите PDF для урока")
+    if fields.get("status") == "published":
+        # Видео в `processing`/`failed` (0066) — сотрудник получил бы
+        # плейсхолдер навсегда; фронт дублирует блокировкой кнопки.
+        content = fields.get("content") if fields.get("content") is not None else lesson.content
+        if fields.get("content_format", lesson.content_format) == "blocks" and content:
+            pending = await videos_not_ready(db, collect_video_ids(content))
+            if pending:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Дождитесь конвертации видео — в уроке есть файл, "
+                        "который ещё обрабатывается"
+                    ),
+                )
     for name, value in fields.items():
         setattr(lesson, name, value)
     audit.record(
@@ -1193,9 +1195,7 @@ async def get_lesson(
             tenant_id=lesson.tenant_id,
             course_id=lesson.course_id,
         )
-        await db.execute(
-            stmt.on_conflict_do_nothing(index_elements=["profile_id", "lesson_id"])
-        )
+        await db.execute(stmt.on_conflict_do_nothing(index_elements=["profile_id", "lesson_id"]))
         await db.commit()
         progress = await _progress_map(db, lesson.course_id, profile_id)
         my_progress = progress.get(lesson.id)
@@ -1215,12 +1215,16 @@ async def get_lesson(
                 .group_by(SurveyQuestion.survey_id)
             )
             survey_counts = {str(sid): count for sid, count in rows}
+        # Дорожки субтитров и статусы видео (0066) — серверные атрибуты нод.
+        track_urls, media_status = await video_tracks(db, collect_video_ids(lesson.content))
         # Менеджеру correct остаётся (редактор), потребителю — вырезается.
         content = prepare_for_consumer(
             lesson.content,
             sign_media_path,
             strip_correct=not manager,
             survey_counts=survey_counts,
+            track_urls=track_urls,
+            media_status=media_status,
         )
 
     pdf_url = None
@@ -1265,9 +1269,7 @@ async def get_lesson(
     )
 
 
-async def _locked_progress(
-    db: AsyncSession, profile_id: UUID, lesson_id: UUID
-) -> LessonProgress:
+async def _locked_progress(db: AsyncSession, profile_id: UUID, lesson_id: UUID) -> LessonProgress:
     row = (
         await db.execute(
             select(LessonProgress)
@@ -1478,11 +1480,7 @@ async def list_templates(
     db: AsyncSession = Depends(get_db),
 ) -> list[TemplateResponse]:
     await require_content_role(db, principal, "author")
-    rows = (
-        (await db.execute(select(LessonTemplate).order_by(LessonTemplate.title)))
-        .scalars()
-        .all()
-    )
+    rows = (await db.execute(select(LessonTemplate).order_by(LessonTemplate.title))).scalars().all()
     return [TemplateResponse.model_validate(t) for t in rows]
 
 

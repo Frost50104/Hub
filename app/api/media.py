@@ -16,17 +16,18 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, Response
 from signaris_auth import Principal
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import tenant_scoped_session
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.course import MediaFile
-from app.models.media import MEDIA_ROLES, MediaJob, MediaPart
+from app.models.media import MEDIA_ROLES, MediaJob, MediaPart, MediaTranscript
 from app.schemas.media import (
     CleanupDefaults,
     DerivedMediaOut,
+    JobCreate,
     MediaAdminSettingsOut,
     MediaAdminSettingsPut,
     MediaCapabilities,
@@ -36,6 +37,8 @@ from app.schemas.media import (
     MergeCreate,
     MergeOut,
     StoryboardParams,
+    TranscriptInfo,
+    TranscriptOut,
 )
 from app.services import audit
 from app.services.attachments import (
@@ -61,6 +64,7 @@ from app.services.learn_media import (
 from app.services.learn_settings import get_settings_dict, set_setting
 from app.services.media import gate as media_gate
 from app.services.media import jobs as media_jobs
+from app.services.media.autostart import maybe_enqueue_transcribe
 from app.services.media.images import aspect_ok, image_size_of
 from app.services.media.storage import derived_storage_key
 from app.services.timefmt import display_tz
@@ -206,6 +210,7 @@ async def upload_media(
     media.file_name = display_filename(file.filename or sanitized)
     media.size_bytes = written
     job: MediaJob | None = None
+    transcribe_job_id: str | None = None
     if kind == "video":
         if needs_normalize:
             # Файл НА МЕСТЕ приведёт к MP4 воркер; до `ready` его никто не видит
@@ -225,6 +230,12 @@ async def upload_media(
             # клиентскому числу верить нельзя. None (битый moov) — не ошибка
             # загрузки: гейт откатится на значение из block_state.
             media.duration_sec = mp4_duration_seconds(dest)
+            await db.flush()
+            transcribe = await maybe_enqueue_transcribe(
+                db, tenant_id=principal.tenant_id, media=media, requested_by=principal.employee_id
+            )
+            if transcribe is not None:
+                transcribe_job_id = str(transcribe.id)
     await db.commit()
     return {
         "id": str(media.id),
@@ -237,6 +248,7 @@ async def upload_media(
         "duration_sec": media.duration_sec,
         "url": sign_media_path(media.id) if media.status == "ready" else None,
         "normalize_job_id": str(job.id) if job is not None else None,
+        "transcribe_job_id": transcribe_job_id,
     }
 
 
@@ -457,6 +469,20 @@ async def _media_detail(db: AsyncSession, media: MediaFile) -> MediaDetailOut:
         .all()
     )
     job_rows = await media_jobs.list_for_media(db, [media.id, *(d.id for d in derived)])
+    transcript = (
+        await db.execute(
+            select(
+                MediaTranscript.language,
+                MediaTranscript.provider,
+                MediaTranscript.model,
+                MediaTranscript.updated_at,
+                func.length(MediaTranscript.text),
+            ).where(MediaTranscript.media_id == media.id)
+        )
+    ).one_or_none()
+    subtitle = next(
+        (d for d in reversed(derived) if d.kind == "subtitle" and d.status == "ready"), None
+    )
     return MediaDetailOut(
         id=media.id,
         kind=media.kind,
@@ -505,6 +531,16 @@ async def _media_detail(db: AsyncSession, media: MediaFile) -> MediaDetailOut:
             cleanup=False,
             compose=False,
         ),
+        transcript=TranscriptInfo(
+            language=transcript[0],
+            provider=transcript[1],
+            model=transcript[2],
+            updated_at=transcript[3],
+            chars=int(transcript[4] or 0),
+        )
+        if transcript is not None
+        else None,
+        subtitle_url=sign_media_path(subtitle.id) if subtitle is not None else None,
     )
 
 
@@ -638,6 +674,69 @@ async def cancel_media_job(
             media.status = "failed"
     await db.commit()
     return _job_out(job)
+
+
+@router.post("/learn/media/{media_id}/jobs", status_code=201, response_model=MediaJobOut)
+async def create_media_job(
+    media_id: UUID,
+    body: JobCreate,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> MediaJobOut:
+    """Запуск или повтор задания по кнопке. Предусловия проверяет API (очередь
+    без DAG): `transcribe` — готовое видео и настроенная расшифровка;
+    дубликат активного — 409 «уже выполняется»."""
+    await _require_pipeline(db, principal.tenant_id)
+    await require_content_role(db, principal, "author")
+    media = await db.get(MediaFile, media_id)
+    if media is None:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    if body.kind == "transcribe":
+        if media.kind != "video":
+            raise HTTPException(status_code=409, detail="Расшифровать можно только видео")
+        if media.status != "ready":
+            raise HTTPException(status_code=409, detail="Файл ещё обрабатывается")
+        if not media_gate.stt_configured():
+            raise HTTPException(
+                status_code=409,
+                detail="Расшифровка не настроена на сервере — сообщите администратору",
+            )
+    try:
+        job = await media_jobs.enqueue(
+            db,
+            tenant_id=principal.tenant_id,
+            media_id=media.id,
+            kind=body.kind,
+            params=body.params or {},
+            requested_by=principal.employee_id,
+        )
+    except media_jobs.JobConflict:
+        raise HTTPException(status_code=409, detail="Уже выполняется") from None
+    await db.commit()
+    return _job_out(job)
+
+
+@router.get("/learn/media/{media_id}/transcript", response_model=TranscriptOut)
+async def get_media_transcript(
+    media_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> TranscriptOut:
+    await _require_pipeline(db, principal.tenant_id)
+    await require_content_role(db, principal, "author")
+    row = await db.get(MediaTranscript, media_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Расшифровки ещё нет")
+    return TranscriptOut(
+        language=row.language,
+        chars=len(row.text),
+        provider=row.provider,
+        model=row.model,
+        updated_at=row.updated_at,
+        text=row.text,
+        segments=list(row.segments or []),
+        duration_sec=row.duration_sec,
+    )
 
 
 @router.get("/learn/media/{media_id}", response_model=MediaDetailOut)

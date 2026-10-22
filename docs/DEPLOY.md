@@ -210,7 +210,9 @@ systemctl restart signaris-hub-stt
 
 **Откат модуля:** `SIGNARIS_HUB_MEDIA_PIPELINE_ENABLED=false` + `systemctl stop signaris-hub-staging-media` — ручки конвейера 404, загрузка снова принимает только MP4 с faststart, данные и файлы остаются. Миграцию 0066 не откатываем (аддитивна).
 
-**Здоровье:** `GET /api/health/media` → `disabled` (env off) | `ok` | `attention` с кодами `ffmpeg_missing`, `stt_unconfigured`, `hedra_key_missing`, `queue_stale` (задание ждёт > 30 мин без `running`), `lease_expired`, `failed_burst` (≥ 3 за сутки), `hedra_auth`. В `scripts/healthcheck.sh` блок добавляется вместе с расшифровкой (инкремент 4).
+**Здоровье:** `GET /api/health/media` → `disabled` (env off) | `ok` | `attention` с кодами `ffmpeg_missing`, `stt_unconfigured`, `hedra_key_missing`, `queue_stale` (задание ждёт > 30 мин без `running`), `lease_expired`, `failed_burst` (≥ 3 за сутки), `hedra_auth`. `scripts/healthcheck.sh` опрашивает `HEALTHCHECK_MEDIA_URLS` (дефолт — оба env): сообщение в Telegram, когда тот же набор кодов держится два прогона подряд, восстановление — сразу; 404 от прода без кода (до go-live) сбоем не считается.
+
+**Расшифровка и STT-юнит.** Воркер staging ходит за сегментами в ПРОД-юнит `signaris-hub-stt` (`MEDIA_STT_URL=http://127.0.0.1:5071`, решение владельца 22.10): ручка `POST /transcribe-segments` появляется в юните только с выкатом прод-бэкенда (`deploy.sh prod` перезапускает STT и гоняет `stt_smoke`; конвейер на проде при этом остаётся выключен флагом). Пока прод-STT на старом коде, задания `transcribe` падают финально `stt_no_segments_route` (404 от юнита), видео остаются `ready`. Куски ≤ 55 с укладываются в `STT_MAX_AUDIO_SEC=60` и сторож `STT_MAX_BUSY_SEC=180`; между кусками пауза 1 с — голосовая команда ассистента ждёт максимум один кусок (~25 с при RTF 0,41). Сравнение с удалённым провайдером — `MEDIA_STT_PROVIDER=openai` + `MEDIA_STT_API_KEY`/`_BASE_URL` на staging (ключа пока нет).
 
 ## Offsite-бэкап (Timeweb S3, 01.09)
 

@@ -20,6 +20,7 @@ from app.services.attachments import absolute_path
 from app.services.learn_media import mp4_duration_seconds, mp4_has_faststart
 from app.services.learn_settings import get_settings_dict
 from app.services.media import merge, storage
+from app.services.media.autostart import maybe_enqueue_transcribe
 from app.services.media.pipeline.context import JobContext, JobFailed, JobResult
 
 KIND = "merge"
@@ -170,6 +171,10 @@ async def run(ctx: JobContext) -> JobResult:
         merged.duration_sec = duration
         merged.mime = "video/mp4"
         merged.status = "ready"
+        await db.flush()
+        await maybe_enqueue_transcribe(
+            db, tenant_id=ctx.spec.tenant_id, media=merged, requested_by=ctx.spec.requested_by
+        )
 
     return JobResult(
         result={

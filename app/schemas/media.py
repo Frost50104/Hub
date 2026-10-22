@@ -111,6 +111,30 @@ class MergeCreate(BaseModel):
     parts: list[MergePart] = Field(min_length=2, max_length=20)
 
 
+class JobCreate(BaseModel):
+    """`POST /learn/media/{id}/jobs` — запуск или повтор задания по кнопке.
+    Виды добавляются по мере инкрементов (`cleanup`, `compose` — позже)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["transcribe"]
+    params: dict[str, Any] | None = None
+
+
+class TranscriptInfo(BaseModel):
+    language: str
+    chars: int
+    provider: str
+    model: str
+    updated_at: datetime
+
+
+class TranscriptOut(TranscriptInfo):
+    text: str
+    segments: list[dict[str, Any]]
+    duration_sec: float | None
+
+
 class MediaPartOut(BaseModel):
     position: int
     source_media_id: UUID
@@ -160,6 +184,9 @@ class MediaDetailOut(BaseModel):
     derived: list[DerivedMediaOut]
     jobs: list[MediaJobOut]
     capabilities: MediaCapabilities
+    # Сводка расшифровки (текст — отдельной ручкой `/transcript`).
+    transcript: TranscriptInfo | None = None
+    subtitle_url: str | None = None
 
 
 class MergeOut(BaseModel):

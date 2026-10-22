@@ -19,6 +19,7 @@ from app.services.attachments import absolute_path
 from app.services.learn_media import mp4_duration_seconds, mp4_has_faststart
 from app.services.learn_settings import get_settings_dict
 from app.services.media import normalize, storage
+from app.services.media.autostart import maybe_enqueue_transcribe
 from app.services.media.pipeline.context import JobContext, JobFailed, JobResult
 
 KIND = "normalize"
@@ -105,6 +106,11 @@ async def run(ctx: JobContext) -> JobResult:
         media.duration_sec = duration
         media.file_name = _mp4_display_name(file_name)
         media.status = "ready"
+        await db.flush()
+        # Готовое видео урока сразу уходит на расшифровку (если настроено).
+        await maybe_enqueue_transcribe(
+            db, tenant_id=ctx.spec.tenant_id, media=media, requested_by=ctx.spec.requested_by
+        )
 
     cleanup = [src] if absolute_path(new_key) != src else []
     return JobResult(

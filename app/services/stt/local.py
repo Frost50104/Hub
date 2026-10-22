@@ -33,6 +33,7 @@ import asyncio
 import io
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -128,6 +129,54 @@ def _run(model: Any, samples: Any, language: str) -> str:
     return " ".join(s.text.strip() for s in segments).strip()
 
 
+def _run_segments(
+    model: Any,
+    samples: Any,
+    *,
+    language: str,
+    beam_size: int,
+    initial_prompt: str | None,
+    word_timestamps: bool,
+) -> list[dict[str, Any]]:
+    """Сегменты с таймкодами и метриками декодера — для субтитров и сторожа
+    галлюцинаций конвейера видео (0066). `condition_on_previous_text=False`:
+    на длинной записи одна галлюцинация иначе тянет за собой следующие куски
+    (правило Listen, `pipeline/asr.py`)."""
+    segments, _info = model.transcribe(
+        samples,
+        language=language,
+        beam_size=beam_size,
+        vad_filter=True,
+        word_timestamps=word_timestamps,
+        initial_prompt=initial_prompt or None,
+        condition_on_previous_text=False,
+    )
+    out: list[dict[str, Any]] = []
+    for seg in segments:
+        item: dict[str, Any] = {
+            "s": round(float(seg.start), 3),
+            "e": round(float(seg.end), 3),
+            "t": (seg.text or "").strip(),
+            "avg_logprob": getattr(seg, "avg_logprob", None),
+            "no_speech_prob": getattr(seg, "no_speech_prob", None),
+            "compression_ratio": getattr(seg, "compression_ratio", None),
+        }
+        words = getattr(seg, "words", None)
+        if word_timestamps and words:
+            item["w"] = [
+                [round(float(w.start), 3), round(float(w.end), 3), (w.word or "").strip()]
+                for w in words
+            ]
+        out.append(item)
+    return out
+
+
+@dataclass
+class SegmentsResult:
+    segments: list[dict[str, Any]]
+    duration_sec: float
+
+
 async def preload() -> None:
     """Загрузка модели при старте юнита; состояние читают `/health` и
     healthcheck. Запросы, пришедшие во время загрузки, ждут её на замке."""
@@ -162,13 +211,17 @@ async def preload() -> None:
 class LocalWhisper:
     name = "local"
 
-    async def transcribe(
+    async def _guarded(
         self,
         audio: bytes,
         *,
-        content_type: str,
-        is_abandoned: Callable[[], Awaitable[bool]] | None = None,
-    ) -> Transcript:
+        is_abandoned: Callable[[], Awaitable[bool]] | None,
+        runner: Callable[[Any, Any], Any],
+        too_long_text: str,
+    ) -> tuple[Any, float, float]:
+        """Общий путь команды и куска видео: замок, «занят» для сторожа,
+        декодирование, предел длины, работа в потоке. → (результат, секунд
+        звука, секунд работы)."""
         global _busy_since
         settings = get_settings()
         if _state in ("missing", "error"):
@@ -193,18 +246,75 @@ class LocalWhisper:
                 audio_sec = len(samples) / SAMPLE_RATE
                 if audio_sec > settings.stt_max_audio_sec:
                     limit = round(settings.stt_max_audio_sec)
-                    raise STTTooLong(f"Запись длиннее {limit} с — скажите короче")
+                    raise STTTooLong(too_long_text.format(limit=limit))
                 try:
-                    text = await asyncio.to_thread(_run, _model, samples, settings.stt_language)
+                    result = await asyncio.to_thread(runner, _model, samples)
                 except Exception as e:  # noqa: BLE001
                     raise STTError(f"Не удалось распознать запись: {e}") from None
             finally:
                 _busy_since = None
+        return result, audio_sec, time.monotonic() - started
+
+    async def transcribe(
+        self,
+        audio: bytes,
+        *,
+        content_type: str,
+        is_abandoned: Callable[[], Awaitable[bool]] | None = None,
+    ) -> Transcript:
+        language = get_settings().stt_language
+        text, audio_sec, seconds = await self._guarded(
+            audio,
+            is_abandoned=is_abandoned,
+            runner=lambda model, samples: _run(model, samples, language),
+            too_long_text="Запись длиннее {limit} с — скажите короче",
+        )
         # Текста в журнале нет: там рабочие команды сотрудников.
         log.info(
             "stt.transcribed",
             audio_sec=round(audio_sec, 1),
-            seconds=round(time.monotonic() - started, 1),
+            seconds=round(seconds, 1),
             **memory_mb(),
         )
         return Transcript(text=text, duration_sec=audio_sec)
+
+    async def transcribe_segments(
+        self,
+        audio: bytes,
+        *,
+        language: str,
+        beam_size: int = 1,
+        initial_prompt: str | None = None,
+        word_timestamps: bool = True,
+        is_abandoned: Callable[[], Awaitable[bool]] | None = None,
+    ) -> SegmentsResult:
+        """Кусок записи урока (≤ `stt_max_audio_sec`) → сегменты с таймкодами.
+        Те же замок, лимит и сторож, что у голосовой команды: конвейер видео
+        шлёт куски по одному с паузой, голос ассистента ждёт максимум один."""
+        beam = max(1, min(5, int(beam_size)))
+
+        def runner(model: Any, samples: Any) -> list[dict[str, Any]]:
+            return _run_segments(
+                model,
+                samples,
+                language=language,
+                beam_size=beam,
+                initial_prompt=initial_prompt,
+                word_timestamps=word_timestamps,
+            )
+
+        segments, audio_sec, seconds = await self._guarded(
+            audio,
+            is_abandoned=is_abandoned,
+            runner=runner,
+            too_long_text="Кусок длиннее {limit} с — конвейер режет записи короче",
+        )
+        log.info(
+            "stt.segments_transcribed",
+            audio_sec=round(audio_sec, 1),
+            seconds=round(seconds, 1),
+            segments=len(segments),
+            beam_size=beam,
+            **memory_mb(),
+        )
+        return SegmentsResult(segments=segments, duration_sec=audio_sec)

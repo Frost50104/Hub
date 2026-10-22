@@ -34,7 +34,7 @@ from app.config import Settings, get_settings
 from app.db import tenant_scoped_session
 from app.services.media import gate, jobs, storage
 from app.services.media.jobs import JobSpec
-from app.services.media.pipeline import merge_job, normalize_job
+from app.services.media.pipeline import merge_job, normalize_job, transcribe_job
 from app.services.media.pipeline.context import (
     JobCancelled,
     JobContext,
@@ -53,6 +53,7 @@ Handler = Any  # модуль с `run(ctx)` и `on_final_failure(ctx, db, error)
 HANDLERS: dict[str, Handler] = {
     normalize_job.KIND: normalize_job,
     merge_job.KIND: merge_job,
+    transcribe_job.KIND: transcribe_job,
 }
 
 

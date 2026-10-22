@@ -109,7 +109,9 @@ class Sampler:
 
 
 def emit(**row) -> None:
-    print(json.dumps(row, ensure_ascii=False))  # noqa: T201 — отчёт в stdout
+    # flush: под systemd stdout — файл, и без него строки фаз появились бы
+    # только в конце часового прогона.
+    print(json.dumps(row, ensure_ascii=False), flush=True)  # noqa: T201 — отчёт в stdout
 
 
 async def phase(name: str, sampler: Sampler, coro, **extra) -> object:

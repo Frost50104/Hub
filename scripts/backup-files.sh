@@ -36,10 +36,13 @@ for SRC in /opt/signaris-hub/attachments; do
   # два пути на один inode. Без -H снимок получал бы на каждую копию отдельный
   # файл, и проект по шаблону с видео на гигабайт стоил бы гигабайт в каждом
   # новом снимке. `--link-dest` с -H совместим.
+  # `.tmp` конвейера видео (0066) — промежуточные файлы заданий воркера:
+  # гигабайты, которые живут минуты; в снимке им не место.
   if [[ -d "$LATEST" ]]; then
-    rsync -aH --delete --link-dest="$(readlink -f "$LATEST")" "$SRC/" "$DEST/"
+    rsync -aH --delete --exclude='*/learn/media/.tmp/' \
+      --link-dest="$(readlink -f "$LATEST")" "$SRC/" "$DEST/"
   else
-    rsync -aH "$SRC/" "$DEST/"
+    rsync -aH --exclude='*/learn/media/.tmp/' "$SRC/" "$DEST/"
   fi
   ln -sfn "$DEST" "$LATEST"
   echo "files backup ok: $DEST ($(du -sh "$DEST" | cut -f1))"

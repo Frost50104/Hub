@@ -109,9 +109,7 @@ def _walk_with_extras(doc: dict[str, Any]) -> None:
             return {"type": "paragraph"}
         out = dict(node)
         if node.get("content"):
-            out["content"] = [
-                strip_extras(c) for c in node["content"] if isinstance(c, dict)
-            ]
+            out["content"] = [strip_extras(c) for c in node["content"] if isinstance(c, dict)]
         return out
 
     _walk(strip_extras(doc), NEWS_NODES, 0)
@@ -143,9 +141,7 @@ def collect_media_ids(payload: dict[str, Any]) -> set[str]:
 
     def fn(node: dict[str, Any]) -> None:
         attrs = node.get("attrs") or {}
-        if node.get("type") in ("figure", "video", "pdfEmbed") and _is_uuid(
-            attrs.get("mediaId")
-        ):
+        if node.get("type") in ("figure", "video", "pdfEmbed") and _is_uuid(attrs.get("mediaId")):
             found.add(attrs["mediaId"])
         if node.get("type") == "gallery":
             for item in attrs.get("items") or []:
@@ -206,6 +202,25 @@ def check_answer(payload: dict[str, Any], block_id: str, answer: int) -> bool | 
     return result.get("ok")
 
 
+def collect_video_ids(payload: dict[str, Any] | None) -> list[str]:
+    """mediaId всех видео-нод в порядке документа, в нижнем регистре, без
+    повторов — для дорожек субтитров, статусов и транскриптов урока (0066)."""
+    if not payload:
+        return []
+    ids: list[str] = []
+
+    def fn(node: dict[str, Any]) -> None:
+        attrs = node.get("attrs") or {}
+        if node.get("type") == "video" and _is_uuid(attrs.get("mediaId")):
+            mid = str(attrs["mediaId"]).lower()
+            if mid not in ids:
+                ids.append(mid)
+        return
+
+    transform_nodes(payload, fn)
+    return ids
+
+
 def collect_survey_ids(payload: dict[str, Any] | None) -> set[str]:
     """surveyId всех встроенных опросов — чтобы взять их размер одним запросом."""
     if not payload:
@@ -228,6 +243,8 @@ def prepare_for_consumer(
     *,
     strip_correct: bool = True,
     survey_counts: dict[str, int] | None = None,
+    track_urls: dict[str, str] | None = None,
+    media_status: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Подписанные URL в media-нодах + вырезанный correct у checkQuestion.
 
@@ -238,6 +255,12 @@ def prepare_for_consumer(
     «3 вопроса», а не отправляла в неизвестность. Значение вычисляется на
     каждой отдаче, поэтому осевшая в контенте копия устареть не может — как
     и подписанный src, она перезаписывается при чтении.
+
+    track_urls / media_status (0066): подписанный URL субтитров и статус файла
+    по `mediaId` видео (ключи — нижний регистр). Оба — СЕРВЕРНЫЕ атрибуты:
+    prosemirror их не объявляет и при сохранении выбросит, поэтому они
+    переписываются на каждой отдаче. `processing`/`failed` → `src=None`:
+    рендерер показывает плейсхолдер, а не битый `<video>`.
     """
 
     def fn(node: dict[str, Any]) -> dict[str, Any] | None:
@@ -245,6 +268,15 @@ def prepare_for_consumer(
         attrs = dict(node.get("attrs") or {})
         if ntype in ("figure", "video", "pdfEmbed") and _is_uuid(attrs.get("mediaId")):
             attrs["src"] = sign(UUID(attrs["mediaId"]))
+            if ntype == "video":
+                mid = str(attrs["mediaId"]).lower()
+                if media_status is not None:
+                    status = media_status.get(mid, "ready")
+                    attrs["status"] = status
+                    if status != "ready":
+                        attrs["src"] = None
+                if track_urls is not None:
+                    attrs["trackSrc"] = track_urls.get(mid)
             return {**node, "attrs": attrs}
         if ntype == "gallery":
             items = []

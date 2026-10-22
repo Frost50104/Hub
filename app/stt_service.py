@@ -68,9 +68,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if interval is not None:
         tasks.append(
             asyncio.create_task(
-                watchdog.run(
-                    local.busy_seconds, get_settings().stt_max_busy_sec, interval=interval
-                )
+                watchdog.run(local.busy_seconds, get_settings().stt_max_busy_sec, interval=interval)
             )
         )
     try:
@@ -126,3 +124,42 @@ async def transcribe(request: Request) -> dict[str, object]:
         log.warning("stt.failed", error=str(e))
         raise HTTPException(status_code=502, detail=str(e)) from None
     return {"text": result.text, "duration_sec": result.duration_sec}
+
+
+@app.post("/transcribe-segments")
+async def transcribe_segments(
+    request: Request,
+    language: str = "ru",
+    beam_size: int = 1,
+    word_timestamps: bool = True,
+    initial_prompt: str | None = None,
+) -> dict[str, object]:
+    """Кусок записи урока → сегменты с таймкодами и метриками декодера (0066).
+    Только локальный провайдер: удалённый конвейер зовёт сам. Текст в журнал
+    не пишется."""
+    audio = await request.body()
+    if not audio:
+        raise HTTPException(status_code=422, detail="Пустая запись")
+    try:
+        provider = get_stt()
+    except STTNotConfigured as e:
+        raise HTTPException(status_code=503, detail=str(e)) from None
+    if not isinstance(provider, local.LocalWhisper):
+        raise HTTPException(status_code=501, detail="Сегменты даёт только локальный провайдер")
+    try:
+        result = await provider.transcribe_segments(
+            audio,
+            language=language,
+            beam_size=beam_size,
+            initial_prompt=(initial_prompt or "")[:500] or None,
+            word_timestamps=word_timestamps,
+            is_abandoned=request.is_disconnected,
+        )
+    except STTTooLong as e:
+        raise HTTPException(status_code=413, detail=str(e)) from None
+    except STTUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from None
+    except STTError as e:
+        log.warning("stt.segments_failed", error=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from None
+    return {"segments": result.segments, "duration_sec": result.duration_sec}

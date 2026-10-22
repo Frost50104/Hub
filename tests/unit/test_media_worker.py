@@ -25,8 +25,8 @@ def test_classify_failure_final_vs_retry():
     assert worker.classify_failure(RuntimeError("boom"), attempts=2, max_attempts=2)[0] == "failed"
 
 
-def test_handlers_cover_increment_3_kinds():
-    assert set(worker.HANDLERS) == {"normalize", "merge"}
+def test_handlers_cover_implemented_kinds():
+    assert set(worker.HANDLERS) == {"normalize", "merge", "transcribe"}
 
 
 def test_ffmpeg_available_checks_both_binaries(monkeypatch):

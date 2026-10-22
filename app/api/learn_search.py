@@ -23,11 +23,14 @@ from app.services.org_scope import get_profile
 
 router = APIRouter(tags=["learn-search"])
 
+# Зеркало — `web/src/lib/learn.ts::CONTENT_TYPE_LABEL` (сторож в
+# tests/unit/test_course_index.py).
 OBJECT_TYPE_LABEL = {
     "library_material": "Библиотека",
     "news_post": "Новость",
     "survey": "Опрос",
     "course": "Курс",
+    "course_lesson": "Урок",
     "product": "Ассортимент",
 }
 
@@ -63,9 +66,7 @@ async def learn_search(
     profile_id = profile.id if profile else None
     query = q.strip()
 
-    fts = text(
-        "search_vector @@ websearch_to_tsquery('russian', :q)"
-    ).bindparams(q=query)
+    fts = text("search_vector @@ websearch_to_tsquery('russian', :q)").bindparams(q=query)
     stmt = (
         select(SearchDocument)
         .where(
@@ -73,9 +74,9 @@ async def learn_search(
             or_(fts, SearchDocument.title.ilike(f"%{query}%")),
         )
         .order_by(
-            text(
-                "ts_rank(search_vector, websearch_to_tsquery('russian', :rq)) DESC"
-            ).bindparams(rq=query),
+            text("ts_rank(search_vector, websearch_to_tsquery('russian', :rq)) DESC").bindparams(
+                rq=query
+            ),
             SearchDocument.published_at.desc().nulls_last(),
         )
         .limit(30)
