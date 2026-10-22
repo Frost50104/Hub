@@ -1,51 +1,13 @@
-import {
-  Bell,
-  CheckCircle2,
-  GraduationCap,
-  Home,
-  Menu,
-  Search,
-  Sparkles,
-  User,
-} from 'lucide-react'
+import { type LucideIcon } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 
 import { LearnMenuSheet } from './LearnMenuSheet'
 import { ADMIN_NAV, LEARN_MENU_ITEMS } from './learnNav'
+import { LEARN_TABS, TASK_TABS } from './mobileTabs'
 import { useUnreadCount } from '@/hooks/useNotifications'
 import { cn } from '@/lib/cn'
 import { type Space } from '@/lib/workspace'
-
-type TabDef =
-  | {
-      kind: 'link'
-      to: string
-      label: string
-      icon: typeof Home
-      end?: boolean
-      showUnreadDot?: boolean
-    }
-  | { kind: 'menu'; label: string; icon: typeof Home }
-
-const TASK_TABS: TabDef[] = [
-  { kind: 'link', to: '/', label: 'Главная', icon: Home, end: true },
-  { kind: 'link', to: '/my', label: 'Мои задачи', icon: CheckCircle2 },
-  { kind: 'link', to: '/inbox', label: 'Входящие', icon: Bell, showUnreadDot: true },
-  { kind: 'link', to: '/search', label: 'Поиск', icon: Search },
-  // Таб ведёт на объединённый экран «Профиль и настройки» (/settings).
-  { kind: 'link', to: '/settings', label: 'Профиль', icon: User },
-]
-
-// В learn-наборе вкладку «Профиль» заменяет «Меню» (sheet со всеми разделами);
-// Профиль доступен строкой внутри sheet'а.
-const LEARN_TABS: TabDef[] = [
-  { kind: 'link', to: '/learn', label: 'Витрина', icon: Sparkles, end: true },
-  { kind: 'link', to: '/learn/courses', label: 'Обучение', icon: GraduationCap },
-  { kind: 'link', to: '/inbox', label: 'Входящие', icon: Bell, showUnreadDot: true },
-  { kind: 'link', to: '/search', label: 'Поиск', icon: Search },
-  { kind: 'menu', label: 'Меню', icon: Menu },
-]
 
 // Подсветка «Меню» выводится из тех же массивов learnNav.ts, что и содержимое
 // sheet'а — списки не разъедутся. Детальные роуты без своей вкладки
@@ -57,7 +19,7 @@ const MENU_DESTINATIONS = [
   ...ADMIN_NAV.map((i) => i.to),
 ]
 
-function tabInner(Icon: typeof Home, label: string, dot: boolean) {
+function tabInner(Icon: LucideIcon, label: string, dot: boolean) {
   return (
     <>
       <span className="relative">

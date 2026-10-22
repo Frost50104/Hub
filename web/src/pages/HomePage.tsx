@@ -1,4 +1,4 @@
-import { LayoutGrid, Star } from 'lucide-react'
+import { Star } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
@@ -10,6 +10,7 @@ import { TeamLeadersCard } from '@/components/home/TeamLeadersCard'
 import { UserStatsCard } from '@/components/home/UserStatsCard'
 import { PushPermissionPrompt } from '@/components/PushPermissionPrompt'
 import { QueryError } from '@/components/QueryError'
+import { Avatar } from '@/components/ui/Avatar'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { MobileTaskRow } from '@/components/task/MobileTaskRow'
 import { CompactTaskRow } from '@/components/task/CompactTaskRow'
@@ -309,6 +310,7 @@ function MobileProjectRow({ project }: { project: Project }) {
 function MobileHome() {
   const { greetingText, projects, myTasks, toggleDone, openTask, projectLabel, raceNudge } =
     useHomeData('upcoming')
+  const me = useMe()
   const recentProjects = (projects.data ?? []).slice(0, 6)
   // Избранное — только на телефоне: на десктопе оно живёт в сайдбаре, а
   // сайдбара ниже 1024px нет, и до 30.09 избранное на телефоне не было собрано
@@ -322,14 +324,21 @@ function MobileHome() {
         topSlot={<SpaceSwitcher size="lg" />}
         eyebrow={todayLabel()}
         title={greetingText}
+        // Профиль — аватаром здесь: его вкладку в таб-баре «Задач» с 22.10
+        // заняла вкладка «Ассистент» (`mobileTabs.ts`).
         trailing={
-          <button
-            type="button"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-[10px] text-text2 hover:bg-glass hover:text-text"
-            aria-label="Виджеты"
+          <Link
+            to="/settings"
+            aria-label="Профиль и настройки"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60"
           >
-            <LayoutGrid className="h-5 w-5" />
-          </button>
+            <Avatar
+              name={me.data?.full_name}
+              email={me.data?.email}
+              src={me.data?.avatar_url}
+              className="h-9 w-9 text-[14px]"
+            />
+          </Link>
         }
       />
 
