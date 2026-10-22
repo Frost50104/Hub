@@ -8,6 +8,7 @@ GET /media/{id} авторизуется ПОДПИСЬЮ (выдана авто
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -19,6 +20,13 @@ from app.config import get_settings
 from app.db import tenant_scoped_session
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.course import MediaFile
+from app.schemas.media import (
+    CleanupDefaults,
+    MediaAdminSettingsOut,
+    MediaAdminSettingsPut,
+    StoryboardParams,
+)
+from app.services import audit
 from app.services.attachments import (
     content_disposition,
     display_filename,
@@ -36,7 +44,11 @@ from app.services.learn_media import (
     storage_key_for_media,
     verify_media_signature,
 )
-from app.services.learn_settings import get_settings_dict
+from app.services.learn_settings import get_settings_dict, set_setting
+from app.services.media import gate as media_gate
+from app.services.media import jobs as media_jobs
+from app.services.media.images import aspect_ok, image_size_of
+from app.services.timefmt import display_tz
 
 router = APIRouter(tags=["learn-media"])
 
@@ -87,9 +99,7 @@ async def upload_media(
     db.add(media)
     await db.flush()
 
-    storage_key, sanitized = storage_key_for_media(
-        principal.tenant_id, media.id, file.filename
-    )
+    storage_key, sanitized = storage_key_for_media(principal.tenant_id, media.id, file.filename)
     dest = absolute_path(storage_key)
     dest.parent.mkdir(parents=True, exist_ok=True)
 
@@ -192,3 +202,124 @@ async def serve_media(
             "Cache-Control": "private, max-age=3600",
         },
     )
+
+
+# ─── Конвейер видео (0066): настройки тенанта ────────────────────────────────
+# ВАЖНО: эти маршруты объявлены раньше любого будущего `/learn/media/{media_id}`
+# — иначе «admin» уйдёт в UUID-параметр и ответит 422 вместо настроек.
+
+_ADMIN = require_auth(roles=["admin"])
+_PIPELINE_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Не найдено")
+
+# поле PUT → ключ learning_settings
+_SETTING_KEYS: dict[str, str] = {
+    "enabled": "media_pipeline_enabled",
+    "auto_transcribe": "media_auto_transcribe",
+    "scene_media_id": "media_scene_media_id",
+    "avatar_monthly_minutes_cap": "media_avatar_monthly_minutes_cap",
+    "avatar_resolution": "media_avatar_resolution",
+    "cleanup_defaults": "media_cleanup_defaults",
+    "storyboard": "media_storyboard",
+    "glossary": "media_glossary",
+}
+
+
+def _month_start() -> datetime:
+    now = datetime.now(display_tz())
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+async def _admin_settings_out(db: AsyncSession, tenant_id: UUID) -> MediaAdminSettingsOut:
+    s = await get_settings_dict(db, tenant_id)
+    scene_raw = s.get("media_scene_media_id")
+    scene_id = UUID(str(scene_raw)) if scene_raw else None
+    used_sec = await media_jobs.monthly_avatar_seconds(db, month_start=_month_start())
+    return MediaAdminSettingsOut(
+        enabled=bool(s.get("media_pipeline_enabled", False)),
+        env_enabled=True,
+        avatar_env_enabled=media_gate.avatar_env_enabled(),
+        stt_configured=media_gate.stt_configured(),
+        auto_transcribe=bool(s.get("media_auto_transcribe", True)),
+        scene_media_id=scene_id,
+        scene_url=sign_media_path(scene_id) if scene_id else None,
+        # Появится вместе с заданием `avatar_test` (инкремент 7).
+        scene_test=None,
+        avatar_monthly_minutes_cap=int(s.get("media_avatar_monthly_minutes_cap", 30)),
+        avatar_resolution=str(s.get("media_avatar_resolution", "720p")),  # type: ignore[arg-type]
+        cleanup_defaults=CleanupDefaults(**(s.get("media_cleanup_defaults") or {})),
+        storyboard=StoryboardParams(**(s.get("media_storyboard") or {})),
+        glossary=str(s.get("media_glossary") or ""),
+        stt_provider=get_settings().media_stt_provider,
+        month_used_minutes=round(used_sec / 60, 1),
+        active_jobs=await media_jobs.count_active(db),
+    )
+
+
+async def _validate_scene(db: AsyncSession, media_id: UUID) -> None:
+    """Сцена гуся: картинка своего тенанта, готовая, 16:9 ±5 % (Hedra оживляет
+    картинку целиком, и именно этот кадр встанет вместо спикера)."""
+    media = await db.get(MediaFile, media_id)
+    if media is None or media.kind != "image":
+        raise HTTPException(status_code=422, detail="Сцена гуся должна быть картинкой")
+    if media.status != "ready":
+        raise HTTPException(status_code=422, detail="Картинка ещё обрабатывается")
+    try:
+        size = image_size_of(absolute_path(media.storage_key))
+    except OSError:
+        raise HTTPException(status_code=422, detail="Файл сцены не найден на сервере") from None
+    if size is not None and not aspect_ok(size):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Нужна сцена 16:9 — у картинки {size[0]}×{size[1]}",
+        )
+
+
+@router.get("/learn/media/admin/settings", response_model=MediaAdminSettingsOut)
+async def get_media_admin_settings(
+    principal: Principal = Depends(_ADMIN),
+    db: AsyncSession = Depends(get_db),
+) -> MediaAdminSettingsOut:
+    if not media_gate.env_enabled():
+        raise _PIPELINE_NOT_FOUND
+    return await _admin_settings_out(db, principal.tenant_id)
+
+
+@router.put("/learn/media/admin/settings", response_model=MediaAdminSettingsOut)
+async def put_media_admin_settings(
+    body: MediaAdminSettingsPut,
+    principal: Principal = Depends(_ADMIN),
+    db: AsyncSession = Depends(get_db),
+) -> MediaAdminSettingsOut:
+    """Частичное обновление по ключам; каждое изменение — строка аудита.
+
+    Тумблер тенанта живёт здесь всегда (пока env включён): иначе включить
+    модуль неоткуда. Выключение ничего не удаляет — очередь просто перестаёт
+    принимать задания, а готовые файлы остаются.
+    """
+    if not media_gate.env_enabled():
+        raise _PIPELINE_NOT_FOUND
+    changes = body.model_dump(exclude_unset=True)
+    if "scene_media_id" in changes and changes["scene_media_id"] is not None:
+        await _validate_scene(db, changes["scene_media_id"])
+    current = await get_settings_dict(db, principal.tenant_id)
+    diff: dict[str, dict[str, object]] = {}
+    for field, value in changes.items():
+        key = _SETTING_KEYS[field]
+        stored = str(value) if isinstance(value, UUID) else value
+        old = current.get(key)
+        if old == stored:
+            continue
+        await set_setting(db, principal.tenant_id, key, stored)
+        diff[field] = {"old": old, "new": stored}
+    if diff:
+        audit.record(
+            db,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.employee_id,
+            action="update",
+            object_type="media_settings",
+            object_label="Конвейер видео",
+            diff=diff,
+        )
+        await db.commit()
+    return await _admin_settings_out(db, principal.tenant_id)

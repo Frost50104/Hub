@@ -21,6 +21,7 @@ from app.models.library import (
     MaterialVersion,
     ViewHistory,
 )
+from app.models.media import MediaJob, MediaPart, MediaStoryboard, MediaTranscript
 from app.models.news import NewsAcknowledgement, NewsComment, NewsPost, NewsReaction
 from app.models.notification import Notification, NotificationPreferences
 from app.models.org import (
@@ -98,6 +99,10 @@ __all__ = [
     "FranchiseeGroupMember",
     "HrSyncState",
     "LearningSettings",
+    "MediaJob",
+    "MediaPart",
+    "MediaStoryboard",
+    "MediaTranscript",
     "LessonProgress",
     "LessonTemplate",
     "LibraryMaterial",

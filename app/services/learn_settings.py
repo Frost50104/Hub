@@ -50,6 +50,33 @@ DEFAULTS: dict[str, Any] = {
     # библиотека появляется там, где её включил hub-admin. «Замок» шаблонов
     # от рубильника НЕ зависит: выключение не должно открывать их спискам.
     "project_templates_enabled": False,
+    # Конвейер видео урока (0066): тенантный рубильник + настройки монтажа.
+    # Дефолт false — модуль появляется там, где его включил hub-admin.
+    "media_pipeline_enabled": False,
+    # Каждое загруженное видео получает субтитры и попадает в поиск; чистовик
+    # и монтаж — только по кнопке.
+    "media_auto_transcribe": True,
+    # Сцена-референс гуся 16:9 (id картинки в media_files, role='scene').
+    "media_scene_media_id": None,
+    # Лимит минут гуся в месяц (Hedra платная); резерв списывается при заказе.
+    "media_avatar_monthly_minutes_cap": 30,
+    "media_avatar_resolution": "720p",
+    # Раскадровка: порог доли кадра под лицом, минимальный отрезок, склейка зазоров.
+    "media_storyboard": {"face_ratio_thr": 0.12, "min_segment_sec": 4, "bridge_gap_sec": 2},
+    # Чистовик: паузы длиннее порога ужимаются до keep_sec с полями margin_sec.
+    "media_cleanup_defaults": {
+        "min_pause_sec": 1.5,
+        "keep_sec": 0.7,
+        "margin_sec": 0.2,
+        "denoise": "afftdn",
+        "loudnorm_i": -16,
+        "loudnorm_tp": -1.5,
+        "loudnorm_lra": 11,
+        "fps_cap": 30,
+        "scale_cap": 1080,
+    },
+    # Слова для initial_prompt Whisper: названия, аббревиатуры, точки.
+    "media_glossary": "Signaris, Hub",
 }
 
 _ALLOWED_KEYS = frozenset(DEFAULTS)

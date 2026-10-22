@@ -255,6 +255,46 @@ class Settings(BaseSettings):
     stt_api_key: str | None = Field(default=None)
     stt_base_url: str | None = Field(default=None)
 
+    # Конвейер видео урока (0066): субтитры, чистовик, сборка из записей,
+    # монтаж с гусём. Env-рубильник модуля; второй — тенантный ключ
+    # `media_pipeline_enabled` в learning_settings. Выключено = ручки 404,
+    # UI невидим, воркер `signaris-hub-media` спит, данные остаются.
+    media_pipeline_enabled: bool = Field(default=False)
+    media_ffmpeg_bin: str = Field(default="ffmpeg")
+    media_ffprobe_bin: str = Field(default="ffprobe")
+    # x264 на двух ядрах VPS: один поток, чтобы API не голодал (замер — инкремент 3).
+    media_ffmpeg_threads: int = Field(default=1, ge=1, le=8)
+    media_ffmpeg_timeout_factor: float = Field(default=6.0)
+    media_worker_poll_sec: float = Field(default=5.0)
+    media_job_lease_sec: int = Field(default=900, ge=60)
+    # Прод и staging живут на одной машине и оба имеют воркер: общий flock,
+    # чтобы два x264 плюс STT не положили API.
+    media_host_lock_path: Path = Field(default=Path("/run/lock/signaris-hub-media.lock"))
+    media_tmp_max_age_hours: int = Field(default=24)
+    # Расшифровка длинных файлов. `local` — наш STT-юнит через НОВУЮ ручку
+    # `/transcribe-segments`; URL без значения по умолчанию НАРОЧНО: `stt_url`
+    # по умолчанию указывает на ПРОД-юнит даже из staging `.env`, и воркер
+    # staging молча грузил бы прод. None при `local` = задания `transcribe`
+    # падают финально `stt_not_configured`, код в `/api/health/media`.
+    media_stt_provider: str = Field(default="local")
+    media_stt_url: str | None = Field(default=None)
+    media_stt_api_key: str | None = Field(default=None)
+    media_stt_base_url: str | None = Field(default=None)
+    media_stt_model: str = Field(default="whisper-1")
+    # Куски ≤ 55 с укладываются в `stt_max_audio_sec` юнита и держат замок
+    # ≈ 23 с; пауза между кусками пускает голосовой ввод ассистента.
+    media_stt_chunk_sec: float = Field(default=55.0, gt=0, le=60)
+    media_stt_beam_size: int = Field(default=1, ge=1, le=5)
+    media_stt_pause_sec: float = Field(default=1.0, ge=0)
+    # Гусь (Hedra v3): отдельный выключатель — staging ходит в Hedra за
+    # реальные деньги только с явного флага и своего ключа.
+    media_avatar_enabled: bool = Field(default=False)
+    hedra_api_key: str | None = Field(default=None)
+    hedra_base_url: str = Field(default="https://api.hedra.com/v3")
+    hedra_timeout_sec: float = Field(default=60.0)
+    hedra_poll_sec: float = Field(default=10.0)
+    hedra_job_max_wait_sec: int = Field(default=1800)
+
     # Public links (3.6.12) — view-only no-auth deep-links to a task/project.
     # Feature-flag so we can kill-switch the entire surface without a redeploy.
     public_links_enabled: bool = Field(default=True)

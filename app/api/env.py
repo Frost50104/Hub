@@ -21,6 +21,8 @@ from app.models.race import RaceContest, RaceSyncState
 from app.models.shadow import ShadowTenant
 from app.services import hr_state
 from app.services.iiko import service as iiko_service
+from app.services.media import gate as media_gate
+from app.services.media import health as media_health
 from app.services.push_sender import vapid_status
 from app.services.race import gate as race_gate
 from app.services.race import health as race_health
@@ -166,4 +168,32 @@ async def race_health_view() -> RaceHealthResponse:
             problems.update(race_health.health_problems(snapshot, now=now, tz=tz))
     return RaceHealthResponse(
         status="attention" if problems else "ok", problems=sorted(problems), checked_at=now
+    )
+
+
+class MediaHealthResponse(BaseModel):
+    """Конвейер видео урока (0066): воркер, очередь, конфигурация расшифровки
+    и гуся. Только коды: ручка анонимная."""
+
+    status: str  # ok | attention | disabled
+    problems: list[str]
+    checked_at: datetime
+
+
+@router.get("/health/media", response_model=MediaHealthResponse)
+async def media_health_view() -> MediaHealthResponse:
+    """`scripts/healthcheck.sh` шлёт алерт при смене набора проблем.
+
+    `disabled` — env-рубильник `SIGNARIS_HUB_MEDIA_PIPELINE_ENABLED` выключен
+    (прод до go-live): проверять нечего. Иначе — коды
+    `media_health.health_problems` по снимку очереди под bypass.
+    """
+    now = datetime.now(UTC)
+    if not media_gate.env_enabled():
+        return MediaHealthResponse(status="disabled", problems=[], checked_at=now)
+    async with tenant_scoped_session(None, bypass_rls=True) as db:
+        snapshot = await media_health.collect_snapshot(db, settings=get_settings(), now=now)
+    problems = media_health.health_problems(snapshot, now=now)
+    return MediaHealthResponse(
+        status="attention" if problems else "ok", problems=problems, checked_at=now
     )

@@ -21,6 +21,7 @@ from app.config import get_settings
 from app.deps import get_db, require_auth, require_auth_any
 from app.services.employee_profiles import ensure_profile_for_principal
 from app.services.guides import GuideLink, guides_for_role
+from app.services.media import gate as media_gate
 from app.services.org_scope import effective_content_role, effective_org_role
 from app.services.personal_projects import ensure_personal_project
 from app.services.project_access import can_create_project, is_hub_admin
@@ -57,6 +58,14 @@ class MeFeatures(BaseModel):
     # Личные напоминания по задачам (0062): env-выключатель, тенантного нет —
     # это ядро трекера. Выключено = строки «Напомнить» и вида в настройках нет.
     task_reminders: bool = False
+    # Конвейер видео урока (0066): `media_pipeline` — env И тенант (кнопки в
+    # редакторе, MOV/WebM, субтитры); `_admin` — env-флаг включён и человек
+    # hub-admin: вкладка «Видео» в «Управлении» видна, пока тумблер тенанта
+    # выключен, иначе включить неоткуда — но НЕ на проде, где env выключен;
+    # `media_avatar` — гусь (флаг + ключ Hedra + тенант).
+    media_pipeline: bool = False
+    media_pipeline_admin: bool = False
+    media_avatar: bool = False
 
 
 class MeResponse(BaseModel):
@@ -147,6 +156,11 @@ async def get_me(
         if hub_role is not None
         else False
     )
+    media_on = (
+        await media_gate.pipeline_enabled_for(db, principal.tenant_id)
+        if hub_role is not None
+        else False
+    )
     return MeResponse(
         employee_id=principal.employee_id,
         email=principal.email,
@@ -166,6 +180,9 @@ async def get_me(
             project_templates=templates_on,
             project_templates_admin=templates_gate.env_enabled() and is_hub_admin(principal),
             task_reminders=get_settings().task_reminders_enabled,
+            media_pipeline=media_on,
+            media_pipeline_admin=media_gate.env_enabled() and is_hub_admin(principal),
+            media_avatar=media_on and media_gate.avatar_env_enabled(),
         ),
     )
 

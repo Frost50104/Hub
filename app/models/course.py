@@ -169,12 +169,44 @@ class LessonTemplate(Base):
 class MediaFile(Base):
     __tablename__ = "media_files"
     __table_args__ = (
-        CheckConstraint("kind IN ('image', 'video', 'pdf')", name="ck_media_files_kind"),
+        CheckConstraint(
+            "kind IN ('image', 'video', 'pdf', 'subtitle')", name="ck_media_files_kind"
+        ),
+        CheckConstraint(
+            "status IN ('ready', 'processing', 'failed')", name="ck_media_files_status"
+        ),
+        CheckConstraint(
+            "role IN ('content', 'part', 'insert', 'scene')", name="ck_media_files_role"
+        ),
+        CheckConstraint(
+            "variant IS NULL OR variant IN ('cleaned', 'composed')",
+            name="ck_media_files_variant",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    # `subtitle` (0066) — VTT, отдаётся той же ручкой, что и видео. Колонка
+    # String(8): именно `subtitle`, не `subtitles`.
     kind: Mapped[str] = mapped_column(String(8), nullable=False)
+    # Конвейер видео (0066). `status` — `processing`, пока файл НА МЕСТЕ
+    # нормализуется (MOV/WebM) или собирается из записей: отдача отвечает 409,
+    # в урок он не публикуется; после `ready` файл неизменяем. `role` — что это
+    # за загрузка: контент урока / часть сборки / вставка поверх голоса / сцена
+    # гуся; всё, кроме `content`, в уроки не вставляется. Производные файлы
+    # (чистовик, монтаж, VTT) — всегда НОВЫЕ строки с `source_media_id`.
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="ready", server_default=text("'ready'")
+    )
+    role: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="content", server_default=text("'content'")
+    )
+    source_media_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("media_files.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    variant: Mapped[str | None] = mapped_column(String(16), nullable=True)
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     mime: Mapped[str] = mapped_column(String(128), nullable=False)
