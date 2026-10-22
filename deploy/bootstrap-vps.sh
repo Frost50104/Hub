@@ -24,6 +24,7 @@ apt-get install -y -qq \
   certbot python3-certbot-nginx \
   python3.12 python3.12-venv python3-pip \
   nodejs npm \
+  ffmpeg \
   sshpass rsync curl ca-certificates gnupg
 
 echo "==> system user 'signaris'"

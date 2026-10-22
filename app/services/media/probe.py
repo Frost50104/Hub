@@ -21,6 +21,8 @@ class Probe:
     has_audio: bool
     container: str
     size_bytes: int | None
+    sample_rate: int | None = None
+    channels: int | None = None
 
     @property
     def has_video(self) -> bool:
@@ -105,4 +107,13 @@ def parse_ffprobe(data: dict[str, Any]) -> Probe:
         has_audio=audio is not None,
         container=_container(fmt),
         size_bytes=size,
+        sample_rate=_int(audio.get("sample_rate")) if audio else None,
+        channels=_int(audio.get("channels")) if audio else None,
     )
+
+
+def _int(raw: Any) -> int | None:
+    try:
+        return int(raw) if raw not in (None, "") else None
+    except (TypeError, ValueError):
+        return None

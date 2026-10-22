@@ -241,6 +241,44 @@ async def retry_later(
     )
 
 
+async def release(db: AsyncSession, job_id: UUID, *, now: datetime | None = None) -> None:
+    """Воркер останавливается (SIGTERM при деплое): вернуть задание в очередь
+    СРАЗУ и не считать попытку — это не провал задания."""
+    now = _now(now)
+    await db.execute(
+        update(MediaJob)
+        .where(MediaJob.id == job_id, MediaJob.status == "running")
+        .values(
+            status="queued",
+            run_after=now,
+            lease_until=None,
+            worker_id=None,
+            attempts=func.greatest(MediaJob.attempts - 1, 0),
+            error="worker_stopped",
+        )
+    )
+
+
+async def list_for_media(
+    db: AsyncSession, media_ids: list[UUID], *, limit: int = 20
+) -> list[MediaJob]:
+    """Последние задания по набору медиа (само видео + производные)."""
+    if not media_ids:
+        return []
+    return list(
+        (
+            await db.execute(
+                select(MediaJob)
+                .where(MediaJob.media_id.in_(media_ids))
+                .order_by(MediaJob.created_at.desc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
 async def requeue_expired(
     db: AsyncSession,
     *,

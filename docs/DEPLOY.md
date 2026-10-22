@@ -117,6 +117,7 @@
 |---|---|---|
 | `signaris-hub[-staging]-extraction.service` | long-running воркер `app/workers/extraction.py` (извлечение текста + RAG-reconcile) | оба env |
 | `signaris-hub-stt.service` | faster-whisper `small` для голосового ввода ассистента (`app/stt_service.py`): модель грузится при старте и не выгружается, только из кэша (`HF_HUB_OFFLINE=1`), `MemoryMax=1100M` без `MemoryHigh`, сторож `WatchdogSec=60` — см. §«Распознавание речи» | **только прод** — одна STT-машина на хост, staging-юнит disable-нут, на staging `STT_ENABLED=false` |
+| `signaris-hub[-staging]-media.service` | воркер конвейера видео урока `app/workers/media.py` (0066): нормализация MOV/WebM, сборка из записей, дальше — расшифровка/чистовик/монтаж. Один ffmpeg на машину (host-wide flock `MEDIA_HOST_LOCK_PATH`), `CPUWeight=20`, `Nice=10`, `MemoryMax=900M` без `MemoryHigh`, `KillMode=mixed` — см. §«Конвейер видео» | **только staging до go-live**; при `MEDIA_PIPELINE_ENABLED=false` процесс спит |
 | `signaris-hub[-staging]-{due-soon,overdue,course-due-soon,review-due,inactivity,automations,race-sync,race-close,sites-sync}.timer` | cron-джобы `app/jobs/*` (расписание — `docs/PUSH.md`); `race-*` на staging стоят, но выходят по `RACE_SYNC_ENABLED=false`; `sites-sync` на staging — dry-run по `SITES_SYNC_ENABLED=false` | оба env |
 | `signaris-hub-backup.timer` / `backup-cleanup.timer` / `backup-files.timer` / `healthcheck.timer` | общие для двух env | прод-хост |
 
@@ -192,6 +193,24 @@ systemctl restart signaris-hub-stt
 **Учения сторожа** (после установки юнита):
 - `kill -STOP $(systemctl show -p MainPID --value signaris-hub-stt)`. Ждём ≤ 80 с: `Watchdog timeout`, стеки faulthandler, новый PID. В `/var/crash` при этом не появляется ничего: процесс ставит себе `PR_SET_DUMPABLE=0`. До этой правки на учениях 22.10 apport записал отчёт на 175 МБ с дампом — `LimitCORE=0` для обработчика через pipe ядро игнорирует. Ближайший прогон healthcheck (`systemctl start signaris-hub-healthcheck`) шлёт сообщение о перезапуске с причиной `watchdog`.
 - Путь «занято»: `systemctl edit signaris-hub-stt` → `Environment=SIGNARIS_HUB_STT_MAX_BUSY_SEC=20` и `SIGNARIS_HUB_STT_MAX_AUDIO_SEC=130`, рестарт, затем 120-секундный образец → `stt.stuck` и перезапуск. Drop-in убрать: `systemctl revert signaris-hub-stt`.
+
+## Конвейер видео урока (ffmpeg, 0066; staging с 22.10)
+
+Устройство — `docs/ARCHITECTURE.md` §«Медиа», план — `~/.claude/plans/a-b-validated-aurora.md`. Здесь — процедуры.
+
+**Зависимости хоста.** `apt-get install -y ffmpeg` (Ubuntu 24.04 → 7:6.1.1; `deploy/bootstrap-vps.sh` ставит его новым машинам). Проверка сборки: `ffmpeg -hide_banner -filters | grep -E ' (afftdn|loudnorm|silencedetect|astats|aselect|concat) '` и `-encoders | grep -E ' (libx264|aac) '`. Python-зависимостей новых нет.
+
+**Юнит.** `ops/systemd/signaris-hub-media.service` (прод-образец) → staging-вариант ТОЛЬКО генератором: `python3 ops/systemd/make-staging-unit.py signaris-hub-media.service 5059 5060 > /tmp/signaris-hub-staging-media.service` (портов в файле нет, аргументы нужны проверке путей), `scp` в `/etc/systemd/system/`, `systemd-analyze verify`, `daemon-reload`, `enable --now`. Юнит ставится **только там, где модуль включён** — на проде до go-live его нет. Деплой (`deploy.sh`) делает `try-restart` установленного юнита и гоняет `app.jobs.media_smoke` (ffmpeg ≥ 6, фильтры и кодеки, синтетический рендер через боевой `filter_script`, состояние STT/Hedra, протухшие аренды); провал — WARNING, деплой не прерывается.
+
+**Рестарт посреди рендера безопасен:** SIGTERM главному процессу (`KillMode=mixed`) → воркер убивает ffmpeg, задание возвращается в очередь без потери попытки (`jobs.release`, `error=worker_stopped`) и начинается заново на новом коде; временная папка `<attachments_root>/<tenant>/learn/media/.tmp/<job>/` чистится в `finally`, остатки после SIGKILL убирает `sweep_orphan_tmp` при старте (старше `MEDIA_TMP_MAX_AGE_HOURS=24`). `.tmp` исключать из бэкапа файлов.
+
+**Один ffmpeg на машину.** Прод и staging делят два ядра и STT; воркеры обоих env берут один `flock` на `MEDIA_HOST_LOCK_PATH` (`/run/lock/signaris-hub-media.lock`, оба юнита — от `signaris`). Второй воркер в это время не берёт задания из очереди вовсе (`run_once` → `None`), и `queue_stale` в здоровье может загореться на одном env, пока другой рендерит часовую запись, — это ожидаемо.
+
+**Замер и лимиты.** `MemoryMax=900M`, `CPUWeight=20`, `MEDIA_FFMPEG_THREADS=1` — гипотезы до замера `scripts/media_measure.py` (запуск — в докстринге скрипта: временный юнит `systemd-run` с окружением staging, записи UPPETIT читаются из прод-хранилища на месте, параллельно меряется p95 `GET /api/env` прода). Строка `summary` даёт `recommended_memory_max_mb` = пик cgroup + 300; `render_t1`/`render_t2` — скорость против стоимости для API. Результаты фиксируются в юните и здесь.
+
+**Откат модуля:** `SIGNARIS_HUB_MEDIA_PIPELINE_ENABLED=false` + `systemctl stop signaris-hub-staging-media` — ручки конвейера 404, загрузка снова принимает только MP4 с faststart, данные и файлы остаются. Миграцию 0066 не откатываем (аддитивна).
+
+**Здоровье:** `GET /api/health/media` → `disabled` (env off) | `ok` | `attention` с кодами `ffmpeg_missing`, `stt_unconfigured`, `hedra_key_missing`, `queue_stale` (задание ждёт > 30 мин без `running`), `lease_expired`, `failed_burst` (≥ 3 за сутки), `hedra_auth`. В `scripts/healthcheck.sh` блок добавляется вместе с расшифровкой (инкремент 4).
 
 ## Offsite-бэкап (Timeweb S3, 01.09)
 

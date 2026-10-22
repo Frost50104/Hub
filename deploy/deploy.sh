@@ -197,6 +197,18 @@ deploy_backend() {
   $SSH_CMD "if systemctl is-active --quiet ${SERVICE}-stt; then \
     cd ${REMOTE_BASE} && ./.venv/bin/python -m app.jobs.stt_smoke --unit ${SERVICE}-stt.service; fi" \
     || echo "WARNING: распознавание речи не прошло проверку после деплоя — journalctl -u ${SERVICE}-stt -n 50"
+
+  # Конвейер видео (0066) — четвёртый процесс с тем же кодом (app.workers.media).
+  # Юнит ставится руками и только там, где модуль включён (staging до go-live).
+  # try-restart посреди рендера безопасен: SIGTERM возвращает задание в очередь
+  # без потери попытки, и воркер начинает его заново на новом коде.
+  echo "==> Restarting ${SERVICE}-media (if installed) + smoke..."
+  $SSH_CMD "if systemctl list-unit-files ${SERVICE}-media.service --no-legend | grep -q .; then \
+    systemctl try-restart ${SERVICE}-media; fi" \
+    || echo "WARNING: рестарт ${SERVICE}-media не удался — journalctl -u ${SERVICE}-media -n 50"
+  $SSH_CMD "if systemctl is-active --quiet ${SERVICE}-media; then \
+    cd ${REMOTE_BASE} && ./.venv/bin/python -m app.jobs.media_smoke; fi" \
+    || echo "WARNING: конвейер видео не прошёл проверку после деплоя — journalctl -u ${SERVICE}-media -n 50"
   echo "==> Backend deployed."
 }
 

@@ -8,29 +8,43 @@ GET /media/{id} авторизуется ПОДПИСЬЮ (выдана авто
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
+from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, Response
 from signaris_auth import Principal
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import tenant_scoped_session
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.course import MediaFile
+from app.models.media import MEDIA_ROLES, MediaJob, MediaPart
 from app.schemas.media import (
     CleanupDefaults,
+    DerivedMediaOut,
     MediaAdminSettingsOut,
     MediaAdminSettingsPut,
+    MediaCapabilities,
+    MediaDetailOut,
+    MediaJobOut,
+    MediaPartOut,
+    MergeCreate,
+    MergeOut,
     StoryboardParams,
 )
 from app.services import audit
 from app.services.attachments import (
+    SNIFF_HEAD_BYTES,
     content_disposition,
     display_filename,
     download_filename,
+    resolve_mime,
+    sniff_mismatch,
 )
 from app.services.content_access import require_content_role
 from app.services.learn_media import (
@@ -48,17 +62,34 @@ from app.services.learn_settings import get_settings_dict, set_setting
 from app.services.media import gate as media_gate
 from app.services.media import jobs as media_jobs
 from app.services.media.images import aspect_ok, image_size_of
+from app.services.media.storage import derived_storage_key
 from app.services.timefmt import display_tz
 
 router = APIRouter(tags=["learn-media"])
 
 
+# Форматы, которые принимаются ТОЛЬКО при включённом конвейере (0066): их
+# приводит к MP4 задание `normalize`, пока строка стоит в `processing`.
+PIPELINE_VIDEO_MIMES: frozenset[str] = frozenset({"video/quicktime", "video/webm"})
+_UPLOAD_CHUNK = 1024 * 1024
+
+
+def _write_chunk(fh, chunk: bytes) -> None:
+    fh.write(chunk)
+
+
 @router.post("/learn/media", status_code=201)
 async def upload_media(
     file: UploadFile = File(...),
+    role: str = Form("content"),
     principal: Principal = Depends(require_auth()),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    """Загрузка медиа урока. При включённом конвейере видео (0066): MOV и WebM
+    принимаются, MP4 без faststart не отвергается — всё это уходит в
+    `normalize` со статусом `processing` (ответ без `url`); `role` — что это за
+    загрузка (`content` по умолчанию; `part`/`insert`/`scene` — только при
+    включённом конвейере). Выключено — прежние 415/422."""
     await enforce_rate_limit(
         bucket="attach:upload",
         employee_id=str(principal.employee_id),
@@ -66,16 +97,29 @@ async def upload_media(
         window_sec=60,
     )
     await require_content_role(db, principal, "author")
-
-    mime = file.content_type or "application/octet-stream"
-    kind = MEDIA_MIME_KINDS.get(mime)
-    if kind is None:
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Тип {mime!r} не поддерживается. Видео — только MP4 (H.264).",
-        )
+    if role not in MEDIA_ROLES:
+        raise HTTPException(status_code=422, detail=f"Неизвестная роль файла: {role!r}")
     if not file.filename:
         raise HTTPException(status_code=400, detail="Имя файла обязательно")
+
+    mime = resolve_mime(file.content_type, file.filename)
+    pipeline_on = await media_gate.pipeline_enabled_for(db, principal.tenant_id)
+    kind = MEDIA_MIME_KINDS.get(mime)
+    if kind is None and pipeline_on and mime in PIPELINE_VIDEO_MIMES:
+        kind = "video"
+    if kind is None:
+        hint = "Видео — MP4, MOV или WebM." if pipeline_on else "Видео — только MP4 (H.264)."
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Тип {mime!r} не поддерживается. {hint}",
+        )
+    if role != "content":
+        if not pipeline_on:
+            raise HTTPException(status_code=422, detail="Конвейер видео выключен")
+        if role == "scene" and kind != "image":
+            raise HTTPException(status_code=422, detail="Сцена гуся — это картинка")
+        if role in ("part", "insert") and kind != "video":
+            raise HTTPException(status_code=422, detail="Часть сборки и вставка — это видео")
 
     settings = get_settings()
     if check_free_space() < settings.media_min_free_bytes:
@@ -90,6 +134,7 @@ async def upload_media(
     media = MediaFile(
         tenant_id=principal.tenant_id,
         kind=kind,
+        role=role,
         storage_key="",  # заполним после генерации имени
         file_name="",
         mime=mime,
@@ -104,12 +149,15 @@ async def upload_media(
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     written = 0
+    head = b""
     try:
         with dest.open("wb") as fh:
             while True:
-                chunk = await file.read(64 * 1024)
+                chunk = await file.read(_UPLOAD_CHUNK)
                 if not chunk:
                     break
+                if not head:
+                    head = chunk[:SNIFF_HEAD_BYTES]
                 written += len(chunk)
                 if written > max_bytes:
                     fh.close()
@@ -118,7 +166,9 @@ async def upload_media(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                         detail=f"Файл больше лимита {max_bytes // (1024 * 1024)} МБ",
                     )
-                fh.write(chunk)
+                # Запись — в поток: гигабайтный MOV в event loop'е задержал бы
+                # остальные запросы на время каждого куска.
+                await asyncio.to_thread(_write_chunk, fh, chunk)
     except HTTPException:
         await db.rollback()
         raise
@@ -127,36 +177,66 @@ async def upload_media(
         await db.rollback()
         raise HTTPException(status_code=500, detail="Не удалось сохранить файл") from exc
 
-    if kind == "video" and not mp4_has_faststart(dest):
+    if sniff_mismatch(mime, head):
         dest.unlink(missing_ok=True)
         await db.rollback()
         raise HTTPException(
-            status_code=422,
-            detail=(
-                "MP4 без faststart — на телефонах видео не начнёт играть, пока не "
-                "скачается целиком. Пересохраните с «web optimized»/faststart "
-                "(HandBrake: Web Optimized; ffmpeg: -movflags +faststart)."
-            ),
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Содержимое файла не соответствует заявленному типу",
         )
+
+    needs_normalize = False
+    if kind == "video":
+        needs_normalize = mime != "video/mp4" or not mp4_has_faststart(dest)
+        if needs_normalize and not pipeline_on:
+            dest.unlink(missing_ok=True)
+            await db.rollback()
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "MP4 без faststart — на телефонах видео не начнёт играть, пока не "
+                    "скачается целиком. Пересохраните с «web optimized»/faststart "
+                    "(HandBrake: Web Optimized; ffmpeg: -movflags +faststart)."
+                ),
+            )
 
     media.storage_key = storage_key
     # В колонку — ЧИТАЕМОЕ имя: ASCII-санитайзер нужен только пути, а от
     # кириллического имени он оставлял одно расширение (ОС 14.09).
     media.file_name = display_filename(file.filename or sanitized)
     media.size_bytes = written
+    job: MediaJob | None = None
     if kind == "video":
-        # Длительность читаем СЕРВЕРОМ (0043): гейт досмотра делит на неё, а
-        # клиентскому числу верить нельзя. None (битый moov) — не ошибка
-        # загрузки: гейт откатится на значение из block_state.
-        media.duration_sec = mp4_duration_seconds(dest)
+        if needs_normalize:
+            # Файл НА МЕСТЕ приведёт к MP4 воркер; до `ready` его никто не видит
+            # (отдача — 409, в урок не публикуется).
+            media.status = "processing"
+            media.duration_sec = None
+            job = await media_jobs.enqueue(
+                db,
+                tenant_id=principal.tenant_id,
+                media_id=media.id,
+                kind="normalize",
+                params={"mime": mime},
+                requested_by=principal.employee_id,
+            )
+        else:
+            # Длительность читаем СЕРВЕРОМ (0043): гейт досмотра делит на неё, а
+            # клиентскому числу верить нельзя. None (битый moov) — не ошибка
+            # загрузки: гейт откатится на значение из block_state.
+            media.duration_sec = mp4_duration_seconds(dest)
     await db.commit()
     return {
         "id": str(media.id),
         "kind": kind,
+        "role": role,
+        "status": media.status,
         "file_name": media.file_name,
         "mime": mime,
         "size_bytes": written,
-        "url": sign_media_path(media.id),
+        "duration_sec": media.duration_sec,
+        "url": sign_media_path(media.id) if media.status == "ready" else None,
+        "normalize_job_id": str(job.id) if job is not None else None,
     }
 
 
@@ -173,6 +253,9 @@ async def serve_media(
         media = await session.get(MediaFile, media_id)
     if media is None or not media.storage_key:
         raise HTTPException(status_code=404, detail="Файл не найден")
+    if media.status != "ready":
+        # Нормализация/сборка идёт прямо в этом файле — отдавать его нельзя.
+        raise HTTPException(status_code=409, detail="Файл ещё обрабатывается")
 
     path = absolute_path(media.storage_key)
     settings = get_settings()
@@ -323,3 +406,251 @@ async def put_media_admin_settings(
         )
         await db.commit()
     return await _admin_settings_out(db, principal.tenant_id)
+
+
+# ─── Конвейер видео (0066): сборка из записей, деталь медиа, задания ─────────
+
+
+async def _require_pipeline(db: AsyncSession, tenant_id: UUID) -> None:
+    if not await media_gate.pipeline_enabled_for(db, tenant_id):
+        raise _PIPELINE_NOT_FOUND
+
+
+def _job_out(job: MediaJob) -> MediaJobOut:
+    return MediaJobOut(
+        id=job.id,
+        media_id=job.media_id,
+        kind=job.kind,
+        status=job.status,
+        params=dict(job.params or {}),
+        result=dict(job.result or {}),
+        error=job.error,
+        attempts=job.attempts,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+    )
+
+
+def _url_if_ready(media: MediaFile) -> str | None:
+    return sign_media_path(media.id) if media.status == "ready" else None
+
+
+async def _media_detail(db: AsyncSession, media: MediaFile) -> MediaDetailOut:
+    part_rows = (
+        await db.execute(
+            select(MediaPart, MediaFile)
+            .join(MediaFile, MediaFile.id == MediaPart.source_media_id)
+            .where(MediaPart.merged_media_id == media.id)
+            .order_by(MediaPart.position)
+        )
+    ).all()
+    derived = list(
+        (
+            await db.execute(
+                select(MediaFile)
+                .where(MediaFile.source_media_id == media.id)
+                .order_by(MediaFile.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    job_rows = await media_jobs.list_for_media(db, [media.id, *(d.id for d in derived)])
+    return MediaDetailOut(
+        id=media.id,
+        kind=media.kind,
+        role=media.role,
+        status=media.status,
+        file_name=media.file_name,
+        mime=media.mime,
+        size_bytes=media.size_bytes,
+        duration_sec=media.duration_sec,
+        url=_url_if_ready(media),
+        variant=media.variant,
+        source_media_id=media.source_media_id,
+        created_at=media.created_at,
+        parts=[
+            MediaPartOut(
+                position=part.position,
+                source_media_id=source.id,
+                trim_start_sec=float(part.trim_start_sec or 0.0),
+                trim_end_sec=part.trim_end_sec,
+                file_name=source.file_name,
+                duration_sec=source.duration_sec,
+                status=source.status,
+            )
+            for part, source in part_rows
+        ],
+        derived=[
+            DerivedMediaOut(
+                id=d.id,
+                kind=d.kind,
+                variant=d.variant,
+                status=d.status,
+                url=_url_if_ready(d),
+                duration_sec=d.duration_sec,
+                size_bytes=d.size_bytes,
+                file_name=d.file_name,
+                created_at=d.created_at,
+            )
+            for d in derived
+        ],
+        jobs=[_job_out(j) for j in job_rows],
+        capabilities=MediaCapabilities(
+            transcribe=media.kind == "video"
+            and media.status == "ready"
+            and media_gate.stt_configured(),
+            # Появятся вместе с заданиями `cleanup` (инкремент 6) и `compose` (7).
+            cleanup=False,
+            compose=False,
+        ),
+    )
+
+
+@router.post("/learn/media/merge", status_code=201, response_model=MergeOut)
+async def merge_media(
+    body: MergeCreate,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> MergeOut:
+    """«5 записей → одно видео»: создаёт собранный файл в `processing`,
+    строки `media_parts` и задание `merge`. Все части — `role='part'` своего
+    тенанта и `ready`; иначе 409 с номером части (клиент повторит, когда
+    конвертация части доедет)."""
+    await _require_pipeline(db, principal.tenant_id)
+    await require_content_role(db, principal, "author")
+    ids = [p.media_id for p in body.parts]
+    if len(set(ids)) != len(ids):
+        raise HTTPException(status_code=422, detail="Одна и та же запись указана дважды")
+    rows = {
+        m.id: m
+        for m in (await db.execute(select(MediaFile).where(MediaFile.id.in_(ids)))).scalars()
+    }
+    for i, part in enumerate(body.parts, start=1):
+        m = rows.get(part.media_id)
+        if m is None or m.kind != "video":
+            raise HTTPException(status_code=422, detail=f"Часть {i}: это не видео")
+        if m.role != "part":
+            raise HTTPException(
+                status_code=422, detail=f"Часть {i}: файл загружен не как часть сборки"
+            )
+        if m.status == "processing":
+            raise HTTPException(status_code=409, detail=f"Часть {i} ещё конвертируется — подождите")
+        if m.status != "ready":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Часть {i}: конвертация не удалась, загрузите файл заново",
+            )
+        start_sec, end_sec = part.trim_start_sec, part.trim_end_sec
+        if end_sec is not None and end_sec <= start_sec:
+            raise HTTPException(status_code=422, detail=f"Часть {i}: «до» раньше, чем «с»")
+        if m.duration_sec:
+            if start_sec >= m.duration_sec:
+                raise HTTPException(
+                    status_code=422, detail=f"Часть {i}: начало подрезки за концом записи"
+                )
+            if end_sec is not None and end_sec > m.duration_sec + 0.5:
+                raise HTTPException(
+                    status_code=422, detail=f"Часть {i}: конец подрезки за концом записи"
+                )
+
+    first = rows[ids[0]]
+    merged = MediaFile(
+        tenant_id=principal.tenant_id,
+        kind="video",
+        role="content",
+        status="processing",
+        storage_key="",
+        file_name=f"{Path(first.file_name).stem or 'Видео'} — сборка.mp4"[:255],
+        mime="video/mp4",
+        size_bytes=0,
+        uploaded_by=principal.employee_id,
+    )
+    db.add(merged)
+    await db.flush()
+    merged.storage_key = derived_storage_key(principal.tenant_id, merged.id, "merged.mp4")
+    for position, part in enumerate(body.parts):
+        db.add(
+            MediaPart(
+                merged_media_id=merged.id,
+                position=position,
+                tenant_id=principal.tenant_id,
+                source_media_id=part.media_id,
+                trim_start_sec=part.trim_start_sec,
+                trim_end_sec=part.trim_end_sec,
+            )
+        )
+    await db.flush()
+    job = await media_jobs.enqueue(
+        db,
+        tenant_id=principal.tenant_id,
+        media_id=merged.id,
+        kind="merge",
+        params={
+            "parts": [
+                {
+                    "media_id": str(p.media_id),
+                    "trim_start_sec": p.trim_start_sec,
+                    "trim_end_sec": p.trim_end_sec,
+                }
+                for p in body.parts
+            ]
+        },
+        requested_by=principal.employee_id,
+    )
+    await db.commit()
+    return MergeOut(media=await _media_detail(db, merged), job=_job_out(job))
+
+
+@router.get("/learn/media/jobs/{job_id}", response_model=MediaJobOut)
+async def get_media_job(
+    job_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> MediaJobOut:
+    await _require_pipeline(db, principal.tenant_id)
+    await require_content_role(db, principal, "author")
+    job = await db.get(MediaJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Задание не найдено")
+    return _job_out(job)
+
+
+@router.post("/learn/media/jobs/{job_id}/cancel", response_model=MediaJobOut, status_code=202)
+async def cancel_media_job(
+    job_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> MediaJobOut:
+    """`queued` → `cancelled` сразу; `running` — флаг, воркер остановит ffmpeg
+    на ближайшем heartbeat (≤ 30 с). Завершённое задание не меняется."""
+    await _require_pipeline(db, principal.tenant_id)
+    await require_content_role(db, principal, "author")
+    job = await db.get(MediaJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Задание не найдено")
+    new_status = await media_jobs.cancel(db, job)
+    if new_status == "cancelled" and job.kind in ("normalize", "merge"):
+        # Файл не дождётся обработки — строка не должна висеть в processing.
+        media = await db.get(MediaFile, job.media_id)
+        if media is not None and media.status == "processing":
+            media.status = "failed"
+    await db.commit()
+    return _job_out(job)
+
+
+@router.get("/learn/media/{media_id}", response_model=MediaDetailOut)
+async def get_media_detail(
+    media_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> MediaDetailOut:
+    """Состояние файла для редактора: статус, части сборки, производные,
+    последние задания, что можно заказать. Опрашивается, пока идёт работа."""
+    await _require_pipeline(db, principal.tenant_id)
+    await require_content_role(db, principal, "author")
+    media = await db.get(MediaFile, media_id)
+    if media is None:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    return await _media_detail(db, media)

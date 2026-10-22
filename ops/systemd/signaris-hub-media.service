@@ -1,0 +1,50 @@
+# Конвейер видео урока (0066): нормализация MOV/WebM, сборка из записей,
+# расшифровка, чистовик, монтаж — всё, что зовёт ffmpeg.
+#
+# Отдельный юнит: ffmpeg — CPU на десятки минут, в uvicorn-процессе ему не
+# место (workers=1). Один ffmpeg на МАШИНУ — host-wide flock в коде
+# (`media_host_lock_path`): прод и staging делят два ядра и STT.
+#
+# Выключенный env-рубильник (`SIGNARIS_HUB_MEDIA_PIPELINE_ENABLED=false`) —
+# процесс жив и спит; юнит ставится только там, где модуль включён
+# (staging до go-live).
+#
+# staging: python3 ops/systemd/make-staging-unit.py signaris-hub-media.service 5059 5060
+# (портов в файле нет — аргументы нужны проверке путей скрипта).
+[Unit]
+Description=Signaris Hub — конвейер видео урока (ffmpeg)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=signaris
+Group=signaris
+WorkingDirectory=/opt/signaris-hub
+EnvironmentFile=/opt/signaris-hub/.env
+# Стеки всех потоков в журнал при аварийном сигнале.
+Environment=PYTHONFAULTHANDLER=1
+ExecStart=/opt/signaris-hub/.venv/bin/python -m app.workers.media
+Restart=always
+RestartSec=10
+# SIGTERM — только главному процессу: он сам убивает ffmpeg и возвращает
+# задание в очередь (`jobs.release`); SIGKILL всей группе — по таймауту.
+KillMode=mixed
+TimeoutStopSec=30
+LimitCORE=0
+# CPU: ниже STT (30) и extraction (50) — рендер подождёт, голос и API нет.
+CPUWeight=20
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+# Память — ТОЛЬКО жёсткий потолок, без MemoryHigh (без swap он тормозит
+# процесс вечно, см. инцидент STT 09.09–21.10). 900M — ГИПОТЕЗА до замера
+# scripts/media_measure.py на записях UPPETIT; x264 veryfast на 1080p берёт
+# ~300–500 МБ, OpenCV раскадровки (инкремент 6) добавит ~150.
+MemoryMax=900M
+# При общей нехватке памяти первой жертвой станет рендер, не STT и не Postgres.
+OOMScoreAdjust=600
+# Без WatchdogSec: часовой ffmpeg — легальное «занят»; живость даёт аренда
+# задания + reaper + GET /api/health/media.
+
+[Install]
+WantedBy=multi-user.target

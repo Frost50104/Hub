@@ -19,7 +19,7 @@ MP4 = {
             "avg_frame_rate": "60/1",
             "r_frame_rate": "60/1",
         },
-        {"codec_type": "audio", "codec_name": "aac"},
+        {"codec_type": "audio", "codec_name": "aac", "sample_rate": "48000", "channels": 2},
     ],
 }
 MOV_HEVC = {
@@ -79,6 +79,7 @@ def test_parse_ffprobe_mp4():
     assert p.size_bytes == 35000000
     assert p.display_size == (1280, 720)
     assert p.rotation == 0
+    assert (p.sample_rate, p.channels) == (48000, 2)
 
 
 def test_parse_ffprobe_rotation_and_fractional_fps():
@@ -93,6 +94,7 @@ def test_parse_ffprobe_webm_and_tags_rotate():
     p = parse_ffprobe(WEBM)
     assert p.container == "webm"
     assert p.acodec == "opus"
+    assert p.sample_rate is None and p.channels is None
     tagged = {**NOAUDIO, "streams": [{**NOAUDIO["streams"][0], "tags": {"rotate": "90"}}]}
     assert parse_ffprobe(tagged).rotation == 90
 

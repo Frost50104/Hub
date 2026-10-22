@@ -90,3 +90,78 @@ class MediaAdminSettingsPut(BaseModel):
     cleanup_defaults: CleanupDefaults | None = None
     storyboard: StoryboardParams | None = None
     glossary: str | None = Field(default=None, max_length=500)
+
+
+# ─── Сборка из записей, деталь медиа ─────────────────────────────────────────
+
+
+class MergePart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    media_id: UUID
+    trim_start_sec: float = Field(default=0, ge=0)
+    trim_end_sec: float | None = Field(default=None, gt=0)
+
+
+class MergeCreate(BaseModel):
+    """2–20 частей с ролью `part` и статусом `ready`, в порядке склейки."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parts: list[MergePart] = Field(min_length=2, max_length=20)
+
+
+class MediaPartOut(BaseModel):
+    position: int
+    source_media_id: UUID
+    trim_start_sec: float
+    trim_end_sec: float | None
+    file_name: str
+    duration_sec: float | None
+    status: str
+
+
+class DerivedMediaOut(BaseModel):
+    id: UUID
+    kind: str
+    variant: str | None
+    status: str
+    url: str | None
+    duration_sec: float | None
+    size_bytes: int
+    file_name: str
+    created_at: datetime
+
+
+class MediaCapabilities(BaseModel):
+    """Что можно заказать для этого файла прямо сейчас (сервер знает про
+    конфигурацию и состояние; клиент правил не выводит)."""
+
+    transcribe: bool
+    cleanup: bool
+    compose: bool
+
+
+class MediaDetailOut(BaseModel):
+    id: UUID
+    kind: str
+    role: str
+    status: str
+    file_name: str
+    mime: str
+    size_bytes: int
+    duration_sec: float | None
+    # Пока `processing`/`failed` — None: отдача ответила бы 409.
+    url: str | None
+    variant: str | None
+    source_media_id: UUID | None
+    created_at: datetime
+    parts: list[MediaPartOut]
+    derived: list[DerivedMediaOut]
+    jobs: list[MediaJobOut]
+    capabilities: MediaCapabilities
+
+
+class MergeOut(BaseModel):
+    media: MediaDetailOut
+    job: MediaJobOut
