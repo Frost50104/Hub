@@ -89,7 +89,7 @@ export const LEARN_NAV: LearnNavItem[] = [
   // LEARN_MENU_ITEMS и подсветка таб-бара).
   { to: '/learn/race', label: 'Гонка', icon: Bird, feature: 'race' },
   { to: '/learn/favorites', label: 'Избранное', icon: Star },
-  { to: '/assistant', label: 'Ассистент', icon: Bot },
+  { to: '/assistant', label: 'AI-помощник', icon: Bot },
   { to: '/learn/shifts', label: 'Биржа смен', icon: Handshake },
   { to: '/learn/assessments', label: 'Аттестации', icon: BadgeCheck },
   { to: '/inbox', label: 'Входящие', icon: Inbox, badge: true },
