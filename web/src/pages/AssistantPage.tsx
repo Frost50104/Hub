@@ -167,6 +167,9 @@ function NotConfigured({ isAdmin }: { isAdmin: boolean }) {
   )
 }
 
+const MOBILE_SCREEN_HEIGHT =
+  'calc(100dvh - var(--safe-top, 0px) - max(var(--kb-inset, 0px), calc(env(safe-area-inset-bottom, 0px) + 4rem)))'
+
 export function AssistantPage() {
   const isDesktop = useIsDesktop()
   const me = useMe()
@@ -176,7 +179,7 @@ export function AssistantPage() {
   const [pending, setPending] = useState<string | null>(null)
   const [view, setView] = useState<'journal' | 'reports'>('journal')
   const [reportKind, setReportKind] = useState<ReportKind>('revenue')
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   const expandReport = (kind: ReportKind) => {
     setReportKind(kind)
@@ -223,8 +226,12 @@ export function AssistantPage() {
     },
   })
 
+  // Прокручиваем ТОЛЬКО ленту журнала. `scrollIntoView` двигал все
+  // прокручиваемые предки, на телефоне — сам документ: страница уезжала вниз
+  // после каждого ответа (ОС 22.10).
   useEffect(() => {
-    if (view === 'journal') bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = listRef.current
+    if (view === 'journal' && el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }, [messages.data, pending, view])
 
   // Переключение вида — в начало. На мобильном скроллится документ, и без
@@ -264,7 +271,16 @@ export function AssistantPage() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-2rem)] max-w-6xl flex-col lg:h-[calc(100vh-3rem)]">
+    <div
+      className="mx-auto flex max-w-6xl flex-col lg:h-[calc(100vh-3rem)]"
+      // Телефон: экран ровно по видимой области между вырезом сверху и
+      // таб-баром (его место резервирует `Shell` — safe-area + 4rem), а при
+      // открытой клавиатуре — до её верха. Документ не прокручивается,
+      // прокручивается лента, и поле ввода всегда над таб-баром (ОС 22.10).
+      // До этого `100vh − 2rem` не знал ни выреза, ни таб-бара: страница была
+      // выше экрана, и композер уходил под навигацию.
+      style={isDesktop ? undefined : { height: MOBILE_SCREEN_HEIGHT }}
+    >
       {!isDesktop && (
         <MobilePageHeader
           eyebrow={view === 'reports' ? 'Отчёты iiko' : opCount}
@@ -366,7 +382,7 @@ export function AssistantPage() {
             </div>
           ) : (
           <>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {empty && (
               <EmptyState
                 canAct={status.data?.can_act ?? false}
@@ -400,7 +416,6 @@ export function AssistantPage() {
                 </p>
               </article>
             )}
-            <div ref={bottomRef} />
           </div>
 
           <Composer
