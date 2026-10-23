@@ -365,6 +365,69 @@ async def test_apply_writes_directory_cards_new_people_and_is_idempotent(
     assert second["directory"]["ops"] == {}
 
 
+async def test_new_person_on_mailbox_of_deleted_account_gets_card_with_hr(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch, hr_env
+):
+    """Учётку удалили в auth (`auth_deleted`) — ящик свободен: новая учётка на
+    том же адресе получает карточку сразу с кадровыми полями, не дожидаясь
+    входа (решение владельца 01.09; до 23.10 кадровая часть её пропускала —
+    нашла канарейка гейта касс). Ручной архив адрес по-прежнему держит:
+    иначе pull заводил бы заново человека, убранного в архив руками."""
+    seed = await _seed(db, tenant_id)
+    hr_env(hr_consumer_enabled="true", hr_apply_tenants=_slug(tenant_id))
+    freed, held = _mail(tenant_id, "freed"), _mail(tenant_id, "held")
+    now = datetime.now(UTC)
+    db.add_all(
+        [
+            EmployeeProfile(
+                tenant_id=tenant_id,
+                email=freed,
+                full_name="Удалённая Учётка",
+                status="archived",
+                archive_reason="auth_deleted",
+                archived_at=now,
+            ),
+            EmployeeProfile(
+                tenant_id=tenant_id,
+                email=held,
+                full_name="Архив Руками",
+                status="archived",
+                archive_reason="manual",
+                archived_at=now,
+            ),
+        ]
+    )
+    await db.commit()
+    new_eid, held_eid = uuid.uuid4(), uuid.uuid4()
+    rows = [
+        _row(tenant_id, new_eid, freed, "Новый Управляющий", hr=_hr(org_role="tu")),
+        _row(tenant_id, held_eid, held, "Архив Руками", hr=_hr()),
+    ]
+    directory = _directory(tenant_id, **_dir_rows(seed, new_position=uuid.uuid4()))
+    _mock(monkeypatch, directory=directory, rows=rows)
+
+    report = await staff_sync.sync_staff()
+    hr_report = report.hr[str(tenant_id)]
+    assert hr_report["mode"] == "apply", hr_report
+    assert hr_report["skips"].get("archived_skip") == [str(held_eid)]
+    card = await _fresh(
+        db, select(EmployeeProfile).where(EmployeeProfile.employee_id == new_eid)
+    )
+    assert card.status == "active" and card.account_kind == "person"
+    assert card.org_role == "tu" and card.last_activity_at is None
+    assert hr_report["applied"]["created"] == [str(card.id)]
+    held_cards = (
+        (
+            await db.execute(
+                select(EmployeeProfile).where(EmployeeProfile.employee_id == held_eid)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert held_cards == []
+
+
 # --- Предохранитель ---------------------------------------------------------------------
 
 

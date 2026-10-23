@@ -117,7 +117,7 @@ class JobCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["transcribe", "cleanup", "analyze"]
+    kind: Literal["transcribe", "cleanup", "analyze", "compose"]
     params: dict[str, Any] | None = None
 
 
@@ -261,3 +261,30 @@ class UsageLessonOut(BaseModel):
 
 class UsageOut(BaseModel):
     lessons: list[UsageLessonOut]
+
+
+# ─── Монтаж (гусь + вставки) ─────────────────────────────────────────────────
+
+
+class ComposeEstimateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resolution: Resolution | None = None
+
+
+class ComposeEstimateOut(BaseModel):
+    goose_enabled: bool
+    resolution: Resolution
+    goose_seconds: float
+    segments: int
+    inserts: int
+    chunks: int
+    billed_seconds: int
+    cost_cents: int
+    currency: str = "USD"
+    monthly_cap_sec: int
+    monthly_used_sec: float
+    allowed: bool
+    reason: str | None = None
+    scene_set: bool
+    hedra_estimate: dict[str, Any] | None = None

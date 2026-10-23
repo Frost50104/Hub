@@ -36,7 +36,9 @@ from app.services.media import gate, jobs, storage
 from app.services.media.jobs import JobSpec
 from app.services.media.pipeline import (
     analyze_job,
+    avatar_test_job,
     cleanup_job,
+    compose_job,
     merge_job,
     normalize_job,
     transcribe_job,
@@ -63,6 +65,8 @@ HANDLERS: dict[str, Handler] = {
     transcribe_job.KIND: transcribe_job,
     cleanup_job.KIND: cleanup_job,
     analyze_job.KIND: analyze_job,
+    compose_job.KIND: compose_job,
+    avatar_test_job.KIND: avatar_test_job,
 }
 
 
@@ -118,9 +122,40 @@ async def _heartbeat_loop(
             continue
 
 
+def _failure_result(ctx: JobContext) -> dict | None:
+    """Что сохранить в `result` при провале: у платных заданий — состояние
+    Hedra (повтор не платит дважды) и `billed_seconds` по фактически
+    отправленным кускам (ноль возвращает резерв минут)."""
+    if ctx.spec.kind not in ("compose", "avatar_test"):
+        return None
+    hedra = ctx.progress.get("hedra") or {}
+    chunks = hedra.get("chunks") if isinstance(hedra, dict) else None
+    sent = 0
+    if isinstance(chunks, list):
+        for row in chunks:
+            if isinstance(row, dict) and row.get("job_id"):
+                sent += int(round(int(row.get("duration_ms") or 0) / 1000))
+    elif isinstance(hedra, dict) and hedra.get("job_id"):
+        sent = 10
+    return {"hedra": hedra, "billed_seconds": sent}
+
+
+def _resume_params(ctx: JobContext) -> dict | None:
+    """Платные задания возобновляются с того же `job_id` Hedra: состояние
+    кусков уезжает в `params.hedra_state` и читается следующей попыткой."""
+    if ctx.spec.kind not in ("compose", "avatar_test"):
+        return None
+    hedra = ctx.progress.get("hedra")
+    if not isinstance(hedra, dict) or not hedra:
+        return None
+    return {**dict(ctx.spec.params or {}), "hedra_state": hedra}
+
+
 async def _finish_failed(
     ctx: JobContext, handler: Handler, *, status: str, error: str, result: dict | None = None
 ) -> None:
+    if result is None:
+        result = _failure_result(ctx)
     async with tenant_scoped_session(ctx.spec.tenant_id) as db:
         try:
             await handler.on_final_failure(ctx, db, error)
@@ -178,7 +213,7 @@ async def run_job(
     except JobCancelled:
         if stop.is_set():
             async with tenant_scoped_session(None, bypass_rls=True) as db:
-                await jobs.release(db, spec.id)
+                await jobs.release(db, spec.id, carry_params=_resume_params(ctx))
                 await db.commit()
             outcome = "queued"
             ctx.log.info("media.job_released")
@@ -194,7 +229,7 @@ async def run_job(
         )
         if decision == "retry":
             async with tenant_scoped_session(None, bypass_rls=True) as db:
-                await jobs.retry_later(db, spec.id, error=message)
+                await jobs.retry_later(db, spec.id, error=message, carry_params=_resume_params(ctx))
                 await db.commit()
             outcome = "queued"
             ctx.log.warning("media.job_retry", err=message[:300], attempts=spec.attempts)

@@ -225,37 +225,45 @@ async def retry_later(
     error: str,
     delay: timedelta = REQUEUE_DELAY,
     now: datetime | None = None,
+    carry_params: dict[str, Any] | None = None,
 ) -> None:
     """Вернуть в очередь после неудачи, у которой остались попытки."""
     now = _now(now)
-    await db.execute(
-        update(MediaJob)
-        .where(MediaJob.id == job_id)
-        .values(
-            status="queued",
-            run_after=now + delay,
-            lease_until=None,
-            worker_id=None,
-            error=error[:2000],
-        )
-    )
+    values: dict[str, Any] = {
+        "status": "queued",
+        "run_after": now + delay,
+        "lease_until": None,
+        "worker_id": None,
+        "error": error[:2000],
+    }
+    if carry_params is not None:
+        values["params"] = carry_params
+    await db.execute(update(MediaJob).where(MediaJob.id == job_id).values(**values))
 
 
-async def release(db: AsyncSession, job_id: UUID, *, now: datetime | None = None) -> None:
+async def release(
+    db: AsyncSession,
+    job_id: UUID,
+    *,
+    now: datetime | None = None,
+    carry_params: dict[str, Any] | None = None,
+) -> None:
     """Воркер останавливается (SIGTERM при деплое): вернуть задание в очередь
-    СРАЗУ и не считать попытку — это не провал задания."""
+    СРАЗУ и не считать попытку — это не провал задания. `carry_params` —
+    состояние для возобновления (куски Hedra), если есть."""
     now = _now(now)
+    values: dict[str, Any] = {
+        "status": "queued",
+        "run_after": now,
+        "lease_until": None,
+        "worker_id": None,
+        "attempts": func.greatest(MediaJob.attempts - 1, 0),
+        "error": "worker_stopped",
+    }
+    if carry_params is not None:
+        values["params"] = carry_params
     await db.execute(
-        update(MediaJob)
-        .where(MediaJob.id == job_id, MediaJob.status == "running")
-        .values(
-            status="queued",
-            run_after=now,
-            lease_until=None,
-            worker_id=None,
-            attempts=func.greatest(MediaJob.attempts - 1, 0),
-            error="worker_stopped",
-        )
+        update(MediaJob).where(MediaJob.id == job_id, MediaJob.status == "running").values(**values)
     )
 
 

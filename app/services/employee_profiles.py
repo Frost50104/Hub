@@ -135,6 +135,26 @@ async def find_latest_archived_by_email(
     ).scalars().first()
 
 
+def archived_twin_blocks_sync(archive_reason: str | None) -> bool:
+    """Держит ли самая свежая архивная карточка с этим адресом создание
+    карточки СИНКОМ штата (`archived_skip`). Вход в Hub архивных не смотрит
+    вовсе — правило только для синка.
+
+    Держит, пока учётка за ней может быть ЖИВА: ручной архив в Hub обнуляет
+    `employee_id`, и без проверки pull заводил бы ту же учётку заново через
+    15 минут (требование 3 auth, 04.09). Не держит при `auth_deleted` —
+    учётку удалили или перевели в auth (так же метит `_release_login`):
+    ящик свободен, и новая учётка на нём — новый человек с новой карточкой
+    (решение владельца 01.09). До 23.10 держала любая архивная, и новый
+    сотрудник на ящике уволенного не появлялся в Hub до первого входа — без
+    кадровых данных из auth и без назначений; нашла канарейка гейта касс.
+
+    Остаток: ручной архив, чью учётку удалили позже, держит по-прежнему —
+    фид удалений отвязанную карточку не находит. Такого человека заведёт
+    первый вход."""
+    return archive_reason != "auth_deleted"
+
+
 async def ensure_profile_for_principal(db: AsyncSession, principal: Principal) -> MatchResult:
     """Идемпотентный матчинг/создание профиля. Коммитит вызывающий."""
     now = datetime.now(UTC)
@@ -364,12 +384,12 @@ async def ensure_profile_for_staff_row(
       привязанной HR-карточки до первого входа остаётся редактируемым
       (та же семантика, что у ручки /link);
     - архивная карточка с тем же email БЛОКИРУЕТ создание (`archived_skip`,
-      требование 3 auth): `archive_profile(manual)` обнуляет employee_id, и
-      без этой проверки pull пересоздавал бы карточку через 15 минут после
-      каждой ручной архивации — с новой рассылкой обязательных курсов.
-      Настоящий новый человек на освободившемся ящике карточку всё равно
-      получит — при первом ВХОДЕ (`ensure_profile_for_principal` архивных
-      сознательно не смотрит и заводит чистую с подсказкой archived_twin).
+      требование 3 auth), пока учётка за ней может быть жива
+      (`archived_twin_blocks_sync`): `archive_profile(manual)` обнуляет
+      employee_id, и без этой проверки pull пересоздавал бы карточку через
+      15 минут после каждой ручной архивации — с новой рассылкой
+      обязательных курсов. Архив `auth_deleted` не блокирует: учётки нет,
+      новая на том же ящике — новый человек (решение владельца 01.09).
       Автоархив (`auto_inactivity`) сюда не доходит: он сохраняет
       employee_id, и `_find_by_employee_id` возвращает already_linked.
 
@@ -438,7 +458,7 @@ async def ensure_profile_for_staff_row(
         return "no_card"
 
     twin = await find_latest_archived_by_email(db, norm)
-    if twin is not None:
+    if twin is not None and archived_twin_blocks_sync(twin.archive_reason):
         log.info("staff_sync.archived_skip", twin_id=str(twin.id))
         return "archived_skip"
 
@@ -494,7 +514,8 @@ async def classify_staff_row(
         return "linked" if active.employee_id is None else "email_conflict"
     if link_only:
         return "no_card"
-    if await find_latest_archived_by_email(db, norm) is not None:
+    twin = await find_latest_archived_by_email(db, norm)
+    if twin is not None and archived_twin_blocks_sync(twin.archive_reason):
         return "archived_skip"
     return "created"
 

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import httpx
@@ -182,6 +182,72 @@ async def test_sync_skips_archived_email_and_archives_deleted(
 
     await db.refresh(victim)
     assert victim.status == "archived" and victim.archive_reason == "auth_deleted"
+
+
+async def test_sync_creates_card_on_mailbox_of_deleted_account(
+    db: AsyncSession, tenant_id: uuid.UUID, monkeypatch
+):
+    """Учётку удалили в auth (`auth_deleted`) — ящик свободен: новая учётка на
+    том же адресе получает чистую карточку синком, не дожидаясь первого входа
+    (решение владельца 01.09; до 23.10 синк её пропускал). Решает САМАЯ
+    СВЕЖАЯ архивная: ручной архив поверх удалённой учётки адрес держит."""
+    freed = f"freed-{tenant_id.hex[:8]}@t.ru"
+    held = f"held-{tenant_id.hex[:8]}@t.ru"
+    now = datetime.now(UTC)
+    db.add_all(
+        [
+            EmployeeProfile(
+                tenant_id=tenant_id,
+                email=freed,
+                full_name="Удалённая учётка",
+                status="archived",
+                archive_reason="auth_deleted",
+                archived_at=now,
+            ),
+            EmployeeProfile(
+                tenant_id=tenant_id,
+                email=held,
+                full_name="Удалена раньше",
+                status="archived",
+                archive_reason="auth_deleted",
+                archived_at=now - timedelta(days=30),
+            ),
+            EmployeeProfile(
+                tenant_id=tenant_id,
+                email=held,
+                full_name="Архив руками",
+                status="archived",
+                archive_reason="manual",
+                archived_at=now,
+            ),
+        ]
+    )
+    await db.commit()
+    rows = [_staff_row(tenant_id, email=freed), _staff_row(tenant_id, email=held)]
+    _mock_fetch(monkeypatch, rows)
+
+    predicted = await sync_staff(dry_run=True)
+    assert (predicted.profiles_created, predicted.archived_skips) == (1, 1)
+
+    report = await sync_staff()
+    assert (report.profiles_created, report.archived_skips) == (1, 1)
+    card = (
+        await db.execute(
+            select(EmployeeProfile).where(
+                EmployeeProfile.email == freed, EmployeeProfile.status == "active"
+            )
+        )
+    ).scalar_one()
+    assert str(card.employee_id) == rows[0]["employee_id"]
+    assert card.last_activity_at is None  # человек НЕ входил
+    held_active = (
+        await db.execute(
+            select(EmployeeProfile).where(
+                EmployeeProfile.email == held, EmployeeProfile.status == "active"
+            )
+        )
+    ).scalars().all()
+    assert held_active == []
 
 
 async def test_sync_unavailable_and_idempotent(

@@ -57,7 +57,11 @@ from app.services.audience_resolver import (
     recalc_profiles,
     rule_spec_from_row,
 )
-from app.services.employee_profiles import archive_profile, restore_profile
+from app.services.employee_profiles import (
+    archive_profile,
+    archived_twin_blocks_sync,
+    restore_profile,
+)
 from app.services.hr_apply import (
     AudienceSpec,
     Card,
@@ -166,7 +170,9 @@ class _HubState:
     cards: dict[UUID, Card]
     by_employee: dict[UUID, Card]
     active_by_email: dict[str, Card]
-    archived_emails: set[str]
+    # Адреса, на которые синк карточку НЕ заводит: их держит самая свежая
+    # архивная (`archived_twin_blocks_sync`).
+    twin_blocked_emails: set[str]
     maps: OrgMapsView
     live_stores: set[UUID]
     audiences: list[AudienceSpec]
@@ -204,11 +210,26 @@ async def _load(db: AsyncSession, row_employee_ids: list[UUID]) -> _HubState:
     ):
         tu.setdefault(profile_id, set()).add(store_id)
     cards: dict[UUID, Card] = {}
+    # Самая свежая архивная на адрес — тот же выбор, что у
+    # `find_latest_archived_by_email` (archived_at DESC NULLS LAST).
+    latest_archived: dict[str, EmployeeProfile] = {}
     for profile in (await db.execute(select(EmployeeProfile))).scalars():
         cards[profile.id] = _card_from(profile, frozenset(tu.get(profile.id, ())))
+        if profile.status == "archived":
+            email = cards[profile.id].email
+            prev = latest_archived.get(email)
+            if prev is None or (
+                profile.archived_at is not None
+                and (prev.archived_at is None or profile.archived_at > prev.archived_at)
+            ):
+                latest_archived[email] = profile
     by_employee = {c.employee_id: c for c in cards.values() if c.employee_id is not None}
     active_by_email = {c.email: c for c in cards.values() if c.status == "active"}
-    archived_emails = {c.email for c in cards.values() if c.status == "archived"}
+    twin_blocked_emails = {
+        email
+        for email, twin in latest_archived.items()
+        if archived_twin_blocks_sync(twin.archive_reason)
+    }
 
     raw = await _load_org_maps(db)
     maps = OrgMapsView(
@@ -272,7 +293,7 @@ async def _load(db: AsyncSession, row_employee_ids: list[UUID]) -> _HubState:
         cards=cards,
         by_employee=by_employee,
         active_by_email=active_by_email,
-        archived_emails=archived_emails,
+        twin_blocked_emails=twin_blocked_emails,
         maps=maps,
         live_stores=live_stores,
         audiences=audiences,
@@ -372,7 +393,7 @@ async def _plan(
             code = "email_conflict" if holder.employee_id is not None else "link_pending"
             skipped_rows.setdefault(code, []).append(str(row.employee_id))
             continue
-        if row.email in hub.archived_emails:
+        if row.email in hub.twin_blocked_emails:
             skipped_rows.setdefault("archived_skip", []).append(str(row.employee_id))
             continue
         new_rows.append((uuid.uuid4(), row))

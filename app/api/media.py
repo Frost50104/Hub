@@ -29,6 +29,8 @@ from app.models.progress import LessonProgress
 from app.schemas.media import (
     CleanupDefaults,
     CleanupOverrides,
+    ComposeEstimateIn,
+    ComposeEstimateOut,
     DerivedMediaOut,
     JobCreate,
     MediaAdminSettingsOut,
@@ -39,6 +41,7 @@ from app.schemas.media import (
     MediaPartOut,
     MergeCreate,
     MergeOut,
+    SceneTestOut,
     StoryboardOut,
     StoryboardParams,
     StoryboardPut,
@@ -69,12 +72,14 @@ from app.services.learn_media import (
     verify_media_signature,
 )
 from app.services.learn_settings import get_settings_dict, set_setting
+from app.services.media import avatar_limit, compose_plan
 from app.services.media import gate as media_gate
 from app.services.media import jobs as media_jobs
 from app.services.media import storyboard as storyboard_rules
 from app.services.media.autostart import maybe_enqueue_transcribe
 from app.services.media.images import aspect_ok, image_size_of
 from app.services.media.storage import derived_storage_key
+from app.services.media.transcription.base import transcript_gaps
 from app.services.timefmt import display_tz
 
 router = APIRouter(tags=["learn-media"])
@@ -345,8 +350,7 @@ async def _admin_settings_out(db: AsyncSession, tenant_id: UUID) -> MediaAdminSe
         auto_transcribe=bool(s.get("media_auto_transcribe", True)),
         scene_media_id=scene_id,
         scene_url=sign_media_path(scene_id) if scene_id else None,
-        # Появится вместе с заданием `avatar_test` (инкремент 7).
-        scene_test=None,
+        scene_test=await _scene_test(db, scene_id),
         avatar_monthly_minutes_cap=int(s.get("media_avatar_monthly_minutes_cap", 30)),
         avatar_resolution=str(s.get("media_avatar_resolution", "720p")),  # type: ignore[arg-type]
         cleanup_defaults=CleanupDefaults(**(s.get("media_cleanup_defaults") or {})),
@@ -356,6 +360,28 @@ async def _admin_settings_out(db: AsyncSession, tenant_id: UUID) -> MediaAdminSe
         month_used_minutes=round(used_sec / 60, 1),
         active_jobs=await media_jobs.count_active(db),
     )
+
+
+async def _scene_test(db: AsyncSession, scene_id: UUID | None) -> SceneTestOut | None:
+    """Последняя проверка гуся на 10 секундах для этой сцены."""
+    if scene_id is None:
+        return None
+    clip = (
+        await db.execute(
+            select(MediaFile)
+            .where(
+                MediaFile.kind == "video",
+                MediaFile.role == "scene",
+                MediaFile.source_media_id == scene_id,
+                MediaFile.status == "ready",
+            )
+            .order_by(MediaFile.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if clip is None:
+        return None
+    return SceneTestOut(media_id=clip.id, url=sign_media_path(clip.id), created_at=clip.created_at)
 
 
 async def _validate_scene(db: AsyncSession, media_id: UUID) -> None:
@@ -428,6 +454,57 @@ async def put_media_admin_settings(
     return await _admin_settings_out(db, principal.tenant_id)
 
 
+@router.post("/learn/media/admin/avatar-test", response_model=MediaJobOut, status_code=201)
+async def start_avatar_test(
+    principal: Principal = Depends(_ADMIN),
+    db: AsyncSession = Depends(get_db),
+) -> MediaJobOut:
+    """«Проверить на 10 секундах»: один запрос Hedra по текущей сцене. Минуты
+    резервируются как у монтажа; без сцены или гуся — 409."""
+    if not media_gate.env_enabled():
+        raise _PIPELINE_NOT_FOUND
+    if not await media_gate.avatar_enabled_for(db, principal.tenant_id):
+        raise HTTPException(
+            status_code=409, detail="Гусь выключен: нет ключа Hedra или модуль выключен"
+        )
+    s = await get_settings_dict(db, principal.tenant_id)
+    scene_raw = s.get("media_scene_media_id")
+    if not scene_raw:
+        raise HTTPException(status_code=409, detail="Сначала загрузите сцену гуся 16:9")
+    scene_id = UUID(str(scene_raw))
+    await _validate_scene(db, scene_id)
+    try:
+        await avatar_limit.reserve(db, principal.tenant_id, need_seconds=10)
+    except avatar_limit.AvatarLimitExceeded as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    try:
+        job = await media_jobs.enqueue(
+            db,
+            tenant_id=principal.tenant_id,
+            media_id=scene_id,
+            kind="avatar_test",
+            params={
+                "estimated_seconds": 10,
+                "resolution": str(s.get("media_avatar_resolution", "720p")),
+            },
+            requested_by=principal.employee_id,
+        )
+    except media_jobs.JobConflict:
+        raise HTTPException(status_code=409, detail="Проверка уже идёт") from None
+    audit.record(
+        db,
+        tenant_id=principal.tenant_id,
+        actor_id=principal.employee_id,
+        action="create",
+        object_type="media_job",
+        object_id=job.id,
+        object_label="Проверка гуся на 10 секундах",
+        diff={"estimated_seconds": 10},
+    )
+    await db.commit()
+    return _job_out(job)
+
+
 # ─── Конвейер видео (0066): сборка из записей, деталь медиа, задания ─────────
 
 
@@ -491,6 +568,7 @@ async def _media_detail(db: AsyncSession, media: MediaFile) -> MediaDetailOut:
     subtitle = next(
         (d for d in reversed(derived) if d.kind == "subtitle" and d.status == "ready"), None
     )
+    storyboard_row = await db.get(MediaStoryboard, media.id)
     return MediaDetailOut(
         id=media.id,
         kind=media.kind,
@@ -539,8 +617,11 @@ async def _media_detail(db: AsyncSession, media: MediaFile) -> MediaDetailOut:
             cleanup=media.kind == "video"
             and media.status == "ready"
             and (transcript is not None or not media_gate.stt_configured()),
-            # Появится вместе с заданием `compose` (инкремент 7).
-            compose=False,
+            # Монтаж — по чистовику с раскадровкой.
+            compose=media.kind == "video"
+            and media.status == "ready"
+            and media.variant == "cleaned"
+            and storyboard_row is not None,
         ),
         transcript=TranscriptInfo(
             language=transcript[0],
@@ -723,6 +804,32 @@ async def create_media_job(
                 status_code=409,
                 detail="Сначала дождитесь расшифровки — паузы ищутся по тексту и звуку",
             )
+    if body.kind == "compose":
+        if media.variant != "cleaned":
+            raise HTTPException(status_code=409, detail="Монтаж собирается по готовому чистовику")
+        estimate, plan = await _compose_estimate(
+            db, principal.tenant_id, media, params.get("resolution")
+        )
+        if not estimate.allowed:
+            raise HTTPException(status_code=409, detail=estimate.reason or "Монтаж недоступен")
+        if plan.chunks:
+            # Гусь — publisher и выше (решение владельца): это платно.
+            await require_content_role(db, principal, "publisher")
+            try:
+                await avatar_limit.reserve(
+                    db, principal.tenant_id, need_seconds=plan.billed_seconds
+                )
+            except avatar_limit.AvatarLimitExceeded as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from None
+        params = {
+            **params,
+            "resolution": estimate.resolution,
+            "goose_enabled": plan.goose_enabled,
+            "chunks": [list(c) for c in plan.chunks],
+            "inserts": plan.inserts,
+            "estimated_seconds": plan.billed_seconds,
+            "estimated_cost_cents": plan.cost_cents,
+        }
     try:
         job = await media_jobs.enqueue(
             db,
@@ -734,6 +841,20 @@ async def create_media_job(
         )
     except media_jobs.JobConflict:
         raise HTTPException(status_code=409, detail="Уже выполняется") from None
+    if body.kind == "compose":
+        audit.record(
+            db,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.employee_id,
+            action="create",
+            object_type="media_job",
+            object_id=job.id,
+            object_label=f"Монтаж: {media.file_name}",
+            diff={
+                "estimated_seconds": params["estimated_seconds"],
+                "estimated_cost_cents": params["estimated_cost_cents"],
+            },
+        )
     await db.commit()
     return _job_out(job)
 
@@ -774,6 +895,80 @@ def _storyboard_out(row: MediaStoryboard, duration: float | None) -> StoryboardO
         params=dict(row.params or {}),
         updated_at=row.updated_at,
     )
+
+
+async def _compose_estimate(
+    db: AsyncSession, tenant_id: UUID, media: MediaFile, resolution_override: str | None
+) -> tuple[ComposeEstimateOut, compose_plan.ComposePlan]:
+    board = await db.get(MediaStoryboard, media.id)
+    if board is None:
+        raise HTTPException(status_code=409, detail="Сначала дождитесь раскадровки чистовика")
+    s = await get_settings_dict(db, tenant_id)
+    resolution = str(resolution_override or s.get("media_avatar_resolution", "720p"))
+    transcript = await db.get(MediaTranscript, media.id)
+    duration = float(media.duration_sec or 0.0)
+    gaps = transcript_gaps(transcript.segments, duration) if transcript and duration else []
+    try:
+        plan = compose_plan.plan_compose(
+            duration=duration,
+            segments=list(board.segments or []),
+            inserts=list(board.inserts or []),
+            goose_enabled=bool(board.goose_enabled),
+            resolution=resolution,
+            transcript_gaps=gaps,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    cap, used = await avatar_limit.month_usage(db, tenant_id)
+    scene_set = bool(s.get("media_scene_media_id"))
+    reason: str | None = None
+    if not plan.chunks and not plan.inserts:
+        reason = "Нечего монтировать: ни отрезков гуся, ни вставок"
+    elif plan.chunks:
+        if not await media_gate.avatar_enabled_for(db, tenant_id):
+            reason = "Гусь выключен на сервере"
+        elif not scene_set:
+            reason = "Сначала загрузите сцену гуся в «Управление → Видео»"
+        elif used + plan.billed_seconds > cap * 60:
+            reason = f"Лимит минут гуся на месяц исчерпан: занято {used / 60:.1f} из {cap}"
+    return (
+        ComposeEstimateOut(
+            goose_enabled=plan.goose_enabled,
+            resolution=resolution,  # type: ignore[arg-type]
+            goose_seconds=round(plan.goose_seconds, 2),
+            segments=len(board.segments or []),
+            inserts=len(plan.inserts),
+            chunks=len(plan.chunks),
+            billed_seconds=plan.billed_seconds,
+            cost_cents=plan.cost_cents,
+            monthly_cap_sec=cap * 60,
+            monthly_used_sec=round(used, 1),
+            allowed=reason is None,
+            reason=reason,
+            scene_set=scene_set,
+        ),
+        plan,
+    )
+
+
+@router.post("/learn/media/{media_id}/compose/estimate", response_model=ComposeEstimateOut)
+async def compose_estimate(
+    media_id: UUID,
+    body: ComposeEstimateIn,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> ComposeEstimateOut:
+    """Оценка монтажа по действующей раскадровке: секунды гуся (минус
+    вставки), куски, цена по локальной таблице, остаток лимита."""
+    await _require_pipeline(db, principal.tenant_id)
+    await require_content_role(db, principal, "author")
+    media = await db.get(MediaFile, media_id)
+    if media is None:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    if media.variant != "cleaned" or media.status != "ready":
+        raise HTTPException(status_code=409, detail="Монтаж собирается по готовому чистовику")
+    out, _plan = await _compose_estimate(db, principal.tenant_id, media, body.resolution)
+    return out
 
 
 @router.get("/learn/media/{media_id}/storyboard", response_model=StoryboardOut)
