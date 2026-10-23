@@ -25,8 +25,12 @@ def test_classify_failure_final_vs_retry():
     assert worker.classify_failure(RuntimeError("boom"), attempts=2, max_attempts=2)[0] == "failed"
 
 
-def test_handlers_cover_implemented_kinds():
-    assert set(worker.HANDLERS) == {"normalize", "merge", "transcribe", "cleanup", "analyze"}
+def test_handlers_cover_all_job_kinds():
+    """Каждый вид из CHECK миграции 0066 имеет обработчик — иначе задание
+    легло бы в очередь и умерло `kind_not_implemented`."""
+    from app.models.media import JOB_KINDS
+
+    assert set(worker.HANDLERS) == set(JOB_KINDS)
 
 
 def test_ffmpeg_available_checks_both_binaries(monkeypatch):

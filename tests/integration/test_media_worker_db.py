@@ -271,9 +271,12 @@ async def test_worker_stop_releases_job_without_consuming_attempt(env, tenant_id
     assert media.status == "processing"
 
 
-async def test_unknown_kind_and_missing_source_fail_finally(env, tenant_id):
+async def test_unknown_kind_and_missing_source_fail_finally(env, tenant_id, monkeypatch):
     media = await _media(tenant_id, env, "m.mov", status="processing")
-    # `compose` появится в инкременте 7 — пока вид без обработчика.
+    # Все виды реализованы — «вид без обработчика» моделируем, убрав его из таблицы.
+    monkeypatch.setattr(
+        worker, "HANDLERS", {k: v for k, v in worker.HANDLERS.items() if k != "compose"}
+    )
     job_id = await _enqueue(tenant_id, media.id, "compose")
     assert await _run(env, tenant_id) == "failed"
     _, job = await _reload(tenant_id, media.id, job_id)
