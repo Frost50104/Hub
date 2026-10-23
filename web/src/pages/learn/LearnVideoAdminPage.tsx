@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { ImagePlus, Play } from 'lucide-react'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/Button'
 import { Confirm } from '@/components/ui/Confirm'
@@ -8,15 +11,23 @@ import { Label } from '@/components/ui/Label'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
 import { Switch } from '@/components/ui/Switch'
-import { useMediaAdminSettings, useUpdateMediaAdminSettings } from '@/hooks/useMediaJobs'
+import {
+  useMediaAdminSettings,
+  useMediaDetail,
+  useStartAvatarTest,
+  useUpdateMediaAdminSettings,
+} from '@/hooks/useMediaJobs'
 import { cn } from '@/lib/cn'
-import type { MediaAdminSettings } from '@/lib/learn'
+import { extractErrorDetail } from '@/lib/errors'
+import { learnApi, type MediaAdminSettings } from '@/lib/learn'
+import { activeJob, failureText, latestJob } from '@/lib/mediaJobs'
+import { formatMoney, pricePerMinute, RESOLUTIONS, sceneTestCostCents } from '@/lib/storyboard'
 
 /**
  * «Управление → Видео» (0066, макет AdminVideoFull): тумблер модуля,
- * расшифровка, глоссарий, лимит гуся. Сцена гуся и «Проверить на 10
- * секундах» — вместе с заданием `avatar_test` (инкремент 7). Сегмент виден
- * только при `me.features.media_pipeline_admin`.
+ * расшифровка, глоссарий, сцена гуся 16:9 с проверкой на 10 секундах
+ * (`avatar_test`), лимит и качество. Сегмент виден только при
+ * `me.features.media_pipeline_admin`.
  */
 export function LearnVideoAdminPage() {
   const settings = useMediaAdminSettings()
@@ -187,6 +198,8 @@ function TranscribeSection({
   )
 }
 
+const SCENE_MAX_BYTES = 20 * 1024 * 1024
+
 function AvatarSection({
   settings,
   pending,
@@ -197,6 +210,7 @@ function AvatarSection({
   onSave: (patch: {
     avatar_monthly_minutes_cap?: number
     avatar_resolution?: MediaAdminSettings['avatar_resolution']
+    scene_media_id?: string | null
   }) => void
 }) {
   const [cap, setCap] = useState(String(settings.avatar_monthly_minutes_cap))
@@ -207,15 +221,18 @@ function AvatarSection({
   const capNum = Number(cap)
   const capValid = Number.isInteger(capNum) && capNum >= 0 && capNum <= 100_000
   const used = settings.month_used_minutes
+  const resolution = settings.avatar_resolution
+  const capCostCents = settings.avatar_monthly_minutes_cap * 60 * (sceneTestCostCents(resolution) / 10)
   return (
     <Section
       title="Гусь (аватар)"
       hint={
         settings.avatar_env_enabled
-          ? 'Говорящий гусь вместо спикера через Hedra. Сцена-референс и проверка на 10 секундах появятся в следующем выпуске.'
-          : 'Гусь на этом сервере выключен: нет ключа Hedra. Лимит и качество можно задать заранее.'
+          ? 'Говорящий гусь вместо спикера через Hedra: наружу уходят только сцена и голосовая дорожка. Всё остальное считается на нашем сервере.'
+          : 'Гусь на этом сервере выключен: нет ключа Hedra. Сцену, лимит и качество можно задать заранее.'
       }
     >
+      <SceneBlock settings={settings} pending={pending} onSave={onSave} />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <Label htmlFor="media-cap">Лимит минут в месяц</Label>
@@ -233,13 +250,16 @@ function AvatarSection({
           <p className="mt-1 text-[13px] text-text2">
             Использовано в этом месяце: {used.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}{' '}
             из {settings.avatar_monthly_minutes_cap} мин
+            {settings.avatar_monthly_minutes_cap > 0 &&
+              ` · ≈ ${formatMoney(capCostCents)} в месяц при ${resolution}`}
+            . Обнуляется 1-го числа.
           </p>
         </div>
         <div>
           <Label htmlFor="media-res">Качество по умолчанию</Label>
           <Select
             id="media-res"
-            value={settings.avatar_resolution}
+            value={resolution}
             disabled={pending}
             onChange={(e) =>
               onSave({
@@ -247,12 +267,196 @@ function AvatarSection({
               })
             }
           >
-            <option value="540p">540p · $1,50/мин</option>
-            <option value="720p">720p · $3,00/мин</option>
-            <option value="1080p">1080p · $3,75/мин</option>
+            {RESOLUTIONS.map((r) => (
+              <option key={r} value={r}>
+                {r} · {pricePerMinute(r)}
+              </option>
+            ))}
           </Select>
+          <p className="mt-1 text-[13px] leading-[1.45] text-text2">
+            Гусь всегда во весь кадр там, где в записи был человек; во время показа экрана остаётся
+            только голос.
+          </p>
         </div>
       </div>
     </Section>
   )
+}
+
+/** Сцена-референс 16:9 (гусь анфас + фон) и «Проверить на 10 секундах». */
+function SceneBlock({
+  settings,
+  pending,
+  onSave,
+}: {
+  settings: MediaAdminSettings
+  pending: boolean
+  onSave: (patch: { scene_media_id?: string | null }) => void
+}) {
+  const qc = useQueryClient()
+  const input = useRef<HTMLInputElement | null>(null)
+  const [uploadPct, setUploadPct] = useState<number | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const test = useStartAvatarTest()
+  const sceneId = settings.scene_media_id
+  // Задание `avatar_test` стоит на самой сцене; его ход и провал читаем из
+  // детали сцены (опрос — пока задание активно), готовую проверку отдают
+  // настройки (`scene_test`).
+  const scene = useMediaDetail(sceneId, Boolean(sceneId) && settings.avatar_env_enabled)
+  const testJob = activeJob(scene.data, 'avatar_test')
+  const lastTest = latestJob(scene.data, 'avatar_test')
+  const lastKey = lastTest ? `${lastTest.id}:${lastTest.status}` : ''
+  useEffect(() => {
+    if (lastKey.endsWith(':done') || lastKey.endsWith(':failed')) {
+      void qc.invalidateQueries({ queryKey: ['learn-media', 'admin', 'settings'] })
+    }
+  }, [lastKey, qc])
+
+  const onPick = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      toast.error('Сцена — PNG, JPEG или WebP')
+      return
+    }
+    if (file.size > SCENE_MAX_BYTES) {
+      toast.error('Файл больше 20 МБ')
+      return
+    }
+    setUploadPct(0)
+    try {
+      const media = await learnApi.uploadMedia(file, {
+        role: 'scene',
+        onProgress: (f) => setUploadPct(Math.round(f * 100)),
+      })
+      onSave({ scene_media_id: media.id })
+    } catch (err) {
+      toast.error('Не удалось загрузить сцену', { description: extractErrorDetail(err) })
+    } finally {
+      setUploadPct(null)
+    }
+  }
+
+  const testCost = formatMoney(sceneTestCostCents(settings.avatar_resolution))
+  const busy = pending || uploadPct !== null
+  return (
+    <div className="space-y-3 rounded-xl border border-hair p-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[200px_1fr]">
+        <div className="aspect-video w-full overflow-hidden rounded-lg bg-surface">
+          {settings.scene_url ? (
+            <img
+              src={settings.scene_url}
+              alt="Сцена с гусём"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <button
+              type="button"
+              disabled={busy || !settings.enabled}
+              onClick={() => input.current?.click()}
+              className="flex h-full w-full flex-col items-center justify-center gap-1 text-[13px] font-semibold text-amber hover:bg-glass disabled:opacity-50"
+            >
+              <ImagePlus className="h-5 w-5" />
+              {uploadPct !== null ? `Загрузка ${uploadPct} %` : 'Загрузить сцену 16:9'}
+            </button>
+          )}
+        </div>
+        <div className="min-w-0 space-y-2">
+          <p className="text-[14px] font-semibold text-text">
+            {settings.scene_url ? 'Сцена с гусём' : 'Сцена с гусём не загружена'}
+          </p>
+          <p className="text-[13px] leading-[1.45] text-text2">
+            Это референс для Hedra: она оживляет картинку целиком, клюв и мимика идут за голосом.
+            Именно этот кадр встанет вместо спикера, поэтому нужна сцена 16:9: гусь анфас по центру,
+            фирменный фон, без текста.
+            {!settings.enabled && ' Загрузка доступна при включённом конвейере.'}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy || !settings.enabled}
+              onClick={() => input.current?.click()}
+            >
+              {uploadPct !== null
+                ? `Загрузка ${uploadPct} %`
+                : settings.scene_url
+                  ? 'Заменить'
+                  : 'Загрузить'}
+            </Button>
+            {sceneId && settings.avatar_env_enabled && (
+              <Button
+                size="sm"
+                disabled={busy || test.isPending || testJob !== null}
+                onClick={() => test.mutate()}
+              >
+                <Play className="h-4 w-4" />
+                {testJob
+                  ? testJob.status === 'queued'
+                    ? 'Ждём очереди…'
+                    : 'Hedra рендерит…'
+                  : `Проверить на 10 секундах · ≈ ${testCost}`}
+              </Button>
+            )}
+            {sceneId && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => setConfirmDelete(true)}
+              >
+                Удалить
+              </Button>
+            )}
+          </div>
+          {lastTest?.status === 'failed' && !testJob && (
+            <p className="text-[13px] text-red">
+              Проверка не удалась: {failureText(lastTest)}.
+            </p>
+          )}
+        </div>
+      </div>
+      {settings.scene_test && (
+        <div className="grid grid-cols-1 gap-3 border-t border-hair pt-3 sm:grid-cols-[200px_1fr]">
+          <video
+            src={settings.scene_test.url}
+            controls
+            playsInline
+            preload="metadata"
+            className="aspect-video w-full rounded-lg bg-black"
+          />
+          <p className="text-[13px] leading-[1.45] text-text2">
+            Проверка от {fmtDate(settings.scene_test.created_at)}: гусь говорит 10 секунд
+            встроенным образцом голоса. Если клюв идёт в такт и фон не плывёт — сцена годится;
+            иначе замените картинку и проверьте снова.
+          </p>
+        </div>
+      )}
+      <input
+        ref={input}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        hidden
+        onChange={(e) => void onPick(e)}
+      />
+      <Confirm
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Убрать сцену гуся?"
+        text="Новые заказы гуся станут недоступны, пока не загрузите другую сцену. Сам файл и готовые монтажи останутся."
+        confirmLabel="Убрать"
+        destructive
+        pending={pending}
+        onConfirm={() => {
+          setConfirmDelete(false)
+          onSave({ scene_media_id: null })
+        }}
+      />
+    </div>
+  )
+}
+
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleString('ru-RU', { day: 'numeric', month: 'short' })
 }

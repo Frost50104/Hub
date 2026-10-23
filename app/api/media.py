@@ -72,7 +72,7 @@ from app.services.learn_media import (
     verify_media_signature,
 )
 from app.services.learn_settings import get_settings_dict, set_setting
-from app.services.media import avatar_limit, compose_plan
+from app.services.media import avatar_limit, compose_plan, lesson_media
 from app.services.media import gate as media_gate
 from app.services.media import jobs as media_jobs
 from app.services.media import storyboard as storyboard_rules
@@ -565,9 +565,9 @@ async def _media_detail(db: AsyncSession, media: MediaFile) -> MediaDetailOut:
             ).where(MediaTranscript.media_id == media.id)
         )
     ).one_or_none()
-    subtitle = next(
-        (d for d in reversed(derived) if d.kind == "subtitle" and d.status == "ready"), None
-    )
+    # У монтажа своих субтитров нет — дорожка чистовика по цепочке
+    # (`lesson_media.subtitle_ids`, одно правило с отдачей урока).
+    subtitle_id = (await lesson_media.subtitle_ids(db, [media.id])).get(media.id)
     storyboard_row = await db.get(MediaStoryboard, media.id)
     return MediaDetailOut(
         id=media.id,
@@ -632,7 +632,7 @@ async def _media_detail(db: AsyncSession, media: MediaFile) -> MediaDetailOut:
         )
         if transcript is not None
         else None,
-        subtitle_url=sign_media_path(subtitle.id) if subtitle is not None else None,
+        subtitle_url=sign_media_path(subtitle_id) if subtitle_id is not None else None,
     )
 
 

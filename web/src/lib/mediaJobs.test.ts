@@ -6,6 +6,9 @@ import {
   cleanupPauses,
   cleanupState,
   cleanupStats,
+  composeState,
+  analyzeState,
+  latestComposed,
   formatBytes,
   formatDelta,
   formatDuration,
@@ -251,5 +254,45 @@ describe('чистовик', () => {
     expect(swapImpactText(14, 2, 72)).toContain('ещё в 2\u00a0уроках')
     expect(swapImpactText(0, 0, null)).toContain('Никто сейчас не проходит')
     expect(swapImpactText(1, 0, 0.5)).toContain('1\u00a0сотрудник —')
+  })
+})
+
+describe('состояние монтажа', () => {
+  const composed = {
+    id: 'c1',
+    kind: 'video' as const,
+    variant: 'composed' as const,
+    status: 'ready' as const,
+    url: '/api/media/c1',
+    duration_sec: 230,
+    size_bytes: 1,
+    file_name: 'a — монтаж.mp4',
+    created_at: '2026-10-23T10:00:00Z',
+  }
+  it('идёт → готов → провал → нет', () => {
+    expect(composeState(undefined)).toBe('none')
+    expect(composeState(detail({ jobs: [job({ kind: 'compose', status: 'running' })] }))).toBe(
+      'running',
+    )
+    expect(
+      composeState(detail({ derived: [composed], jobs: [job({ kind: 'compose', status: 'failed' })] })),
+    ).toBe('ready')
+    expect(latestComposed(detail({ derived: [composed] }))?.id).toBe('c1')
+    expect(composeState(detail({ jobs: [job({ kind: 'compose', status: 'failed' })] }))).toBe('failed')
+    expect(composeState(detail({}))).toBe('none')
+  })
+  it('раскадровка: строка на сервере важнее хода задания', () => {
+    expect(analyzeState(undefined, true)).toBe('ready')
+    expect(analyzeState(detail({ jobs: [job({ kind: 'analyze', status: 'queued' })] }), false)).toBe(
+      'running',
+    )
+    expect(analyzeState(detail({ jobs: [job({ kind: 'analyze', status: 'failed' })] }), false)).toBe(
+      'failed',
+    )
+    expect(analyzeState(detail({}), false)).toBe('none')
+  })
+  it('коды Hedra переводятся', () => {
+    expect(failureText(job({ error: 'insufficient_balance: 402' }))).toContain('Hedra')
+    expect(failureText(job({ error: 'moderation_failed: x' }))).toContain('модерацией')
   })
 })

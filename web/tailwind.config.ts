@@ -11,6 +11,7 @@ export default {
         green: 'rgb(var(--green) / <alpha-value>)',
         'green-deep': 'rgb(var(--green-deep) / <alpha-value>)',
         'blue-deep': 'rgb(var(--blue-deep) / <alpha-value>)',
+        sonar: 'rgb(var(--sonar) / <alpha-value>)',
         'on-amber': 'rgb(var(--on-amber) / <alpha-value>)',
         'amber-deep': 'rgb(var(--amber-deep) / <alpha-value>)',
         'av-fill': 'rgb(var(--av-fill) / <alpha-value>)',

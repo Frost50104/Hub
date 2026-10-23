@@ -21,6 +21,7 @@ from app.api.media import (
     compose_estimate,
     create_media_job,
     get_media_admin_settings,
+    get_media_detail,
     start_avatar_test,
 )
 from app.config import get_settings
@@ -29,7 +30,7 @@ from app.models.course import MediaFile
 from app.models.media import MediaJob, MediaStoryboard, MediaTranscript
 from app.schemas.media import ComposeEstimateIn, JobCreate
 from app.services.learn_settings import set_setting
-from app.services.media import gate, storage
+from app.services.media import gate, lesson_media, storage
 from app.services.media.hedra.client import HedraClient
 from app.services.media.pipeline import avatar_test_job, compose_job
 from app.workers import media as worker
@@ -310,6 +311,28 @@ async def test_estimate_order_and_compose_with_fake_hedra(
     assert composed.file_name == "Запись — монтаж.mp4"
     assert composed.duration_sec == pytest.approx(12.0, abs=0.3)
     assert (Path(env.attachments_root) / composed.storage_key).exists()
+
+    # Субтитры монтажа — дорожка ЧИСТОВИКА по цепочке `source_media_id`:
+    # и в детали медиа, и в отдаче урока (`video_tracks`).
+    sub = await _media(
+        db,
+        tenant_id,
+        env,
+        None,
+        kind="subtitle",
+        mime="text/vtt",
+        variant=None,
+        duration_sec=None,
+        file_name="Запись.vtt",
+        source_media_id=cleaned.id,
+    )
+    await db.commit()
+    detail = await get_media_detail(composed.id, admin, db)
+    assert detail.subtitle_url and detail.subtitle_url.startswith(f"/api/media/{sub.id}?")
+    tracks, statuses = await lesson_media.video_tracks(db, [str(composed.id), str(cleaned.id)])
+    assert tracks[str(composed.id)].startswith(f"/api/media/{sub.id}?")
+    assert tracks[str(cleaned.id)].startswith(f"/api/media/{sub.id}?")
+    assert statuses[str(composed.id)] == "ready"
 
 
 @needs_ffmpeg

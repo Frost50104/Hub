@@ -1427,6 +1427,56 @@ export interface MediaUsage {
   }[]
 }
 
+export interface StoryboardSegment {
+  s: number
+  e: number
+  kind: 'speaker' | 'screen'
+  mode?: 'goose' | 'keep'
+}
+
+export interface StoryboardInsert {
+  media_id: string
+  at: number
+  duration: number
+}
+
+export interface MediaStoryboard {
+  media_id: string
+  duration_sec: number | null
+  face_track: number[]
+  segments_auto: StoryboardSegment[]
+  segments: StoryboardSegment[]
+  inserts: StoryboardInsert[]
+  goose_enabled: boolean
+  edited_by: string | null
+  params: Record<string, unknown>
+  updated_at: string
+}
+
+export interface StoryboardPatch {
+  segments?: StoryboardSegment[]
+  inserts?: StoryboardInsert[]
+  goose_enabled?: boolean
+}
+
+export interface ComposeEstimate {
+  goose_enabled: boolean
+  resolution: '540p' | '720p' | '1080p'
+  goose_seconds: number
+  segments: number
+  inserts: number
+  chunks: number
+  billed_seconds: number
+  cost_cents: number
+  currency: string
+  monthly_cap_sec: number
+  monthly_used_sec: number
+  allowed: boolean
+  reason: string | null
+  scene_set: boolean
+  hedra_estimate: Record<string, unknown> | null
+}
+
 export interface MergePartInput {
   media_id: string
   trim_start_sec?: number
@@ -2198,9 +2248,22 @@ export const learnApi = {
     api.get<MediaJob>(`/learn/media/jobs/${jobId}`).then((r) => r.data),
   mediaUsage: (id: string): Promise<MediaUsage> =>
     api.get<MediaUsage>(`/learn/media/${id}/usage`).then((r) => r.data),
+  mediaStoryboard: (id: string): Promise<MediaStoryboard> =>
+    api.get<MediaStoryboard>(`/learn/media/${id}/storyboard`).then((r) => r.data),
+  updateMediaStoryboard: (id: string, patch: StoryboardPatch): Promise<MediaStoryboard> =>
+    api.put<MediaStoryboard>(`/learn/media/${id}/storyboard`, patch).then((r) => r.data),
+  composeEstimate: (
+    id: string,
+    resolution?: ComposeEstimate['resolution'],
+  ): Promise<ComposeEstimate> =>
+    api
+      .post<ComposeEstimate>(`/learn/media/${id}/compose/estimate`, resolution ? { resolution } : {})
+      .then((r) => r.data),
+  startAvatarTest: (): Promise<MediaJob> =>
+    api.post<MediaJob>('/learn/media/admin/avatar-test').then((r) => r.data),
   createMediaJob: (
     id: string,
-    kind: 'transcribe' | 'cleanup' | 'analyze',
+    kind: 'transcribe' | 'cleanup' | 'analyze' | 'compose',
     params?: Record<string, unknown>,
   ): Promise<MediaJob> =>
     api

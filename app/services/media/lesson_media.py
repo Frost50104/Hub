@@ -12,19 +12,15 @@ from app.models.course import MediaFile
 from app.services.learn_media import sign_media_path
 
 
-async def video_tracks(
-    db: AsyncSession, media_ids: list[str]
-) -> tuple[dict[str, str], dict[str, str]]:
-    """→ (`{media_id: url субтитров}`, `{media_id: status}`); ключи в нижнем
-    регистре, как в `collect_video_ids`. Субтитры — строка `kind='subtitle'`
-    с `source_media_id` на видео, готовая; из нескольких берётся свежая."""
-    if not media_ids:
-        return {}, {}
-    ids = [UUID(x) for x in media_ids]
-    status_rows = await db.execute(
-        select(MediaFile.id, MediaFile.status).where(MediaFile.id.in_(ids))
-    )
-    statuses = {str(mid).lower(): status for mid, status in status_rows}
+async def subtitle_ids(db: AsyncSession, ids: list[UUID]) -> dict[UUID, UUID]:
+    """`{video_id: subtitle_id}` — готовая строка `kind='subtitle'` с
+    `source_media_id` на видео; из нескольких берётся свежая. Монтаж
+    (`variant='composed'`) своих субтитров не имеет — таймлайн у него тот же,
+    что у чистовика, поэтому для него берётся дорожка ИСТОЧНИКА (один шаг
+    по `source_media_id`; чистовик свою дорожку имеет всегда)."""
+    if not ids:
+        return {}
+    out: dict[UUID, UUID] = {}
     sub_rows = await db.execute(
         select(MediaFile.id, MediaFile.source_media_id)
         .where(
@@ -34,9 +30,46 @@ async def video_tracks(
         )
         .order_by(MediaFile.created_at)
     )
-    tracks: dict[str, str] = {}
     for sub_id, source_id in sub_rows:
-        tracks[str(source_id).lower()] = sign_media_path(sub_id)
+        out[source_id] = sub_id
+    missing = [mid for mid in ids if mid not in out]
+    if not missing:
+        return out
+    composed_rows = await db.execute(
+        select(MediaFile.id, MediaFile.source_media_id).where(
+            MediaFile.id.in_(missing),
+            MediaFile.variant == "composed",
+            MediaFile.source_media_id.is_not(None),
+        )
+    )
+    parents: dict[UUID, UUID] = dict(composed_rows.all())
+    if not parents:
+        return out
+    parent_subs = await subtitle_ids(db, list(set(parents.values())))
+    for mid, source_id in parents.items():
+        sub = parent_subs.get(source_id)
+        if sub is not None:
+            out[mid] = sub
+    return out
+
+
+async def video_tracks(
+    db: AsyncSession, media_ids: list[str]
+) -> tuple[dict[str, str], dict[str, str]]:
+    """→ (`{media_id: url субтитров}`, `{media_id: status}`); ключи в нижнем
+    регистре, как в `collect_video_ids`. Дорожки — `subtitle_ids` (у монтажа
+    — дорожка чистовика)."""
+    if not media_ids:
+        return {}, {}
+    ids = [UUID(x) for x in media_ids]
+    status_rows = await db.execute(
+        select(MediaFile.id, MediaFile.status).where(MediaFile.id.in_(ids))
+    )
+    statuses = {str(mid).lower(): status for mid, status in status_rows}
+    tracks = {
+        str(video_id).lower(): sign_media_path(sub_id)
+        for video_id, sub_id in (await subtitle_ids(db, ids)).items()
+    }
     return tracks, statuses
 
 

@@ -11,15 +11,18 @@ import type { SwapTarget } from '@/lib/lessonVideoNodes'
 import { activeJob, failureText, formatDuration, latestJob, transcribeState } from '@/lib/mediaJobs'
 
 import { CleanupTab } from './CleanupTab'
+import { MontageTab } from './MontageTab'
 
 /**
  * Шторка инструментов видеоблока (макеты «Чистовик видео урока», холст
- * GbzNFbfcNCftQtcyyiwPFq): шторка ниже `lg`, модалка 720 на десктопе. Пока
- * одна вкладка — «Субтитры» (инкремент 5); «Чистовик» и «Монтаж» появятся
- * вместе с заданиями `cleanup` (6) и `compose` (7). Состояние файла делит с
- * видеоблоком ключ `['learn-media', id]`.
+ * GbzNFbfcNCftQtcyyiwPFq): шторка ниже `lg`, модалка 760 на десктопе. Три
+ * вкладки — «Субтитры» (инкремент 5), «Чистовик» (6), «Монтаж» (7).
+ * Состояние файла делит с видеоблоком ключ `['learn-media', id]`. «База» —
+ * всегда ОРИГИНАЛ: у ноды с чистовиком это его источник, у ноды с монтажом —
+ * источник чистовика (`source_media_id` монтажа указывает на чистовик).
  */
-type Tab = 'subtitles' | 'cleanup'
+export type MediaToolsTab = 'subtitles' | 'cleanup' | 'montage'
+type Tab = MediaToolsTab
 
 export function MediaToolsSheet({
   mediaId,
@@ -41,10 +44,17 @@ export function MediaToolsSheet({
 }) {
   const detail = useMediaDetail(mediaId, open)
   const d = detail.data
-  // Чистовик заказывается и показывается по ОРИГИНАЛУ: у ноды с чистовиком
-  // «база» — его источник.
-  const baseId = d?.variant === 'cleaned' && d.source_media_id ? d.source_media_id : mediaId
-  const base = useMediaDetail(baseId, open && baseId !== mediaId)
+  // Чистовик и монтаж заказываются и показываются по ОРИГИНАЛУ: у ноды с
+  // чистовиком «база» — его источник, у ноды с монтажом — источник чистовика.
+  const midId = d?.variant === 'composed' ? d.source_media_id : null
+  const mid = useMediaDetail(midId, open && Boolean(midId))
+  const baseId =
+    d?.variant === 'cleaned'
+      ? d.source_media_id
+      : d?.variant === 'composed'
+        ? (mid.data?.source_media_id ?? null)
+        : mediaId
+  const base = useMediaDetail(baseId, open && Boolean(baseId) && baseId !== mediaId)
   const baseDetail = baseId === mediaId ? d : base.data
   const [tab, setTab] = useState<Tab>(initialTab)
   const title = d
@@ -55,7 +65,7 @@ export function MediaToolsSheet({
       open={open}
       onOpenChange={onOpenChange}
       title={title}
-      description="Субтитры и чистовик"
+      description="Субтитры, чистовик и монтаж"
       desktopWidth={760}
       dismissLabel="Закрыть"
     >
@@ -68,6 +78,7 @@ export function MediaToolsSheet({
           options={[
             { value: 'subtitles', label: 'Субтитры' },
             { value: 'cleanup', label: 'Чистовик' },
+            { value: 'montage', label: 'Монтаж' },
           ]}
         />
         {detail.isPending && <p className="text-sm text-text3">Загружаем…</p>}
@@ -85,6 +96,19 @@ export function MediaToolsSheet({
             onSwap={onSwap}
             onRevert={onRevert}
           />
+        )}
+        {d && tab === 'montage' && baseDetail && (
+          <MontageTab
+            base={baseDetail}
+            nodeMediaId={mediaId}
+            nodeDerived={nodeDerived}
+            onSwap={onSwap}
+            onRevert={onRevert}
+            onGoCleanup={() => setTab('cleanup')}
+          />
+        )}
+        {d && (tab === 'cleanup' || tab === 'montage') && !baseDetail && (
+          <p className="text-sm text-text3">Загружаем…</p>
         )}
       </div>
     </ResponsiveDialog>

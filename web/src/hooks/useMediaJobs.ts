@@ -1,4 +1,10 @@
-import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+  type UseQueryResult,
+} from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 import { extractErrorDetail } from '@/lib/errors'
@@ -29,7 +35,8 @@ export function useMediaDetail(
 }
 
 export type StartJobInput =
-  'transcribe' | { kind: 'transcribe' | 'cleanup' | 'analyze'; params?: Record<string, unknown> }
+  | 'transcribe'
+  | { kind: 'transcribe' | 'cleanup' | 'analyze' | 'compose'; params?: Record<string, unknown> }
 
 export function useStartMediaJob(mediaId: string) {
   const qc = useQueryClient()
@@ -88,6 +95,76 @@ export function useUpdateMediaAdminSettings() {
       toast.error('Не удалось сохранить', {
         description: extractErrorDetail(err),
       })
+    },
+  })
+}
+
+export function useStoryboard(mediaId: string | null | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ['learn-media', mediaId, 'storyboard'],
+    queryFn: () => learnApi.mediaStoryboard(mediaId!),
+    enabled: Boolean(mediaId) && enabled,
+    staleTime: 10_000,
+    retry: false,
+    meta: { suppressGlobalError: true },
+  })
+}
+
+export function useUpdateStoryboard(mediaId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (patch: Parameters<typeof learnApi.updateMediaStoryboard>[1]) =>
+      learnApi.updateMediaStoryboard(mediaId, patch),
+    onSuccess: (fresh) => {
+      qc.setQueryData(['learn-media', mediaId, 'storyboard'], fresh)
+      void qc.invalidateQueries({ queryKey: ['learn-media', mediaId, 'estimate'] })
+    },
+    onError: (err) => {
+      toast.error('Не удалось сохранить раскадровку', { description: extractErrorDetail(err) })
+    },
+  })
+}
+
+export function useComposeEstimate(
+  mediaId: string | null | undefined,
+  resolution: '540p' | '720p' | '1080p' | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['learn-media', mediaId, 'estimate', resolution ?? 'default'],
+    queryFn: () => learnApi.composeEstimate(mediaId!, resolution),
+    enabled: Boolean(mediaId) && enabled,
+    staleTime: 10_000,
+    retry: false,
+    meta: { suppressGlobalError: true },
+  })
+}
+
+/** Детали вставок раскадровки (имя файла, длина, статус) — по одной на id;
+ *  вставок единицы, отдельной батч-ручки нет. */
+export function useInsertDetails(ids: string[]) {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: ['learn-media', id],
+      queryFn: () => learnApi.mediaDetail(id),
+      staleTime: 30_000,
+      retry: false,
+      meta: { suppressGlobalError: true },
+    })),
+  })
+}
+
+/** «Проверить на 10 секундах» в админке: задание `avatar_test` на сцене. */
+export function useStartAvatarTest() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: learnApi.startAvatarTest,
+    onSuccess: (job) => {
+      void qc.invalidateQueries({ queryKey: ['learn-media', job.media_id] })
+      void qc.invalidateQueries({ queryKey: ['learn-media', 'admin', 'settings'] })
+    },
+    onError: (err) => {
+      toast.error('Не удалось запустить проверку', { description: extractErrorDetail(err) })
     },
   })
 }

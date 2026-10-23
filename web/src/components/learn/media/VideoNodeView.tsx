@@ -7,15 +7,17 @@ import { useMediaDetail } from '@/hooks/useMediaJobs'
 import { cn } from '@/lib/cn'
 import { revertedVideoAttrs, swappedVideoAttrs, type SwapTarget } from '@/lib/lessonVideoNodes'
 import {
+  activeJob,
   blockStatus,
   cleanupState,
   formatDelta,
   formatDuration,
   latestCleaned,
+  latestComposed,
   transcribeChip,
 } from '@/lib/mediaJobs'
 
-import { MediaToolsSheet } from './MediaToolsSheet'
+import { MediaToolsSheet, type MediaToolsTab } from './MediaToolsSheet'
 
 /**
  * Видеоблок редактора при включённом конвейере (0066): живое состояние файла
@@ -43,6 +45,16 @@ function VideoNodeViewInner({ node, selected, updateAttributes }: NodeViewProps)
   const nodeDerived = node.attrs.derivedKind === 'cleaned' || node.attrs.derivedKind === 'composed'
   const cleaned = !nodeDerived ? latestCleaned(d) : null
   const cleanupRunning = cleanupState(d) === 'running'
+  // Задания чистовика (в том числе `compose`) видны и у оригинала — сервер
+  // собирает их по производным; готовый монтаж лежит в `derived` ЧИСТОВИКА.
+  const composeRunning = activeJob(d, 'compose') !== null
+  const composed = d?.variant === 'cleaned' ? latestComposed(d) : null
+  const initialTab: MediaToolsTab =
+    node.attrs.derivedKind === 'composed' || composed || composeRunning
+      ? 'montage'
+      : cleaned || nodeDerived
+        ? 'cleanup'
+        : 'subtitles'
   const onSwap = (target: SwapTarget) => updateAttributes(swappedVideoAttrs(node.attrs, target))
   const onRevert = (originalSrc: string | null) => {
     const next = revertedVideoAttrs(node.attrs, originalSrc)
@@ -138,6 +150,16 @@ function VideoNodeViewInner({ node, selected, updateAttributes }: NodeViewProps)
               : ''}
           </Chip>
         )}
+        {composeRunning && (
+          <Chip variant="neutral" className="text-amber">
+            Собираем монтаж…
+          </Chip>
+        )}
+        {composed && node.attrs.derivedKind !== 'composed' && (
+          <Chip variant="outline" className="border-green-deep/50 text-green-deep">
+            Монтаж готов
+          </Chip>
+        )}
 
         {d && d.status === 'ready' && (
           <button
@@ -158,7 +180,7 @@ function VideoNodeViewInner({ node, selected, updateAttributes }: NodeViewProps)
           onOpenChange={setSheetOpen}
           onSwap={onSwap}
           onRevert={onRevert}
-          initialTab={cleaned || nodeDerived ? 'cleanup' : 'subtitles'}
+          initialTab={initialTab}
         />
       )}
     </NodeViewWrapper>

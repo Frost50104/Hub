@@ -121,6 +121,17 @@ export function failureText(job: MediaJob | null): string {
     cancelled: 'Отменено',
     lease_expired: 'Воркер не ответил вовремя',
     worker_stopped: 'Сервер перезапускался — задание вернётся в очередь',
+    avatar_disabled: 'Гусь выключен на сервере',
+    scene_missing: 'Сцена гуся не задана или не готова',
+    insufficient_balance: 'На кошельке Hedra нет денег — пополните баланс',
+    moderation_failed: 'Hedra отклонила материал модерацией',
+    hedra_auth: 'Ключ Hedra не принят — сообщите администратору',
+    invalid_argument: 'Hedra не приняла запрос',
+    hedra_no_output: 'Hedra не отдала результат',
+    hedra_timeout: 'Hedra не ответила вовремя',
+    nothing_to_compose: 'Ни отрезков гуся, ни вставок — монтировать нечего',
+    insert_missing: 'Вставка не готова или удалена',
+    faststart_missing: 'Файл собрался без быстрого старта',
   }
   const text = known[(code ?? '').trim()]
   if (text) return text
@@ -189,6 +200,43 @@ export function cleanupState(detail: MediaDetail | undefined): CleanupState {
 export function cleanupJobFor(detail: MediaDetail | undefined): MediaJob | null {
   if (!detail) return null
   return detail.jobs.find((j) => j.kind === 'cleanup' && j.status === 'done') ?? null
+}
+
+export type ComposeState = 'none' | 'running' | 'ready' | 'failed'
+
+/** Свежий готовый монтаж — производная ЧИСТОВИКА (`source_media_id` у
+ *  монтажа указывает на чистовик, поэтому в `derived` оригинала его нет). */
+export function latestComposed(detail: MediaDetail | undefined): DerivedMedia | null {
+  if (!detail) return null
+  const ready = detail.derived.filter((d) => d.variant === 'composed' && d.status === 'ready')
+  return ready.length ? ready[ready.length - 1]! : null
+}
+
+/** Состояние вкладки «Монтаж» по детали чистовика: идёт → есть готовый →
+ *  провал → ещё нет. */
+export function composeState(detail: MediaDetail | undefined): ComposeState {
+  if (!detail) return 'none'
+  if (activeJob(detail, 'compose')) return 'running'
+  if (latestComposed(detail)) return 'ready'
+  if (latestJob(detail, 'compose')?.status === 'failed') return 'failed'
+  return 'none'
+}
+
+export function composeJobFor(detail: MediaDetail | undefined): MediaJob | null {
+  if (!detail) return null
+  return detail.jobs.find((j) => j.kind === 'compose' && j.status === 'done') ?? null
+}
+
+export type AnalyzeState = 'none' | 'running' | 'failed' | 'ready'
+
+/** Раскадровка: `analyze` ставится сам после чистовика; «ready» решает
+ *  наличие строки на сервере (`GET …/storyboard`), здесь — только ход. */
+export function analyzeState(detail: MediaDetail | undefined, hasBoard: boolean): AnalyzeState {
+  if (hasBoard) return 'ready'
+  if (!detail) return 'none'
+  if (activeJob(detail, 'analyze')) return 'running'
+  if (latestJob(detail, 'analyze')?.status === 'failed') return 'failed'
+  return 'none'
 }
 
 export interface CleanupStats {

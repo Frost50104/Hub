@@ -1,16 +1,13 @@
-import { useQuery } from '@tanstack/react-query'
 import { Scissors } from 'lucide-react'
 import { useRef, useState } from 'react'
-import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/Button'
-import { Confirm } from '@/components/ui/Confirm'
 import { SegmentGroup } from '@/components/ui/SegmentGroup'
 import { Select } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/Switch'
 import { useCancelMediaJob, useStartMediaJob } from '@/hooks/useMediaJobs'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
-import { learnApi, type DerivedMedia, type MediaDetail } from '@/lib/learn'
+import type { DerivedMedia, MediaDetail } from '@/lib/learn'
 import {
   activeJob,
   cleanupJobFor,
@@ -23,12 +20,11 @@ import {
   latestCleaned,
   latestJob,
   mapOriginalTime,
-  swapImpactText,
   type PauseRow,
 } from '@/lib/mediaJobs'
 import type { SwapTarget } from '@/lib/lessonVideoNodes'
 
-import { useMediaToolsContext } from './MediaToolsContext'
+import { SwapControls } from './SwapControls'
 
 /**
  * Вкладка «Чистовик» (макеты CleanupSettings / Progress / CleanupResult /
@@ -257,34 +253,10 @@ function CleanupResult({
   onRevert: () => void
   onRebuild: () => void
 }) {
-  const { lessonId, lessonStatus } = useMediaToolsContext()
   const isDesktop = useIsDesktop()
   const [showAll, setShowAll] = useState(false)
-  const [confirm, setConfirm] = useState(false)
-  const usage = useQuery({
-    queryKey: ['learn-media', base.id, 'usage'],
-    queryFn: () => learnApi.mediaUsage(base.id),
-    enabled: confirm && lessonStatus === 'published',
-    staleTime: 30_000,
-    retry: false,
-    meta: { suppressGlobalError: true },
-  })
   const shorter = stats ? stats.source_sec - stats.output_sec : null
   const visible = showAll ? pauses : pauses.slice(0, 6)
-  const inThisLesson = usage.data?.lessons.find((l) => l.lesson_id === lessonId)
-  const others = usage.data ? usage.data.lessons.filter((l) => l.lesson_id !== lessonId).length : 0
-
-  const doSwap = () => {
-    onSwap({ mediaId: cleaned.id, src: cleaned.url, derivedKind: 'cleaned' })
-    setConfirm(false)
-    toast.success('Видео заменено — сохраните урок', {
-      description: 'Оригинал остался, вернуть его можно в любой момент из этой шторки.',
-    })
-  }
-  const swapClick = () => {
-    if (lessonStatus === 'published') setConfirm(true)
-    else doSwap()
-  }
 
   return (
     <div className="space-y-4">
@@ -341,33 +313,19 @@ function CleanupResult({
           )}
         </div>
       )}
-      <div className="flex flex-wrap gap-2">
-        {inUse ? (
-          <Button size="sm" variant="secondary" onClick={onRevert}>
-            Вернуть оригинал
-          </Button>
-        ) : (
-          <Button size="sm" onClick={swapClick} disabled={nodeDerived && !inUse}>
-            Заменить в уроке
-          </Button>
-        )}
+      <SwapControls
+        base={base}
+        target={{ mediaId: cleaned.id, src: cleaned.url, derivedKind: 'cleaned' }}
+        inUse={inUse}
+        nodeDerived={nodeDerived}
+        shorterBy={shorter}
+        onSwap={onSwap}
+        onRevert={onRevert}
+      >
         <Button size="sm" variant="ghost" onClick={onRebuild}>
           Собрать заново
         </Button>
-      </div>
-      <Confirm
-        open={confirm}
-        onOpenChange={setConfirm}
-        title="Заменить видео в опубликованном уроке?"
-        text={
-          usage.isPending
-            ? 'Считаем, сколько человек сейчас проходят урок…'
-            : swapImpactText(inThisLesson?.in_progress ?? 0, others, shorter)
-        }
-        confirmLabel="Заменить"
-        pending={usage.isPending}
-        onConfirm={doSwap}
-      />
+      </SwapControls>
     </div>
   )
 }
