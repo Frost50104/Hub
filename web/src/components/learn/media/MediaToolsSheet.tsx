@@ -213,6 +213,26 @@ export function SubtitlesTab({ detail }: { detail: MediaDetail }) {
     )
   }
 
+  if (state === 'ready' && !detail.transcript && detail.subtitle_url) {
+    return (
+      <div className="space-y-4">
+        <Header title="Субтитры взяты у чистовика">
+          <p className="mt-1 text-sm leading-[1.45] text-text2">
+            Монтаж идёт по таймлайну чистовика, поэтому дорожка у них одна: в плеере сотрудника
+            она включится сама. Переделать расшифровку можно во вкладке чистовика — по оригиналу.
+          </p>
+        </Header>
+        <a
+          href={detail.subtitle_url}
+          download
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-hair px-3 text-[13px] font-semibold text-text hover:bg-glass"
+        >
+          <Download className="h-4 w-4" /> Скачать .vtt
+        </a>
+      </div>
+    )
+  }
+
   if (state === 'ready' && detail.transcript) {
     const t = detail.transcript
     const segments = transcript.data?.segments.slice(0, 6) ?? []

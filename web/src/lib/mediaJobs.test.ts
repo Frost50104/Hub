@@ -74,6 +74,15 @@ describe('опрос', () => {
 })
 
 describe('состояние расшифровки', () => {
+  it('у монтажа без своего транскрипта субтитры чистовика считаются готовыми', () => {
+    expect(
+      transcribeState(detail({ variant: 'composed', subtitle_url: '/api/media/s?e=1&s=x' })),
+    ).toBe('ready')
+    expect(transcribeState(detail({ variant: 'composed', subtitle_url: null }))).toBe('none')
+    expect(transcribeChip(detail({ variant: 'composed', subtitle_url: '/api/media/s' }))?.text).toBe(
+      'Субтитры',
+    )
+  })
   it('активное задание важнее всего, транскрипт важнее старой ошибки', () => {
     expect(transcribeState(undefined)).toBe('none')
     expect(transcribeState(detail({}))).toBe('none')

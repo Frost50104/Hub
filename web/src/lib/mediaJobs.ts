@@ -48,6 +48,9 @@ export function transcribeState(detail: MediaDetail | undefined): TranscribeStat
   if (!detail) return 'none'
   if (activeJob(detail, 'transcribe')) return 'running'
   if (detail.transcript) return 'ready'
+  // Монтаж своего транскрипта не имеет — дорожку чистовика сервер отдаёт по
+  // цепочке `source_media_id` (`subtitle_url`), и для человека это «есть».
+  if (detail.variant === 'composed' && detail.subtitle_url) return 'ready'
   const last = latestJob(detail, 'transcribe')
   if (last?.status === 'failed') return 'failed'
   if (!detail.capabilities.transcribe && detail.status === 'ready') return 'unavailable'
