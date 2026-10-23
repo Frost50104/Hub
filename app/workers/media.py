@@ -183,6 +183,16 @@ async def run_job(
     )
     handler = HANDLERS.get(spec.kind)
     started = time.monotonic()
+
+    async def persist() -> None:
+        # Та же короткая bypass-транзакция, что у heartbeat, но по требованию.
+        async with tenant_scoped_session(None, bypass_rls=True) as db:
+            if await jobs.heartbeat(
+                db, ctx.spec.id, lease_sec=settings.media_job_lease_sec, progress=dict(ctx.progress)
+            ):
+                ctx.cancel.set()
+
+    ctx.persist = persist
     hb = asyncio.create_task(
         _heartbeat_loop(ctx, lease_sec=settings.media_job_lease_sec, every=heartbeat_sec, stop=stop)
     )

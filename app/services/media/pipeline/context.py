@@ -52,9 +52,18 @@ class JobContext:
     cancel: asyncio.Event
     log: Any
     progress: dict[str, Any] = field(default_factory=dict)
+    # Записать `progress` в `media_jobs.result` НЕМЕДЛЕННО, не дожидаясь
+    # heartbeat: ставит воркер. Нужно платным шагам — `job_id` Hedra обязан
+    # лечь в базу сразу после submit, иначе рестарт в окне до heartbeat
+    # отправил бы кусок второй раз (идемпотентности у API Hedra нет).
+    persist: Callable[[], Awaitable[None]] | None = None
 
     def set_progress(self, stage: str, pct: int | None = None) -> None:
         self.progress = {"stage": stage, "pct": pct}
+
+    async def persist_now(self) -> None:
+        if self.persist is not None:
+            await self.persist()
 
     async def ffmpeg(
         self,

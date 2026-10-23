@@ -95,8 +95,10 @@ async def _hedra_chunks(
     resolution: str,
     state: dict[str, Any],
 ) -> list[Path]:
-    """Куски гуся: загрузить голос → submit (idempotency_key) → дождаться →
-    скачать. Состояние — в `state["chunks"]`, heartbeat пишет его в result."""
+    """Куски гуся: загрузить сцену и голос → submit → записать `job_id` СРАЗУ
+    (`ctx.persist_now`) → дождаться → скачать. Состояние — в `state["chunks"]`.
+    Handle файла Hedra живёт ~1 ч, а кусок ждёт результата до 30 мин — поэтому
+    сцена грузится перед КАЖДЫМ submit, а не один раз на задание."""
     s = ctx.settings
     rows: list[dict[str, Any]] = state.setdefault("chunks", [])
     while len(rows) < len(chunks):
@@ -112,7 +114,6 @@ async def _hedra_chunks(
                 "cost": None,
             }
         )
-    image_id: str | None = state.get("image_id")
     clips: list[Path] = []
     for i, (cs, ce) in enumerate(chunks):
         if ctx.cancel.is_set():
@@ -123,11 +124,6 @@ async def _hedra_chunks(
         clip = ctx.tmp / f"goose-{i:02d}.mp4"
         try:
             if not row.get("job_id"):
-                if image_id is None:
-                    image_id = await client.upload_file(
-                        scene_path, purpose="image", mime=scene_mime
-                    )
-                    state["image_id"] = image_id
                 voice = ctx.tmp / f"voice-{i:02d}.mp3"
                 await ctx.ffmpeg(
                     compose_plan.voice_slice_args(src, voice, cs, ce),
@@ -136,16 +132,19 @@ async def _hedra_chunks(
                     pct_offset=20 + 60 * i / max(1, len(chunks)),
                     pct_scale=0.01,
                 )
-                audio_id = await client.upload_file(voice, purpose="audio", mime="audio/mpeg")
+                image_ref = await client.upload_file(scene_path, purpose="image", mime=scene_mime)
+                audio_ref = await client.upload_file(voice, purpose="audio", mime="audio/mpeg")
                 row["job_id"] = await client.submit(
-                    image_id=image_id,
-                    audio_id=audio_id,
+                    image_ref=image_ref,
+                    audio_ref=audio_ref,
                     resolution=resolution,
                     duration_ms=row["duration_ms"],
                     idempotency_key=row["idempotency_key"],
                     prompt=GOOSE_PROMPT,
                 )
                 row["status"] = "submitted"
+                ctx.progress["hedra"] = {"chunks": rows}
+                await ctx.persist_now()
                 ctx.log.info("media.hedra_submitted", chunk=i, job_id=row["job_id"])
 
             async def on_tick(job: Any, row: dict[str, Any] = row) -> None:

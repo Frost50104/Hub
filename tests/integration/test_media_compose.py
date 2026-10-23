@@ -78,27 +78,50 @@ class FakeHedra:
         path = request.url.path
         if path == "/v3/files":
             self.uploads += 1
-            return httpx.Response(200, json={"id": f"file_{self.uploads}"})
+            # Форма Hedra v3 (сверено 23.10): presigned url — и есть handle.
+            return httpx.Response(
+                201,
+                json={
+                    "url": f"https://s3.test/up/file_{self.uploads}?sig=x",
+                    "content_type": "application/octet-stream",
+                    "expires_at": "2026-10-23T11:20:36Z",
+                },
+            )
         if path == "/v3/models/hedra-character-3":
             body = json.loads(request.content)
+            assert "idempotency_key" not in body and request.headers.get("idempotency-key")
+            assert body["input"]["start_image"]["source"] == "url"
+            assert body["input"]["audio"]["source"] == "url"
             self.submits.append(body)
             if self.fail_submit is not None and self.fail_submit == len(self.submits):
-                return httpx.Response(422, text="MODERATION_FAILED")
-            return httpx.Response(202, json={"id": f"gen_{len(self.submits)}", "status": "queued"})
+                return httpx.Response(
+                    422,
+                    json={
+                        "error": {
+                            "code": "MODERATION_FAILED",
+                            "message": "unsafe",
+                            "type": "invalid_request_error",
+                        }
+                    },
+                )
+            return httpx.Response(
+                202, json={"job_id": f"gen_{len(self.submits)}", "status": "IN_QUEUE"}
+            )
         if path.startswith("/v3/jobs/") and path.endswith("/status"):
             job_id = path.split("/")[3]
             self.polls[job_id] = self.polls.get(job_id, 0) + 1
-            status = "complete" if self.polls[job_id] >= 2 else "processing"
-            return httpx.Response(200, json={"id": job_id, "status": status, "progress": 0.5})
+            status = "COMPLETED" if self.polls[job_id] >= 2 else "IN_PROGRESS"
+            return httpx.Response(200, json={"job_id": job_id, "status": status, "progress": 0.5})
         if path.startswith("/v3/jobs/"):
             job_id = path.split("/")[3]
             return httpx.Response(
                 200,
                 json={
-                    "id": job_id,
-                    "status": "complete",
-                    "outputs": [{"url": f"https://cdn.test/{job_id}.mp4"}],
+                    "job_id": job_id,
+                    "status": "COMPLETED",
+                    "outputs": [{"status": "COMPLETED", "url": f"https://cdn.test/{job_id}.mp4"}],
                     "cost": 0.5,
+                    "currency": "USD",
                 },
             )
         if request.url.host == "cdn.test":

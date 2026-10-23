@@ -76,18 +76,21 @@ async def run(ctx: JobContext) -> JobResult:
     clip = ctx.tmp / "goose-test.mp4"
     try:
         if not state.get("job_id"):
-            image_id = await client.upload_file(
+            image_ref = await client.upload_file(
                 scene_path, purpose="image", mime=scene_mime or "image/png"
             )
-            audio_id = await client.upload_file(voice, purpose="audio", mime="audio/mpeg")
+            audio_ref = await client.upload_file(voice, purpose="audio", mime="audio/mpeg")
             state["job_id"] = await client.submit(
-                image_id=image_id,
-                audio_id=audio_id,
+                image_ref=image_ref,
+                audio_ref=audio_ref,
                 resolution=resolution,
                 duration_ms=int(SAMPLE_SEC * 1000),
                 idempotency_key=f"{ctx.spec.id}:test",
                 prompt=GOOSE_PROMPT,
             )
+            ctx.set_progress("goose", 10)
+            ctx.progress["hedra"] = state
+            await ctx.persist_now()
             ctx.log.info("media.hedra_submitted", chunk="test", job_id=state["job_id"])
         ctx.set_progress("goose", 10)
         ctx.progress["hedra"] = state

@@ -33,35 +33,81 @@ async def test_upload_submit_and_headers(tmp_path: Path):
         seen.append(request)
         if request.url.path == "/v3/files":
             assert request.headers["x-api-key"] == "k"
-            return httpx.Response(200, json={"id": "file_1"})
+            # Форма Hedra v3: presigned url — и есть handle.
+            return httpx.Response(
+                201,
+                json={
+                    "url": "https://s3.test/up/a.mp3?sig=1",
+                    "content_type": "audio/mpeg",
+                    "expires_at": "2026-10-23T11:20:36Z",
+                },
+            )
         if request.url.path == "/v3/models/hedra-character-3":
             body = json.loads(request.content)
-            assert body["idempotency_key"] == "job:0"
-            assert body["input"]["start_image"] == {"source": "file", "id": "img"}
-            assert body["input"]["audio"] == {"source": "file", "id": "file_1"}
+            assert "idempotency_key" not in body  # лишнее поле тела — 400 у Hedra
+            assert request.headers["idempotency-key"] == "job:0"
+            assert body["input"]["start_image"] == {"source": "asset", "asset_id": "asset_img"}
+            assert body["input"]["audio"] == {
+                "source": "url",
+                "url": "https://s3.test/up/a.mp3?sig=1",
+            }
             assert body["input"]["resolution"] == "720p" and body["input"]["duration_ms"] == 30000
-            return httpx.Response(202, json={"id": "gen_42", "status": "queued"})
+            return httpx.Response(202, json={"job_id": "gen_42", "status": "IN_QUEUE"})
         return httpx.Response(404)
 
     wav = tmp_path / "a.mp3"
     wav.write_bytes(b"\x00" * 16)
     client = _client(handler)
-    file_id = await client.upload_file(wav, purpose="audio", mime="audio/mpeg")
-    assert file_id == "file_1"
+    handle = await client.upload_file(wav, purpose="audio", mime="audio/mpeg")
+    assert handle == "https://s3.test/up/a.mp3?sig=1"
     job_id = await client.submit(
-        image_id="img",
-        audio_id=file_id,
+        image_ref="asset_img",
+        audio_ref=handle,
         resolution="720p",
         duration_ms=30000,
         idempotency_key="job:0",
     )
     assert job_id == "gen_42"
-    assert b'name="purpose"' in seen[0].content
+    assert b'name="file"' in seen[0].content and b'name="purpose"' not in seen[0].content
     with pytest.raises(HedraError) as exc:
         await client.submit(
-            image_id="i", audio_id="a", resolution="720p", duration_ms=700_000, idempotency_key="x"
+            image_ref="i",
+            audio_ref="a",
+            resolution="720p",
+            duration_ms=700_000,
+            idempotency_key="x",
         )
     assert exc.value.code == "invalid_argument"
+
+
+async def test_upload_without_handle_is_bad_response(tmp_path: Path):
+    f = tmp_path / "x.png"
+    f.write_bytes(b"\x89PNG")
+    client = _client(lambda r: httpx.Response(201, json={"content_type": "image/png"}))
+    with pytest.raises(HedraError) as exc:
+        await client.upload_file(f, purpose="image", mime="image/png")
+    assert exc.value.code == "hedra_bad_response"
+
+
+async def test_error_envelope_code_wins_over_status():
+    body = {
+        "error": {
+            "code": "MODERATION_FAILED",
+            "message": "unsafe",
+            "type": "invalid_request_error",
+        },
+        "trace_id": "t",
+    }
+    with pytest.raises(HedraError) as exc:
+        await _client(lambda r: httpx.Response(400, json=body)).status("j")
+    assert exc.value.code == "moderation_failed" and "unsafe" in exc.value.message
+    with pytest.raises(HedraError) as exc:
+        await _client(
+            lambda r: httpx.Response(
+                400, json={"error": {"code": "INVALID_ARGUMENT", "message": "expired"}}
+            )
+        ).status("j")
+    assert exc.value.code == "invalid_argument" and exc.value.message == "INVALID_ARGUMENT: expired"
 
 
 @pytest.mark.parametrize(
@@ -174,6 +220,28 @@ def test_parse_job_variants():
     assert parse_job({"id": "a", "state": "failed", "error": "x"}).status == "error"
     assert parse_job({}).status == "queued"
     assert parse_job({"id": "a", "status": "complete", "cost": "abc"}).cost is None
+    # Форма Hedra v3: job_id, статусы в верхнем регистре, конверт ошибки.
+    real = parse_job(
+        {
+            "job_id": "gen_1",
+            "status": "FAILED",
+            "outputs": [],
+            "error": {"code": "MODERATION_FAILED", "message": "unsafe"},
+        }
+    )
+    assert real.job_id == "gen_1" and real.status == "error"
+    assert real.error == "MODERATION_FAILED: unsafe"
+    ok = parse_job(
+        {
+            "job_id": "gen_2",
+            "status": "COMPLETED",
+            "outputs": [{"status": "COMPLETED", "url": "https://cdn/o.mp4", "duration_ms": 10000}],
+            "cost": 0.5,
+            "currency": "USD",
+        }
+    )
+    assert ok.status == "complete" and ok.output_url == "https://cdn/o.mp4" and ok.cost == 0.5
+    assert parse_job({"job_id": "g", "status": "IN_PROGRESS", "progress": 0.4}).progress == 0.4
 
 
 async def test_estimate_is_best_effort():

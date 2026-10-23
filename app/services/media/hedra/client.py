@@ -1,15 +1,23 @@
 """Клиент Hedra v3 (Character-3) — три ручки и поллинг, транспорт инжектится
-(`httpx.MockTransport` в тестах). Политика ошибок — решение плана:
+(`httpx.MockTransport` в тестах). Форма API сверена с `api.hedra.com/v3/openapi.json`
+на первом живом прогоне 23.10:
 
-- 429 → сон по `Retry-After` (≤ 120 с), это не попытка;
-- 5xx и сеть → экспоненциально, три раза;
-- 402 → `insufficient_balance` («Пополните баланс Hedra»), 422 → `moderation_failed`,
-  400 → `invalid_argument`, 401/403 → `hedra_auth` — финальные, без повтора;
-- presigned URL результата истекает — скачивать СРАЗУ, handle загруженного
-  файла живёт ~1 ч — грузить аудио непосредственно перед submit.
+- `POST /v3/files` (multipart `file`) → `{url, content_type, expires_at}` — presigned
+  `url` И ЕСТЬ handle: в submit он уходит как `{"source": "url", "url": …}` побайтово,
+  живёт ~1 ч (просроченный → 400 `reason: "expired"`), поэтому сцена и голос грузятся
+  непосредственно перед КАЖДЫМ submit;
+- `POST /v3/models/hedra-character-3` `{input: {prompt, aspect_ratio, resolution,
+  duration_ms, start_image, audio}}` → 202 `{job_id, status}`; лишние поля тела —
+  400, идемпотентности у API нет (`Idempotency-Key` шлём заголовком на будущее,
+  от двойной оплаты защищает наша запись `job_id` сразу после submit);
+- `GET /v3/jobs/{id}/status` → `{job_id, status, progress 0..1}`, статусы
+  `IN_QUEUE | IN_PROGRESS | COMPLETED | FAILED`; `GET /v3/jobs/{id}` → `outputs[].url`
+  (presigned, истекает — скачивать СРАЗУ), `cost`, `error: {code, message}`.
 
-Повторная отправка того же куска идёт с тем же `idempotency_key`, поэтому
-возобновлённое после рестарта задание не платит дважды.
+Политика ошибок — решение плана: 429 → сон по `Retry-After` (≤ 120 с), это не
+попытка; 5xx и сеть → экспоненциально, три раза; `INSUFFICIENT_BALANCE`/402 →
+`insufficient_balance`, `MODERATION_FAILED`/422 → `moderation_failed`,
+`INVALID_ARGUMENT`/400 → `invalid_argument`, 401/403 → `hedra_auth` — финальные.
 """
 
 from __future__ import annotations
@@ -90,16 +98,72 @@ def parse_job(data: dict[str, Any]) -> HedraJob:
         progress_f = float(progress) if progress is not None else None
     except (TypeError, ValueError):
         progress_f = None
-    error = data.get("error_message") or data.get("error") or None
+    error_raw = data.get("error_message") or data.get("error") or None
+    if isinstance(error_raw, dict):
+        code, message = error_raw.get("code"), error_raw.get("message")
+        error = f"{code}: {message}" if code and message else str(message or code or "")
+    else:
+        error = str(error_raw) if error_raw else ""
     return HedraJob(
-        job_id=str(data.get("id") or data.get("job_id") or ""),
+        job_id=str(data.get("job_id") or data.get("id") or ""),
         status=_status_of(data),
         progress=progress_f,
-        error=str(error) if error else None,
+        error=error or None,
         output_url=output_url,
         cost=cost,
         duration_ms=duration_ms,
     )
+
+
+def media_ref(ref: str) -> dict[str, str]:
+    """Ссылка на медиа в `input`: presigned url от `POST /v3/files` или
+    `asset_<uuid>` готового выхода — `source` выбирается по форме."""
+    if ref.startswith(("http://", "https://")):
+        return {"source": "url", "url": ref}
+    return {"source": "asset", "asset_id": ref}
+
+
+# Код ошибки Hedra (`error.code` в теле) → наш код; статус HTTP — запасной путь.
+_CODE_MAP: dict[str, str] = {
+    "INSUFFICIENT_BALANCE": "insufficient_balance",
+    "MODERATION_FAILED": "moderation_failed",
+    "UNAUTHORIZED": "hedra_auth",
+    "PERMISSION_DENIED": "hedra_auth",
+    "INVALID_ARGUMENT": "invalid_argument",
+    "FAILED_PRECONDITION": "invalid_argument",
+    "NOT_FOUND": "invalid_argument",
+    "GONE": "invalid_argument",
+}
+_STATUS_MAP: dict[int, str] = {
+    400: "invalid_argument",
+    401: "hedra_auth",
+    402: "insufficient_balance",
+    403: "hedra_auth",
+    404: "invalid_argument",
+    422: "moderation_failed",
+}
+
+
+def _error_of(resp: httpx.Response) -> HedraError:
+    """Финальная ошибка из ответа 3xx/4xx: код из конверта `{"error": {code,
+    message}}`, иначе по статусу; текст — `message` конверта, иначе хвост тела."""
+    code: str | None = None
+    message = resp.text[:300]
+    try:
+        body = resp.json()
+    except ValueError:
+        body = None
+    env = body.get("error") if isinstance(body, dict) else None
+    if isinstance(env, dict):
+        raw = str(env.get("code") or "").upper()
+        code = _CODE_MAP.get(raw)
+        if env.get("message"):
+            message = f"{raw}: {env['message']}"[:300] if raw else str(env["message"])[:300]
+    if code is None:
+        code = _STATUS_MAP.get(resp.status_code, "hedra_error")
+    if code == "hedra_error":
+        message = f"{resp.status_code} {message[:200]}"
+    return HedraError(code, message)
 
 
 class HedraClient:
@@ -157,16 +221,8 @@ class HedraClient:
                     await self._sleep(RETRY_ERR_SEC[err_waits])
                     err_waits += 1
                     continue
-                if resp.status_code in (401, 403):
-                    raise HedraError("hedra_auth", resp.text[:200])
-                if resp.status_code == 402:
-                    raise HedraError("insufficient_balance", resp.text[:200])
-                if resp.status_code == 422:
-                    raise HedraError("moderation_failed", resp.text[:300])
-                if resp.status_code == 400:
-                    raise HedraError("invalid_argument", resp.text[:300])
                 if resp.status_code >= 300:
-                    raise HedraError("hedra_error", f"{resp.status_code} {resp.text[:200]}")
+                    raise _error_of(resp)
                 if resp.status_code == 204 or not resp.content:
                     return {}
                 try:
@@ -176,31 +232,33 @@ class HedraClient:
                 return data if isinstance(data, dict) else {"data": data}
 
     async def upload_file(self, path: Path, *, purpose: str, mime: str) -> str:
-        """`POST /v3/files` → `id` (handle, живёт ~1 ч)."""
+        """`POST /v3/files` → handle: presigned `url` (живёт ~1 ч, передаётся в
+        submit побайтово). `purpose` API не принимает — остаётся в сигнатуре
+        для логов вызывающего; тип сервер сниффит по байтам сам."""
         with path.open("rb") as fh:
             data = await self._request(
                 "POST",
                 "/files",
                 files={"file": (path.name, fh, mime)},
-                data={"purpose": purpose},
             )
-        file_id = data.get("id") or data.get("file_id") or (data.get("file") or {}).get("id")
-        if not file_id:
-            raise HedraError("hedra_bad_response", "у загруженного файла нет id")
-        return str(file_id)
+        handle = data.get("url") or data.get("id") or data.get("file_id")
+        if not handle:
+            raise HedraError("hedra_bad_response", f"у загруженного файла ({purpose}) нет url")
+        return str(handle)
 
     async def submit(
         self,
         *,
-        image_id: str,
-        audio_id: str,
+        image_ref: str,
+        audio_ref: str,
         resolution: str,
         duration_ms: int,
         idempotency_key: str,
         prompt: str = "",
         aspect_ratio: str = "16:9",
     ) -> str:
-        """`POST /v3/models/hedra-character-3` → `job_id` (202)."""
+        """`POST /v3/models/hedra-character-3` → `job_id` (202). `*_ref` — handle
+        из `upload_file` (url) либо `asset_<uuid>` готового выхода Hedra."""
         if duration_ms > MAX_DURATION_MS:
             raise HedraError("invalid_argument", f"кусок длиннее {MAX_DURATION_MS // 1000} с")
         body = {
@@ -208,16 +266,20 @@ class HedraClient:
                 "prompt": prompt,
                 "aspect_ratio": aspect_ratio,
                 "resolution": resolution,
-                "start_image": {"source": "file", "id": image_id},
-                "audio": {"source": "file", "id": audio_id},
+                "start_image": media_ref(image_ref),
+                "audio": media_ref(audio_ref),
                 "duration_ms": duration_ms,
             },
-            "idempotency_key": idempotency_key,
         }
-        data = await self._request("POST", f"/models/{MODEL_ID}", json=body)
-        job_id = data.get("id") or data.get("job_id")
+        data = await self._request(
+            "POST",
+            f"/models/{MODEL_ID}",
+            json=body,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        job_id = data.get("job_id") or data.get("id")
         if not job_id:
-            raise HedraError("hedra_bad_response", "в ответе нет id задания")
+            raise HedraError("hedra_bad_response", "в ответе нет job_id")
         return str(job_id)
 
     async def estimate(self, *, resolution: str, duration_ms: int) -> dict[str, Any] | None:
