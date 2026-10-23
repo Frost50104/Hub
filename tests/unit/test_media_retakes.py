@@ -146,3 +146,28 @@ def test_segments_without_words_and_json_shape():
     assert set(data) == {"s", "e", "reason", "confidence", "marker", "before", "after"}
     assert retakes.high_confidence_cuts(items) == [(items[0].start, items[0].end)]
     assert retakes.find_retakes([], duration=10.0) == []
+
+
+def test_marker_after_long_aborted_paragraph_cuts_from_matching_restart():
+    # Автор переснимает абзац: 20 слов брака, «Стоп.», хороший дубль с тем же
+    # зачином — вырезка начинается с зачина брака, а не с одной метки.
+    bad = phrase(
+        0.0,
+        "Мы попали на платформу Dashboard. На левой панели мы видим список проектов, "
+        "которые у нас есть в доступе. В выпадающем меню мы можем...",
+    )
+    marker = [(12.0, 12.3, "Стоп.")]
+    good = phrase(
+        14.0,
+        "Мы попали на страницу Dashboard. На левой панели мы видим список проектов, "
+        "у которого у вас есть доступ к каждому проекту.",
+    )
+    items = retakes.find_retakes([seg(bad), seg(marker), seg(good)], duration=40.0)
+    assert len(items) == 1 and items[0].confidence == "high"
+    assert items[0].start == pytest.approx(0.0)
+    assert items[0].end == pytest.approx(14.0 - retakes.LEAD_SEC)
+    # Два совпавших слова, но дальше совсем другая фраза — режется одна метка.
+    other = phrase(14.0, "Мы попали в настройки профиля, где меняется пароль и аватар.")
+    bad2 = phrase(0.0, "Мы попали на платформу Dashboard. На левой панели список проектов.")
+    items2 = retakes.find_retakes([seg(bad2), seg(marker), seg(other)], duration=40.0)
+    assert len(items2) == 1 and items2[0].before == "Стоп."

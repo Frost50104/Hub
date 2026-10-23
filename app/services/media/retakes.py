@@ -39,7 +39,11 @@ MARKER_JOIN_GAP_SEC = 2.0
 # Вырезка «только метка» захватывает не больше такого хвоста тишины после неё.
 MARKER_TAIL_SEC = 1.5
 MAX_SPAN_SEC = 60.0
-LOOKBACK_TOKENS = 15
+# После голосовой метки брак может быть длинным (автор переснимает абзац):
+# окно поиска зачина и допустимая длина вырезки у метки шире, чем у повтора
+# без метки — метка сама по себе говорит, что перед ней брак.
+LOOKBACK_TOKENS = 40
+MARKER_MAX_SPAN_SEC = 90.0
 REPEAT_LOOKBACK_TOKENS = 12
 LOW_REPEAT_MAX_RUN = 8
 # Совпали два слова — уверенно только если и дальше фразы похожи.
@@ -219,13 +223,17 @@ def best_match(before: list[str], after: list[str]) -> tuple[int, int]:
     return 0, -1
 
 
-def run_similarity(tokens: list[Token], start: int, restart: int) -> float:
+def run_similarity(
+    tokens: list[Token], start: int, restart: int, *, restart_from: int | None = None
+) -> float:
     """Похожесть брака `[start, restart)` на такое же число слов после
     перезапуска — отличает «мы можем … / мы можем …» (переформулировка той
-    же мысли) от двух разных фраз с одинаковым началом."""
+    же мысли) от двух разных фраз с одинаковым началом. `restart_from` —
+    где начинается хороший дубль, если между браком и им стоит метка."""
     n = restart - start
+    good = restart if restart_from is None else restart_from
     before = " ".join(norm(t[2]) for t in tokens[start:restart])
-    after = " ".join(norm(t[2]) for t in tokens[restart : restart + n])
+    after = " ".join(norm(t[2]) for t in tokens[good : good + n])
     if not before or not after:
         return 0.0
     return SequenceMatcher(None, before, after).ratio()
@@ -294,7 +302,13 @@ def find_retakes(
         start_index = i
         if k >= 2 or (k == 1 and len(after[0]) >= 4):
             cand = lo + rel
-            if restart_at - tokens[cand][0] <= max_span:
+            # Совпали два слова или одно — доверяем только похожим фразам;
+            # иначе режем одну метку, а брак перед ней остаётся на совести автора.
+            similar = k >= 3 or (
+                j < len(tokens)
+                and run_similarity(tokens, cand, i, restart_from=j) >= SIMILAR_RUN_RATIO
+            )
+            if similar and restart_at - tokens[cand][0] <= max(max_span, MARKER_MAX_SPAN_SEC):
                 start_index = cand
         if start_index == i:
             # Только метка: хвост тишины до перезапуска — дело правила пауз,
