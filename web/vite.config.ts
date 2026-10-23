@@ -136,6 +136,8 @@ export default defineConfig(({ mode }) => ({
           // «Гусиная гонка»: ТВ-страницу сотрудники не открывают, админ-вкладка — hub-admin.
           '**/RaceTvPage-*.js',
           '**/LearnRaceAdminPage-*.js',
+          // Конвейер видео (0066): админ-вкладка — hub-admin при флаге.
+          '**/LearnVideoAdminPage-*.js',
         ],
       },
       manifest: {

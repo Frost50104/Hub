@@ -23,6 +23,10 @@ import { LearnReviewPage } from './LearnReviewPage'
 const LearnRaceAdminPage = lazy(() =>
   import('./LearnRaceAdminPage').then((m) => ({ default: m.LearnRaceAdminPage })),
 )
+// «Видео» (0066) — тоже lazy и вне precache: hub-admin и только при флаге.
+const LearnVideoAdminPage = lazy(() =>
+  import('./LearnVideoAdminPage').then((m) => ({ default: m.LearnVideoAdminPage })),
+)
 
 /**
  * «Управление» — один маршрут `/learn/admin?tab=…` с семью сегментами
@@ -46,6 +50,7 @@ const SUBTITLE: Record<AdminSegment, string> = {
   audit: 'Кто, что и когда менял — только метаполя, без содержимого ответов.',
   org: 'Должности, точки, франчайзи, отделы, группы и доступ.',
   race: 'Соревнование точек по среднему числу позиций в чеке: заезды, участники, база и ссылка для ТВ.',
+  video: 'Конвейер видео уроков: субтитры и расшифровка, сборка из записей, чистовик, гусь и лимит минут.',
 }
 
 const TAB_COMPONENT: Record<AdminSegment, ComponentType> = {
@@ -57,6 +62,7 @@ const TAB_COMPONENT: Record<AdminSegment, ComponentType> = {
   audit: LearnAuditPage,
   org: LearnOrgPage,
   race: LearnRaceAdminPage,
+  video: LearnVideoAdminPage,
 }
 
 export function LearnAdminPage() {

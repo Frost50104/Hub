@@ -30,7 +30,9 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import io
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -87,6 +89,25 @@ def memory_mb() -> dict[str, int]:
     except (OSError, ValueError, IndexError):
         pass
     return out
+
+
+def _trim_heap() -> None:
+    """Вернуть ядру освобождённые арены glibc после расшифровки.
+
+    Замер 22.10 (`scripts/media_measure.py`, три куска по 35–55 с подряд с
+    паузой в секунду): RSS после каждого куска 724–726 МБ при 556 после
+    загрузки, а на четвёртом куске anon дошёл до 1,12 ГБ, и OOM-killer убил
+    юнит по `MemoryMax=1100M` (прод, 17:04 UTC, перезапуск за 5 с). Буферы
+    numpy и ctranslate2 выделяются в разных потоках (`to_thread`), и glibc
+    копит их в аренах, не отдавая память между запросами. `malloc_trim(0)`
+    после каждого запроса — дешёвый способ вернуть пустые арены; вторая
+    половина лечения — `MALLOC_ARENA_MAX=2` в юните."""
+    if sys.platform != "linux":
+        return
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
 
 
 def _load(name: str, compute_type: str, threads: int, cache_dir: str | None) -> Any:
@@ -253,6 +274,8 @@ class LocalWhisper:
                     raise STTError(f"Не удалось распознать запись: {e}") from None
             finally:
                 _busy_since = None
+                del samples
+                _trim_heap()
         return result, audio_sec, time.monotonic() - started
 
     async def transcribe(

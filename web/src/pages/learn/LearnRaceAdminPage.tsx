@@ -7,10 +7,10 @@ import { QueryError } from '@/components/QueryError'
 import { ContestFormDialog } from '@/components/race/admin/ContestFormDialog'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { Confirm } from '@/components/ui/Confirm'
 import { Chip } from '@/components/ui/Chip'
 import { InfoRow, InfoRows } from '@/components/ui/InfoRows'
 import { Input } from '@/components/ui/Input'
-import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
 import { SegmentGroup } from '@/components/ui/SegmentGroup'
 import { Select } from '@/components/ui/Select'
 import { SkeletonRows } from '@/components/ui/Skeleton'
@@ -57,28 +57,6 @@ function Card({ title, actions, children, className }: { title: string; actions?
       </div>
       {children}
     </section>
-  )
-}
-
-function Confirm({ open, onOpenChange, title, text, confirmLabel, destructive, pending, onConfirm }: { open: boolean; onOpenChange: (v: boolean) => void; title: string; text: string; confirmLabel: string; destructive?: boolean; pending: boolean; onConfirm: () => void }) {
-  return (
-    <ResponsiveDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title={title}
-      footer={
-        <>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Отмена
-          </Button>
-          <Button variant={destructive ? 'destructive' : 'default'} disabled={pending} onClick={onConfirm}>
-            {pending ? 'Выполняем…' : confirmLabel}
-          </Button>
-        </>
-      }
-    >
-      <p className="text-[14px] text-text2">{text}</p>
-    </ResponsiveDialog>
   )
 }
 

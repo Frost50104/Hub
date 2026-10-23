@@ -263,7 +263,9 @@ class Settings(BaseSettings):
     media_ffmpeg_bin: str = Field(default="ffmpeg")
     media_ffprobe_bin: str = Field(default="ffprobe")
     # x264 на двух ядрах VPS: один поток, чтобы API не голодал (замер — инкремент 3).
-    media_ffmpeg_threads: int = Field(default=1, ge=1, le=8)
+    # 2 — по замеру 22.10 (`scripts/media_measure.py`): +20 % скорости рендера
+    # против одного потока при той же p95 API прода (≤ 10 мс под CPUWeight=20).
+    media_ffmpeg_threads: int = Field(default=2, ge=1, le=8)
     media_ffmpeg_timeout_factor: float = Field(default=6.0)
     media_worker_poll_sec: float = Field(default=5.0)
     media_job_lease_sec: int = Field(default=900, ge=60)

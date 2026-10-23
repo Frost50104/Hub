@@ -869,7 +869,7 @@ function ProductEditorDialog({
     try {
       for (const file of files) {
         const media = await learnApi.uploadMedia(file)
-        setPhotos((prev) => [...prev, { media_id: media.id, url: media.url }])
+        setPhotos((prev) => [...prev, { media_id: media.id, url: media.url ?? '' }])
       }
     } catch (err) {
       toast.error('Не удалось загрузить фото', { description: extractErrorDetail(err) })

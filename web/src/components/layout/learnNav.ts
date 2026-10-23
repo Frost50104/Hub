@@ -5,6 +5,7 @@ import {
   BookOpen,
   Bot,
   Building2,
+  Clapperboard,
   ClipboardList,
   GraduationCap,
   Handshake,
@@ -107,6 +108,7 @@ export type AdminSegment =
   | 'audit'
   | 'org'
   | 'race'
+  | 'video'
 
 export const ADMIN_SEGMENTS: { key: AdminSegment; label: string; title: string; icon: LucideIcon }[] = [
   { key: 'review', label: 'Проверка', title: 'Проверка тестов', icon: ClipboardList },
@@ -122,6 +124,7 @@ export const ADMIN_SEGMENTS: { key: AdminSegment; label: string; title: string; 
   { key: 'audit', label: 'Журнал', title: 'Журнал действий', icon: ScrollText },
   { key: 'org', label: 'Оргструктура', title: 'Оргструктура', icon: Building2 },
   { key: 'race', label: 'Гонка', title: 'Гусиная гонка', icon: Bird },
+  { key: 'video', label: 'Видео', title: 'Видео уроков', icon: Clapperboard },
 ]
 
 /**
@@ -136,6 +139,7 @@ export const ADMIN_SEGMENTS: { key: AdminSegment; label: string; title: string; 
 export function adminSegmentsFor(me: {
   hub_role: string | null
   profile: { content_role: string; org_role: string } | null
+  features?: { media_pipeline_admin?: boolean }
 } | undefined): AdminSegment[] {
   if (!me) return []
   const isAdmin = me.hub_role === 'admin'
@@ -150,6 +154,11 @@ export function adminSegmentsFor(me: {
   // «Гонка» — ПОСЛЕДНИМ и только admin: там живёт тумблер модуля, поэтому
   // сегмент виден даже при выключенной гонке (иначе включить неоткуда).
   if (isAdmin) out.push('employees', 'automations', 'audit', 'org', 'race')
+  // «Видео» (0066) — ПОСЛЕДНИМ и только когда сервер сказал
+  // `media_pipeline_admin` (env включён + hub-admin): на проде до go-live
+  // поля нет, и вкладка не появляется ни у кого — страховка от преждевременного
+  // показа сильнее любого клиентского правила.
+  if (isAdmin && me.features?.media_pipeline_admin === true) out.push('video')
   return out
 }
 

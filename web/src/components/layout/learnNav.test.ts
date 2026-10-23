@@ -23,6 +23,28 @@ describe('adminSegmentsFor', () => {
     ])
   })
 
+  it('admin с флагом конвейера видео получает «Видео» последним', () => {
+    expect(
+      adminSegmentsFor({ ...me('admin', 'employee'), features: { media_pipeline_admin: true } }),
+    ).toEqual([
+      'review',
+      'analytics',
+      'progress',
+      'employees',
+      'automations',
+      'audit',
+      'org',
+      'race',
+      'video',
+    ])
+    // Флаг есть, а hub-роль не admin — вкладки нет: там тумблер тенанта.
+    expect(
+      adminSegmentsFor({ ...me('member', 'office', 'publisher'), features: { media_pipeline_admin: true } }),
+    ).not.toContain('video')
+    // Старый бэкенд без `features` — список прежний (прод до go-live).
+    expect(adminSegmentsFor(me('admin', 'employee'))).not.toContain('video')
+  })
+
   it('офис без publisher — ничего', () => {
     expect(adminSegmentsFor(me('member', 'office'))).toEqual([])
   })

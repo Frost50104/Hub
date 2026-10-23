@@ -24,9 +24,12 @@ declare module '@tiptap/core' {
       insertGallery: (items: GalleryItemAttrs[]) => ReturnType
       insertVideo: (attrs: {
         mediaId: string
-        src: string
+        /** null — файл ещё конвертируется/собирается (0066), src подставит сервер. */
+        src: string | null
         requireFullWatch?: boolean
         disableSeek?: boolean
+        sourceMediaId?: string | null
+        derivedKind?: 'cleaned' | 'composed' | null
       }) => ReturnType
       insertPdfEmbed: (attrs: { mediaId: string; src: string }) => ReturnType
       insertSurveyEmbed: (surveyId: string) => ReturnType
@@ -158,6 +161,12 @@ export const LessonVideo = Node.create({
       src: { default: null },
       requireFullWatch: { default: false },
       disableSeek: { default: false },
+      // Конвейер (0066): откуда сделан чистовик/монтаж и что это за производная.
+      // Объявлены здесь нарочно — необъявленный атрибут prosemirror выбросит
+      // при сохранении. `status`/`trackSrc` сервер пишет сам на каждой отдаче
+      // и в контент они не попадают.
+      sourceMediaId: { default: null },
+      derivedKind: { default: null },
     }
   },
 
@@ -167,6 +176,8 @@ export const LessonVideo = Node.create({
 
   renderHTML({ node, HTMLAttributes }) {
     const badges: string[] = []
+    if (node.attrs.derivedKind === 'cleaned') badges.push('чистовик')
+    if (node.attrs.derivedKind === 'composed') badges.push('монтаж')
     if (node.attrs.requireFullWatch) badges.push('обязательный досмотр')
     if (node.attrs.disableSeek) badges.push('без перемотки')
     return [

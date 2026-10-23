@@ -97,6 +97,7 @@ export function VideoPlayer({
   initialIntervals = [],
   initialDuration = null,
   preview = false,
+  trackSrc = null,
   onCoverageChange,
   className,
 }: {
@@ -105,6 +106,8 @@ export function VideoPlayer({
   src: string
   requireFullWatch?: boolean
   disableSeek?: boolean
+  /** Подписанный URL субтитров (VTT, 0066) — серверный атрибут ноды. */
+  trackSrc?: string | null
   initialIntervals?: Interval[]
   /** Длительность из block_state — сервер её знает из файла (0043). */
   initialDuration?: number | null
@@ -122,6 +125,12 @@ export function VideoPlayer({
   // ту, с которой стартовали (другое видео получает новый инстанс: `key`
   // включает `mediaId`).
   const srcRef = useRef(src)
+  // Дорожка субтитров — тем же правилом «первый непустой побеждает»: URL
+  // переиздаётся каждый час, а смена `src` у <track> перезагружает дорожку и
+  // сбрасывает её режим. Появившаяся ПОЗЖЕ дорожка (расшифровка закончилась,
+  // пока урок открыт) подхватывается один раз.
+  const trackRef = useRef<string | null>(trackSrc)
+  if (!trackRef.current && trackSrc) trackRef.current = trackSrc
   // Просмотренное копится микро-интервалами [prev, now] между timeupdate —
   // модель без «открытых сегментов» переживает waiting/паузы/буферизацию,
   // из-за которых сегментная версия теряла куски.
@@ -205,6 +214,22 @@ export function VideoPlayer({
     )
     onCoverageRef.current?.(next.coverage)
   }, [snapshot])
+
+  // Субтитры включены по умолчанию (решение владельца): `default` на <track>
+  // браузеры трактуют по-разному, режим ставим явно — но один раз, чтобы не
+  // спорить с человеком, выключившим их в меню плеера.
+  const trackShownRef = useRef(false)
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || !trackRef.current || trackShownRef.current) return
+    const tracks = video.textTracks
+    if (!tracks || tracks.length === 0) return
+    const track = tracks[0]
+    if (track) {
+      track.mode = 'showing'
+      trackShownRef.current = true
+    }
+  })
 
   const applyDuration = useCallback(
     (next: number) => {
@@ -494,7 +519,11 @@ export function VideoPlayer({
           refreshCoverage()
           void flush()
         }}
-      />
+      >
+        {trackRef.current && (
+          <track kind="subtitles" srcLang="ru" label="Русские субтитры" src={trackRef.current} default />
+        )}
+      </video>
       {requireFullWatch && (
         <>
           {/* Карта просмотра: закрашено ровно то, что засчитано, пропуски

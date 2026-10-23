@@ -123,7 +123,7 @@ async def run(ctx: JobContext) -> JobResult:
     except TranscriptionError as exc:
         if exc.code == "cancelled":
             raise JobCancelled() from None
-        raise JobFailed(exc.code, str(exc), final=exc.final) from exc
+        raise JobFailed(exc.code, exc.message, final=exc.final) from exc
     segments = segments_to_json(result.segments)
     text = plain_text(result.segments)
     vtt_text = build_vtt(segments)

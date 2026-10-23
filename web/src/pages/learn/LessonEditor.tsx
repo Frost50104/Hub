@@ -14,10 +14,12 @@ import {
   SlidersHorizontal,
   X,
 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   lazy,
   Suspense,
   useEffect,
+  useMemo,
   useReducer,
   useRef,
   useState,
@@ -26,6 +28,8 @@ import {
 } from 'react'
 import { toast } from 'sonner'
 
+import { MergeSheet } from '@/components/learn/media/MergeSheet'
+import { LessonVideoWithView } from '@/components/learn/media/VideoNodeView'
 import {
   LESSON_NODE_EXTENSIONS,
   LESSON_NODE_TYPES,
@@ -44,6 +48,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/Dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select } from '@/components/ui/Select'
@@ -55,8 +65,12 @@ import {
   useLessonTemplates,
   useSurveys,
 } from '@/hooks/useLearn'
+import { hasMediaPipeline, useMe } from '@/hooks/useMe'
 
 import { buildCheckAttrs, type CheckQuestionAttrs } from '@/lib/checkQuestion'
+import type { MediaDetail } from '@/lib/learn'
+import { pendingVideoIds } from '@/lib/lessonVideoNodes'
+import { videoFileProblem } from '@/lib/mediaJobs'
 
 import { QuizBuilder } from './QuizBuilder'
 import { cn } from '@/lib/cn'
@@ -167,7 +181,21 @@ function LessonEditorInner({
   const [surveyOpen, setSurveyOpen] = useState(false)
   const [blockPropsOpen, setBlockPropsOpen] = useState(false)
   const [videoUpload, setVideoUpload] = useState<File | null>(null)
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [uploadPct, setUploadPct] = useState<number | null>(null)
   const [templatesOpen, setTemplatesOpen] = useState(false)
+  // Конвейер видео (0066): MOV/WebM, сборка из записей, живой видеоблок.
+  // Набор расширений редактора собирается ОДИН раз — поэтому ждём `me`.
+  const me = useMe()
+  const pipelineOn = hasMediaPipeline(me.data)
+  const qc = useQueryClient()
+  const nodeExtensions = useMemo(
+    () =>
+      pipelineOn
+        ? LESSON_NODE_EXTENSIONS.map((ext) => (ext.name === 'video' ? LessonVideoWithView : ext))
+        : LESSON_NODE_EXTENSIONS,
+    [pipelineOn],
+  )
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
 
   const imageInput = useRef<HTMLInputElement | null>(null)
@@ -198,16 +226,25 @@ function LessonEditorInner({
   const saveWithStatus = useCourseMutation((next: 'draft' | 'published') =>
     learnApi.updateLesson(lesson.id, { ...buildPayload(), status: next }),
   )
+  // Публикация с видео в конвертации: сервер ответит 409, но зачем ждать —
+  // статусы уже в кэше видеоблоков (`['learn-media', id]`). Неизвестное
+  // считается готовым: последнее слово за сервером.
+  const pendingMedia = () =>
+    pendingVideoIds(content, (id) => qc.getQueryData<MediaDetail>(['learn-media', id]))
 
   const upload = async (file: File) => {
     setUploading(true)
+    setUploadPct(0)
     try {
-      return await learnApi.uploadMedia(file)
+      return await learnApi.uploadMedia(file, {
+        onProgress: (f) => setUploadPct(Math.round(f * 100)),
+      })
     } catch (e) {
       toast.error('Не удалось загрузить файл', { description: extractErrorDetail(e) })
       return null
     } finally {
       setUploading(false)
+      setUploadPct(null)
     }
   }
 
@@ -220,7 +257,7 @@ function LessonEditorInner({
       editorRef.current
         ?.chain()
         .focus()
-        .insertFigure({ mediaId: media.id, src: media.url, caption: '' })
+        .insertFigure({ mediaId: media.id, src: media.url ?? '', caption: '' })
         .run()
     }
   }
@@ -232,7 +269,7 @@ function LessonEditorInner({
     const items: { mediaId: string; src: string; caption: string }[] = []
     for (const file of files) {
       const media = await upload(file)
-      if (media) items.push({ mediaId: media.id, src: media.url, caption: '' })
+      if (media) items.push({ mediaId: media.id, src: media.url ?? '', caption: '' })
     }
     if (items.length) {
       editorRef.current?.chain().focus().insertGallery(items).run()
@@ -242,7 +279,15 @@ function LessonEditorInner({
   const onVideoPick = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     e.target.value = ''
-    if (file) setVideoUpload(file) // опции досмотра — в диалоге
+    if (!file) return
+    // Расширение и размер — до диалога: сервер ответил бы 415/413 после
+    // загрузки сотен мегабайт. Лимит видео — тот же, что у `media_size_limit`.
+    const problem = videoFileProblem(file, pipelineOn, 300 * 1024 * 1024)
+    if (problem) {
+      toast.error(problem)
+      return
+    }
+    setVideoUpload(file) // опции досмотра — в диалоге
   }
 
   const onPdfEmbedPick = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -251,7 +296,11 @@ function LessonEditorInner({
     if (!file) return
     const media = await upload(file)
     if (media) {
-      editorRef.current?.chain().focus().insertPdfEmbed({ mediaId: media.id, src: media.url }).run()
+      editorRef.current
+        ?.chain()
+        .focus()
+        .insertPdfEmbed({ mediaId: media.id, src: media.url ?? '' })
+        .run()
     }
   }
 
@@ -262,7 +311,7 @@ function LessonEditorInner({
     const media = await upload(file)
     if (media) {
       setPdfMediaId(media.id)
-      setPdfUrl(media.url)
+      setPdfUrl(media.url ?? null)
       toast.success('PDF загружен — не забудьте сохранить урок')
     }
   }
@@ -277,9 +326,32 @@ function LessonEditorInner({
         <ToolButton title="Галерея (шаги)" onClick={() => galleryInput.current?.click()} disabled={uploading}>
           <Images className="h-4 w-4" /> Галерея
         </ToolButton>
-        <ToolButton title="Видео (MP4)" onClick={() => videoInput.current?.click()} disabled={uploading}>
-          <Film className="h-4 w-4" /> Видео
-        </ToolButton>
+        {pipelineOn ? (
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                title="Видео"
+                disabled={uploading}
+                className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-text3 transition-colors hover:bg-glass hover:text-text disabled:opacity-50"
+              >
+                <Film className="h-4 w-4" /> Видео ▾
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={() => videoInput.current?.click()}>
+                Загрузить один файл
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setMergeOpen(true)}>
+                Собрать из нескольких записей…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <ToolButton title="Видео (MP4)" onClick={() => videoInput.current?.click()} disabled={uploading}>
+            <Film className="h-4 w-4" /> Видео
+          </ToolButton>
+        )}
         <ToolButton title="Вложенный PDF" onClick={() => pdfEmbedInput.current?.click()} disabled={uploading}>
           <FileText className="h-4 w-4" /> PDF
         </ToolButton>
@@ -301,7 +373,11 @@ function LessonEditorInner({
             setBlockPropsOpen(true)
           }}
         />
-        {uploading && <span className="px-1 text-xs text-text3">Загрузка…</span>}
+        {uploading && (
+          <span className="px-1 text-xs text-text3">
+            Загрузка…{uploadPct != null && uploadPct > 0 ? ` ${uploadPct} %` : ''}
+          </span>
+        )}
       </>
     )
   }
@@ -395,24 +471,28 @@ function LessonEditorInner({
         </div>
       ) : (
         <Suspense fallback={<SkeletonRows rows={4} />}>
-          <RichEditor
-            value={content}
-            onChange={setContent}
-            placeholder="Содержимое урока…"
-            extraExtensions={LESSON_NODE_EXTENSIONS}
-            extraNodeTypes={LESSON_NODE_TYPES}
-            extraToolbar={lessonToolbar}
-            onNodeDoubleClick={(type, pos) => {
-              if (type !== 'checkQuestion') return false
-              const editor = editorRef.current
-              if (!editor) return false
-              // Выделение обязательно: `updateAttributes` пишет в АКТИВНУЮ
-              // ноду, и без него сохранение ушло бы в никуда.
-              editor.commands.setNodeSelection(pos)
-              setCheckForm({ attrs: readCheckAttrs(editor) })
-              return true
-            }}
-          />
+          {me.isPending ? (
+            <SkeletonRows rows={4} />
+          ) : (
+            <RichEditor
+              value={content}
+              onChange={setContent}
+              placeholder="Содержимое урока…"
+              extraExtensions={nodeExtensions}
+              extraNodeTypes={LESSON_NODE_TYPES}
+              extraToolbar={lessonToolbar}
+              onNodeDoubleClick={(type, pos) => {
+                if (type !== 'checkQuestion') return false
+                const editor = editorRef.current
+                if (!editor) return false
+                // Выделение обязательно: `updateAttributes` пишет в АКТИВНУЮ
+                // ноду, и без него сохранение ушло бы в никуда.
+                editor.commands.setNodeSelection(pos)
+                setCheckForm({ attrs: readCheckAttrs(editor) })
+                return true
+              }}
+            />
+          )}
         </Suspense>
       )}
 
@@ -434,12 +514,19 @@ function LessonEditorInner({
             size="sm"
             variant="secondary"
             disabled={!title.trim() || saveWithStatus.isPending || (format === 'pdf' && !pdfUrl)}
-            onClick={() =>
+            onClick={() => {
+              if (pendingMedia().length) {
+                toast.error('Дождитесь конвертации видео', {
+                  description:
+                    'В уроке есть файл, который ещё обрабатывается. Сохранить черновик можно.',
+                })
+                return
+              }
               void saveWithStatus
                 .mutateAsync('published')
                 .then(() => toast.success('Урок опубликован'))
                 .catch(() => undefined)
-            }
+            }}
           >
             <Eye className="h-4 w-4" /> Сохранить и опубликовать
           </Button>
@@ -483,7 +570,13 @@ function LessonEditorInner({
       {/* Скрытые file-инпуты */}
       <input ref={imageInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => void onImagePick(e)} />
       <input ref={galleryInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={(e) => void onGalleryPick(e)} />
-      <input ref={videoInput} type="file" accept="video/mp4" hidden onChange={onVideoPick} />
+      <input
+        ref={videoInput}
+        type="file"
+        accept={pipelineOn ? 'video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,.m4v' : 'video/mp4'}
+        hidden
+        onChange={onVideoPick}
+      />
       <input ref={pdfEmbedInput} type="file" accept="application/pdf" hidden onChange={(e) => void onPdfEmbedPick(e)} />
       <input ref={pdfLessonInput} type="file" accept="application/pdf" hidden onChange={(e) => void onLessonPdfPick(e)} />
 
@@ -525,16 +618,35 @@ function LessonEditorInner({
         <VideoOptionsDialog
           file={videoUpload}
           onClose={() => setVideoUpload(null)}
+          pipelineOn={pipelineOn}
           onInsert={async (opts) => {
             const media = await upload(videoUpload)
             if (media) {
               editorRef.current
                 ?.chain()
                 .focus()
-                .insertVideo({ mediaId: media.id, src: media.url, ...opts })
+                .insertVideo({ mediaId: media.id, src: media.url ?? null, ...opts })
                 .run()
+              if (media.status === 'processing') {
+                toast.info('Конвертируем в MP4 — видео появится в уроке само', {
+                  description: 'Урок можно сохранять; опубликовать получится после конвертации.',
+                })
+              }
             }
             setVideoUpload(null)
+          }}
+        />
+      )}
+      {mergeOpen && (
+        <MergeSheet
+          open={mergeOpen}
+          onOpenChange={setMergeOpen}
+          onMerged={(media, opts) => {
+            editorRef.current
+              ?.chain()
+              .focus()
+              .insertVideo({ mediaId: media.id, src: null, ...opts })
+              .run()
           }}
         />
       )}
@@ -966,10 +1078,12 @@ function BlockPropsDialog({ editor, onClose }: { editor: Editor; onClose: () => 
 
 function VideoOptionsDialog({
   file,
+  pipelineOn,
   onClose,
   onInsert,
 }: {
   file: File
+  pipelineOn: boolean
   onClose: () => void
   onInsert: (opts: { requireFullWatch: boolean; disableSeek: boolean }) => Promise<void>
 }) {
@@ -992,7 +1106,9 @@ function VideoOptionsDialog({
             запретить перемотку вперёд
           </label>
           <p className="text-xs text-text3">
-            Только MP4 (H.264) c «web optimized» / faststart — иначе сервер отклонит файл.
+            {pipelineOn
+              ? 'MP4, MOV или WebM — MOV и WebM сервер сконвертирует сам, это займёт несколько минут.'
+              : 'Только MP4 (H.264) c «web optimized» / faststart — иначе сервер отклонит файл.'}
           </p>
         </div>
         <DialogFooter>

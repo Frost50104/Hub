@@ -139,7 +139,28 @@ export function LessonRenderer({
     video: (node: RichNode, index: number) => {
       const src = str(node.attrs?.src)
       const mediaId = str(node.attrs?.mediaId)
-      if (!src || !mediaId) return null
+      if (!mediaId) return null
+      // Конвейер (0066): файл ещё конвертируется или не сконвертировался —
+      // сервер отдал `status` и пустой `src`; битый <video> не рисуем.
+      const status = str(node.attrs?.status)
+      if (!src) {
+        if (status !== 'processing' && status !== 'failed') return null
+        return (
+          <div
+            key={`${mediaId}-${index}`}
+            className="my-7 flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-[14px] border border-glass-border bg-tint px-6 text-center lg:my-8"
+          >
+            <p className="text-[15px] font-semibold text-text">
+              {status === 'processing' ? 'Видео обрабатывается' : 'Видео не сконвертировалось'}
+            </p>
+            <p className="text-sm leading-[1.45] text-text2">
+              {status === 'processing'
+                ? 'Загляните чуть позже — ролик появится здесь сам.'
+                : 'Сообщите автору курса: файл нужно загрузить заново.'}
+            </p>
+          </div>
+        )
+      }
       const saved = videoState[mediaId]
       return (
         <VideoPlayer
@@ -147,6 +168,7 @@ export function LessonRenderer({
           lessonId={lesson.id}
           mediaId={mediaId}
           src={src}
+          trackSrc={str(node.attrs?.trackSrc) || null}
           requireFullWatch={Boolean(node.attrs?.requireFullWatch)}
           disableSeek={Boolean(node.attrs?.disableSeek)}
           initialIntervals={saved?.intervals ?? []}

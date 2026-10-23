@@ -28,6 +28,11 @@ Environment=HF_HOME=/opt/signaris-hub/stt-cache
 # memory.high (docs/tech-debt/incidents.md). Скачивает app.jobs.stt_fetch_model.
 Environment=HF_HUB_OFFLINE=1
 Environment=OMP_NUM_THREADS=2
+# Арены glibc: буферы расшифровки выделяются в разных потоках, и без потолка
+# арен RSS рос от запроса к запросу (556 → 726 МБ → 1,12 ГБ anon на четвёртом
+# куске подряд — OOM-kill 22.10 17:04 UTC при замере конвейера видео). Две
+# арены + malloc_trim после запроса (app/services/stt/local.py).
+Environment=MALLOC_ARENA_MAX=2
 # Стеки всех потоков в журнал на SIGABRT сторожа — даже когда цикл событий встал.
 Environment=PYTHONFAULTHANDLER=1
 # --workers 1 обязателен: пинги сторожа принимаются только от главного

@@ -1311,7 +1311,20 @@ export interface AssessmentAttemptDetail {
   correct_answers: Record<string, Record<string, unknown>>
 }
 
-export type MediaKind = 'image' | 'video' | 'pdf'
+export type MediaKind = 'image' | 'video' | 'pdf' | 'subtitle'
+/** Состояние файла (0066): `processing` — нормализация MOV/WebM или сборка
+ *  идёт прямо в этом файле, отдача ответит 409; `failed` — не сконвертировался. */
+export type MediaStatus = 'ready' | 'processing' | 'failed'
+export type MediaRole = 'content' | 'part' | 'insert' | 'scene'
+export type MediaJobKind =
+  | 'merge'
+  | 'normalize'
+  | 'transcribe'
+  | 'analyze'
+  | 'cleanup'
+  | 'compose'
+  | 'avatar_test'
+export type MediaJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
 
 export interface MediaUploadResult {
   id: string
@@ -1319,8 +1332,138 @@ export interface MediaUploadResult {
   file_name: string
   mime: string
   size_bytes: number
-  url: string
+  /** null, пока файл в `processing` (старый бэкенд отдаёт строку всегда). */
+  url: string | null
+  /** Поля конвейера (0066) — optional: у старого бэкенда их нет. */
+  role?: MediaRole
+  status?: MediaStatus
+  duration_sec?: number | null
+  normalize_job_id?: string | null
+  transcribe_job_id?: string | null
 }
+
+export interface MediaJob {
+  id: string
+  media_id: string
+  kind: MediaJobKind
+  status: MediaJobStatus
+  params: Record<string, unknown>
+  result: Record<string, unknown> & {
+    progress?: { stage?: string; pct?: number | null; updated_at?: string }
+  }
+  error: string | null
+  attempts: number
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface MediaPartInfo {
+  position: number
+  source_media_id: string
+  trim_start_sec: number
+  trim_end_sec: number | null
+  file_name: string
+  duration_sec: number | null
+  status: MediaStatus
+}
+
+export interface DerivedMedia {
+  id: string
+  kind: MediaKind
+  variant: 'cleaned' | 'composed' | null
+  status: MediaStatus
+  url: string | null
+  duration_sec: number | null
+  size_bytes: number
+  file_name: string
+  created_at: string
+}
+
+export interface TranscriptInfo {
+  language: string
+  chars: number
+  provider: string
+  model: string
+  updated_at: string
+}
+
+export interface MediaTranscript extends TranscriptInfo {
+  text: string
+  segments: { s: number; e: number; t: string; w?: [number, number, string][] }[]
+  duration_sec: number | null
+}
+
+export interface MediaDetail {
+  id: string
+  kind: MediaKind
+  role: MediaRole
+  status: MediaStatus
+  file_name: string
+  mime: string
+  size_bytes: number
+  duration_sec: number | null
+  url: string | null
+  variant: 'cleaned' | 'composed' | null
+  source_media_id: string | null
+  created_at: string
+  parts: MediaPartInfo[]
+  derived: DerivedMedia[]
+  /** Последние 20 заданий по файлу и его производным, свежие первыми. */
+  jobs: MediaJob[]
+  capabilities: { transcribe: boolean; cleanup: boolean; compose: boolean }
+  transcript: TranscriptInfo | null
+  subtitle_url: string | null
+}
+
+export interface MergePartInput {
+  media_id: string
+  trim_start_sec?: number
+  trim_end_sec?: number | null
+}
+
+export interface MediaAdminSettings {
+  enabled: boolean
+  env_enabled: boolean
+  avatar_env_enabled: boolean
+  stt_configured: boolean
+  auto_transcribe: boolean
+  scene_media_id: string | null
+  scene_url: string | null
+  scene_test: { media_id: string; url: string; created_at: string } | null
+  avatar_monthly_minutes_cap: number
+  avatar_resolution: '540p' | '720p' | '1080p'
+  cleanup_defaults: {
+    min_pause_sec: number
+    keep_sec: number
+    margin_sec: number
+    denoise: 'afftdn' | 'arnndn' | 'none'
+    loudnorm_i: number
+    loudnorm_tp: number
+    loudnorm_lra: number
+    fps_cap: 24 | 25 | 30 | 60
+    scale_cap: 720 | 1080
+  }
+  storyboard: { face_ratio_thr: number; min_segment_sec: number; bridge_gap_sec: number }
+  glossary: string
+  stt_provider: string
+  month_used_minutes: number
+  active_jobs: number
+}
+
+export type MediaAdminSettingsPatch = Partial<
+  Pick<
+    MediaAdminSettings,
+    | 'enabled'
+    | 'auto_transcribe'
+    | 'scene_media_id'
+    | 'avatar_monthly_minutes_cap'
+    | 'avatar_resolution'
+    | 'cleanup_defaults'
+    | 'storyboard'
+    | 'glossary'
+  >
+>
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
@@ -2015,15 +2158,51 @@ export const learnApi = {
       )
       .then((r) => r.data),
 
-  uploadMedia: (file: File): Promise<MediaUploadResult> => {
+  uploadMedia: (
+    file: File,
+    opts: { role?: MediaRole; onProgress?: (fraction: number) => void } = {},
+  ): Promise<MediaUploadResult> => {
     const form = new FormData()
     form.append('file', file)
+    // `role` шлём только НЕ-content: старый бэкенд лишнее поле формы не
+    // поймёт, а `content` — его поведение по умолчанию.
+    if (opts.role && opts.role !== 'content') form.append('role', opts.role)
     return api
       .post<MediaUploadResult>('/learn/media', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (event) => {
+          if (!opts.onProgress || !event.total) return
+          opts.onProgress(event.loaded / event.total)
+        },
       })
       .then((r) => r.data)
   },
+
+  // ─── Конвейер видео (0066) ────────────────────────────────────────────────
+  mediaDetail: (id: string): Promise<MediaDetail> =>
+    api.get<MediaDetail>(`/learn/media/${id}`).then((r) => r.data),
+  mediaTranscript: (id: string): Promise<MediaTranscript> =>
+    api.get<MediaTranscript>(`/learn/media/${id}/transcript`).then((r) => r.data),
+  mediaJob: (jobId: string): Promise<MediaJob> =>
+    api.get<MediaJob>(`/learn/media/jobs/${jobId}`).then((r) => r.data),
+  createMediaJob: (
+    id: string,
+    kind: 'transcribe',
+    params?: Record<string, unknown>,
+  ): Promise<MediaJob> =>
+    api
+      .post<MediaJob>(`/learn/media/${id}/jobs`, params ? { kind, params } : { kind })
+      .then((r) => r.data),
+  cancelMediaJob: (jobId: string): Promise<MediaJob> =>
+    api.post<MediaJob>(`/learn/media/jobs/${jobId}/cancel`).then((r) => r.data),
+  mergeMedia: (parts: MergePartInput[]): Promise<{ media: MediaDetail; job: MediaJob }> =>
+    api
+      .post<{ media: MediaDetail; job: MediaJob }>('/learn/media/merge', { parts })
+      .then((r) => r.data),
+  mediaAdminSettings: (): Promise<MediaAdminSettings> =>
+    api.get<MediaAdminSettings>('/learn/media/admin/settings').then((r) => r.data),
+  updateMediaAdminSettings: (patch: MediaAdminSettingsPatch): Promise<MediaAdminSettings> =>
+    api.put<MediaAdminSettings>('/learn/media/admin/settings', patch).then((r) => r.data),
 
   /**
    * Скачать файл материала для показа внутри приложения.

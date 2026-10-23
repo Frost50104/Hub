@@ -52,7 +52,24 @@ export interface Me {
     project_templates_admin?: boolean
     /** Личные напоминания по задачам (0062): env-выключатель, не тенантный. */
     task_reminders?: boolean
+    /** Конвейер видео урока (0066): env И тенантный тумблер — субтитры,
+     *  чистовик, MOV/WebM в редакторе. */
+    media_pipeline?: boolean
+    /** env включён и человек hub-admin: вкладка «Видео» в «Управлении» видна
+     *  всегда (там тумблер тенанта — иначе включить неоткуда). */
+    media_pipeline_admin?: boolean
+    /** Гусь: env-флаг аватара + ключ Hedra + тенант. */
+    media_avatar?: boolean
   }
+}
+
+/** Конвейер видео включён для тенанта (нет поля — старый бэкенд — выключено). */
+export function hasMediaPipeline(me: Me | undefined): boolean {
+  return me?.features?.media_pipeline === true
+}
+
+export function hasMediaAvatar(me: Me | undefined): boolean {
+  return me?.features?.media_avatar === true
 }
 
 export function hasRace(me: Me | undefined): boolean {

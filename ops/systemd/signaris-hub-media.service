@@ -37,9 +37,11 @@ Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 # Память — ТОЛЬКО жёсткий потолок, без MemoryHigh (без swap он тормозит
-# процесс вечно, см. инцидент STT 09.09–21.10). 900M — ГИПОТЕЗА до замера
-# scripts/media_measure.py на записях UPPETIT; x264 veryfast на 1080p берёт
-# ~300–500 МБ, OpenCV раскадровки (инкремент 6) добавит ~150.
+# процесс вечно, см. инцидент STT 09.09–21.10). Замер 22.10 на записях UPPETIT
+# (720p60 → 30 fps, afftdn + loudnorm, scripts/media_measure.py): anon-пик
+# рендера 334 МБ при -threads 2 (311 при 1), страничный кэш сверху ~20 МБ;
+# сборка трёх частей — тот же порядок. 900M = пик ×2 + запас под OpenCV
+# раскадровки (инкремент 6, ~150 МБ).
 MemoryMax=900M
 # При общей нехватке памяти первой жертвой станет рендер, не STT и не Postgres.
 OOMScoreAdjust=600
