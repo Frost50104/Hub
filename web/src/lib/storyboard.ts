@@ -19,11 +19,12 @@ import { plural } from '@/lib/typography'
 
 export type Resolution = '540p' | '720p' | '1080p'
 
-/** Зеркало `app/schemas/media.py::HEDRA_CENTS_PER_SEC` — только для подписей. */
+/** Зеркало `app/schemas/media.py::HEDRA_CENTS_PER_SEC` (сверено с estimate
+ *  Hedra 23.10) — только для подписей. */
 export const HEDRA_CENTS_PER_SEC: Record<Resolution, number> = {
   '540p': 2.5,
   '720p': 5,
-  '1080p': 6.25,
+  '1080p': 6.43,
 }
 
 export const RESOLUTIONS: Resolution[] = ['540p', '720p', '1080p']

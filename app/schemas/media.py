@@ -11,9 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 Resolution = Literal["540p", "720p", "1080p"]
 RESOLUTIONS: tuple[str, ...] = ("540p", "720p", "1080p")
-# Цена Hedra Character-3 за секунду, центы (документация API, 22.10.2026) —
-# локальная таблица авторитетна, `estimate` Hedra лишь сверяет.
-HEDRA_CENTS_PER_SEC: dict[str, float] = {"540p": 2.5, "720p": 5.0, "1080p": 6.25}
+# Цена Hedra Character-3 за секунду ЗВУКА, центы — сверено с `POST
+# /v3/models/hedra-character-3/estimate` 23.10.2026 (540p 2,857¢ за 1 с и далее
+# 2,5¢/с; 720p 5¢/с; 1080p 6,4286¢/с; `duration_ms` на цену не влияет — Hedra
+# тарифицирует длину аудио, у нас это и есть длина куска). Локальная таблица
+# авторитетна, `estimate` Hedra лишь сверяет. Зеркало — `web/src/lib/storyboard.ts`.
+HEDRA_CENTS_PER_SEC: dict[str, float] = {"540p": 2.5, "720p": 5.0, "1080p": 6.43}
 
 
 class CleanupDefaults(BaseModel):

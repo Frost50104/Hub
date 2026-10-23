@@ -20,7 +20,7 @@ def test_billed_seconds_ceil_per_chunk():
 def test_estimate_cost_cents():
     assert pricing.estimate_cost_cents(60, "720p") == 300
     assert pricing.estimate_cost_cents(60, "540p") == 150
-    assert pricing.estimate_cost_cents(60, "1080p") == 375
+    assert pricing.estimate_cost_cents(60, "1080p") == 386
     assert pricing.estimate_cost_cents(1, "540p") == 3
     assert pricing.estimate_cost_cents(0, "720p") == 0
     with pytest.raises(ValueError, match="разрешение"):

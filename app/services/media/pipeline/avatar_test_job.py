@@ -1,5 +1,6 @@
 """`avatar_test` — «Проверить на 10 секундах»: сцена-референс + встроенный
-русский образец (`ops/stt/smoke-ru.webm`, ~10 с) → один запрос Hedra → клип
+русский образец (`ops/stt/smoke-ru.webm`, 4,6 с, зациклен до 10 с — Hedra
+тарифицирует длину ЗВУКА, и 10 секунд обязаны быть честными) → один запрос Hedra → клип
 сохраняется как `MediaFile(kind='video', role='scene', variant='composed',
 source_media_id=сцена)` и показывается в карточке «Гусь» админки. Это же —
 первый живой прогон на staging (модерация мультяшного гуся, качество)."""
@@ -50,6 +51,8 @@ async def run(ctx: JobContext) -> JobResult:
     voice = ctx.tmp / "sample.mp3"
     await ctx.ffmpeg(
         [
+            "-stream_loop",
+            "-1",
             "-i",
             str(SAMPLE),
             "-t",
