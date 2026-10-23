@@ -1,4 +1,11 @@
-import type { DerivedMedia, MediaDetail, MediaJob, MediaJobKind, MediaJobStatus } from '@/lib/learn'
+import type {
+  DerivedMedia,
+  MediaDetail,
+  MediaJob,
+  MediaJobKind,
+  MediaJobStatus,
+  MediaRetake,
+} from '@/lib/learn'
 import { plural } from '@/lib/typography'
 
 /**
@@ -248,6 +255,8 @@ export interface CleanupStats {
   output_sec: number
   removed_sec: number
   pauses: number
+  retakes: number
+  retakes_sec: number
 }
 
 export function cleanupStats(job: MediaJob | null): CleanupStats | null {
@@ -258,7 +267,61 @@ export function cleanupStats(job: MediaJob | null): CleanupStats | null {
     output_sec: raw.output_sec ?? raw.source_sec,
     removed_sec: raw.removed_sec ?? 0,
     pauses: raw.pauses ?? 0,
+    retakes: raw.retakes ?? 0,
+    retakes_sec: raw.retakes_sec ?? 0,
   }
+}
+
+/** Ключ кандидата для выбора: границы в исходнике с точностью до сотых. */
+export function retakeKey(r: Pick<MediaRetake, 's' | 'e'>): string {
+  return `${r.s.toFixed(2)}-${r.e.toFixed(2)}`
+}
+
+/** По умолчанию вырезаются уверенные кандидаты (решение владельца 23.10),
+ *  неуверенные показываются выключенными. */
+export function defaultRetakeSelection(items: readonly MediaRetake[]): Set<string> {
+  return new Set(items.filter((r) => r.confidence === 'high').map(retakeKey))
+}
+
+export function retakeReasonLabel(r: MediaRetake): string {
+  if (r.reason === 'marker') return r.marker ? `метка «${r.marker}»` : 'голосовая метка'
+  return r.confidence === 'high' ? 'повтор начала фразы' : 'похоже на повтор'
+}
+
+/** Сколько выбрано и на сколько секунд. */
+export function retakesSummary(
+  items: readonly MediaRetake[],
+  selected: ReadonlySet<string>,
+): { count: number; seconds: number } {
+  let count = 0
+  let seconds = 0
+  for (const r of items) {
+    if (!selected.has(retakeKey(r))) continue
+    count += 1
+    seconds += Math.max(0, r.e - r.s)
+  }
+  return { count, seconds }
+}
+
+/** Тело заказа: явный список вырезок. Пустой список — «ничего не резать»,
+ *  отсутствие поля — автоматика сервера; поэтому без загруженных кандидатов
+ *  поле не шлём. */
+export function retakeCuts(
+  items: readonly MediaRetake[] | undefined,
+  selected: ReadonlySet<string>,
+): { s: number; e: number }[] | undefined {
+  if (!items) return undefined
+  return items.filter((r) => selected.has(retakeKey(r))).map((r) => ({ s: r.s, e: r.e }))
+}
+
+export interface RetakeRow extends MediaRetake {
+  applied: boolean
+}
+
+/** Кандидаты из результата задания — что вырезано на самом деле. */
+export function cleanupRetakes(job: MediaJob | null): RetakeRow[] {
+  const raw = job?.result.retakes
+  return Array.isArray(raw) ? (raw as RetakeRow[]) : []
 }
 
 export interface PauseRow {

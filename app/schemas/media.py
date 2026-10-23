@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Resolution = Literal["540p", "720p", "1080p"]
 RESOLUTIONS: tuple[str, ...] = ("540p", "720p", "1080p")
@@ -200,9 +200,26 @@ class MergeOut(BaseModel):
 # ─── Чистовик, раскадровка, использование ────────────────────────────────────
 
 
+class CutIn(BaseModel):
+    """Отрезок исходной записи, который вырезается целиком (перезапись)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    s: float = Field(ge=0)
+    e: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> CutIn:
+        if self.e <= self.s:
+            raise ValueError("конец вырезки должен быть позже начала")
+        return self
+
+
 class CleanupOverrides(BaseModel):
     """Параметры заказа чистовика поверх `media_cleanup_defaults` тенанта.
-    `min_pause_sec = 0` — паузы не трогать."""
+    `min_pause_sec = 0` — паузы не трогать. `cuts` — явный список вырезок
+    (перезаписи, выбранные автором); без поля режутся уверенные кандидаты
+    `retakes.find_retakes`, пустой список — не режется ничего."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -213,6 +230,27 @@ class CleanupOverrides(BaseModel):
     loudnorm: bool | None = None
     fps_cap: Literal[24, 25, 30, 60] | None = None
     scale_cap: Literal[720, 1080] | None = None
+    cuts: list[CutIn] | None = Field(default=None, max_length=500)
+
+
+class RetakeOut(BaseModel):
+    s: float
+    e: float
+    reason: Literal["marker", "repeat"]
+    confidence: Literal["high", "low"]
+    marker: str | None
+    before: str
+    after: str
+
+
+class RetakesOut(BaseModel):
+    """`GET /learn/media/{id}/retakes` — кандидаты на вырезку по транскрипту
+    исходника; считается на лету, без транскрипта список пуст."""
+
+    media_id: UUID
+    duration_sec: float | None
+    transcript: bool
+    items: list[RetakeOut]
 
 
 class StoryboardSegmentIn(BaseModel):

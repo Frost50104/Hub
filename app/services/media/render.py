@@ -39,6 +39,31 @@ def noise_floor_args(wav: Path) -> list[str]:
     ]
 
 
+def _escape_filter_value(value: str) -> str:
+    """Экранирование значения опции фильтра (путь к файлу): `\\ : , ' [ ] ;`."""
+    out = []
+    for ch in value:
+        if ch in "\\:,'[];":
+            out.append("\\" + ch)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def levels_args(wav: Path, out: Path) -> list[str]:
+    """RMS каждого кадра по 100 мс (16 кГц × 1600 отсчётов) → текстовый файл
+    `out` для `levels.parse_levels`. `ametadata` пишет В ФАЙЛ: stdout занят
+    `-progress`, а stderr режется по размеру."""
+    chain = ",".join(
+        [
+            "asetnsamples=n=1600:p=0",
+            "astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=RMS_level",
+            f"ametadata=mode=print:key=lavfi.astats.Overall.RMS_level:file={_escape_filter_value(str(out))}",
+        ]
+    )
+    return ["-i", str(wav), "-af", chain, "-f", "null", "-"]
+
+
 def silencedetect_args(wav: Path, *, threshold_db: float, min_pause: float) -> list[str]:
     return [
         "-i",

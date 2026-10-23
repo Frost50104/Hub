@@ -67,6 +67,15 @@ def test_offset_words_json_and_plain_text():
     assert base.plain_text([seg(0, 1, " a "), seg(1, 2, ""), seg(2, 3, "b")]) == "a b"
 
 
+def test_transcript_gaps_by_words():
+    # Реплика 0–10 с дырой между словами 2–8: по словам зазор есть, по репликам — нет.
+    segs = [{"s": 0.0, "e": 10.0, "t": "а б", "w": [[0.0, 2.0, "а"], [8.0, 10.0, "б"]]}]
+    assert base.transcript_gaps(segs, 12.0) == [(2.0, 8.0), (10.0, 12.0)]
+    assert base.transcript_gaps(segs, 12.0, by_words=False) == [(10.0, 12.0)]
+    assert base.speech_intervals(segs) == [(0.0, 2.0), (8.0, 10.0)]
+    assert base.speech_intervals([seg(0, 3, "x")]) == [(0.0, 3.0)]
+
+
 def test_transcript_gaps():
     gaps = base.transcript_gaps([{"s": 1, "e": 2}, {"s": 2.5, "e": 4}], 5)
     assert gaps == [(0.0, 1.0), (2.0, 2.5), (4.0, 5.0)]

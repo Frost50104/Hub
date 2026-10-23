@@ -126,17 +126,37 @@ def stitch(chunks: Sequence[tuple[float, Sequence[Segment]]]) -> list[Segment]:
     return out
 
 
-def transcript_gaps(
-    segments: Iterable[Segment | dict[str, Any]], duration: float
+def speech_intervals(
+    segments: Iterable[Segment | dict[str, Any]], *, by_words: bool = True
 ) -> list[Interval]:
-    """Зазоры между репликами (и до первой / после последней)."""
+    """Где звучит речь: слова транскрипта (если есть) или реплика целиком.
+    По словам, а не по репликам: Whisper склеивает в одну реплику «…платформой
+    Hub.» и «Что же это такое?» через 7,5 с дыры — на уровне реплик зазора нет
+    (83 такие дыры на 8 минут в записи 23.10)."""
     bounds: list[Interval] = []
     for s in segments:
+        words: list[Any] = []
         if isinstance(s, dict):
-            bounds.append((float(s["s"]), float(s["e"])))
+            seg_bounds = (float(s["s"]), float(s["e"]))
+            words = list(s.get("w") or []) if by_words else []
+            word_bounds = [(float(w[0]), float(w[1])) for w in words]
         else:
-            bounds.append((s.start, s.end))
+            seg_bounds = (s.start, s.end)
+            words = list(s.words) if by_words else []
+            word_bounds = [(w.start, w.end) for w in words]
+        if word_bounds:
+            bounds.extend(word_bounds)
+        else:
+            bounds.append(seg_bounds)
     bounds.sort()
+    return bounds
+
+
+def transcript_gaps(
+    segments: Iterable[Segment | dict[str, Any]], duration: float, *, by_words: bool = True
+) -> list[Interval]:
+    """Зазоры между словами/репликами (и до первого / после последнего)."""
+    bounds = speech_intervals(segments, by_words=by_words)
     gaps: list[Interval] = []
     cur = 0.0
     for s, e in bounds:

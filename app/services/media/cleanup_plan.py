@@ -1,14 +1,24 @@
-"""План чистовика — чистая математика над параметрами, тишиной и транскриптом:
-какие куски вырезать, что останется, какая статистика уйдёт в `result` и в
-шторку «до/после». Без ffmpeg и БД — под юнит-тестами."""
+"""План чистовика — чистая математика над параметрами, уровнями звука и
+транскриптом: какие куски вырезать, что останется, какая статистика уйдёт в
+`result` и в шторку «до/после». Без ffmpeg и БД — под юнит-тестами.
+
+Две вырезки разной природы: ПАУЗЫ ужимаются (середина уходит, края остаются —
+решение владельца 22.10), ПЕРЕЗАПИСИ (`cuts`: брак дублей по `retakes.py` или
+явный выбор автора) вырезаются целиком.
+
+Паузы ищутся по зазорам между СЛОВАМИ транскрипта и уровню звука в них
+(`levels.pauses_from_gaps`); пути без уровней (`silences`) и без транскрипта
+(тихие отрезки по кадрам) остаются для старых заданий и STT-less стендов.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.services.media import edl
+from app.services.media import edl, levels
 from app.services.media.edl import Interval
+from app.services.media.levels import Frame
 
 
 @dataclass(frozen=True)
@@ -23,6 +33,13 @@ class CleanupParams:
     loudnorm_lra: float = 11.0
     fps_cap: float = 30.0
     scale_cap: int = 1080
+    # Порог «громко» — на столько дБ тише медианы речи (`levels.threshold_db`).
+    speech_offset_db: float = 15.0
+    # Зазор между словами считается паузой, если громкого времени в нём не больше.
+    max_loud_fraction: float = 0.5
+    # Уверенные перезаписи режутся сами (решение владельца 23.10); автор может
+    # прислать явный список `cuts` вместо автоматики.
+    retakes: bool = True
 
     @classmethod
     def from_settings(cls, defaults: dict[str, Any], overrides: dict[str, Any]) -> CleanupParams:
@@ -44,6 +61,9 @@ class CleanupParams:
             loudnorm_lra=float(merged.get("loudnorm_lra", 11)),
             fps_cap=float(merged.get("fps_cap", 30)),
             scale_cap=int(merged.get("scale_cap", 1080)),
+            speech_offset_db=float(merged.get("speech_offset_db", 15.0)),
+            max_loud_fraction=float(merged.get("max_loud_fraction", 0.5)),
+            retakes=bool(merged.get("retakes", True)),
         )
 
     @property
@@ -62,6 +82,9 @@ class CleanupParams:
             "loudnorm_lra": self.loudnorm_lra,
             "fps_cap": self.fps_cap,
             "scale_cap": self.scale_cap,
+            "speech_offset_db": self.speech_offset_db,
+            "max_loud_fraction": self.max_loud_fraction,
+            "retakes": self.retakes,
         }
 
 
@@ -72,11 +95,16 @@ class CleanupPlan:
     pauses: list[Interval]
     removed: list[Interval]
     kept: list[Interval]
+    cuts: list[Interval] = field(default_factory=list)
     report: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def removed_sec(self) -> float:
         return edl.total(self.removed)
+
+    @property
+    def cuts_sec(self) -> float:
+        return edl.total(self.cuts)
 
     @property
     def output_sec(self) -> float:
@@ -88,51 +116,89 @@ class CleanupPlan:
             "output_sec": round(self.output_sec, 2),
             "removed_sec": round(self.removed_sec, 2),
             "pauses": len(self.pauses),
+            "retakes": len(self.cuts),
+            "retakes_sec": round(self.cuts_sec, 2),
         }
 
 
 def _context_for(
     pause: Interval, segments: list[dict[str, Any]] | None, *, max_words: int = 5
 ) -> str | None:
-    """Подпись паузы — хвост реплики перед ней («после „нажимаем Сохранить“»)."""
+    """Подпись паузы — хвост реплики перед ней («после „нажимаем Сохранить“»).
+    Реплика ищется по словам: пауза может стоять внутри реплики Whisper."""
     if not segments:
         return None
     start = pause[0]
-    before = [s for s in segments if float(s["e"]) <= start + 0.3]
-    if not before:
-        return None
-    text = str(before[-1].get("t") or "").strip()
-    if not text:
-        return None
-    words = text.rstrip(".!?…").split()
-    tail = " ".join(words[-max_words:])
-    return f"после «{tail}»" if tail else None
+    tail: list[str] = []
+    for seg in segments:
+        words = seg.get("w") or []
+        if words:
+            for w in words:
+                if float(w[1]) <= start + 0.3:
+                    tail.append(str(w[2]))
+                    tail = tail[-max_words:]
+        elif float(seg["e"]) <= start + 0.3:
+            text = str(seg.get("t") or "").strip()
+            if text:
+                tail = text.split()[-max_words:]
+    joined = " ".join(tail).strip().rstrip(".!?…,")
+    return f"после «{joined}»" if joined else None
 
 
 def plan_cleanup(
     params: CleanupParams,
     *,
     duration: float,
-    silences: list[Interval],
     segments: list[dict[str, Any]] | None,
+    silences: list[Interval] | None = None,
+    frames: list[Frame] | None = None,
+    threshold_db: float | None = None,
+    cuts: list[Interval] | None = None,
     report_limit: int = 200,
 ) -> CleanupPlan:
-    """Паузы = тишина ∩ зазоры транскрипта (без транскрипта — только тишина),
-    длиннее порога; из каждой удаляется середина, края остаются (`edl`)."""
+    """Паузы: с `frames` — зазоры между словами с долей громкого ≤ порога
+    (`levels.pauses_from_gaps`); без транскрипта — тихие отрезки по кадрам;
+    без `frames` (старый путь) — тишина ∩ зазоры. Из каждой паузы удаляется
+    середина, края остаются (`edl`). `cuts` вырезаются целиком."""
+    cut_list = edl.normalize(
+        [(max(0.0, s), min(float(duration), e)) for s, e in (cuts or []) if e > s]
+    )
+    cut_list = [(s, e) for s, e in cut_list if e - s > edl.EPS]
     if not params.pauses_enabled:
-        return CleanupPlan(params, duration, [], [], [(0.0, float(duration))])
-    gaps = None
-    if segments:
-        from app.services.media.transcription.base import transcript_gaps
+        pauses: list[Interval] = []
+    elif frames is not None:
+        thr = threshold_db if threshold_db is not None else levels.DEFAULT_THRESHOLD_DB
+        if segments:
+            from app.services.media.transcription.base import transcript_gaps
 
-        gaps = transcript_gaps(segments, duration)
-    pauses = edl.pauses(silences, gaps, min_pause=params.min_pause_sec)
-    removed = edl.compress_pauses(pauses, keep=params.keep_sec, margin=params.margin_sec)
+            gaps = transcript_gaps(segments, duration)
+            pauses = levels.pauses_from_gaps(
+                gaps,
+                frames,
+                thr,
+                min_pause=params.min_pause_sec,
+                max_loud_fraction=params.max_loud_fraction,
+            )
+        else:
+            pauses = levels.silent_runs(frames, thr, min_len=params.min_pause_sec)
+    else:
+        gaps = None
+        if segments:
+            from app.services.media.transcription.base import transcript_gaps
+
+            gaps = transcript_gaps(segments, duration)
+        pauses = edl.pauses(silences or [], gaps, min_pause=params.min_pause_sec)
+    # Вырезка перезаписи забирает своё: остаток паузы считается заново и
+    # короче порога паузой не является.
+    pauses = [
+        p for p in edl.subtract(pauses, cut_list) if p[1] - p[0] >= params.min_pause_sec - edl.EPS
+    ]
+    compressed = edl.compress_pauses(pauses, keep=params.keep_sec, margin=params.margin_sec)
+    removed = edl.normalize([*compressed, *cut_list])
     kept = edl.kept_intervals(removed, duration)
     report: list[dict[str, Any]] = []
     for pause in pauses[:report_limit]:
-        cut = [r for r in removed if r[0] >= pause[0] - 1e-6 and r[1] <= pause[1] + 1e-6]
-        cut_sec = edl.total(cut)
+        cut_sec = edl.total(edl.intersect([pause], removed))
         report.append(
             {
                 "at": round(edl.remap_time(pause[0], removed), 2),
@@ -142,4 +208,4 @@ def plan_cleanup(
                 "context": _context_for(pause, segments),
             }
         )
-    return CleanupPlan(params, duration, pauses, removed, kept, report)
+    return CleanupPlan(params, duration, pauses, removed, kept, cut_list, report)

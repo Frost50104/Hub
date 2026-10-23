@@ -81,6 +81,16 @@ def test_pass1_and_analysis_args():
     sd = render.silencedetect_args(Path("/a.wav"), threshold_db=-43.3, min_pause=1.5)
     assert sd[sd.index("-af") + 1] == "silencedetect=n=-43.3dB:d=1.5"
     assert "astats=measure_overall=Noise_floor" in render.noise_floor_args(Path("/a.wav"))[3]
+    lv = render.levels_args(Path("/a.wav"), Path("/tmp/job 1/levels.txt"))
+    assert lv[:2] == ["-i", "/a.wav"] and lv[-3:] == ["-f", "null", "-"]
+    chain = lv[lv.index("-af") + 1]
+    assert chain.startswith("asetnsamples=n=1600:p=0,astats=metadata=1:reset=1")
+    assert chain.endswith(
+        "ametadata=mode=print:key=lavfi.astats.Overall.RMS_level:file=/tmp/job 1/levels.txt"
+    )
+    # Спецсимволы пути экранируются для парсера фильтров.
+    esc = render.levels_args(Path("/a.wav"), Path("/x/a:b,c.txt"))[3]
+    assert esc.endswith("file=/x/a\\:b\\,c.txt")
     a16 = render.audio16k_args(Path("/s.mp4"), Path("/a.wav"))
     assert a16[a16.index("-ar") + 1] == "16000"
     assert a16[a16.index("-ac") + 1] == "1"

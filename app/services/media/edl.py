@@ -115,28 +115,45 @@ def remap_time(t: float, removed: Sequence[Interval]) -> float:
     return max(0.0, t - shift)
 
 
+WORD_MIN_SEC = 0.03
+
+
 def remap_segments(
     segments: Iterable[dict[str, Any]],
     removed: Sequence[Interval],
     *,
     min_len: float = 0.05,
 ) -> list[dict[str, Any]]:
-    """Перемапить `[{"s","e","t","w"?}]` транскрипта; схлопнувшиеся выкинуть."""
+    """Перемапить `[{"s","e","t","w"?}]` транскрипта. Схлопнувшиеся реплики
+    выкидываются; слово, целиком попавшее в вырезку (брак дубля), уходит из
+    реплики, и её текст собирается заново из оставшихся слов — иначе субтитры
+    показывали бы вырезанное."""
     removed = normalize(removed)
     out: list[dict[str, Any]] = []
     for seg in segments:
         s = remap_time(float(seg["s"]), removed)
         e = remap_time(float(seg["e"]), removed)
-        if e - s < min_len:
+        words_in = list(seg.get("w") or [])
+        if not words_in:
+            if e - s < min_len:
+                continue
+            out.append({**seg, "s": round(s, 3), "e": round(e, 3)})
             continue
-        item: dict[str, Any] = {**seg, "s": round(s, 3), "e": round(e, 3)}
-        if seg.get("w"):
-            words = []
-            for ws, we, wt in seg["w"]:
-                ns, ne = remap_time(float(ws), removed), remap_time(float(we), removed)
-                if ne - ns >= 0.0:
-                    words.append([round(ns, 3), round(ne, 3), wt])
-            item["w"] = words
+        words = []
+        dropped = False
+        for ws, we, wt in words_in:
+            ns, ne = remap_time(float(ws), removed), remap_time(float(we), removed)
+            if ne - ns < WORD_MIN_SEC:
+                dropped = True
+                continue
+            words.append([round(ns, 3), round(ne, 3), wt])
+        if not words:
+            continue
+        item: dict[str, Any] = {**seg, "s": round(s, 3), "e": round(e, 3), "w": words}
+        if dropped:
+            item["s"] = words[0][0]
+            item["e"] = max(words[-1][1], item["s"])
+            item["t"] = " ".join(str(w[2]).strip() for w in words).strip()
         out.append(item)
     return out
 

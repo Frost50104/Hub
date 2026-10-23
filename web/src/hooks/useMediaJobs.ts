@@ -110,6 +110,19 @@ export function useStoryboard(mediaId: string | null | undefined, enabled = true
   })
 }
 
+/** Кандидаты на вырезку перезаписей по транскрипту исходника — список с
+ *  тумблерами во вкладке «Чистовик» до заказа. */
+export function useRetakes(mediaId: string | null | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ['learn-media', mediaId, 'retakes'],
+    queryFn: () => learnApi.mediaRetakes(mediaId!),
+    enabled: Boolean(mediaId) && enabled,
+    staleTime: 30_000,
+    retry: false,
+    meta: { suppressGlobalError: true },
+  })
+}
+
 export function useUpdateStoryboard(mediaId: string) {
   const qc = useQueryClient()
   return useMutation({

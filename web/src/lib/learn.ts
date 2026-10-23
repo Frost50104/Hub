@@ -1416,6 +1416,27 @@ export interface MediaDetail {
   subtitle_url: string | null
 }
 
+export type RetakeReason = 'marker' | 'repeat'
+export type RetakeConfidence = 'high' | 'low'
+
+/** Кандидат на вырезку перезаписи (брак дубля) в ИСХОДНОЙ записи. */
+export interface MediaRetake {
+  s: number
+  e: number
+  reason: RetakeReason
+  confidence: RetakeConfidence
+  marker: string | null
+  before: string
+  after: string
+}
+
+export interface MediaRetakes {
+  media_id: string
+  duration_sec: number | null
+  transcript: boolean
+  items: MediaRetake[]
+}
+
 export interface MediaUsage {
   lessons: {
     lesson_id: string
@@ -2248,6 +2269,8 @@ export const learnApi = {
     api.get<MediaJob>(`/learn/media/jobs/${jobId}`).then((r) => r.data),
   mediaUsage: (id: string): Promise<MediaUsage> =>
     api.get<MediaUsage>(`/learn/media/${id}/usage`).then((r) => r.data),
+  mediaRetakes: (id: string): Promise<MediaRetakes> =>
+    api.get<MediaRetakes>(`/learn/media/${id}/retakes`).then((r) => r.data),
   mediaStoryboard: (id: string): Promise<MediaStoryboard> =>
     api.get<MediaStoryboard>(`/learn/media/${id}/storyboard`).then((r) => r.data),
   updateMediaStoryboard: (id: string, patch: StoryboardPatch): Promise<MediaStoryboard> =>

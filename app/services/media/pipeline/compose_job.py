@@ -27,7 +27,7 @@ from app.services.media import compose_plan, storage
 from app.services.media.hedra.client import HedraClient, HedraError
 from app.services.media.hedra.pricing import billed_seconds
 from app.services.media.pipeline.context import JobCancelled, JobContext, JobFailed, JobResult
-from app.services.media.transcription.base import transcript_gaps
+from app.services.media.transcription.base import speech_intervals, transcript_gaps
 
 KIND = "compose"
 GOOSE_PROMPT = (
@@ -75,6 +75,9 @@ async def _load(ctx: JobContext) -> dict[str, Any]:
             "gaps": transcript_gaps(transcript.segments, float(media.duration_sec or 0.0))
             if transcript and media.duration_sec
             else [],
+            # Слова чистовика — чтобы заглушить голос вне речи: гусь не
+            # шевелит клювом под дыхание и щелчки в паузах.
+            "speech": speech_intervals(transcript.segments) if transcript else [],
             "scene_key": scene.storage_key if scene and scene.status == "ready" else None,
             "scene_mime": scene.mime if scene else None,
             "insert_keys": {
@@ -94,6 +97,7 @@ async def _hedra_chunks(
     scene_mime: str,
     resolution: str,
     state: dict[str, Any],
+    speech: list[tuple[float, float]] | None = None,
 ) -> list[Path]:
     """Куски гуся: загрузить сцену и голос → submit → записать `job_id` СРАЗУ
     (`ctx.persist_now`) → дождаться → скачать. Состояние — в `state["chunks"]`.
@@ -125,8 +129,9 @@ async def _hedra_chunks(
         try:
             if not row.get("job_id"):
                 voice = ctx.tmp / f"voice-{i:02d}.mp3"
+                mute = compose_plan.mute_intervals(speech or [], cs, ce)
                 await ctx.ffmpeg(
-                    compose_plan.voice_slice_args(src, voice, cs, ce),
+                    compose_plan.voice_slice_args(src, voice, cs, ce, mute=mute),
                     stage=f"voice {i + 1}/{len(chunks)}",
                     duration=ce - cs,
                     pct_offset=20 + 60 * i / max(1, len(chunks)),
@@ -241,6 +246,7 @@ async def run(ctx: JobContext) -> JobResult:
             scene_mime=info["scene_mime"] or "image/png",
             resolution=resolution,
             state=state,
+            speech=info["speech"],
         )
     pieces = compose_plan.timeline_pieces(
         duration,

@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import type { MediaDetail, MediaJob } from './learn'
+import type { MediaDetail, MediaJob, MediaRetake } from './learn'
 import {
   blockStatus,
   cleanupPauses,
+  cleanupRetakes,
   cleanupState,
   cleanupStats,
   composeState,
   analyzeState,
+  defaultRetakeSelection,
   latestComposed,
   formatBytes,
   formatDelta,
@@ -17,6 +19,10 @@ import {
   latestCleaned,
   mapOriginalTime,
   pollIntervalMs,
+  retakeCuts,
+  retakeKey,
+  retakeReasonLabel,
+  retakesSummary,
   swapImpactText,
   transcribeChip,
   transcribeState,
@@ -238,10 +244,59 @@ describe('чистовик', () => {
       output_sec: 788,
       removed_sec: 72,
       pauses: 37,
+      retakes: 0,
+      retakes_sec: 0,
     })
     expect(cleanupStats(job({}))).toBeNull()
     expect(cleanupPauses(done)).toHaveLength(1)
     expect(cleanupPauses(null)).toEqual([])
+  })
+
+  it('перезаписи: выбор по умолчанию, итог, тело заказа и отчёт', () => {
+    const marker: MediaRetake = {
+      s: 25.42,
+      e: 32.37,
+      reason: 'marker',
+      confidence: 'high',
+      marker: 'Стоп.',
+      before: 'Важно, весь офис Стоп.',
+      after: 'Важно, весь офис компании',
+    }
+    const weak: MediaRetake = {
+      s: 100,
+      e: 104.5,
+      reason: 'repeat',
+      confidence: 'low',
+      marker: null,
+      before: 'выбираем учётную запись,',
+      after: 'выбираем профиль и связь',
+    }
+    const strong: MediaRetake = { ...weak, s: 200, e: 206, confidence: 'high' }
+    const items = [marker, weak, strong]
+    expect(retakeKey(marker)).toBe('25.42-32.37')
+    const def = defaultRetakeSelection(items)
+    expect([...def]).toEqual([retakeKey(marker), retakeKey(strong)])
+    const sum = retakesSummary(items, def)
+    expect(sum.count).toBe(2)
+    expect(sum.seconds).toBeCloseTo(12.95, 5)
+    expect(retakeReasonLabel(marker)).toBe('метка «Стоп.»')
+    expect(retakeReasonLabel({ ...marker, marker: null })).toBe('голосовая метка')
+    expect(retakeReasonLabel(weak)).toBe('похоже на повтор')
+    expect(retakeReasonLabel(strong)).toBe('повтор начала фразы')
+    // Тело заказа — только выбранные; без кандидатов поле не шлём (сервер решит сам).
+    expect(retakeCuts(items, def)).toEqual([
+      { s: 25.42, e: 32.37 },
+      { s: 200, e: 206 },
+    ])
+    expect(retakeCuts(items, new Set())).toEqual([])
+    expect(retakeCuts(undefined, def)).toBeUndefined()
+    const done = job({
+      kind: 'cleanup',
+      status: 'done',
+      result: { retakes: [{ ...marker, applied: true }, { ...weak, applied: false }] },
+    })
+    expect(cleanupRetakes(done).filter((r) => r.applied)).toHaveLength(1)
+    expect(cleanupRetakes(null)).toEqual([])
   })
 
   it('дельта, перенос времени и текст подтверждения', () => {

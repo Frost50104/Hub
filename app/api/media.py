@@ -41,6 +41,8 @@ from app.schemas.media import (
     MediaPartOut,
     MergeCreate,
     MergeOut,
+    RetakeOut,
+    RetakesOut,
     SceneTestOut,
     StoryboardOut,
     StoryboardParams,
@@ -75,6 +77,7 @@ from app.services.learn_settings import get_settings_dict, set_setting
 from app.services.media import avatar_limit, compose_plan, lesson_media
 from app.services.media import gate as media_gate
 from app.services.media import jobs as media_jobs
+from app.services.media import retakes as retake_rules
 from app.services.media import storyboard as storyboard_rules
 from app.services.media.autostart import maybe_enqueue_transcribe
 from app.services.media.images import aspect_ok, image_size_of
@@ -804,6 +807,11 @@ async def create_media_job(
                 status_code=409,
                 detail="Сначала дождитесь расшифровки — паузы ищутся по тексту и звуку",
             )
+        cuts = params.get("cuts")
+        if cuts is not None and media.duration_sec:
+            limit = float(media.duration_sec) + 0.5
+            if any(float(c["e"]) > limit for c in cuts):
+                raise HTTPException(status_code=422, detail="Вырезка выходит за длительность видео")
     if body.kind == "compose":
         if media.variant != "cleaned":
             raise HTTPException(status_code=409, detail="Монтаж собирается по готовому чистовику")
@@ -1084,6 +1092,37 @@ async def get_media_usage(
             )
         )
     return UsageOut(lessons=out)
+
+
+@router.get("/learn/media/{media_id}/retakes", response_model=RetakesOut)
+async def get_media_retakes(
+    media_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> RetakesOut:
+    """Кандидаты на вырезку перезаписей по транскрипту исходника — для списка
+    с тумблерами во вкладке «Чистовик» до заказа. Чистая функция над
+    транскриптом, считается на лету."""
+    await _require_pipeline(db, principal.tenant_id)
+    await require_content_role(db, principal, "author")
+    media = await db.get(MediaFile, media_id)
+    if media is None:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    if media.kind != "video":
+        raise HTTPException(status_code=409, detail="Перезаписи ищутся только у видео")
+    transcript = await db.get(MediaTranscript, media.id)
+    duration = float(media.duration_sec or (transcript.duration_sec if transcript else 0) or 0)
+    items = (
+        retake_rules.find_retakes(list(transcript.segments or []), duration=duration)
+        if transcript is not None and duration > 0
+        else []
+    )
+    return RetakesOut(
+        media_id=media.id,
+        duration_sec=media.duration_sec,
+        transcript=transcript is not None,
+        items=[RetakeOut(**r.to_json()) for r in items],
+    )
 
 
 @router.get("/learn/media/{media_id}", response_model=MediaDetailOut)

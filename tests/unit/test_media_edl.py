@@ -77,6 +77,31 @@ def test_remap_segments_drops_collapsed_and_maps_words():
     assert out[1]["w"] == [[1.5, 2.0, "б"]]
 
 
+def test_remap_segments_drops_cut_words_and_rebuilds_text():
+    # Вырезана перезапись «Важно, [пауза]» внутри реплики: слово уходит, текст
+    # собирается заново, границы реплики — по оставшимся словам.
+    segs = [
+        {
+            "s": 10.0,
+            "e": 16.0,
+            "t": "Важно, весь офис переходит",
+            "w": [
+                [10.0, 10.8, "Важно,"],
+                [13.0, 13.4, "весь"],
+                [13.4, 13.9, "офис"],
+                [13.9, 16.0, "переходит"],
+            ],
+        }
+    ]
+    out = edl.remap_segments(segs, [(9.9, 12.9)])
+    assert len(out) == 1
+    assert out[0]["t"] == "весь офис переходит"
+    assert out[0]["w"][0] == [pytest.approx(10.0), pytest.approx(10.4), "весь"]
+    assert out[0]["s"] == pytest.approx(10.0) and out[0]["e"] == pytest.approx(13.0)
+    # Реплика, целиком попавшая в вырезку, исчезает вместе со словами.
+    assert edl.remap_segments(segs, [(9.0, 17.0)]) == []
+
+
 def test_select_expr():
     assert edl.select_expr([(0, 1), (2.5, 4)]) == "between(t,0.000,1.000)+between(t,2.500,4.000)"
     assert edl.select_expr([]) == "0"

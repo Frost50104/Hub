@@ -4,8 +4,11 @@
 её транскрипт с перемапленными таймкодами и VTT; следом автоматически
 ставится `analyze` (раскадровка для монтажа). Оригинал не меняется.
 
-Паузы ищутся пересечением тишины по звуку и зазоров транскрипта — тихая
-речь не режется; без транскрипта (STT не настроен) — только по тишине.
+Паузы ищутся по зазорам между СЛОВАМИ транскрипта и уровню звука в них
+(`levels.py`: порог от речи, доля громкого времени) — тихая речь не режется,
+а дыхание и щелчки уходят вместе с паузой; без транскрипта (STT не настроен)
+— тихие отрезки по кадрам. Перезаписи (брак дублей, `retakes.py`) вырезаются
+целиком: уверенные — сами, остальные — по явному списку `params.cuts` автора.
 """
 
 from __future__ import annotations
@@ -21,14 +24,36 @@ from app.models.media import MediaTranscript
 from app.services.attachments import absolute_path
 from app.services.learn_media import mp4_duration_seconds, mp4_has_faststart
 from app.services.learn_settings import get_settings_dict
-from app.services.media import edl, jobs, render, silence, storage
+from app.services.media import edl, jobs, levels, render, retakes, silence, storage
 from app.services.media.cleanup_plan import CleanupParams, plan_cleanup
 from app.services.media.pipeline.context import JobContext, JobFailed, JobResult
-from app.services.media.transcription.base import plain_text_of_json
+from app.services.media.transcription.base import plain_text_of_json, speech_intervals
 from app.services.media.vtt import build_vtt
 
 KIND = "cleanup"
 WAV_BYTES_PER_SEC = 32_000
+
+
+def _applied(item: retakes.Retake, cuts: list[edl.Interval]) -> bool:
+    """Кандидат вырезан, если вырезки покрывают его почти целиком."""
+    span = item.end - item.start
+    if span <= edl.EPS:
+        return False
+    covered = edl.total(edl.intersect([(item.start, item.end)], cuts))
+    return covered >= 0.9 * span
+
+
+def resolve_cuts(
+    params: CleanupParams, job_params: dict[str, Any] | None, found: list[retakes.Retake]
+) -> list[edl.Interval]:
+    """Что вырезать целиком: явный список автора (`cuts`, даже пустой) имеет
+    приоритет; иначе — уверенные кандидаты, если автоматика включена."""
+    explicit = (job_params or {}).get("cuts")
+    if explicit is not None:
+        return [(float(c["s"]), float(c["e"])) for c in explicit]
+    if params.retakes:
+        return retakes.high_confidence_cuts(found)
+    return []
 
 
 async def _load(ctx: JobContext) -> tuple[MediaFile, MediaTranscript | None, dict[str, Any]]:
@@ -69,50 +94,59 @@ async def run(ctx: JobContext) -> JobResult:
     except storage.NoSpace as exc:
         raise JobFailed("no_space", str(exc)) from None
 
-    # 1. Звук 16 кГц → шумовой пол → тишина.
+    # 1. Звук 16 кГц → уровни по кадрам → порог «громко» от речи.
     wav = ctx.tmp / "audio16k.wav"
     await ctx.ffmpeg(
         render.audio16k_args(src, wav), stage="audio", duration=duration, pct_scale=0.04
     )
-    noise_floor: float | None = None
-    threshold = silence.threshold_db(None)
-    silences: list[edl.Interval] = []
+    segments = list(transcript.segments or []) if transcript is not None else None
+    frames: list[levels.Frame] = []
+    speech_level: float | None = None
+    threshold = levels.DEFAULT_THRESHOLD_DB
     if params.pauses_enabled:
-        nf_log = await ctx.ffmpeg(
-            render.noise_floor_args(wav),
-            stage="silence",
+        levels_txt = ctx.tmp / "levels.txt"
+        await ctx.ffmpeg(
+            render.levels_args(wav, levels_txt),
+            stage="levels",
             duration=duration,
             pct_offset=4,
-            pct_scale=0.02,
-            capture_stderr=True,
-            loglevel="info",
+            pct_scale=0.04,
         )
-        noise_floor = silence.parse_noise_floor(nf_log)
-        threshold = silence.threshold_db(noise_floor)
-        sd_log = await ctx.ffmpeg(
-            render.silencedetect_args(
-                wav, threshold_db=threshold, min_pause=max(0.3, params.min_pause_sec)
-            ),
-            stage="silence",
-            duration=duration,
-            pct_offset=6,
-            pct_scale=0.02,
-            capture_stderr=True,
-            loglevel="info",
-        )
-        silences = silence.parse_silencedetect(sd_log, duration=duration)
+        if levels_txt.is_file():
+            frames = levels.parse_levels(levels_txt.read_text(encoding="utf-8", errors="replace"))
+        if not frames:
+            raise JobFailed("levels_missing", "ffmpeg не отдал уровни звука (astats/ametadata)")
+        if segments:
+            speech_level = levels.speech_level_db(frames, speech_intervals(segments))
+        if speech_level is None:
+            speech_level = levels.fallback_speech_level_db(frames)
+        threshold = levels.threshold_db(speech_level, offset=params.speech_offset_db)
 
-    # 2. План вырезки.
-    segments = list(transcript.segments or []) if transcript is not None else None
-    plan = plan_cleanup(params, duration=duration, silences=silences, segments=segments)
+    # 2. Перезаписи: кандидаты по транскрипту, вырезки — явные или уверенные.
+    found = retakes.find_retakes(segments, duration=duration) if segments else []
+    cuts = resolve_cuts(params, ctx.spec.params, found)
+    cut_set = edl.normalize(cuts)
+    retake_report = [{**r.to_json(), "applied": _applied(r, cut_set)} for r in found]
+
+    # 3. План вырезки.
+    plan = plan_cleanup(
+        params,
+        duration=duration,
+        segments=segments,
+        frames=frames or None,
+        threshold_db=threshold,
+        cuts=cuts,
+    )
     ctx.log.info(
         "media.cleanup_planned",
         pauses=len(plan.pauses),
+        retakes=len(plan.cuts),
         removed_sec=round(plan.removed_sec, 1),
+        speech_level_db=speech_level,
         threshold_db=threshold,
     )
 
-    # 3. Громкость: первый проход по УЖЕ вырезанному и очищенному треку.
+    # 4. Громкость: первый проход по УЖЕ вырезанному и очищенному треку.
     denoise = render.denoise_filter(params.denoise)
     measured: dict[str, float] | None = None
     if params.loudnorm:
@@ -137,7 +171,7 @@ async def run(ctx: JobContext) -> JobResult:
         except ValueError as exc:
             raise JobFailed("loudnorm_measure", str(exc)) from None
 
-    # 4. Рендер одним проходом.
+    # 5. Рендер одним проходом.
     fps = min(probe.fps or params.fps_cap, params.fps_cap)
     script = ctx.tmp / "filters.txt"
     script.write_text(
@@ -166,7 +200,7 @@ async def run(ctx: JobContext) -> JobResult:
     out_duration = mp4_duration_seconds(out) or plan.output_sec
     out_size = out.stat().st_size
 
-    # 5. Транскрипт и субтитры чистовика — перемаппинг, не новая расшифровка.
+    # 6. Транскрипт и субтитры чистовика — перемаппинг, не новая расшифровка.
     remapped: list[dict[str, Any]] | None = None
     vtt_path: Path | None = None
     if segments:
@@ -186,9 +220,10 @@ async def run(ctx: JobContext) -> JobResult:
     job_result = JobResult(
         result={
             "params": params.to_json(),
-            "noise_floor_db": noise_floor,
-            "threshold_db": threshold,
+            "speech_level_db": None if speech_level is None else round(speech_level, 1),
+            "threshold_db": round(threshold, 1),
             "pauses": plan.report,
+            "retakes": retake_report,
             "stats": {**plan.stats(), "output_sec": round(out_duration, 2)},
             "loudnorm": measured,
             "transcript": remapped is not None,

@@ -19,12 +19,13 @@ demuxer `-c copy`, затем мультиплексирование с ауди
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
 from app.services.media import chunking, edl, storyboard
-from app.services.media.edl import Interval
+from app.services.media.edl import EPS, Interval
 from app.services.media.hedra.pricing import billed_seconds, estimate_cost_cents
 from app.services.media.merge import concat_list
 from app.services.media.normalize import FASTSTART, X264
@@ -202,8 +203,55 @@ def mux_args(video: Path, cleaned: Path, dst: Path) -> list[str]:
     ]
 
 
-def voice_slice_args(cleaned: Path, dst: Path, start: float, end: float) -> list[str]:
-    """Голос для одного куска Hedra: моно mp3 96k ровно по границам куска."""
+MUTE_PAD_SEC = 0.15
+MUTE_MIN_GAP_SEC = 0.4
+
+
+def mute_intervals(
+    speech: Iterable[Interval],
+    start: float,
+    end: float,
+    *,
+    pad: float = MUTE_PAD_SEC,
+    min_gap: float = MUTE_MIN_GAP_SEC,
+) -> list[Interval]:
+    """Что приглушить в голосе куска `[start, end)` (координаты — от начала
+    куска): всё вне слов транскрипта с запасом `pad`, только зазоры длиннее
+    `min_gap`. Hedra шевелит клюв под любой звук — дыхание, щелчки клавиатуры,
+    «пфр» между дублями; без транскрипта (`speech` пуст) не глушим ничего."""
+    speech = list(speech)
+    if not speech or end - start <= EPS:
+        return []
+    keep = edl.normalize(
+        [
+            (max(start, s - pad), min(end, e + pad))
+            for s, e in speech
+            if e > start - EPS and s < end + EPS
+        ]
+    )
+    gaps = edl.subtract([(start, end)], keep)
+    return [(s - start, e - start) for s, e in gaps if e - s >= min_gap - EPS]
+
+
+def mute_filter(mute: Iterable[Interval]) -> str:
+    """`volume` с таймлайном: ноль на приглушаемых отрезках."""
+    parts = [f"between(t,{s:.3f},{e:.3f})" for s, e in mute]
+    return "volume=0:enable='" + "+".join(parts) + "'"
+
+
+def voice_slice_args(
+    cleaned: Path,
+    dst: Path,
+    start: float,
+    end: float,
+    *,
+    mute: Iterable[Interval] | None = None,
+) -> list[str]:
+    """Голос для одного куска Hedra: моно mp3 96k ровно по границам куска;
+    `mute` — отрезки без речи (от начала куска), которые глушатся в ноль, чтобы
+    гусь молчал в паузах."""
+    mute_list = list(mute or [])
+    audio_filter = ["-af", mute_filter(mute_list)] if mute_list else []
     return [
         "-ss",
         f"{start:.3f}",
@@ -212,6 +260,7 @@ def voice_slice_args(cleaned: Path, dst: Path, start: float, end: float) -> list
         "-t",
         f"{end - start:.3f}",
         "-vn",
+        *audio_filter,
         "-ac",
         "1",
         "-ar",

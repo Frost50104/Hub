@@ -18,6 +18,7 @@ from sqlalchemy import select
 from app.api.media import (
     create_media_job,
     get_media_detail,
+    get_media_retakes,
     get_media_usage,
     get_storyboard,
     put_storyboard,
@@ -177,8 +178,12 @@ async def test_cleanup_then_analyze(db, tenant_id, env, tmp_path):
     await db.refresh(row)
     assert row.status == "done", row.error
     stats = row.result["stats"]
-    assert stats["pauses"] == 1 and stats["removed_sec"] == pytest.approx(0.8, abs=0.2)
-    assert row.result["pauses"][0]["context"] == "после «Добрый день, коллеги»"
+    # Пауза — зазор между словами 2,4–4,2 (синус затихает на 2,5–4,0, края
+    # громкие на 17 % времени) → ужата до 0,7 с.
+    assert stats["pauses"] == 1 and stats["removed_sec"] == pytest.approx(1.1, abs=0.2)
+    assert stats["retakes"] == 0 and row.result["retakes"] == []
+    assert row.result["speech_level_db"] is not None and row.result["threshold_db"] <= -30
+    assert row.result["pauses"][0]["context"] == "после «Добрый день»"
     assert row.result["loudnorm"] and "input_i" in row.result["loudnorm"]
     cleaned = await db.get(MediaFile, row.output_media_id)
     assert cleaned.variant == "cleaned" and cleaned.source_media_id == media.id
@@ -253,6 +258,58 @@ async def test_cleanup_preconditions_and_storyboard_validation(db, tenant_id, en
     with pytest.raises(HTTPException) as exc:
         await create_media_job(
             media.id, JobCreate(kind="cleanup", params={"min_pause_sec": 99}), admin, db
+        )
+    assert exc.value.status_code == 422
+    # Перезаписи: без транскрипта — пусто; с транскриптом — кандидат по
+    # повтору начала фразы; вырезка за пределами длительности — 422.
+    empty = await get_media_retakes(media.id, admin, db)
+    assert empty.transcript is False and empty.items == []
+    db.add(
+        MediaTranscript(
+            media_id=media.id,
+            tenant_id=tenant_id,
+            provider="fake",
+            model="m",
+            language="ru",
+            text="Выбираем проект. Стоп. Выбираем проект. У нас появляется список.",
+            segments=[
+                {
+                    "s": 0.0,
+                    "e": 1.0,
+                    "t": "Выбираем проект.",
+                    "w": [[0.0, 0.5, "Выбираем"], [0.5, 1.0, "проект."]],
+                },
+                {"s": 1.5, "e": 1.9, "t": "Стоп.", "w": [[1.5, 1.9, "Стоп."]]},
+                {
+                    "s": 3.0,
+                    "e": 5.5,
+                    "t": "Выбираем проект. У нас появляется список.",
+                    "w": [
+                        [3.0, 3.5, "Выбираем"],
+                        [3.5, 4.0, "проект."],
+                        [4.0, 4.3, "У"],
+                        [4.3, 4.6, "нас"],
+                        [4.6, 5.0, "появляется"],
+                        [5.0, 5.5, "список."],
+                    ],
+                },
+            ],
+            duration_sec=6.0,
+        )
+    )
+    await db.flush()
+    found = await get_media_retakes(media.id, admin, db)
+    assert found.transcript is True and len(found.items) == 1
+    assert found.items[0].reason == "marker" and found.items[0].confidence == "high"
+    assert found.items[0].s == pytest.approx(0.0) and found.items[0].e == pytest.approx(2.92)
+    with pytest.raises(HTTPException) as exc:
+        await create_media_job(
+            media.id, JobCreate(kind="cleanup", params={"cuts": [{"s": 1, "e": 9}]}), admin, db
+        )
+    assert exc.value.status_code == 422 and "длительность" in exc.value.detail
+    with pytest.raises(HTTPException) as exc:
+        await create_media_job(
+            media.id, JobCreate(kind="cleanup", params={"cuts": [{"s": 2, "e": 1}]}), admin, db
         )
     assert exc.value.status_code == 422
     with pytest.raises(HTTPException) as exc:

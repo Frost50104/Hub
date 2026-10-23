@@ -1,27 +1,35 @@
-import { Scissors } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { Play, Scissors } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/Button'
 import { SegmentGroup } from '@/components/ui/SegmentGroup'
 import { Select } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/Switch'
-import { useCancelMediaJob, useStartMediaJob } from '@/hooks/useMediaJobs'
+import { useCancelMediaJob, useRetakes, useStartMediaJob } from '@/hooks/useMediaJobs'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
-import type { DerivedMedia, MediaDetail } from '@/lib/learn'
+import type { DerivedMedia, MediaDetail, MediaRetake } from '@/lib/learn'
 import {
   activeJob,
   cleanupJobFor,
   cleanupPauses,
+  cleanupRetakes,
   cleanupState,
   cleanupStats,
+  defaultRetakeSelection,
   failureText,
   formatDelta,
   formatDuration,
   latestCleaned,
   latestJob,
   mapOriginalTime,
+  retakeCuts,
+  retakeKey,
+  retakeReasonLabel,
+  retakesSummary,
   type PauseRow,
+  type RetakeRow,
 } from '@/lib/mediaJobs'
+import { plural } from '@/lib/typography'
 import type { SwapTarget } from '@/lib/lessonVideoNodes'
 
 import { SwapControls } from './SwapControls'
@@ -58,14 +66,22 @@ export function CleanupTab({
   const [denoise, setDenoise] = useState(true)
   const [loudnorm, setLoudnorm] = useState(true)
   const [rebuild, setRebuild] = useState(false)
+  // Кандидаты на вырезку перезаписей — только когда есть транскрипт (иначе
+  // ручка отдаёт пустой список, а чистовик недоступен).
+  const retakes = useRetakes(base.id, base.status === 'ready' && base.capabilities.cleanup)
+  const items = retakes.data?.items
+  const [picked, setPicked] = useState<Set<string> | null>(null)
+  const selected = picked ?? defaultRetakeSelection(items ?? [])
 
   const order = () => {
+    const cuts = retakeCuts(items, selected)
     start.mutate({
       kind: 'cleanup',
       params: {
         min_pause_sec: Number(pause),
         denoise: denoise ? 'afftdn' : 'none',
         loudnorm,
+        ...(cuts ? { cuts } : {}),
       },
     })
     setRebuild(false)
@@ -103,7 +119,7 @@ export function CleanupTab({
         <p className="text-[13px] text-text3">
           {typeof pct === 'number' ? `${pct} %` : 'запуск'}
           {stage === 'audio' && ' · извлекаем звук'}
-          {stage === 'silence' && ' · ищем паузы'}
+          {(stage === 'silence' || stage === 'levels') && ' · ищем паузы и перезаписи'}
           {stage === 'loudness' && ' · измеряем громкость'}
           {stage === 'render' && ' · рендер видео и склейка звука'}
         </p>
@@ -126,6 +142,7 @@ export function CleanupTab({
         cleaned={cleaned}
         stats={cleanupStats(job)}
         pauses={cleanupPauses(job)}
+        retakes={cleanupRetakes(job)}
         inUse={nodeDerived && nodeMediaId === cleaned.id}
         nodeDerived={nodeDerived}
         onSwap={onSwap}
@@ -190,6 +207,18 @@ export function CleanupTab({
           </span>
         </label>
       </div>
+      <RetakesPicker
+        base={base}
+        items={items}
+        loading={retakes.isPending && retakes.fetchStatus !== 'idle'}
+        selected={selected}
+        onToggle={(key) => {
+          const next = new Set(selected)
+          if (next.has(key)) next.delete(key)
+          else next.add(key)
+          setPicked(next)
+        }}
+      />
       <p className="text-[12px] leading-[1.45] text-text3">
         Обычно 10–20 минут на получасовую запись. Шторку можно закрыть — статус будет на блоке
         видео.
@@ -223,6 +252,130 @@ function Lead({ title, text }: { title: string; text: string }) {
   )
 }
 
+/** «0:20–0:32 · −12 с». */
+function fmtSpan(r: Pick<MediaRetake, 's' | 'e'>): string {
+  return `${formatDuration(r.s)}–${formatDuration(r.e)} · ${formatDelta(-(r.e - r.s))}`
+}
+
+/**
+ * Перезаписи (брак дублей): кандидаты по транскрипту с тумблерами. Уверенные
+ * включены по умолчанию (решение владельца 23.10), неуверенные — выключены.
+ * «Послушать» открывает оригинал на полсекунды раньше вырезки и ставит на
+ * паузу сразу после неё.
+ */
+function RetakesPicker({
+  base,
+  items,
+  loading,
+  selected,
+  onToggle,
+}: {
+  base: MediaDetail
+  items: MediaRetake[] | undefined
+  loading: boolean
+  selected: ReadonlySet<string>
+  onToggle: (key: string) => void
+}) {
+  const [showAll, setShowAll] = useState(false)
+  const [preview, setPreview] = useState<MediaRetake | null>(null)
+  const player = useRef<HTMLVideoElement | null>(null)
+
+  useEffect(() => {
+    const el = player.current
+    if (!el || !preview) return
+    const stopAt = preview.e + 0.5
+    const onTime = () => {
+      if (el.currentTime >= stopAt) el.pause()
+    }
+    el.addEventListener('timeupdate', onTime)
+    el.currentTime = Math.max(0, preview.s - 0.5)
+    void el.play().catch(() => undefined)
+    return () => el.removeEventListener('timeupdate', onTime)
+  }, [preview])
+
+  if (loading) {
+    return <p className="text-[12px] text-text3">Ищем перезаписи в расшифровке…</p>
+  }
+  if (!items) return null
+  if (items.length === 0) {
+    return (
+      <div className="rounded-xl border border-hair bg-tint p-3">
+        <p className="text-[13px] font-semibold text-text">Перезаписи</p>
+        <p className="mt-1 text-[12px] leading-[1.45] text-text3">
+          В расшифровке не нашлось ни голосовых меток («Стоп», «Заново», «Это вырезаем»), ни
+          повторов начала фразы. Если брак всё же есть, его можно убрать после сборки — заказать
+          заново с другими настройками.
+        </p>
+      </div>
+    )
+  }
+  const summary = retakesSummary(items, selected)
+  const visible = showAll ? items : items.slice(0, 5)
+  return (
+    <div className="space-y-2 rounded-xl border border-hair bg-tint p-3">
+      <div>
+        <p className="text-[13px] font-semibold text-text">
+          Перезаписи · {plural(items.length, 'кандидат', 'кандидата', 'кандидатов')}
+        </p>
+        <p className="mt-1 text-[12px] leading-[1.45] text-text3">
+          Вырежем целиком {summary.count > 0 ? plural(summary.count, 'отрезок', 'отрезка', 'отрезков') : 'ничего'}
+          {summary.count > 0 && ` · ${formatDelta(-summary.seconds)}`}. Уверенные (голосовая метка
+          или повтор двух и более слов) включены сразу, остальные — на ваше усмотрение.
+        </p>
+      </div>
+      {preview && base.url && (
+        <video
+          ref={player}
+          src={base.url}
+          controls
+          playsInline
+          preload="metadata"
+          className="aspect-video w-full rounded-lg bg-black"
+        />
+      )}
+      <ol className="max-h-72 space-y-2 overflow-y-auto overscroll-contain">
+        {visible.map((r) => {
+          const key = retakeKey(r)
+          const on = selected.has(key)
+          return (
+            <li key={key} className="flex items-start gap-2 text-[13px]">
+              <Switch checked={on} onCheckedChange={() => onToggle(key)} />
+              <div className="min-w-0 flex-1">
+                <p className="flex flex-wrap items-baseline gap-x-2 text-text2">
+                  <span className="tabular-nums text-text">{fmtSpan(r)}</span>
+                  <span className="text-[12px] text-text3">{retakeReasonLabel(r)}</span>
+                </p>
+                <p className="truncate text-[12px] text-text3" title={`${r.before} → ${r.after}`}>
+                  «{r.before}» → «{r.after}»
+                </p>
+              </div>
+              {base.url && (
+                <button
+                  type="button"
+                  aria-label="Послушать отрезок"
+                  className="shrink-0 rounded-md p-1 text-amber hover:bg-surface"
+                  onClick={() => setPreview(r)}
+                >
+                  <Play className="h-4 w-4" />
+                </button>
+              )}
+            </li>
+          )
+        })}
+      </ol>
+      {items.length > 5 && (
+        <button
+          type="button"
+          className="text-[13px] font-semibold text-amber"
+          onClick={() => setShowAll((v) => !v)}
+        >
+          {showAll ? 'Свернуть' : `Показать все ${items.length}`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleString('ru-RU', {
     day: 'numeric',
@@ -237,6 +390,7 @@ function CleanupResult({
   cleaned,
   stats,
   pauses,
+  retakes,
   inUse,
   nodeDerived,
   onSwap,
@@ -247,6 +401,7 @@ function CleanupResult({
   cleaned: DerivedMedia
   stats: ReturnType<typeof cleanupStats>
   pauses: PauseRow[]
+  retakes: RetakeRow[]
   inUse: boolean
   nodeDerived: boolean
   onSwap: (target: SwapTarget) => void
@@ -255,8 +410,10 @@ function CleanupResult({
 }) {
   const isDesktop = useIsDesktop()
   const [showAll, setShowAll] = useState(false)
+  const [showCuts, setShowCuts] = useState(false)
   const shorter = stats ? stats.source_sec - stats.output_sec : null
   const visible = showAll ? pauses : pauses.slice(0, 6)
+  const applied = retakes.filter((r) => r.applied)
 
   return (
     <div className="space-y-4">
@@ -280,9 +437,40 @@ function CleanupResult({
             <span className="text-text3"> · {formatDelta(-stats.removed_sec)}</span>
           )}
         </dd>
+        <dt className="text-text3">Перезаписи</dt>
+        <dd className="text-text">
+          {stats && stats.retakes > 0 ? `${stats.retakes} вырезано` : 'не вырезались'}
+          {stats && stats.retakes_sec > 0 && (
+            <span className="text-text3"> · {formatDelta(-stats.retakes_sec)}</span>
+          )}
+        </dd>
         <dt className="text-text3">Звук</dt>
         <dd className="text-text">Шум и громкость — по настройкам заказа</dd>
       </dl>
+      {applied.length > 0 && (
+        <div className="space-y-1">
+          <button
+            type="button"
+            className="text-[12px] font-semibold uppercase tracking-[0.06em] text-text3"
+            onClick={() => setShowCuts((v) => !v)}
+          >
+            Вырезанные перезаписи · время в оригинале {showCuts ? '▴' : '▾'}
+          </button>
+          {showCuts && (
+            <ol className="max-h-56 space-y-1 overflow-y-auto rounded-xl border border-hair p-2">
+              {applied.map((r) => (
+                <li key={retakeKey(r)} className="text-[13px]">
+                  <span className="tabular-nums text-text">{fmtSpan(r)}</span>
+                  <span className="text-text3"> · {retakeReasonLabel(r)}</span>
+                  <span className="block truncate text-[12px] text-text3">
+                    «{r.before}» → «{r.after}»
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
       {pauses.length > 0 && (
         <div className="space-y-1">
           <p className="text-[12px] font-semibold uppercase tracking-[0.06em] text-text3">

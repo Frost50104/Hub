@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.services.media import compose_plan as cp
 
 SEGMENTS = [
@@ -99,3 +101,22 @@ def test_piece_args_concat_and_mux():
     assert (
         voice[:4] == ["-ss", "15.000", "-i", "/c.mp4"] and voice[voice.index("-t") + 1] == "15.000"
     )
+    assert "-af" not in voice
+
+
+def test_mute_intervals_and_voice_filter():
+    # Слова чистовика: 14–16, 16.3–20, 24–29; кусок гуся 15–30.
+    speech = [(14.0, 16.0), (16.3, 20.0), (24.0, 29.0)]
+    mute = cp.mute_intervals(speech, 15.0, 30.0)
+    # Зазор 16–16,3 короче min_gap — не глушим; 20,15–23,85 и 29,15–30 — глушим.
+    assert mute == [(pytest.approx(5.15), pytest.approx(8.85)), (pytest.approx(14.15), 15.0)]
+    assert (
+        cp.mute_filter(mute) == "volume=0:enable='between(t,5.150,8.850)+between(t,14.150,15.000)'"
+    )
+    voice = cp.voice_slice_args(Path("/c.mp4"), Path("/v.mp3"), 15.0, 30.0, mute=mute)
+    assert voice[voice.index("-af") + 1].startswith("volume=0:enable=")
+    assert voice.index("-vn") < voice.index("-af") < voice.index("-ac")
+    # Без транскрипта глушить нечего — и ничего не глушим.
+    assert cp.mute_intervals([], 15.0, 30.0) == []
+    # Речь целиком покрывает кусок — тоже пусто.
+    assert cp.mute_intervals([(0.0, 100.0)], 15.0, 30.0) == []
