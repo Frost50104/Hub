@@ -175,8 +175,15 @@ async def run() -> int:
             log.error("media.smoke_failed", reason="render", err=str(exc)[:300])
             return 1
     leases = await expired_leases()
+    try:
+        import cv2  # noqa: PLC0415 — проверка наличия, не работа
+
+        opencv = cv2.__version__
+    except ImportError:
+        opencv = None
     log.info(
         "media.smoke_ok",
+        opencv=opencv,
         ffmpeg=banner,
         render_sec=round(time.monotonic() - started, 1),
         output_sec=round(duration, 2),

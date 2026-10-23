@@ -95,23 +95,28 @@ def filter_script(
     i: float,
     tp: float,
     lra: float,
-    measured: dict[str, float],
+    measured: dict[str, float] | None,
     fps: float,
     scale_cap: int,
 ) -> str:
-    """Текст для `-filter_complex_script`: одна видео- и одна аудио-ветка."""
+    """Текст для `-filter_complex_script`: одна видео- и одна аудио-ветка.
+    `measured=None` — громкость не выравниваем (тумблер «Выровнять громкость»
+    выключен), в цепочке остаются только вырезка и шумодав."""
     kept = list(kept)
     video = (
         f"[0:v]select='{select_expr(kept)}',setpts=N/FRAME_RATE/TB,"
         f"fps={fps:g},scale=-2:'min(ih,{scale_cap})':flags=bicubic,format=yuv420p[v]"
     )
-    loud = (
-        loudnorm_target(i=i, tp=tp, lra=lra)
-        + f":measured_I={measured['input_i']:g}:measured_TP={measured['input_tp']:g}"
-        + f":measured_LRA={measured['input_lra']:g}:measured_thresh={measured['input_thresh']:g}"
-        + f":offset={measured.get('target_offset', 0.0):g}:linear=true:print_format=summary"
-    )
-    audio = "[0:a]" + ",".join([*_audio_chain(kept, denoise), loud]) + "[a]"
+    chain = _audio_chain(kept, denoise)
+    if measured is not None:
+        chain.append(
+            loudnorm_target(i=i, tp=tp, lra=lra)
+            + f":measured_I={measured['input_i']:g}:measured_TP={measured['input_tp']:g}"
+            + f":measured_LRA={measured['input_lra']:g}"
+            + f":measured_thresh={measured['input_thresh']:g}"
+            + f":offset={measured.get('target_offset', 0.0):g}:linear=true:print_format=summary"
+        )
+    audio = "[0:a]" + ",".join(chain) + "[a]"
     return video + ";\n" + audio + "\n"
 
 

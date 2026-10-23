@@ -34,7 +34,13 @@ from app.config import Settings, get_settings
 from app.db import tenant_scoped_session
 from app.services.media import gate, jobs, storage
 from app.services.media.jobs import JobSpec
-from app.services.media.pipeline import merge_job, normalize_job, transcribe_job
+from app.services.media.pipeline import (
+    analyze_job,
+    cleanup_job,
+    merge_job,
+    normalize_job,
+    transcribe_job,
+)
 from app.services.media.pipeline.context import (
     JobCancelled,
     JobContext,
@@ -45,7 +51,8 @@ from app.services.media.pipeline.context import (
 
 log = structlog.get_logger("media.worker")
 
-HEARTBEAT_SEC = 30.0
+# 15 с: прогресс в шторке обновляется с этим шагом, аренда 900 с — запас 60×.
+HEARTBEAT_SEC = 15.0
 REAPER_EVERY_SEC = 60.0
 FFMPEG_RECHECK_SEC = 60.0
 
@@ -54,6 +61,8 @@ HANDLERS: dict[str, Handler] = {
     normalize_job.KIND: normalize_job,
     merge_job.KIND: merge_job,
     transcribe_job.KIND: transcribe_job,
+    cleanup_job.KIND: cleanup_job,
+    analyze_job.KIND: analyze_job,
 }
 
 

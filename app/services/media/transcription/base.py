@@ -161,3 +161,10 @@ def segments_to_json(segments: Iterable[Segment]) -> list[dict[str, Any]]:
 
 def plain_text(segments: Iterable[Segment]) -> str:
     return " ".join(s.text.strip() for s in segments if s.text.strip())
+
+
+def plain_text_of_json(segments: Iterable[dict[str, Any]]) -> str:
+    """То же для формы `media_transcripts.segments` (перемаппинг чистовика)."""
+    return " ".join(
+        str(s.get("t") or "").strip() for s in segments if str(s.get("t") or "").strip()
+    )

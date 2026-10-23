@@ -50,3 +50,40 @@ export function pendingVideoIds(
     return status === 'processing' || status === 'failed'
   })
 }
+
+export interface SwapTarget {
+  mediaId: string
+  src: string | null
+  derivedKind: 'cleaned' | 'composed'
+}
+
+/**
+ * Атрибуты ноды после замены оригинала производной: `sourceMediaId` ставится
+ * ОДИН раз и при второй замене (чистовик → монтаж) не перетирается — иначе
+ * «Вернуть оригинал» вернул бы чистовик. Условия досмотра не трогаем.
+ */
+export function swappedVideoAttrs(
+  attrs: Record<string, unknown>,
+  target: SwapTarget,
+): Record<string, unknown> {
+  const current = typeof attrs.mediaId === 'string' ? attrs.mediaId : null
+  const source =
+    typeof attrs.sourceMediaId === 'string' && attrs.sourceMediaId ? attrs.sourceMediaId : current
+  return {
+    ...attrs,
+    mediaId: target.mediaId,
+    src: target.src,
+    sourceMediaId: source,
+    derivedKind: target.derivedKind,
+  }
+}
+
+/** Откат к оригиналу: `mediaId` ← `sourceMediaId`, производная забывается. */
+export function revertedVideoAttrs(
+  attrs: Record<string, unknown>,
+  originalSrc: string | null,
+): Record<string, unknown> | null {
+  const source = typeof attrs.sourceMediaId === 'string' ? attrs.sourceMediaId : null
+  if (!source) return null
+  return { ...attrs, mediaId: source, src: originalSrc, sourceMediaId: null, derivedKind: null }
+}

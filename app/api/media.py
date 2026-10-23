@@ -15,6 +15,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, Response
+from pydantic import ValidationError
 from signaris_auth import Principal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,9 +24,11 @@ from app.config import get_settings
 from app.db import tenant_scoped_session
 from app.deps import enforce_rate_limit, get_db, require_auth
 from app.models.course import MediaFile
-from app.models.media import MEDIA_ROLES, MediaJob, MediaPart, MediaTranscript
+from app.models.media import MEDIA_ROLES, MediaJob, MediaPart, MediaStoryboard, MediaTranscript
+from app.models.progress import LessonProgress
 from app.schemas.media import (
     CleanupDefaults,
+    CleanupOverrides,
     DerivedMediaOut,
     JobCreate,
     MediaAdminSettingsOut,
@@ -36,11 +39,15 @@ from app.schemas.media import (
     MediaPartOut,
     MergeCreate,
     MergeOut,
+    StoryboardOut,
     StoryboardParams,
+    StoryboardPut,
     TranscriptInfo,
     TranscriptOut,
+    UsageLessonOut,
+    UsageOut,
 )
-from app.services import audit
+from app.services import audit, course_index
 from app.services.attachments import (
     SNIFF_HEAD_BYTES,
     content_disposition,
@@ -64,6 +71,7 @@ from app.services.learn_media import (
 from app.services.learn_settings import get_settings_dict, set_setting
 from app.services.media import gate as media_gate
 from app.services.media import jobs as media_jobs
+from app.services.media import storyboard as storyboard_rules
 from app.services.media.autostart import maybe_enqueue_transcribe
 from app.services.media.images import aspect_ok, image_size_of
 from app.services.media.storage import derived_storage_key
@@ -527,8 +535,11 @@ async def _media_detail(db: AsyncSession, media: MediaFile) -> MediaDetailOut:
             transcribe=media.kind == "video"
             and media.status == "ready"
             and media_gate.stt_configured(),
-            # Появятся вместе с заданиями `cleanup` (инкремент 6) и `compose` (7).
-            cleanup=False,
+            # Чистовик — по готовому видео с транскриптом (без STT — по тишине).
+            cleanup=media.kind == "video"
+            and media.status == "ready"
+            and (transcript is not None or not media_gate.stt_configured()),
+            # Появится вместе с заданием `compose` (инкремент 7).
             compose=False,
         ),
         transcript=TranscriptInfo(
@@ -691,15 +702,26 @@ async def create_media_job(
     media = await db.get(MediaFile, media_id)
     if media is None:
         raise HTTPException(status_code=404, detail="Файл не найден")
-    if body.kind == "transcribe":
-        if media.kind != "video":
-            raise HTTPException(status_code=409, detail="Расшифровать можно только видео")
-        if media.status != "ready":
-            raise HTTPException(status_code=409, detail="Файл ещё обрабатывается")
-        if not media_gate.stt_configured():
+    if media.kind != "video":
+        raise HTTPException(status_code=409, detail="Задание ставится только на видео")
+    if media.status != "ready":
+        raise HTTPException(status_code=409, detail="Файл ещё обрабатывается")
+    params: dict = dict(body.params or {})
+    if body.kind == "transcribe" and not media_gate.stt_configured():
+        raise HTTPException(
+            status_code=409,
+            detail="Расшифровка не настроена на сервере — сообщите администратору",
+        )
+    if body.kind == "cleanup":
+        try:
+            params = CleanupOverrides(**params).model_dump(exclude_none=True)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc.errors()[0]["msg"])) from None
+        has_transcript = await db.get(MediaTranscript, media.id) is not None
+        if not has_transcript and media_gate.stt_configured():
             raise HTTPException(
                 status_code=409,
-                detail="Расшифровка не настроена на сервере — сообщите администратору",
+                detail="Сначала дождитесь расшифровки — паузы ищутся по тексту и звуку",
             )
     try:
         job = await media_jobs.enqueue(
@@ -707,7 +729,7 @@ async def create_media_job(
             tenant_id=principal.tenant_id,
             media_id=media.id,
             kind=body.kind,
-            params=body.params or {},
+            params=params,
             requested_by=principal.employee_id,
         )
     except media_jobs.JobConflict:
@@ -737,6 +759,136 @@ async def get_media_transcript(
         segments=list(row.segments or []),
         duration_sec=row.duration_sec,
     )
+
+
+def _storyboard_out(row: MediaStoryboard, duration: float | None) -> StoryboardOut:
+    return StoryboardOut(
+        media_id=row.media_id,
+        duration_sec=duration,
+        face_track=list(row.face_track or []),
+        segments_auto=list(row.segments_auto or []),
+        segments=list(row.segments or []),
+        inserts=list(row.inserts or []),
+        goose_enabled=bool(row.goose_enabled),
+        edited_by=row.edited_by,
+        params=dict(row.params or {}),
+        updated_at=row.updated_at,
+    )
+
+
+@router.get("/learn/media/{media_id}/storyboard", response_model=StoryboardOut)
+async def get_storyboard(
+    media_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> StoryboardOut:
+    await _require_pipeline(db, principal.tenant_id)
+    await require_content_role(db, principal, "author")
+    media = await db.get(MediaFile, media_id)
+    if media is None:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    row = await db.get(MediaStoryboard, media_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Раскадровки ещё нет")
+    return _storyboard_out(row, media.duration_sec)
+
+
+@router.put("/learn/media/{media_id}/storyboard", response_model=StoryboardOut)
+async def put_storyboard(
+    media_id: UUID,
+    body: StoryboardPut,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> StoryboardOut:
+    """Правка автора: границы отрезков и режим `goose|keep` у спикера, вставки
+    поверх голоса, тумблер гуся. Правила — `services/media/storyboard.py`
+    (покрытие без дыр, вставки без пересечений); пока идёт `compose` — 409."""
+    await _require_pipeline(db, principal.tenant_id)
+    await require_content_role(db, principal, "author")
+    media = await db.get(MediaFile, media_id)
+    if media is None:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    row = await db.get(MediaStoryboard, media_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Раскадровки ещё нет")
+    if await media_jobs.active_job(db, media_id, "compose") is not None:
+        raise HTTPException(status_code=409, detail="Идёт монтаж — дождитесь его окончания")
+    duration = float(media.duration_sec or 0.0)
+    if body.segments is not None:
+        try:
+            row.segments = storyboard_rules.validate_segments(
+                [seg.model_dump(exclude_none=True) for seg in body.segments], duration=duration
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+    if body.inserts is not None:
+        raw = [
+            {"media_id": str(i.media_id), "at": i.at, "duration": i.duration} for i in body.inserts
+        ]
+        try:
+            inserts = storyboard_rules.validate_inserts(raw, duration=duration)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        ids = {UUID(i["media_id"]) for i in inserts}
+        if ids:
+            rows = (
+                (await db.execute(select(MediaFile).where(MediaFile.id.in_(ids)))).scalars().all()
+            )
+            found = {m.id: m for m in rows}
+            for mid in ids:
+                m = found.get(mid)
+                if m is None or m.kind != "video" or m.role != "insert":
+                    raise HTTPException(
+                        status_code=422, detail="Вставка должна быть видео, загруженным как вставка"
+                    )
+                if m.status != "ready":
+                    raise HTTPException(status_code=409, detail="Вставка ещё конвертируется")
+        row.inserts = inserts
+    if body.goose_enabled is not None:
+        row.goose_enabled = body.goose_enabled
+    row.edited_by = principal.employee_id
+    await db.commit()
+    await db.refresh(row)
+    return _storyboard_out(row, media.duration_sec)
+
+
+@router.get("/learn/media/{media_id}/usage", response_model=UsageOut)
+async def get_media_usage(
+    media_id: UUID,
+    principal: Principal = Depends(require_auth()),
+    db: AsyncSession = Depends(get_db),
+) -> UsageOut:
+    """В каких уроках стоит это видео и сколько человек сейчас его проходят —
+    для предупреждения при замене оригинала чистовиком (прогресс просмотра у
+    них сбросится)."""
+    await _require_pipeline(db, principal.tenant_id)
+    await require_content_role(db, principal, "author")
+    rows = (await db.execute(course_index.lessons_referencing_media_stmt(media_id))).all()
+    out: list[UsageLessonOut] = []
+    key = str(media_id).lower()
+    for lesson, course in rows:
+        in_progress = (
+            await db.execute(
+                select(func.count())
+                .select_from(LessonProgress)
+                .where(
+                    LessonProgress.lesson_id == lesson.id,
+                    LessonProgress.status != "completed",
+                    LessonProgress.block_state["video"].has_key(key),
+                )
+            )
+        ).scalar_one()
+        out.append(
+            UsageLessonOut(
+                lesson_id=lesson.id,
+                title=lesson.title,
+                course_id=course.id,
+                course_title=course.title,
+                published=lesson.status == "published" and course.status == "published",
+                in_progress=int(in_progress or 0),
+            )
+        )
+    return UsageOut(lessons=out)
 
 
 @router.get("/learn/media/{media_id}", response_model=MediaDetailOut)

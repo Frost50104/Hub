@@ -1416,6 +1416,17 @@ export interface MediaDetail {
   subtitle_url: string | null
 }
 
+export interface MediaUsage {
+  lessons: {
+    lesson_id: string
+    title: string
+    course_id: string
+    course_title: string
+    published: boolean
+    in_progress: number
+  }[]
+}
+
 export interface MergePartInput {
   media_id: string
   trim_start_sec?: number
@@ -2185,9 +2196,11 @@ export const learnApi = {
     api.get<MediaTranscript>(`/learn/media/${id}/transcript`).then((r) => r.data),
   mediaJob: (jobId: string): Promise<MediaJob> =>
     api.get<MediaJob>(`/learn/media/jobs/${jobId}`).then((r) => r.data),
+  mediaUsage: (id: string): Promise<MediaUsage> =>
+    api.get<MediaUsage>(`/learn/media/${id}/usage`).then((r) => r.data),
   createMediaJob: (
     id: string,
-    kind: 'transcribe',
+    kind: 'transcribe' | 'cleanup' | 'analyze',
     params?: Record<string, unknown>,
   ): Promise<MediaJob> =>
     api

@@ -26,7 +26,7 @@ def test_classify_failure_final_vs_retry():
 
 
 def test_handlers_cover_implemented_kinds():
-    assert set(worker.HANDLERS) == {"normalize", "merge", "transcribe"}
+    assert set(worker.HANDLERS) == {"normalize", "merge", "transcribe", "cleanup", "analyze"}
 
 
 def test_ffmpeg_available_checks_both_binaries(monkeypatch):

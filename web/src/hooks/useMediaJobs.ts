@@ -28,10 +28,16 @@ export function useMediaDetail(
   })
 }
 
+export type StartJobInput =
+  'transcribe' | { kind: 'transcribe' | 'cleanup' | 'analyze'; params?: Record<string, unknown> }
+
 export function useStartMediaJob(mediaId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (kind: 'transcribe') => learnApi.createMediaJob(mediaId, kind),
+    mutationFn: (input: StartJobInput) =>
+      typeof input === 'string'
+        ? learnApi.createMediaJob(mediaId, input)
+        : learnApi.createMediaJob(mediaId, input.kind, input.params),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['learn-media', mediaId] })
     },

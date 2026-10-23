@@ -198,7 +198,7 @@ systemctl restart signaris-hub-stt
 
 Устройство — `docs/ARCHITECTURE.md` §«Медиа», план — `~/.claude/plans/a-b-validated-aurora.md`. Здесь — процедуры.
 
-**Зависимости хоста.** `apt-get install -y ffmpeg` (Ubuntu 24.04 → 7:6.1.1; `deploy/bootstrap-vps.sh` ставит его новым машинам). Проверка сборки: `ffmpeg -hide_banner -filters | grep -E ' (afftdn|loudnorm|silencedetect|astats|aselect|concat) '` и `-encoders | grep -E ' (libx264|aac) '`. Python-зависимостей новых нет.
+**Зависимости хоста.** `apt-get install -y ffmpeg` (Ubuntu 24.04 → 7:6.1.1; `deploy/bootstrap-vps.sh` ставит его новым машинам). Проверка сборки: `ffmpeg -hide_banner -filters | grep -E ' (afftdn|loudnorm|silencedetect|astats|aselect|concat) '` и `-encoders | grep -E ' (libx264|aac) '`. Python: extra `[media]` = `opencv-python-headless==4.14.0.94` (раскадровка; `deploy.sh` ставит `.[sentry,stt,media]`), в API-процесс не импортируется; `media_smoke` печатает версию.
 
 **Юнит.** `ops/systemd/signaris-hub-media.service` (прод-образец) → staging-вариант ТОЛЬКО генератором: `python3 ops/systemd/make-staging-unit.py signaris-hub-media.service 5059 5060 > /tmp/signaris-hub-staging-media.service` (портов в файле нет, аргументы нужны проверке путей), `scp` в `/etc/systemd/system/`, `systemd-analyze verify`, `daemon-reload`, `enable --now`. Юнит ставится **только там, где модуль включён** — на проде до go-live его нет. Деплой (`deploy.sh`) делает `try-restart` установленного юнита и гоняет `app.jobs.media_smoke` (ffmpeg ≥ 6, фильтры и кодеки, синтетический рендер через боевой `filter_script`, состояние STT/Hedra, протухшие аренды); провал — WARNING, деплой не прерывается.
 

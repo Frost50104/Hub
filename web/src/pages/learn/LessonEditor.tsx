@@ -28,6 +28,7 @@ import {
 } from 'react'
 import { toast } from 'sonner'
 
+import { MediaToolsContext } from '@/components/learn/media/MediaToolsContext'
 import { MergeSheet } from '@/components/learn/media/MergeSheet'
 import { LessonVideoWithView } from '@/components/learn/media/VideoNodeView'
 import {
@@ -474,6 +475,7 @@ function LessonEditorInner({
           {me.isPending ? (
             <SkeletonRows rows={4} />
           ) : (
+            <MediaToolsContext.Provider value={{ lessonId: lesson.id, lessonStatus: status }}>
             <RichEditor
               value={content}
               onChange={setContent}
@@ -492,6 +494,7 @@ function LessonEditorInner({
                 return true
               }}
             />
+            </MediaToolsContext.Provider>
           )}
         </Suspense>
       )}

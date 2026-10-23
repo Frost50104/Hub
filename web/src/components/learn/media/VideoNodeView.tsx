@@ -5,7 +5,15 @@ import { LessonVideo } from '@/components/learn/rich/lessonNodes'
 import { Chip } from '@/components/ui/Chip'
 import { useMediaDetail } from '@/hooks/useMediaJobs'
 import { cn } from '@/lib/cn'
-import { blockStatus, formatDuration, transcribeChip } from '@/lib/mediaJobs'
+import { revertedVideoAttrs, swappedVideoAttrs, type SwapTarget } from '@/lib/lessonVideoNodes'
+import {
+  blockStatus,
+  cleanupState,
+  formatDelta,
+  formatDuration,
+  latestCleaned,
+  transcribeChip,
+} from '@/lib/mediaJobs'
 
 import { MediaToolsSheet } from './MediaToolsSheet'
 
@@ -32,6 +40,14 @@ function VideoNodeViewInner({ node, selected, updateAttributes }: NodeViewProps)
 
   const status = blockStatus(d)
   const chip = transcribeChip(d)
+  const nodeDerived = node.attrs.derivedKind === 'cleaned' || node.attrs.derivedKind === 'composed'
+  const cleaned = !nodeDerived ? latestCleaned(d) : null
+  const cleanupRunning = cleanupState(d) === 'running'
+  const onSwap = (target: SwapTarget) => updateAttributes(swappedVideoAttrs(node.attrs, target))
+  const onRevert = (originalSrc: string | null) => {
+    const next = revertedVideoAttrs(node.attrs, originalSrc)
+    if (next) updateAttributes(next)
+  }
   const badges: string[] = ['Видео']
   if (node.attrs.derivedKind === 'cleaned') badges.push('чистовик')
   if (node.attrs.derivedKind === 'composed') badges.push('монтаж')
@@ -109,6 +125,20 @@ function VideoNodeViewInner({ node, selected, updateAttributes }: NodeViewProps)
             {chip.text}
           </Chip>
         )}
+        {cleanupRunning && (
+          <Chip variant="neutral" className="text-amber">
+            Собираем чистовик…
+          </Chip>
+        )}
+        {cleaned && d?.duration_sec && cleaned.duration_sec != null && (
+          <Chip variant="outline" className="border-green-deep/50 text-green-deep">
+            Чистовик готов
+            {d.duration_sec - cleaned.duration_sec > 0.5
+              ? ` · ${formatDelta(-(d.duration_sec - cleaned.duration_sec))}`
+              : ''}
+          </Chip>
+        )}
+
         {d && d.status === 'ready' && (
           <button
             type="button"
@@ -121,7 +151,15 @@ function VideoNodeViewInner({ node, selected, updateAttributes }: NodeViewProps)
         )}
       </div>
       {mediaId && sheetOpen && (
-        <MediaToolsSheet mediaId={mediaId} open={sheetOpen} onOpenChange={setSheetOpen} />
+        <MediaToolsSheet
+          mediaId={mediaId}
+          nodeDerived={nodeDerived}
+          open={sheetOpen}
+          onOpenChange={setSheetOpen}
+          onSwap={onSwap}
+          onRevert={onRevert}
+          initialTab={cleaned || nodeDerived ? 'cleanup' : 'subtitles'}
+        />
       )}
     </NodeViewWrapper>
   )

@@ -396,4 +396,4 @@ async def test_create_job_endpoint_preconditions(db, tenant_id, env, monkeypatch
         await create_media_job(other.id, JobCreate(kind="transcribe"), admin, db)
     assert exc.value.status_code == 409 and "не настроена" in exc.value.detail
     with pytest.raises(ValueError):
-        JobCreate(kind="cleanup")
+        JobCreate(kind="compose")

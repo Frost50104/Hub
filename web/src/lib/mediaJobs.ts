@@ -1,4 +1,5 @@
-import type { MediaDetail, MediaJob, MediaJobKind, MediaJobStatus } from '@/lib/learn'
+import type { DerivedMedia, MediaDetail, MediaJob, MediaJobKind, MediaJobStatus } from '@/lib/learn'
+import { plural } from '@/lib/typography'
 
 /**
  * Чистые правила экрана конвейера видео (0066): какое состояние показать на
@@ -162,4 +163,108 @@ export function formatBytes(bytes: number): string {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1).replace('.', ',')} ГБ`
   if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} МБ`
   return `${Math.max(1, Math.round(bytes / 1024))} КБ`
+}
+
+export type CleanupState = 'none' | 'running' | 'ready' | 'failed'
+
+/** Свежий готовый чистовик этого файла (производные — старые первыми). */
+export function latestCleaned(detail: MediaDetail | undefined): DerivedMedia | null {
+  if (!detail) return null
+  const ready = detail.derived.filter((d) => d.variant === 'cleaned' && d.status === 'ready')
+  return ready.length ? ready[ready.length - 1]! : null
+}
+
+/** Состояние вкладки «Чистовик»: идёт → есть готовый → последняя попытка
+ *  провалилась → ещё нет. Готовый чистовик важнее старой ошибки. */
+export function cleanupState(detail: MediaDetail | undefined): CleanupState {
+  if (!detail) return 'none'
+  if (activeJob(detail, 'cleanup')) return 'running'
+  if (latestCleaned(detail)) return 'ready'
+  if (latestJob(detail, 'cleanup')?.status === 'failed') return 'failed'
+  return 'none'
+}
+
+/** Задание `cleanup`, породившее этот чистовик (по `output_media_id` нет —
+ *  берём последнее завершённое). */
+export function cleanupJobFor(detail: MediaDetail | undefined): MediaJob | null {
+  if (!detail) return null
+  return detail.jobs.find((j) => j.kind === 'cleanup' && j.status === 'done') ?? null
+}
+
+export interface CleanupStats {
+  source_sec: number
+  output_sec: number
+  removed_sec: number
+  pauses: number
+}
+
+export function cleanupStats(job: MediaJob | null): CleanupStats | null {
+  const raw = job?.result.stats as Partial<CleanupStats> | undefined
+  if (!raw || typeof raw.source_sec !== 'number') return null
+  return {
+    source_sec: raw.source_sec,
+    output_sec: raw.output_sec ?? raw.source_sec,
+    removed_sec: raw.removed_sec ?? 0,
+    pauses: raw.pauses ?? 0,
+  }
+}
+
+export interface PauseRow {
+  at: number
+  source_at: number
+  was_sec: number
+  now_sec: number
+  context: string | null
+}
+
+export function cleanupPauses(job: MediaJob | null): PauseRow[] {
+  const raw = job?.result.pauses
+  return Array.isArray(raw) ? (raw as PauseRow[]) : []
+}
+
+/** «−1 мин 12 с», «−48 с». */
+export function formatDelta(sec: number): string {
+  const total = Math.round(Math.abs(sec))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  const sign = sec < 0 ? '−' : ''
+  if (m === 0) return `${sign}${s} с`
+  return `${sign}${m} мин${s ? ` ${s} с` : ''}`
+}
+
+/** Время в оригинале → время в чистовике по списку ужатых пауз (монотонно). */
+export function mapOriginalTime(t: number, pauses: PauseRow[]): number {
+  let shift = 0
+  for (const p of pauses) {
+    if (p.source_at >= t) break
+    const cut = Math.max(0, p.was_sec - p.now_sec)
+    if (t < p.source_at + p.was_sec) {
+      // Внутри паузы: пропорционально ужатию.
+      const inside = t - p.source_at
+      return Math.max(0, t - shift - Math.min(cut, Math.max(0, inside - p.now_sec / 2)))
+    }
+    shift += cut
+  }
+  return Math.max(0, t - shift)
+}
+
+/** Текст подтверждения замены в опубликованном уроке (макет SwapConfirm). */
+export function swapImpactText(
+  inProgress: number,
+  otherLessons: number,
+  shorterBy: number | null,
+): string {
+  const head =
+    shorterBy != null && shorterBy > 1
+      ? `Чистовик короче оригинала на ${formatDelta(shorterBy)}. `
+      : ''
+  const people =
+    inProgress > 0
+      ? `Сейчас урок проходят ${plural(inProgress, 'сотрудник', 'сотрудника', 'сотрудников')} — их прогресс просмотра этого видео сбросится, ролик придётся посмотреть заново. У тех, кто уже завершил урок, ничего не изменится.`
+      : 'Никто сейчас не проходит этот урок — прогресс просмотра не пострадает. У тех, кто уже завершил урок, ничего не изменится.'
+  const others =
+    otherLessons > 0
+      ? ` Это видео стоит ещё в ${plural(otherLessons, 'уроке', 'уроках', 'уроках')} — там останется оригинал.`
+      : ''
+  return `${head}${people}${others} Замена вступит в силу после сохранения урока.`
 }

@@ -163,7 +163,7 @@ deploy_backend() {
 
   echo "==> Installing deps + running migrations..."
   $SSH_CMD "cd ${REMOTE_BASE} && \
-    ./.venv/bin/pip install -e '.[sentry,stt]' \
+    ./.venv/bin/pip install -e '.[sentry,stt,media]' \
       --extra-index-url https://auth.signaris.ru/pypi/simple/ \
       --quiet --upgrade && \
     ./.venv/bin/alembic upgrade head"

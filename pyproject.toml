@@ -57,6 +57,13 @@ stt = [
     "onnxruntime==1.29.0",
     "av==18.1.0",
 ]
+# Конвейер видео (0066): раскадровка — Haar-каскады OpenCV в медиа-воркере.
+# Импортируется ТОЛЬКО воркером (`app/services/media/faces.py`); в API-процесс
+# не попадает (сторож tests/unit/test_media_faces.py). Версия точная: последняя
+# 4.x, в 5.0 менялись API загрузчиков.
+media = [
+    "opencv-python-headless==4.14.0.94",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

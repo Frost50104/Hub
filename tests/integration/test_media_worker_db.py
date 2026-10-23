@@ -273,8 +273,8 @@ async def test_worker_stop_releases_job_without_consuming_attempt(env, tenant_id
 
 async def test_unknown_kind_and_missing_source_fail_finally(env, tenant_id):
     media = await _media(tenant_id, env, "m.mov", status="processing")
-    # `analyze` появится в инкременте 6 — пока вид без обработчика.
-    job_id = await _enqueue(tenant_id, media.id, "analyze")
+    # `compose` появится в инкременте 7 — пока вид без обработчика.
+    job_id = await _enqueue(tenant_id, media.id, "compose")
     assert await _run(env, tenant_id) == "failed"
     _, job = await _reload(tenant_id, media.id, job_id)
     assert job.status == "failed" and job.error.startswith("kind_not_implemented")

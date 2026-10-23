@@ -117,7 +117,7 @@ class JobCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["transcribe"]
+    kind: Literal["transcribe", "cleanup", "analyze"]
     params: dict[str, Any] | None = None
 
 
@@ -192,3 +192,72 @@ class MediaDetailOut(BaseModel):
 class MergeOut(BaseModel):
     media: MediaDetailOut
     job: MediaJobOut
+
+
+# ─── Чистовик, раскадровка, использование ────────────────────────────────────
+
+
+class CleanupOverrides(BaseModel):
+    """Параметры заказа чистовика поверх `media_cleanup_defaults` тенанта.
+    `min_pause_sec = 0` — паузы не трогать."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_pause_sec: float | None = Field(default=None, ge=0, le=10)
+    keep_sec: float | None = Field(default=None, ge=0.2, le=3)
+    margin_sec: float | None = Field(default=None, ge=0, le=1)
+    denoise: Literal["afftdn", "arnndn", "none"] | None = None
+    loudnorm: bool | None = None
+    fps_cap: Literal[24, 25, 30, 60] | None = None
+    scale_cap: Literal[720, 1080] | None = None
+
+
+class StoryboardSegmentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    s: float = Field(ge=0)
+    e: float = Field(gt=0)
+    kind: Literal["speaker", "screen"]
+    mode: Literal["goose", "keep"] | None = None
+
+
+class StoryboardInsertIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    media_id: UUID
+    at: float = Field(ge=0)
+    duration: float = Field(gt=0)
+
+
+class StoryboardPut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    segments: list[StoryboardSegmentIn] | None = Field(default=None, max_length=500)
+    inserts: list[StoryboardInsertIn] | None = Field(default=None, max_length=100)
+    goose_enabled: bool | None = None
+
+
+class StoryboardOut(BaseModel):
+    media_id: UUID
+    duration_sec: float | None
+    face_track: list[float]
+    segments_auto: list[dict[str, Any]]
+    segments: list[dict[str, Any]]
+    inserts: list[dict[str, Any]]
+    goose_enabled: bool
+    edited_by: UUID | None
+    params: dict[str, Any]
+    updated_at: datetime
+
+
+class UsageLessonOut(BaseModel):
+    lesson_id: UUID
+    title: str
+    course_id: UUID
+    course_title: str
+    published: bool
+    in_progress: int
+
+
+class UsageOut(BaseModel):
+    lessons: list[UsageLessonOut]

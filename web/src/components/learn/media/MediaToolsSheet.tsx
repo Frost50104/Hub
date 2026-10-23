@@ -1,11 +1,16 @@
 import { useQuery } from '@tanstack/react-query'
 import { Download, RefreshCw, Subtitles } from 'lucide-react'
+import { useState } from 'react'
 
 import { Button } from '@/components/ui/Button'
 import { ResponsiveDialog } from '@/components/ui/ResponsiveDialog'
+import { SegmentGroup } from '@/components/ui/SegmentGroup'
 import { useCancelMediaJob, useMediaDetail, useStartMediaJob } from '@/hooks/useMediaJobs'
 import { learnApi, type MediaDetail } from '@/lib/learn'
+import type { SwapTarget } from '@/lib/lessonVideoNodes'
 import { activeJob, failureText, formatDuration, latestJob, transcribeState } from '@/lib/mediaJobs'
+
+import { CleanupTab } from './CleanupTab'
 
 /**
  * Шторка инструментов видеоблока (макеты «Чистовик видео урока», холст
@@ -14,17 +19,34 @@ import { activeJob, failureText, formatDuration, latestJob, transcribeState } fr
  * вместе с заданиями `cleanup` (6) и `compose` (7). Состояние файла делит с
  * видеоблоком ключ `['learn-media', id]`.
  */
+type Tab = 'subtitles' | 'cleanup'
+
 export function MediaToolsSheet({
   mediaId,
+  nodeDerived,
   open,
   onOpenChange,
+  onSwap,
+  onRevert,
+  initialTab = 'subtitles',
 }: {
   mediaId: string
+  /** Нода урока уже показывает производную (чистовик/монтаж). */
+  nodeDerived: boolean
   open: boolean
   onOpenChange: (v: boolean) => void
+  onSwap: (target: SwapTarget) => void
+  onRevert: (originalSrc: string | null) => void
+  initialTab?: Tab
 }) {
   const detail = useMediaDetail(mediaId, open)
   const d = detail.data
+  // Чистовик заказывается и показывается по ОРИГИНАЛУ: у ноды с чистовиком
+  // «база» — его источник.
+  const baseId = d?.variant === 'cleaned' && d.source_media_id ? d.source_media_id : mediaId
+  const base = useMediaDetail(baseId, open && baseId !== mediaId)
+  const baseDetail = baseId === mediaId ? d : base.data
+  const [tab, setTab] = useState<Tab>(initialTab)
   const title = d
     ? `${d.file_name}${d.duration_sec ? ` · ${formatDuration(d.duration_sec)}` : ''}`
     : 'Видео'
@@ -33,17 +55,38 @@ export function MediaToolsSheet({
       open={open}
       onOpenChange={onOpenChange}
       title={title}
-      description="Субтитры"
-      desktopWidth={720}
+      description="Субтитры и чистовик"
+      desktopWidth={760}
       dismissLabel="Закрыть"
     >
-      {detail.isPending && <p className="text-sm text-text3">Загружаем…</p>}
-      {detail.isError && (
-        <p className="text-sm text-red">
-          Не удалось получить состояние файла — попробуйте ещё раз.
-        </p>
-      )}
-      {d && <SubtitlesTab detail={d} />}
+      <div className="space-y-4">
+        <SegmentGroup
+          ariaLabel="Инструменты видео"
+          size="md"
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: 'subtitles', label: 'Субтитры' },
+            { value: 'cleanup', label: 'Чистовик' },
+          ]}
+        />
+        {detail.isPending && <p className="text-sm text-text3">Загружаем…</p>}
+        {detail.isError && (
+          <p className="text-sm text-red">
+            Не удалось получить состояние файла — попробуйте ещё раз.
+          </p>
+        )}
+        {d && tab === 'subtitles' && <SubtitlesTab detail={d} />}
+        {d && tab === 'cleanup' && baseDetail && (
+          <CleanupTab
+            base={baseDetail}
+            nodeMediaId={mediaId}
+            nodeDerived={nodeDerived}
+            onSwap={onSwap}
+            onRevert={onRevert}
+          />
+        )}
+      </div>
     </ResponsiveDialog>
   )
 }
