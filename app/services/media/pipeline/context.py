@@ -59,7 +59,11 @@ class JobContext:
     persist: Callable[[], Awaitable[None]] | None = None
 
     def set_progress(self, stage: str, pct: int | None = None) -> None:
-        self.progress = {"stage": stage, "pct": pct}
+        # Остальные ключи (`hedra` — состояние оплаченных кусков) СОХРАНЯЮТСЯ:
+        # замена словаря целиком теряла их на стадии рендера, и после OOM
+        # посреди склейки возобновлённое задание заново отправило куски в
+        # Hedra (23.10, 409 ALREADY_EXISTS спас от двойной оплаты).
+        self.progress = {**self.progress, "stage": stage, "pct": pct}
 
     async def persist_now(self) -> None:
         if self.persist is not None:

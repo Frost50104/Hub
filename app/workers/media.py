@@ -128,7 +128,7 @@ def _failure_result(ctx: JobContext) -> dict | None:
     отправленным кускам (ноль возвращает резерв минут)."""
     if ctx.spec.kind not in ("compose", "avatar_test"):
         return None
-    hedra = ctx.progress.get("hedra") or {}
+    hedra = _hedra_state(ctx)
     chunks = hedra.get("chunks") if isinstance(hedra, dict) else None
     sent = 0
     if isinstance(chunks, list):
@@ -145,10 +145,21 @@ def _resume_params(ctx: JobContext) -> dict | None:
     кусков уезжает в `params.hedra_state` и читается следующей попыткой."""
     if ctx.spec.kind not in ("compose", "avatar_test"):
         return None
-    hedra = ctx.progress.get("hedra")
-    if not isinstance(hedra, dict) or not hedra:
+    hedra = _hedra_state(ctx)
+    if not hedra:
         return None
     return {**dict(ctx.spec.params or {}), "hedra_state": hedra}
+
+
+def _hedra_state(ctx: JobContext) -> dict:
+    """Состояние кусков Hedra: свежее — в `ctx.progress["hedra"]`, запасное —
+    `params.hedra_state` предыдущей попытки (задание упало до первого submit
+    этой попытки, а оплаченные куски уже есть)."""
+    fresh = ctx.progress.get("hedra")
+    if isinstance(fresh, dict) and fresh:
+        return fresh
+    carried = (ctx.spec.params or {}).get("hedra_state")
+    return dict(carried) if isinstance(carried, dict) else {}
 
 
 async def _finish_failed(

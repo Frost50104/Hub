@@ -249,19 +249,49 @@ async def run(ctx: JobContext) -> JobResult:
         first_chunk_input=1,
         first_insert_input=1 + len(clips),
     )
-    script = ctx.tmp / "compose.txt"
-    script.write_text(
-        compose_plan.filter_script(pieces, width=width, height=height, fps=fps), encoding="utf-8"
+    # Кусочный рендер: один ffmpeg на кусок (память одного x264), потом склейка
+    # копированием и звук чистовика как есть — см. докстринг compose_plan.
+    sources = [src, *clips, *insert_files]
+    rendered: list[Path] = []
+    done_sec = 0.0
+    for n, piece in enumerate(pieces):
+        part = ctx.tmp / f"piece-{n:03d}.mp4"
+        await ctx.ffmpeg(
+            compose_plan.piece_args(
+                piece,
+                sources,
+                part,
+                width=width,
+                height=height,
+                fps=fps,
+                threads=ctx.settings.media_ffmpeg_threads,
+            ),
+            stage=f"render {n + 1}/{len(pieces)}",
+            duration=piece.length,
+            pct_offset=80 + 17 * done_sec / max(1.0, duration),
+            pct_scale=0.17 * piece.length / max(1.0, duration),
+        )
+        rendered.append(part)
+        done_sec += piece.length
+    list_path = ctx.tmp / "concat.txt"
+    list_path.write_text(compose_plan.concat_list(rendered), encoding="utf-8")
+    video = ctx.tmp / "video.mp4"
+    await ctx.ffmpeg(
+        compose_plan.concat_video_args(list_path, video),
+        stage="concat",
+        duration=duration,
+        pct_offset=97,
+        pct_scale=0.01,
     )
+    for part in rendered:
+        part.unlink(missing_ok=True)
     out = ctx.tmp / "composed.mp4"
     await ctx.ffmpeg(
-        compose_plan.render_args(
-            src, clips, insert_files, script, out, threads=ctx.settings.media_ffmpeg_threads
-        ),
-        stage="render",
+        compose_plan.mux_args(video, src, out),
+        stage="mux",
         duration=duration,
-        pct_offset=80,
-        pct_scale=0.19,
+        pct_offset=98,
+        pct_scale=0.01,
     )
     if not mp4_has_faststart(out):
         raise JobFailed("faststart_missing", "ffmpeg не записал moov в начало файла")

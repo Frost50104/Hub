@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from app.services.media.pipeline.context import JobFailed
+import asyncio
+import uuid
+from pathlib import Path
+
+from app.config import get_settings
+from app.services.media.jobs import JobSpec
+from app.services.media.pipeline.context import JobContext, JobFailed
 from app.workers import media as worker
 
 
@@ -47,3 +53,45 @@ def test_ffmpeg_available_checks_both_binaries(monkeypatch):
 def test_worker_identity_is_bounded():
     ident = worker.worker_identity()
     assert ":" in ident and len(ident) <= 64
+
+
+def _ctx(kind: str = "compose", params: dict | None = None) -> JobContext:
+    spec = JobSpec(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        media_id=uuid.uuid4(),
+        kind=kind,
+        params=params or {},
+        attempts=1,
+        max_attempts=2,
+        requested_by=None,
+    )
+    return JobContext(
+        spec=spec, settings=get_settings(), tmp=Path("/tmp"), cancel=asyncio.Event(), log=None
+    )
+
+
+def test_hedra_state_survives_stage_change_and_falls_back_to_params():
+    """Инцидент 23.10: `set_progress` заменял словарь целиком, на стадии
+    `render` состояние кусков пропадало, и после OOM возобновлённое задание
+    заново отправляло куски в Hedra (409 ALREADY_EXISTS)."""
+    ctx = _ctx()
+    chunks = [{"i": 0, "job_id": "job_1", "status": "downloaded", "duration_ms": 19000}]
+    ctx.set_progress("goose 1/1", 20)
+    ctx.progress["hedra"] = {"chunks": chunks}
+    ctx.set_progress("render 1/7", 80)
+    assert ctx.progress["hedra"] == {"chunks": chunks}
+    assert ctx.progress["stage"] == "render 1/7" and ctx.progress["pct"] == 80
+    assert worker._resume_params(ctx)["hedra_state"] == {"chunks": chunks}
+    assert worker._failure_result(ctx) == {"hedra": {"chunks": chunks}, "billed_seconds": 19}
+
+    # Попытка упала до первого submit — состояние берётся из params прошлой попытки.
+    carried = _ctx(params={"hedra_state": {"chunks": chunks}})
+    carried.set_progress("probe", 0)
+    assert worker._resume_params(carried)["hedra_state"] == {"chunks": chunks}
+    assert worker._failure_result(carried)["billed_seconds"] == 19
+    # Без состояния — ничего не переносим, минуты возвращаются.
+    bare = _ctx()
+    assert worker._resume_params(bare) is None
+    assert worker._failure_result(bare) == {"hedra": {}, "billed_seconds": 0}
+    assert worker._resume_params(_ctx(kind="cleanup")) is None

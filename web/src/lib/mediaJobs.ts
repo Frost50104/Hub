@@ -131,6 +131,7 @@ export function failureText(job: MediaJob | null): string {
     hedra_auth: 'Ключ Hedra не принят — сообщите администратору',
     invalid_argument: 'Hedra не приняла запрос',
     hedra_no_output: 'Hedra не отдала результат',
+    hedra_duplicate: 'Hedra уже получала этот отрезок — состояние заказа потеряно, напишите администратору',
     hedra_timeout: 'Hedra не ответила вовремя',
     nothing_to_compose: 'Ни отрезков гуся, ни вставок — монтировать нечего',
     insert_missing: 'Вставка не готова или удалена',

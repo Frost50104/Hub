@@ -125,6 +125,9 @@ def media_ref(ref: str) -> dict[str, str]:
 
 # Код ошибки Hedra (`error.code` в теле) → наш код; статус HTTP — запасной путь.
 _CODE_MAP: dict[str, str] = {
+    # Hedra ЧТИТ заголовок Idempotency-Key: тот же ключ с другим телом → 409.
+    # Это значит, что кусок уже оплачен, а его job_id мы потеряли — финал.
+    "ALREADY_EXISTS": "hedra_duplicate",
     "INSUFFICIENT_BALANCE": "insufficient_balance",
     "MODERATION_FAILED": "moderation_failed",
     "UNAUTHORIZED": "hedra_auth",
