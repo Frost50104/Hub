@@ -146,11 +146,20 @@ async def _hedra_chunks(
                 ctx.progress["hedra"] = {"chunks": rows}
                 await ctx.persist_now()
                 ctx.log.info("media.hedra_submitted", chunk=i, job_id=row["job_id"])
+            # Нарезка голоса переписала стадию на «voice i/n» — вернуть «goose».
+            ctx.set_progress(f"goose {i + 1}/{len(chunks)}", int(20 + 60 * i / max(1, len(chunks))))
+            ctx.progress["hedra"] = {"chunks": rows}
 
-            async def on_tick(job: Any, row: dict[str, Any] = row) -> None:
+            async def on_tick(job: Any, row: dict[str, Any] = row, i: int = i) -> None:
                 row["status"] = job.status
                 if job.progress is not None:
                     row["progress"] = job.progress
+                    # Ход Hedra по куску — в общий процент (20..80 — доля гуся).
+                    ctx.set_progress(
+                        f"goose {i + 1}/{len(chunks)}",
+                        int(20 + 60 * (i + max(0.0, min(1.0, job.progress))) / max(1, len(chunks))),
+                    )
+                    ctx.progress["hedra"] = {"chunks": rows}
 
             done = await client.wait(
                 row["job_id"],
